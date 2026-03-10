@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理</title>
+    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/css/admin-base.css">
+    <link rel="stylesheet" href="/static/css/users.css">
+</head>
+<body class="app-page users-page">
+    <div class="container">
+        <div class="header">
+            <div class="header-title">
+                <h1>用户管理</h1>
+                <p>统一管理白名单用户与 IP</p>
+            </div>
+            <div class="header-actions">
+                <nav class="header-nav" aria-label="Main navigation">
+                    <a class="header-nav-link" href="/">统计概览</a>
+                    <a class="header-nav-link active" href="/users">用户管理</a>
+                </nav>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="add-user-section">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>用户名 *</label>
+                        <input type="text" id="newUsername" placeholder="请输入用户名">
+                    </div>
+                    <div class="form-group">
+                        <label>IP 地址 *</label>
+                        <input type="text" id="newIpAddress" placeholder="仅支持 IPv4，例如 192.168.1.1">
+                    </div>
+                    <div class="form-group form-submit">
+                        <button class="btn btn-primary" onclick="createUser()">添加</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="users-section">
+                <h2>用户列表</h2>
+                <div id="usersTableContainer">
+                    <div class="loading">加载用户数据...</div>
+                </div>
+                <div class="table-footer" id="tableFooter" style="display: none;">
+                    <div class="right-controls">
+                        <div class="pagination-controls">
+                            <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
+                            <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
+                            <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+                        </div>
+                        <div class="quick-jump">
+                            <label for="pageJumpInput">跳至</label>
+                            <input id="pageJumpInput" type="number" min="1" value="1">
+                        </div>
+                        <div class="page-size-controls">
+                            <label for="pageSizeSelect">每页显示:</label>
+                            <select id="pageSizeSelect" onchange="changePageSize()">
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="200">200</option>
+                            </select>
+                        </div>
+                        <span class="total-count" id="totalCount">共 0 条</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑用户模态框 -->
+    <div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <h5 class="modal-title fw-semibold" id="editModalLabel">编辑用户</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <div class="mb-3">
+                        <label class="form-label">用户名</label>
+                        <input type="text" class="form-control" id="editUsername">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">IP 地址</label>
+                        <input type="text" class="form-control" id="editIpAddress">
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveUser()">保存修改</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/ui-message.js"></script>
+    <script>
+        const whitelistControlEnabled = {{ 'true' if chat_whitelist_enabled else 'false' }};
+        let users = [];
+        let editingUserId = null;
+        let currentPage = 1;
+        let pageSize = 50;
+        let totalUsers = 0;
+        let jumpDebounceTimer = null;
+        let currentTotalPages = 1;
+        let activeCustomSelect = null;
+        let editModalInstance = null;
+
+        function closeAllCustomSelects() {
+            document.querySelectorAll('.custom-select.open').forEach(select => {
+                select.classList.remove('open');
+                const trigger = select.querySelector('.custom-select-trigger');
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            });
+            activeCustomSelect = null;
+        }
+
+        function syncCustomSelectValue(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect) return;
+
+            const trigger = customSelect.querySelector('.custom-select-trigger');
+            const selectedOption = nativeSelect.options[nativeSelect.selectedIndex] || nativeSelect.options[0];
+            trigger.textContent = selectedOption ? selectedOption.textContent : '请选择';
+
+            customSelect.querySelectorAll('.custom-select-option').forEach(option => {
+                option.classList.toggle('selected', option.dataset.value === nativeSelect.value);
+            });
+        }
+
+        function renderCustomSelectOptions(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect) return;
+
+            const menu = customSelect.querySelector('.custom-select-menu');
+            menu.innerHTML = '';
+
+            Array.from(nativeSelect.options).forEach(option => {
+                const optionButton = document.createElement('button');
+                optionButton.type = 'button';
+                optionButton.className = 'custom-select-option';
+                optionButton.textContent = option.textContent;
+                optionButton.dataset.value = option.value;
+                optionButton.addEventListener('click', function() {
+                    if (nativeSelect.value !== option.value) {
+                        nativeSelect.value = option.value;
+                        nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    syncCustomSelectValue(selectId);
+                    closeAllCustomSelects();
+                });
+                menu.appendChild(optionButton);
+            });
+
+            syncCustomSelectValue(selectId);
+        }
+
+        function setupCustomSelect(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            if (!nativeSelect) return;
+
+            nativeSelect.classList.add('native-select-hidden');
+
+            let customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!customSelect) {
+                customSelect = document.createElement('div');
+                customSelect.className = 'custom-select';
+                customSelect.dataset.for = selectId;
+                customSelect.innerHTML = `
+                    <button type="button" class="custom-select-trigger" aria-haspopup="listbox" aria-expanded="false"></button>
+                    <div class="custom-select-menu" role="listbox"></div>
+                `;
+                nativeSelect.insertAdjacentElement('afterend', customSelect);
+
+                const trigger = customSelect.querySelector('.custom-select-trigger');
+                trigger.addEventListener('click', function(event) {
+                    event.stopPropagation();
+                    const isOpen = customSelect.classList.contains('open');
+                    closeAllCustomSelects();
+                    if (!isOpen) {
+                        const rect = customSelect.getBoundingClientRect();
+                        const spaceBelow = window.innerHeight - rect.bottom;
+                        customSelect.classList.toggle('drop-up', spaceBelow < 236);
+                        customSelect.classList.add('open');
+                        trigger.setAttribute('aria-expanded', 'true');
+                        activeCustomSelect = customSelect;
+                    }
+                });
+
+                trigger.addEventListener('keydown', function(event) {
+                    if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        trigger.click();
+                    } else if (event.key === 'Escape') {
+                        closeAllCustomSelects();
+                    }
+                });
+
+                nativeSelect.addEventListener('change', function() {
+                    syncCustomSelectValue(selectId);
+                });
+            }
+
+            renderCustomSelectOptions(selectId);
+        }
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            setupCustomSelect('pageSizeSelect');
+            loadUsers();
+            document.getElementById('pageSizeSelect').value = pageSize;
+            syncCustomSelectValue('pageSizeSelect');
+            const editModalElement = document.getElementById('editModal');
+            if (editModalElement && window.bootstrap) {
+                editModalInstance = new bootstrap.Modal(editModalElement);
+                editModalElement.addEventListener('hidden.bs.modal', function() {
+                    editingUserId = null;
+                });
+            }
+            const pageJumpInput = document.getElementById('pageJumpInput');
+            pageJumpInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    jumpToPage(true);
+                }
+            });
+            pageJumpInput.addEventListener('blur', function() {
+                jumpToPage(true);
+            });
+            pageJumpInput.addEventListener('input', function() {
+                clearTimeout(jumpDebounceTimer);
+                jumpDebounceTimer = setTimeout(function() {
+                jumpToPage(false);
+                }, 450);
+            });
+        });
+
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.custom-select')) {
+                closeAllCustomSelects();
+            }
+        });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeAllCustomSelects();
+            }
+        });
+
+        // 加载用户列表
+        async function loadUsers() {
+            try {
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    page_size: pageSize
+                });
+                const response = await fetch(`/api/users?${params}`);
+                const data = await response.json();
+
+                if (Array.isArray(data)) {
+                    users = data;
+                    totalUsers = data.length;
+                } else {
+                    users = data.users || [];
+                    totalUsers = data.total || users.length;
+                }
+                renderUsers();
+                updatePagination();
+            } catch (error) {
+                console.error('加载用户失败:', error);
+                document.getElementById('usersTableContainer').innerHTML =
+                    '<div class="error">加载用户数据失败</div>';
+            }
+        }
+
+        // 渲染用户列表
+        function renderUsers() {
+            const container = document.getElementById('usersTableContainer');
+
+            if (users.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无用户数据</div>';
+                return;
+            }
+
+            let html = `
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>用户名</th>
+                            <th>IP 地址</th>
+                            <th>总请求数</th>
+                            <th>输入token</th>
+                            <th>输出token</th>
+                            <th>总 Token</th>
+                            ${whitelistControlEnabled ? '<th>白名单访问</th>' : ''}
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            users.forEach(user => {
+                const whitelistEnabled = !!user.whitelist_access_enabled;
+
+                html += `
+                    <tr>
+                        <td>${user.username}</td>
+                        <td><span class="ip-address">${user.ip_address}</span></td>
+                        <td>${(user.total_request_count || 0).toLocaleString()}</td>
+                        <td>${(user.prompt_tokens || 0).toLocaleString()}</td>
+                        <td>${(user.completion_tokens || 0).toLocaleString()}</td>
+                        <td>${(user.total_tokens || 0).toLocaleString()}</td>
+                        ${whitelistControlEnabled ? `
+                        <td>
+                            <label class="switch">
+                                <input type="checkbox" ${whitelistEnabled ? 'checked' : ''} onchange="toggleUser(${user.id})">
+                                <span class="slider"></span>
+                            </label>
+                        </td>` : ''}
+                        <td>${formatDateTime(new Date(user.created_at))}</td>
+                        <td>
+                            <div class="action-buttons">
+                                <button class="btn-action btn-edit" onclick="openEditModal(${user.id})">编辑</button>
+                                <button class="btn-action btn-delete" onclick="deleteUser(${user.id})">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        // 更新分页
+        function updatePagination() {
+            const totalPages = Math.ceil(totalUsers / pageSize) || 1;
+            currentTotalPages = totalPages;
+            document.getElementById('pageInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
+            document.getElementById('prevBtn').classList.toggle('disabled', currentPage <= 1);
+            document.getElementById('nextBtn').classList.toggle('disabled', currentPage >= totalPages);
+            document.getElementById('totalCount').textContent = `共 ${totalUsers} 条`;
+            document.getElementById('pageSizeSelect').value = pageSize;
+            syncCustomSelectValue('pageSizeSelect');
+            const pageJumpInput = document.getElementById('pageJumpInput');
+            pageJumpInput.max = totalPages;
+            pageJumpInput.value = currentPage;
+            document.getElementById('tableFooter').style.display = 'flex';
+        }
+
+        function jumpToPage(force = false) {
+            const totalPages = Math.ceil(totalUsers / pageSize) || 1;
+            const input = document.getElementById('pageJumpInput');
+            const page = parseInt(input.value, 10);
+            if (Number.isNaN(page)) {
+                if (force) input.value = currentPage;
+                return;
+            }
+            const target = Math.min(totalPages, Math.max(1, page));
+            if (target === currentPage) {
+                input.value = currentPage;
+                return;
+            }
+            currentPage = target;
+            loadUsers();
+        }
+
+        // 上一页
+        function prevPage() {
+            if (currentPage <= 1) return;
+            currentPage--;
+            loadUsers();
+        }
+
+        // 下一页
+        function nextPage() {
+            if (currentPage >= currentTotalPages) return;
+            currentPage++;
+            loadUsers();
+        }
+
+        // 更改每页大小
+        function changePageSize() {
+            const newPageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            if (newPageSize !== pageSize) {
+                pageSize = newPageSize;
+                currentPage = 1;
+                loadUsers();
+            }
+        }
+
+        // 创建用户
+        async function createUser() {
+            const username = document.getElementById('newUsername').value.trim();
+            const ipAddress = document.getElementById('newIpAddress').value.trim();
+
+            if (!username) {
+                showMessage('请输入用户名', 'error');
+                return;
+            }
+
+            if (!ipAddress) {
+                showMessage('请输入IP地址', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        ip_address: ipAddress
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage('用户创建成功', 'success');
+                    document.getElementById('newUsername').value = '';
+                    document.getElementById('newIpAddress').value = '';
+                    loadUsers();
+                } else {
+                    showMessage(result.error || '创建失败', 'error');
+                }
+            } catch (error) {
+                console.error('创建用户失败:', error);
+                showMessage('创建用户失败', 'error');
+            }
+        }
+
+        // 打开编辑模态框
+        function openEditModal(userId) {
+            const user = users.find(u => u.id === userId);
+            if (!user) return;
+
+            editingUserId = userId;
+            document.getElementById('editUsername').value = user.username;
+            document.getElementById('editIpAddress').value = user.ip_address;
+
+            if (editModalInstance) {
+                editModalInstance.show();
+            }
+        }
+
+        // 关闭编辑模态框
+        function closeEditModal() {
+            if (editModalInstance) {
+                editModalInstance.hide();
+            }
+            editingUserId = null;
+        }
+
+        // 保存用户修改
+        async function saveUser() {
+            if (!editingUserId) return;
+
+            const username = document.getElementById('editUsername').value.trim();
+            const ipAddress = document.getElementById('editIpAddress').value.trim();
+
+            if (!username) {
+                showMessage('请输入用户名', 'error');
+                return;
+            }
+
+            if (!ipAddress) {
+                showMessage('请输入IP地址', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/users/${editingUserId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        ip_address: ipAddress
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage('用户更新成功', 'success');
+                    closeEditModal();
+                    loadUsers();
+                } else {
+                    showMessage(result.error || '更新失败', 'error');
+                }
+            } catch (error) {
+                console.error('更新用户失败:', error);
+                showMessage('更新用户失败', 'error');
+            }
+        }
+
+        // 切换用户状态
+        async function toggleUser(userId) {
+            try {
+                const response = await fetch(`/api/users/${userId}/toggle`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    loadUsers();
+                } else {
+                    console.error('切换白名单访问状态失败:', result.error || '切换失败');
+                    loadUsers();
+                }
+            } catch (error) {
+                console.error('切换白名单访问状态失败:', error);
+            }
+        }
+
+        // 删除用户
+        async function deleteUser(userId) {
+            if (!confirm('确定要删除该用户吗？')) return;
+
+            try {
+                const response = await fetch(`/api/users/${userId}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage('用户删除成功', 'success');
+                    loadUsers();
+                } else {
+                    showMessage(result.error || '删除失败', 'error');
+                }
+            } catch (error) {
+                console.error('删除用户失败:', error);
+                showMessage('删除用户失败', 'error');
+            }
+        }
+
+        function formatDateTime(date) {
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+    </script>
+    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+

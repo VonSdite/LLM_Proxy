@@ -1,0 +1,8 @@
+codemate
+*.pyc
+.claude
+data
+logs
+.opencode
+.history
+config.yaml

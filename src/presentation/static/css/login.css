@@ -1,0 +1,116 @@
+body.login-page {
+    min-height: 100vh;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background:
+        radial-gradient(1100px 620px at -10% -15%, #eaf2fb 0%, transparent 60%),
+        radial-gradient(980px 640px at 100% 0%, #eef4fb 0%, transparent 62%),
+        var(--bg-page);
+    color: var(--text-primary);
+}
+
+.login-page .login-shell {
+    width: 100%;
+    max-width: 420px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
+}
+
+.login-page .login-head {
+    padding: 22px 24px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #fbfdff 0%, #f5f9ff 100%);
+}
+
+.login-page .login-head h1 {
+    margin: 0;
+    font-size: 1.38rem;
+    line-height: 1.2;
+    font-weight: 650;
+    color: var(--text-primary);
+}
+
+.login-page .login-head p {
+    margin: 8px 0 0;
+    font-size: 0.92rem;
+    color: var(--text-secondary);
+}
+
+.login-page .login-body {
+    padding: 22px 24px 24px;
+    background: var(--surface-soft);
+}
+
+.login-page .form-label {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.login-page .form-control {
+    min-height: 40px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 0.58rem 0.72rem;
+    color: var(--text-primary);
+    background: #fff;
+    transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
+}
+
+.login-page .form-control:hover {
+    border-color: #b9cbde;
+    background: #fcfeff;
+}
+
+.login-page .form-control:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--focus);
+}
+
+.login-page .btn-login {
+    width: 100%;
+    min-height: 40px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    padding: 0.58rem 0.72rem;
+    color: #fff;
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    transition: background-color var(--transition), border-color var(--transition), box-shadow var(--transition), opacity var(--transition);
+}
+
+.login-page .btn-login:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+    color: #fff;
+}
+
+.login-page .btn-login:active {
+    background: var(--primary-active);
+    border-color: var(--primary-active);
+}
+
+.login-page .btn-login:disabled {
+    opacity: 0.62;
+    cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+    body.login-page {
+        padding: 14px;
+    }
+
+    .login-page .login-head,
+    .login-page .login-body {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+}

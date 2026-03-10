@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员登录 - LLM Proxy</title>
+    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/css/admin-base.css">
+    <link rel="stylesheet" href="/static/css/login.css">
+</head>
+<body class="login-page">
+    <div class="login-shell">
+        <div class="login-head">
+            <h1>管理员登录</h1>
+            <p>请输入账号和密码以继续访问管理后台</p>
+        </div>
+        <div class="login-body">
+            <form id="loginForm">
+                <div class="mb-3">
+                    <label class="form-label" for="username">用户名</label>
+                    <input type="text" class="form-control" id="username" name="username" placeholder="请输入用户名" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="password">密码</label>
+                    <input type="password" class="form-control" id="password" name="password" placeholder="请输入密码" required>
+                </div>
+                <button type="submit" class="btn btn-login" id="loginBtn">登录</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/ui-message.js"></script>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const loginBtn = document.getElementById('loginBtn');
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = '登录中...';
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showMessage('登录成功，正在跳转...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 500);
+                    return;
+                }
+
+                showMessage(data.error || '登录失败，请检查用户名和密码', 'error');
+            } catch (error) {
+                console.error('登录请求失败:', error);
+                showMessage('网络错误，请稍后重试', 'error');
+            }
+
+            loginBtn.disabled = false;
+            loginBtn.textContent = '登录';
+        });
+    </script>
+    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>

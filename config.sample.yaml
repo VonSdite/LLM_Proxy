@@ -1,0 +1,37 @@
+server:
+  port: 8080
+  host: 0.0.0.0
+
+chat:
+  whitelist_enabled: true
+
+admin:
+  username: admin
+  password: admin
+
+providers:
+  - name: volcengine
+    api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
+    api_key:
+    timeout_seconds: 300
+    max_retries: 3
+    verify_ssl: false
+    model_list:
+      - kimi-k2.5
+    hook: example_hook.py
+
+  - name: volc
+    api: https://ark.cn-beijing.volces.com/api/v3/chat/completions
+    api_key:
+    model_list:
+      - glm-4-7-251222
+      - deepseek-v3-2-251201
+      - MiniMax-M2.5
+      - Kimi-K2.5
+
+# logging:  # 可选
+#   path:
+#   level:
+
+# database:  # 可选
+#   path:

@@ -1,0 +1,315 @@
+.users-page .container {
+    max-width: 1280px;
+}
+
+.users-page .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+}
+
+.users-page .content {
+    padding: 24px;
+    background: var(--surface);
+}
+
+.users-page .add-user-section,
+.users-page .users-section {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-soft);
+    box-shadow: var(--shadow-card);
+}
+
+.users-page .add-user-section {
+    padding: 18px;
+    margin-bottom: 20px;
+}
+
+.users-page .users-section {
+    padding: 18px;
+    background: #fff;
+}
+
+.users-page .users-section h2 {
+    margin: 0 0 14px;
+    font-size: 18px;
+    font-weight: 650;
+    color: var(--text-primary);
+}
+
+.users-page #usersTableContainer {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+.users-page .form-row {
+    display: flex;
+    gap: 14px;
+    align-items: flex-end;
+    margin-bottom: 0;
+}
+
+.users-page .form-group {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.users-page .form-group.form-submit {
+    flex: 0 0 110px;
+    min-width: 110px;
+}
+
+.users-page .form-group.form-submit .btn {
+    width: 100%;
+}
+
+.users-page .form-group label,
+.users-page .form-label {
+    display: block;
+    margin-bottom: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.users-page .users-table {
+    width: 100%;
+    min-width: 980px;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.users-page .users-table th {
+    padding: 13px 14px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: #f4f8fd;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+}
+
+.users-page .users-table td {
+    padding: 13px 14px;
+    border-bottom: 1px solid #e8eef5;
+    color: var(--text-primary);
+    line-height: 1.45;
+    white-space: nowrap;
+    background: #fff;
+}
+
+.users-page .users-table tbody tr:nth-child(even) td {
+    background: #fbfdff;
+}
+
+.users-page .users-table tbody tr:hover td {
+    background: #f2f7fd;
+}
+
+.users-page .ip-address {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #f8fbff;
+    color: var(--text-secondary);
+    padding: 3px 8px;
+    font-size: 12px;
+    font-family: "Cascadia Mono", "Consolas", monospace;
+}
+
+.users-page .action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.users-page .btn-action {
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.users-page .btn-edit {
+    color: var(--primary);
+    background: #edf4fc;
+    border-color: #d6e4f1;
+}
+
+.users-page .btn-edit:hover {
+    color: #fff;
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.users-page .btn-delete {
+    color: var(--danger);
+    background: #fdf2f3;
+    border-color: #f3d7dc;
+}
+
+.users-page .btn-delete:hover {
+    color: #fff;
+    background: var(--danger-hover);
+    border-color: var(--danger-hover);
+}
+
+.users-page .switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    vertical-align: middle;
+}
+
+.users-page .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.users-page .slider {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    border: 1px solid #c8d7e6;
+    background: #e7eef6;
+    cursor: pointer;
+    transition: background-color var(--transition), border-color var(--transition);
+}
+
+.users-page .slider::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
+    transition: transform var(--transition);
+}
+
+.users-page .switch input:checked + .slider {
+    background: #e7f5ef;
+    border-color: #b7dccf;
+}
+
+.users-page .switch input:checked + .slider::before {
+    transform: translateX(20px);
+    background: var(--success);
+}
+
+.users-page .empty-state,
+.users-page .loading,
+.users-page .error,
+.users-page .success {
+    text-align: center;
+    padding: 30px 16px;
+    font-size: 14px;
+    border-radius: var(--radius-sm);
+}
+
+.users-page .loading,
+.users-page .empty-state {
+    color: var(--text-secondary);
+    border: 1px dashed var(--line);
+    background: #fbfdff;
+}
+
+.users-page .error {
+    color: #9b2c2c;
+    border: 1px solid #f1d4d8;
+    background: #fef2f2;
+}
+
+.users-page .success {
+    color: #24604d;
+    border: 1px solid #cce4dc;
+    background: #edf9f4;
+}
+
+.users-page .table-footer {
+    padding: 14px 4px 0;
+    margin-top: 14px;
+}
+
+.users-page .modal-content {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-soft) !important;
+}
+
+.users-page .modal-header,
+.users-page .modal-footer {
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.users-page .modal-title {
+    color: var(--text-primary);
+}
+
+.users-page .btn-close:focus {
+    box-shadow: 0 0 0 3px var(--focus);
+}
+
+@media (max-width: 900px) {
+    .users-page .header,
+    .users-page .content {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .users-page .header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .users-page .form-row {
+        flex-wrap: wrap;
+    }
+
+    .users-page .form-group.form-submit {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 640px) {
+    .users-page .content {
+        padding: 14px;
+    }
+
+    .users-page .form-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .users-page .users-table th,
+    .users-page .users-table td {
+        padding: 10px 11px;
+        font-size: 12px;
+    }
+
+    .users-page .btn-action {
+        height: 28px;
+        padding: 0 8px;
+    }
+}

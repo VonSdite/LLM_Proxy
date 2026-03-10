@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM使用统计</title>
+    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/css/admin-base.css">
+    <link rel="stylesheet" href="/static/css/index.css">
+</head>
+<body class="app-page dashboard-page">
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>LLM使用统计</h1>
+                    <p>实时监控 API 请求和 Token 消耗</p>
+                </div>
+                <div class="header-actions">
+                    <nav class="header-nav" aria-label="Main navigation">
+                        <a class="header-nav-link active" href="/">统计概览</a>
+                        <a class="header-nav-link" href="/users">用户管理</a>
+                    </nav>
+                </div>
+            </div>
+        </div>
+        <div class="filters-section">
+            <div class="filters">
+                <div class="filter-group">
+                    <label>开始日期:</label>
+                    <input type="date" id="startDate">
+                </div>
+                <div class="filter-group">
+                    <label>结束日期:</label>
+                    <input type="date" id="endDate">
+                </div>
+                <div class="filter-group">
+                    <label>用户名</label>
+                    <select id="username">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>请求模型:</label>
+                    <select id="requestModel">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" onclick="applyFilters()">查询</button>
+            </div>
+        </div>
+
+        <div class="stats-section">
+            <div class="stats-container">
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>IP</th>
+                            <th>用户名</th>
+                            <th>请求模型</th>
+                            <th>响应模型</th>
+                            <th>请求数</th>
+                            <th>输入token</th>
+                            <th>输出token</th>
+                            <th>总 Token</th>
+                        </tr>
+                    </thead>
+                    <tbody id="statsTable">
+                        <tr>
+                            <td colspan="8" class="loading">加载统计数据...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="table-section">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>IP</th>
+                            <th>用户名</th>
+                            <th>请求模型</th>
+                            <th>响应模型</th>
+                            <th>输入token</th>
+                            <th>输出token</th>
+                            <th>总 Token</th>
+                            <th>开始时间</th>
+                            <th>结束时间</th>
+                            <th>耗时(秒)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTable">
+                        <tr>
+                            <td colspan="10" class="loading">加载请求数据...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="table-footer" id="tableFooter" style="display: none;">
+            <div class="right-controls">
+                <div class="pagination-controls">
+                    <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
+                    <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
+                    <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+                </div>
+                <div class="quick-jump">
+                    <label for="pageJumpInput">跳至</label>
+                    <input id="pageJumpInput" type="number" min="1" value="1">
+                </div>
+                <div class="page-size-controls">
+                    <label for="pageSizeSelect">每页显示:</label>
+                    <select id="pageSizeSelect" onchange="changePageSize()">
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                </div>
+                <span class="total-count" id="totalCount">共 0 条</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/ui-message.js"></script>
+    <script>
+        let currentPage = 1;
+        let pageSize = 50;
+        let currentFilters = {};
+        let jumpDebounceTimer = null;
+        let currentTotalPages = 1;
+        let activeCustomSelect = null;
+
+        function closeAllCustomSelects() {
+            document.querySelectorAll('.custom-select.open').forEach(select => {
+                select.classList.remove('open');
+                const trigger = select.querySelector('.custom-select-trigger');
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            });
+            activeCustomSelect = null;
+        }
+
+        function syncCustomSelectValue(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect) return;
+
+            const trigger = customSelect.querySelector('.custom-select-trigger');
+            const selectedOption = nativeSelect.options[nativeSelect.selectedIndex] || nativeSelect.options[0];
+            trigger.textContent = selectedOption ? selectedOption.textContent : '请选择';
+
+            customSelect.querySelectorAll('.custom-select-option').forEach(option => {
+                option.classList.toggle('selected', option.dataset.value === nativeSelect.value);
+            });
+        }
+
+        function renderCustomSelectOptions(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect) return;
+
+            const menu = customSelect.querySelector('.custom-select-menu');
+            menu.innerHTML = '';
+
+            Array.from(nativeSelect.options).forEach(option => {
+                const optionButton = document.createElement('button');
+                optionButton.type = 'button';
+                optionButton.className = 'custom-select-option';
+                optionButton.textContent = option.textContent;
+                optionButton.dataset.value = option.value;
+                optionButton.addEventListener('click', function() {
+                    if (nativeSelect.value !== option.value) {
+                        nativeSelect.value = option.value;
+                        nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    syncCustomSelectValue(selectId);
+                    closeAllCustomSelects();
+                });
+                menu.appendChild(optionButton);
+            });
+
+            syncCustomSelectValue(selectId);
+        }
+
+        function setupCustomSelect(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            if (!nativeSelect) return;
+
+            nativeSelect.classList.add('native-select-hidden');
+
+            let customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!customSelect) {
+                customSelect = document.createElement('div');
+                customSelect.className = 'custom-select';
+                customSelect.dataset.for = selectId;
+                customSelect.innerHTML = `
+                    <button type="button" class="custom-select-trigger" aria-haspopup="listbox" aria-expanded="false"></button>
+                    <div class="custom-select-menu" role="listbox"></div>
+                `;
+                nativeSelect.insertAdjacentElement('afterend', customSelect);
+
+                const trigger = customSelect.querySelector('.custom-select-trigger');
+                trigger.addEventListener('click', function(event) {
+                    event.stopPropagation();
+                    const isOpen = customSelect.classList.contains('open');
+                    closeAllCustomSelects();
+                    if (!isOpen) {
+                        const rect = customSelect.getBoundingClientRect();
+                        const spaceBelow = window.innerHeight - rect.bottom;
+                        customSelect.classList.toggle('drop-up', spaceBelow < 236);
+                        customSelect.classList.add('open');
+                        trigger.setAttribute('aria-expanded', 'true');
+                        activeCustomSelect = customSelect;
+                    }
+                });
+
+                trigger.addEventListener('keydown', function(event) {
+                    if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        trigger.click();
+                    } else if (event.key === 'Escape') {
+                        closeAllCustomSelects();
+                    }
+                });
+
+                nativeSelect.addEventListener('change', function() {
+                    syncCustomSelectValue(selectId);
+                });
+            }
+
+            renderCustomSelectOptions(selectId);
+        }
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            setupCustomSelect('username');
+            setupCustomSelect('requestModel');
+            setupCustomSelect('pageSizeSelect');
+            setDefaultDateRange();
+            loadStatistics();
+            loadUsernames();
+            loadRequestModels();
+            loadLogs();
+
+            // 设置默认每页大小
+            document.getElementById('pageSizeSelect').value = pageSize;
+            syncCustomSelectValue('pageSizeSelect');
+            const pageJumpInput = document.getElementById('pageJumpInput');
+            if (pageJumpInput) {
+                pageJumpInput.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        jumpToPage(true);
+                    }
+                });
+                pageJumpInput.addEventListener('blur', function() {
+                    jumpToPage(true);
+                });
+                pageJumpInput.addEventListener('input', function() {
+                    clearTimeout(jumpDebounceTimer);
+                    jumpDebounceTimer = setTimeout(function() {
+                        jumpToPage(false);
+                    }, 450);
+                });
+            }
+        });
+
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.custom-select')) {
+                closeAllCustomSelects();
+            }
+        });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeAllCustomSelects();
+            }
+        });
+
+        // 加载统计数据
+        async function loadStatistics() {
+            try {
+                const params = new URLSearchParams(currentFilters);
+                const response = await fetch(`/api/statistics?${params}`);
+                const stats = await response.json();
+
+                const statsTable = document.getElementById('statsTable');
+                if (stats.length === 0) {
+                    statsTable.innerHTML = '<tr><td colspan="8" class="empty-state">暂无统计数据</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                let totalRequests = 0;
+                let totalTokens = 0;
+                let totalPromptTokens = 0;
+                let totalCompletionTokens = 0;
+
+                stats.forEach(stat => {
+                    totalRequests += stat.request_count;
+                    totalTokens += stat.total_tokens;
+                    totalPromptTokens += stat.prompt_tokens || 0;
+                    totalCompletionTokens += stat.completion_tokens || 0;
+
+                    html += `
+                        <tr>
+                            <td>${stat.ip_address || '-'}</td>
+                            <td>${stat.username || '-'}</td>
+                            <td>${stat.request_model || '-'}</td>
+                            <td>${stat.response_model || '-'}</td>
+                            <td>${stat.request_count}</td>
+                            <td>${(stat.prompt_tokens || 0).toLocaleString()}</td>
+                            <td>${(stat.completion_tokens || 0).toLocaleString()}</td>
+                            <td>${stat.total_tokens.toLocaleString()}</td>
+                        </tr>
+                    `;
+                });
+                html += `
+                    <tr class="stats-total-row">
+                        <td colspan="4">总计</td>
+                        <td>${totalRequests.toLocaleString()}</td>
+                        <td>${totalPromptTokens.toLocaleString()}</td>
+                        <td>${totalCompletionTokens.toLocaleString()}</td>
+                        <td>${totalTokens.toLocaleString()}</td>
+                    </tr>
+                `;
+                statsTable.innerHTML = html;
+            } catch (error) {
+                console.error('加载统计数据失败:', error);
+                document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="error">加载统计数据失败</td></tr>';
+                showMessage('加载统计数据失败，请稍后重试', 'error');
+            }
+        }
+
+        // 加载用户名列表
+        async function loadUsernames() {
+            try {
+                const response = await fetch('/api/usernames');
+                const usernames = await response.json();
+
+                const select = document.getElementById('username');
+                usernames.forEach(username => {
+                    const option = document.createElement('option');
+                    option.value = username;
+                    option.textContent = username;
+                    select.appendChild(option);
+                });
+                renderCustomSelectOptions('username');
+            } catch (error) {
+                console.error('加载用户名列表失败', error);
+                showMessage('加载用户名列表失败', 'warning');
+            }
+        }
+
+        async function loadRequestModels() {
+            try {
+                const response = await fetch('/api/request-models');
+                const models = await response.json();
+
+                const select = document.getElementById('requestModel');
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model;
+                    option.textContent = model;
+                    select.appendChild(option);
+                });
+                renderCustomSelectOptions('requestModel');
+            } catch (error) {
+                console.error('加载请求模型列表失败', error);
+                showMessage('加载请求模型列表失败', 'warning');
+            }
+        }
+
+        // 加载日志数据
+        async function loadLogs() {
+            // 显示加载状态
+            document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="loading">加载请求数据...</td></tr>';
+
+            try {
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    page_size: pageSize,
+                    ...currentFilters
+                });
+
+                const response = await fetch(`/api/request-logs?${params}`);
+                const data = await response.json();
+
+                renderLogs(data.logs);
+                updatePagination(data);
+            } catch (error) {
+                console.error('加载日志失败:', error);
+                document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="error">加载日志失败</td></tr>';
+                showMessage('加载日志失败，请稍后重试', 'error');
+            }
+        }
+
+        // 渲染日志表格
+        function renderLogs(logs) {
+            const tbody = document.getElementById('logsTable');
+
+            if (logs.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <p>暂无请求数据</p>
+                        </td>
+                    </tr>
+                `;
+                // 隐藏表格底部
+                document.getElementById('tableFooter').style.display = 'none';
+                return;
+            }
+
+            let html = '';
+            logs.forEach(log => {
+                const startTime = new Date(log.start_time);
+                const endTime = new Date(log.end_time);
+                const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+                html += `
+                    <tr>
+                        <td>${log.ip_address || '-'}</td>
+                        <td>${log.username || '-'}</td>
+                        <td>${log.request_model || '-'}</td>
+                        <td>${log.response_model || '-'}</td>
+                        <td>${log.prompt_tokens?.toLocaleString() || 0}</td>
+                        <td>${log.completion_tokens?.toLocaleString() || 0}</td>
+                        <td>${log.total_tokens?.toLocaleString() || 0}</td>
+                        <td>${formatDateTime(startTime)}</td>
+                        <td>${formatDateTime(endTime)}</td>
+                        <td>${duration}</td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        // 更新分页
+        function updatePagination(data) {
+            currentTotalPages = data.total_pages;
+            document.getElementById('pageInfo').textContent = `第 ${data.page} 页 / 共 ${data.total_pages} 页`;
+            document.getElementById('prevBtn').classList.toggle('disabled', data.page <= 1);
+            document.getElementById('nextBtn').classList.toggle('disabled', data.page >= data.total_pages);
+            document.getElementById('totalCount').textContent = `共 ${data.total} 条`;
+
+            const pageSizeSelect = document.getElementById('pageSizeSelect');
+            pageSizeSelect.value = pageSize;
+            syncCustomSelectValue('pageSizeSelect');
+
+            const pageJumpInput = document.getElementById('pageJumpInput');
+            if (pageJumpInput) {
+                pageJumpInput.max = data.total_pages;
+                pageJumpInput.value = data.page;
+            }
+
+            document.getElementById('tableFooter').style.display = 'flex';
+        }
+
+        function jumpToPage(force = false) {
+            const input = document.getElementById('pageJumpInput');
+            if (!input) return;
+            const page = parseInt(input.value, 10);
+            if (Number.isNaN(page)) {
+                if (force) input.value = currentPage;
+                return;
+            }
+
+            const totalPages = Math.max(1, parseInt(input.max || '1', 10));
+            const target = Math.min(totalPages, Math.max(1, page));
+            if (target === currentPage) {
+                input.value = currentPage;
+                return;
+            }
+
+            currentPage = target;
+            loadLogs();
+        }
+
+        // 格式化日期时间
+        function formatDateTime(date) {
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // 应用过滤
+        function applyFilters() {
+            currentFilters = {};
+
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const username = document.getElementById('username').value;
+            const requestModel = document.getElementById('requestModel').value;
+
+            if (startDate) currentFilters.start_date = startDate;
+            if (endDate) currentFilters.end_date = endDate;
+            if (username) currentFilters.username = username;
+            if (requestModel) currentFilters.request_model = requestModel;
+
+            currentPage = 1;
+            loadStatistics();
+            loadLogs();
+        }
+
+        function setDefaultDateRange() {
+            const end = new Date();
+            const start = new Date();
+            start.setDate(end.getDate() - 2);
+
+            const toDateInput = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            document.getElementById('startDate').value = toDateInput(start);
+            document.getElementById('endDate').value = toDateInput(end);
+
+            currentFilters = {
+                start_date: toDateInput(start),
+                end_date: toDateInput(end),
+            };
+        }
+
+        // 上一页
+        function prevPage() {
+            if (currentPage <= 1) return;
+            currentPage--;
+            loadLogs();
+        }
+
+        // 下一页
+        function nextPage() {
+            if (currentPage >= currentTotalPages) return;
+            currentPage++;
+            loadLogs();
+        }
+
+        // 更改每页大小
+        function changePageSize() {
+            const newPageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            if (newPageSize !== pageSize) {
+                pageSize = newPageSize;
+                currentPage = 1; // 重置到第一页
+                loadLogs();
+            }
+        }
+    </script>
+    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+
+
+
+
