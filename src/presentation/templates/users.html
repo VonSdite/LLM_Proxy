@@ -113,6 +113,7 @@
         let currentTotalPages = 1;
         let activeCustomSelect = null;
         let editModalInstance = null;
+        let tokenSortDirection = 'desc';
 
         function closeAllCustomSelects() {
             document.querySelectorAll('.custom-select.open').forEach(select => {
@@ -273,6 +274,7 @@
                     users = data.users || [];
                     totalUsers = data.total || users.length;
                 }
+                applyUsersSort();
                 renderUsers();
                 updatePagination();
             } catch (error) {
@@ -283,6 +285,29 @@
         }
 
         // 渲染用户列表
+        function getTotalTokens(user) {
+            const totalTokens = Number(user?.total_tokens);
+            return Number.isFinite(totalTokens) ? totalTokens : 0;
+        }
+
+        function applyUsersSort() {
+            if (tokenSortDirection === 'asc') {
+                users.sort((a, b) => getTotalTokens(a) - getTotalTokens(b));
+                return;
+            }
+            users.sort((a, b) => getTotalTokens(b) - getTotalTokens(a));
+        }
+
+        function getTokenSortIndicator() {
+            return tokenSortDirection === 'asc' ? '↑' : '↓';
+        }
+
+        function toggleTokenSort() {
+            tokenSortDirection = tokenSortDirection === 'desc' ? 'asc' : 'desc';
+            applyUsersSort();
+            renderUsers();
+        }
+
         function renderUsers() {
             const container = document.getElementById('usersTableContainer');
 
@@ -297,10 +322,14 @@
                         <tr>
                             <th>用户名</th>
                             <th>IP 地址</th>
-                            <th>总请求数</th>
                             <th>输入token</th>
                             <th>输出token</th>
-                            <th>总 Token</th>
+                            <th class="sortable-th">
+                                <button type="button" class="sort-button" onclick="toggleTokenSort()">
+                                    总 Token <span class="sort-indicator">${getTokenSortIndicator()}</span>
+                                </button>
+                            </th>
+                            <th>总请求数</th>
                             ${whitelistControlEnabled ? '<th>白名单访问</th>' : ''}
                             <th>创建时间</th>
                             <th>操作</th>
@@ -316,10 +345,10 @@
                     <tr>
                         <td>${user.username}</td>
                         <td><span class="ip-address">${user.ip_address}</span></td>
-                        <td>${(user.total_request_count || 0).toLocaleString()}</td>
                         <td>${(user.prompt_tokens || 0).toLocaleString()}</td>
                         <td>${(user.completion_tokens || 0).toLocaleString()}</td>
                         <td>${(user.total_tokens || 0).toLocaleString()}</td>
+                        <td>${(user.total_request_count || 0).toLocaleString()}</td>
                         ${whitelistControlEnabled ? `
                         <td>
                             <label class="switch">

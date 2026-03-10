@@ -63,10 +63,10 @@
                             <th>用户名</th>
                             <th>请求模型</th>
                             <th>响应模型</th>
-                            <th>请求数</th>
                             <th>输入token</th>
                             <th>输出token</th>
                             <th>总 Token</th>
+                            <th>请求数</th>
                         </tr>
                     </thead>
                     <tbody id="statsTable">
@@ -313,20 +313,20 @@
                             <td>${stat.username || '-'}</td>
                             <td>${stat.request_model || '-'}</td>
                             <td>${stat.response_model || '-'}</td>
-                            <td>${stat.request_count}</td>
                             <td>${(stat.prompt_tokens || 0).toLocaleString()}</td>
                             <td>${(stat.completion_tokens || 0).toLocaleString()}</td>
                             <td>${stat.total_tokens.toLocaleString()}</td>
+                            <td>${stat.request_count}</td>
                         </tr>
                     `;
                 });
                 html += `
                     <tr class="stats-total-row">
                         <td colspan="4">总计</td>
-                        <td>${totalRequests.toLocaleString()}</td>
                         <td>${totalPromptTokens.toLocaleString()}</td>
                         <td>${totalCompletionTokens.toLocaleString()}</td>
                         <td>${totalTokens.toLocaleString()}</td>
+                        <td>${totalRequests.toLocaleString()}</td>
                     </tr>
                 `;
                 statsTable.innerHTML = html;
@@ -408,7 +408,7 @@
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="empty-state">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
                             <p>暂无请求数据</p>

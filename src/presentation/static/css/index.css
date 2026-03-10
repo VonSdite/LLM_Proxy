@@ -1,7 +1,3 @@
-.dashboard-page .container {
-    max-width: 1360px;
-}
-
 .dashboard-page .header-content {
     display: flex;
     justify-content: space-between;
@@ -142,6 +138,58 @@
 
 .dashboard-page .table-footer {
     padding: 14px 20px;
+}
+
+/* Request logs table: fit within viewport without horizontal scrollbar */
+.dashboard-page .table-container {
+    overflow-x: hidden;
+}
+
+.dashboard-page .table-container table {
+    table-layout: fixed;
+}
+
+.dashboard-page .table-container th:nth-child(1),
+.dashboard-page .table-container td:nth-child(1) {
+    width: 10%;
+}
+
+.dashboard-page .table-container th:nth-child(2),
+.dashboard-page .table-container td:nth-child(2) {
+    width: 10%;
+}
+
+.dashboard-page .table-container th:nth-child(3),
+.dashboard-page .table-container td:nth-child(3),
+.dashboard-page .table-container th:nth-child(4),
+.dashboard-page .table-container td:nth-child(4) {
+    width: 15%;
+}
+
+.dashboard-page .table-container th:nth-child(5),
+.dashboard-page .table-container td:nth-child(5),
+.dashboard-page .table-container th:nth-child(6),
+.dashboard-page .table-container td:nth-child(6),
+.dashboard-page .table-container th:nth-child(7),
+.dashboard-page .table-container td:nth-child(7) {
+    width: 8%;
+}
+
+.dashboard-page .table-container th:nth-child(8),
+.dashboard-page .table-container td:nth-child(8),
+.dashboard-page .table-container th:nth-child(9),
+.dashboard-page .table-container td:nth-child(9) {
+    width: 10%;
+}
+
+.dashboard-page .table-container th:nth-child(10),
+.dashboard-page .table-container td:nth-child(10) {
+    width: 6%;
+}
+
+.dashboard-page .table-container td {
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {

@@ -1,4 +1,5 @@
 :root {
+    --app-container-max-width: min(96vw, 1860px);
     --bg-page: #f4f8fc;
     --surface: #ffffff;
     --surface-soft: #f8fbff;
@@ -42,7 +43,7 @@ body.app-page {
 }
 
 .app-page .container {
-    max-width: 1280px;
+    max-width: var(--app-container-max-width);
     margin: 0 auto;
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
