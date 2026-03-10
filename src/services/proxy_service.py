@@ -1,46 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""代理服务。"""
+"""上游 LLM 代理服务。"""
 
 import threading
-from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import requests
-from requests.adapters import HTTPAdapter
 from flask import Response, stream_with_context
+from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from ..application.app_context import AppContext
-from ..external import LLMProvider
+from ..external import LLMProvider, build_proxy_response, probe_stream_response
 from ..hooks import HookContext
-
-
-class _PrefetchedStreamResponse:
-    def __init__(self, response: requests.Response, first_chunk: bytes):
-        self._response = response
-        self._first_chunk = first_chunk
-        self.status_code = response.status_code
-        self.headers = response.headers
-
-    def iter_content(self, chunk_size: Optional[int] = None) -> Iterator[bytes]:
-        if self._first_chunk:
-            yield self._first_chunk
-            self._first_chunk = b""
-        yield from self._response.iter_content(chunk_size=chunk_size)
-
-    def close(self) -> None:
-        self._response.close()
-
-
-class _BufferedUpstreamResponse:
-    def __init__(self, response: requests.Response, body: bytes):
-        self._response = response
-        self.content = body
-        self.status_code = response.status_code
-        self.headers = response.headers
-
-    def close(self) -> None:
-        self._response.close()
 
 
 class ProxyService:
@@ -58,7 +30,7 @@ class ProxyService:
         request_headers: Dict[str, str],
         on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Tuple[Optional[Response], int]:
-        """代理请求到指定 provider，并执行重试与输出钩子。"""
+        """代理请求到目标 provider，并处理重试与输出钩子。"""
         target_url = provider.api
         model_name = request_data["model"]
 
@@ -67,7 +39,6 @@ class ProxyService:
         verify_ssl = provider.verify_ssl
 
         def build_request(attempt: int) -> Tuple[Dict[str, str], Dict[str, Any], HookContext]:
-            """构建重试请求的 headers/body/context。"""
             headers = dict(request_headers)
             headers["content-type"] = "application/json"
 
@@ -85,7 +56,6 @@ class ProxyService:
         for attempt in range(max_retries):
             headers, body, request_ctx = build_request(attempt)
             requested_stream = bool(body.get("stream", False))
-            http_session: Optional[requests.Session] = None
             self._logger.info(
                 "Proxying upstream request: provider=%s model=%s attempt=%s/%s stream=%s",
                 provider.name,
@@ -123,7 +93,7 @@ class ProxyService:
                 upstream_stream = "text/event-stream" in content_type
                 response_for_hook: Any = upstream_response
                 if requested_stream and not upstream_stream:
-                    response_for_hook, is_stream = self._probe_stream_response(upstream_response)
+                    response_for_hook, is_stream = probe_stream_response(upstream_response)
                     self._logger.warning(
                         "Stream mode probed for mismatch: requested_stream=%s upstream_stream=%s probed_stream=%s content_type=%s",
                         requested_stream,
@@ -141,7 +111,8 @@ class ProxyService:
                         upstream_stream,
                     )
 
-                response = provider.apply_output_body_hook(
+                response = build_proxy_response(
+                    provider.hook,
                     request_ctx,
                     response_for_hook,
                     is_stream,
@@ -157,6 +128,7 @@ class ProxyService:
                     is_stream,
                 )
                 if is_stream:
+
                     def _close_upstream_resources() -> None:
                         response_for_hook.close()
 
@@ -201,32 +173,7 @@ class ProxyService:
         return session
 
     @staticmethod
-    def _looks_like_sse_chunk(chunk: bytes) -> bool:
-        if not chunk:
-            return False
-        text = chunk.decode("utf-8", errors="ignore").lstrip()
-        return text.startswith("data:") or text.startswith("event:") or text.startswith(":")
-
-    def _probe_stream_response(self, upstream_response: requests.Response) -> Tuple[Any, bool]:
-        chunk_iter = upstream_response.iter_content(chunk_size=None)
-        first_chunk = b""
-        for chunk in chunk_iter:
-            if chunk:
-                first_chunk = chunk
-                break
-
-        if not first_chunk:
-            return _BufferedUpstreamResponse(upstream_response, b""), False
-
-        if self._looks_like_sse_chunk(first_chunk):
-            return _PrefetchedStreamResponse(upstream_response, first_chunk), True
-
-        remaining = b"".join(chunk_iter)
-        return _BufferedUpstreamResponse(upstream_response, first_chunk + remaining), False
-
-    @staticmethod
     def _filter_response_headers(headers: Any) -> Dict[str, str]:
-        """过滤不应透传给客户端的 hop-by-hop 响应头。"""
         excluded = {
             "transfer-encoding",
             "connection",
