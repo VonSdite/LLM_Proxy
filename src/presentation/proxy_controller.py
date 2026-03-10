@@ -9,6 +9,7 @@ from flask import Response, jsonify, request
 
 from ..application.app_context import AppContext
 from ..config import ConfigManager, ProviderManager
+from ..hooks import HookAbortError
 from ..services import LogService, ProxyService, UserService
 from ..utils import normalize_ip
 
@@ -146,6 +147,25 @@ class ProxyController:
                 )
 
             return result
+        except HookAbortError as exc:
+            self._logger.warning(
+                "Proxy blocked by hook: ip=%s status=%s type=%s message=%s",
+                normalize_ip(request.remote_addr),
+                exc.status_code,
+                exc.error_type,
+                exc.message,
+            )
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": exc.message,
+                            "type": exc.error_type,
+                        }
+                    }
+                ),
+                exc.status_code,
+            )
         except Exception as exc:
             self._logger.error(f"Error in chat_completions: {exc}")
             return (

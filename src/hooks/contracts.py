@@ -9,6 +9,16 @@ from typing import Any, Dict, Protocol
 from ..application.app_context import Logger
 
 
+class HookAbortError(Exception):
+    """Exception raised by hooks to stop proxy request with custom status."""
+
+    def __init__(self, message: str, status_code: int = 400, error_type: str = "hook_error"):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.error_type = error_type
+
+
 @dataclass(frozen=True)
 class HookContext:
     """Context passed into hooks."""
