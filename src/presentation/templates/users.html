@@ -124,6 +124,26 @@
             activeCustomSelect = null;
         }
 
+        function normalizeNumber(value) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : 0;
+        }
+
+        function formatNumberFull(value) {
+            return normalizeNumber(value).toLocaleString();
+        }
+
+        function formatNumberDisplay(value) {
+            const n = normalizeNumber(value);
+            return n.toLocaleString();
+        }
+
+        function renderNumber(value) {
+            const full = formatNumberFull(value);
+            const display = formatNumberDisplay(value);
+            return `<span class="numeric-value" title="${full}">${display}</span>`;
+        }
+
         function syncCustomSelectValue(selectId) {
             const nativeSelect = document.getElementById(selectId);
             const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
@@ -299,7 +319,7 @@
         }
 
         function getTokenSortIndicator() {
-            return tokenSortDirection === 'asc' ? '↑' : '↓';
+            return tokenSortDirection === 'asc' ? '&uarr;' : '&darr;';
         }
 
         function toggleTokenSort() {
@@ -322,14 +342,14 @@
                         <tr>
                             <th>用户名</th>
                             <th>IP 地址</th>
-                            <th>输入token</th>
-                            <th>输出token</th>
-                            <th class="sortable-th">
+                            <th class="num-col">输入token</th>
+                            <th class="num-col">输出token</th>
+                            <th class="sortable-th num-col">
                                 <button type="button" class="sort-button" onclick="toggleTokenSort()">
                                     总 Token <span class="sort-indicator">${getTokenSortIndicator()}</span>
                                 </button>
                             </th>
-                            <th>总请求数</th>
+                            <th class="num-col">总请求数</th>
                             ${whitelistControlEnabled ? '<th>白名单访问</th>' : ''}
                             <th>创建时间</th>
                             <th>操作</th>
@@ -345,10 +365,10 @@
                     <tr>
                         <td>${user.username}</td>
                         <td><span class="ip-address">${user.ip_address}</span></td>
-                        <td>${(user.prompt_tokens || 0).toLocaleString()}</td>
-                        <td>${(user.completion_tokens || 0).toLocaleString()}</td>
-                        <td>${(user.total_tokens || 0).toLocaleString()}</td>
-                        <td>${(user.total_request_count || 0).toLocaleString()}</td>
+                        <td class="num-col">${renderNumber(user.prompt_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(user.completion_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(user.total_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(user.total_request_count || 0)}</td>
                         ${whitelistControlEnabled ? `
                         <td>
                             <label class="switch">

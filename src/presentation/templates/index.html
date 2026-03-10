@@ -63,10 +63,10 @@
                             <th>用户名</th>
                             <th>请求模型</th>
                             <th>响应模型</th>
-                            <th>输入token</th>
-                            <th>输出token</th>
-                            <th>总 Token</th>
-                            <th>请求数</th>
+                            <th class="num-col">输入token</th>
+                            <th class="num-col">输出token</th>
+                            <th class="num-col">总 Token</th>
+                            <th class="num-col">请求数</th>
                         </tr>
                     </thead>
                     <tbody id="statsTable">
@@ -87,12 +87,12 @@
                             <th>用户名</th>
                             <th>请求模型</th>
                             <th>响应模型</th>
-                            <th>输入token</th>
-                            <th>输出token</th>
-                            <th>总 Token</th>
+                            <th class="num-col">输入token</th>
+                            <th class="num-col">输出token</th>
+                            <th class="num-col">总 Token</th>
                             <th>开始时间</th>
                             <th>结束时间</th>
-                            <th>耗时(秒)</th>
+                            <th class="num-col">耗时(秒)</th>
                         </tr>
                     </thead>
                     <tbody id="logsTable">
@@ -144,6 +144,26 @@
                 if (trigger) trigger.setAttribute('aria-expanded', 'false');
             });
             activeCustomSelect = null;
+        }
+
+        function normalizeNumber(value) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : 0;
+        }
+
+        function formatNumberFull(value) {
+            return normalizeNumber(value).toLocaleString();
+        }
+
+        function formatNumberDisplay(value) {
+            const n = normalizeNumber(value);
+            return n.toLocaleString();
+        }
+
+        function renderNumber(value) {
+            const full = formatNumberFull(value);
+            const display = formatNumberDisplay(value);
+            return `<span class="numeric-value" title="${full}">${display}</span>`;
         }
 
         function syncCustomSelectValue(selectId) {
@@ -313,20 +333,20 @@
                             <td>${stat.username || '-'}</td>
                             <td>${stat.request_model || '-'}</td>
                             <td>${stat.response_model || '-'}</td>
-                            <td>${(stat.prompt_tokens || 0).toLocaleString()}</td>
-                            <td>${(stat.completion_tokens || 0).toLocaleString()}</td>
-                            <td>${stat.total_tokens.toLocaleString()}</td>
-                            <td>${stat.request_count}</td>
+                            <td class="num-col">${renderNumber(stat.prompt_tokens || 0)}</td>
+                            <td class="num-col">${renderNumber(stat.completion_tokens || 0)}</td>
+                            <td class="num-col">${renderNumber(stat.total_tokens || 0)}</td>
+                            <td class="num-col">${renderNumber(stat.request_count || 0)}</td>
                         </tr>
                     `;
                 });
                 html += `
                     <tr class="stats-total-row">
                         <td colspan="4">总计</td>
-                        <td>${totalPromptTokens.toLocaleString()}</td>
-                        <td>${totalCompletionTokens.toLocaleString()}</td>
-                        <td>${totalTokens.toLocaleString()}</td>
-                        <td>${totalRequests.toLocaleString()}</td>
+                        <td class="num-col">${renderNumber(totalPromptTokens)}</td>
+                        <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
+                        <td class="num-col">${renderNumber(totalTokens)}</td>
+                        <td class="num-col">${renderNumber(totalRequests)}</td>
                     </tr>
                 `;
                 statsTable.innerHTML = html;
@@ -432,12 +452,12 @@
                         <td>${log.username || '-'}</td>
                         <td>${log.request_model || '-'}</td>
                         <td>${log.response_model || '-'}</td>
-                        <td>${log.prompt_tokens?.toLocaleString() || 0}</td>
-                        <td>${log.completion_tokens?.toLocaleString() || 0}</td>
-                        <td>${log.total_tokens?.toLocaleString() || 0}</td>
+                        <td class="num-col">${renderNumber(log.prompt_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(log.completion_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(log.total_tokens || 0)}</td>
                         <td>${formatDateTime(startTime)}</td>
                         <td>${formatDateTime(endTime)}</td>
-                        <td>${duration}</td>
+                        <td class="num-col"><span class="numeric-value">${duration}</span></td>
                     </tr>
                 `;
             });

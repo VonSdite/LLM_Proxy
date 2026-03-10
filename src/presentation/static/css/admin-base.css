@@ -34,12 +34,20 @@ body.app-page {
     min-height: 100vh;
     padding: 24px;
     font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1;
     color: var(--text-primary);
     overflow-x: hidden;
     background:
         radial-gradient(1100px 620px at -10% -15%, #eaf2fb 0%, transparent 60%),
         radial-gradient(980px 640px at 100% 0%, #eef4fb 0%, transparent 62%),
         var(--bg-page);
+}
+
+.app-page .numeric-value {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    font-family: "Segoe UI", "Cascadia Mono", "Consolas", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .app-page .container {
@@ -358,6 +366,20 @@ body.app-page {
     display: flex;
     justify-content: flex-end;
     align-items: flex-end;
+}
+
+/* Shared column semantics: numeric columns stay on one line */
+.app-page th.num-col,
+.app-page td.num-col {
+    text-align: right;
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: normal;
+    font-variant-numeric: tabular-nums;
+}
+
+.app-page th.num-col .sort-button {
+    justify-content: flex-end;
 }
 
 .app-page .right-controls {

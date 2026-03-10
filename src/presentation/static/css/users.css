@@ -37,7 +37,7 @@
 
 .users-page #usersTableContainer {
     width: 100%;
-    overflow-x: auto;
+    overflow-x: hidden;
     overflow-y: visible;
 }
 
@@ -73,7 +73,6 @@
 
 .users-page .users-table {
     width: 100%;
-    min-width: 980px;
     border-collapse: separate;
     border-spacing: 0;
     font-size: 14px;
@@ -92,7 +91,8 @@
     letter-spacing: 0.04em;
     background: #f4f8fd;
     border-bottom: 1px solid var(--line);
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .users-page .users-table th.sortable-th {
@@ -129,7 +129,8 @@
     border-bottom: 1px solid #e8eef5;
     color: var(--text-primary);
     line-height: 1.45;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
     background: #fff;
 }
 
@@ -151,6 +152,8 @@
     padding: 3px 8px;
     font-size: 12px;
     font-family: "Cascadia Mono", "Consolas", monospace;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .users-page .action-buttons {

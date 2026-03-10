@@ -77,7 +77,7 @@
 .dashboard-page .table-container {
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
-    overflow-x: auto;
+    overflow-x: hidden;
     background: #fff;
     box-shadow: var(--shadow-card);
 }
@@ -101,7 +101,8 @@
     letter-spacing: 0.04em;
     background: #f4f8fd;
     border-bottom: 1px solid var(--line);
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .dashboard-page .stats-table td,
@@ -110,7 +111,8 @@
     border-bottom: 1px solid #e8eef5;
     color: var(--text-primary);
     line-height: 1.45;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
     background: #fff;
 }
 
@@ -146,53 +148,6 @@
 
 .dashboard-page .table-footer {
     padding: 14px 20px;
-}
-
-/* Request logs table: fit within viewport without horizontal scrollbar */
-.dashboard-page .table-container {
-    overflow-x: hidden;
-}
-
-.dashboard-page .table-container table {
-    table-layout: fixed;
-}
-
-.dashboard-page .table-container th:nth-child(1),
-.dashboard-page .table-container td:nth-child(1) {
-    width: 10%;
-}
-
-.dashboard-page .table-container th:nth-child(2),
-.dashboard-page .table-container td:nth-child(2) {
-    width: 10%;
-}
-
-.dashboard-page .table-container th:nth-child(3),
-.dashboard-page .table-container td:nth-child(3),
-.dashboard-page .table-container th:nth-child(4),
-.dashboard-page .table-container td:nth-child(4) {
-    width: 15%;
-}
-
-.dashboard-page .table-container th:nth-child(5),
-.dashboard-page .table-container td:nth-child(5),
-.dashboard-page .table-container th:nth-child(6),
-.dashboard-page .table-container td:nth-child(6),
-.dashboard-page .table-container th:nth-child(7),
-.dashboard-page .table-container td:nth-child(7) {
-    width: 8%;
-}
-
-.dashboard-page .table-container th:nth-child(8),
-.dashboard-page .table-container td:nth-child(8),
-.dashboard-page .table-container th:nth-child(9),
-.dashboard-page .table-container td:nth-child(9) {
-    width: 10%;
-}
-
-.dashboard-page .table-container th:nth-child(10),
-.dashboard-page .table-container td:nth-child(10) {
-    width: 6%;
 }
 
 .dashboard-page .table-container td {
