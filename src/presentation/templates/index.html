@@ -21,6 +21,10 @@
                         <a class="header-nav-link active" href="/">统计概览</a>
                         <a class="header-nav-link" href="/users">用户管理</a>
                     </nav>
+                    {% if auth_enabled %}
+                    <span class="header-user">当前用户：{{ current_username or '未知用户' }}</span>
+                    <a class="header-nav-link header-nav-link-logout" href="/logout">退出登录</a>
+                    {% endif %}
                 </div>
             </div>
         </div>

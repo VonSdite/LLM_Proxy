@@ -75,6 +75,23 @@ class AuthenticationService:
         if session:
             self._logger.info(f"Destroyed session for user={session['username']!r}")
 
+    def get_session_username(self, session_token: Optional[str]) -> Optional[str]:
+        """根据 session token 获取当前登录用户名。"""
+        if not session_token:
+            return None
+
+        session = self._sessions.get(session_token)
+        if not session:
+            return None
+
+        if datetime.now() > session["expires"]:
+            del self._sessions[session_token]
+            self._logger.info("Session expired and removed")
+            return None
+
+        username = session.get("username")
+        return str(username) if username else None
+
     def get_cookie_settings(self) -> Dict[str, Any]:
         """返回 session cookie 配置。"""
         return {

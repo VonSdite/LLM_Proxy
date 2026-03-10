@@ -35,14 +35,28 @@ class WebController:
 
     def index(self) -> str:
         """首页。"""
-        return render_template('index.html')
+        return render_template(
+            'index.html',
+            current_username=self._get_current_username(),
+            auth_enabled=self._auth_service.is_auth_enabled(),
+        )
 
     def users_page(self) -> str:
         """用户管理页。"""
         return render_template(
             'users.html',
             chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
+            current_username=self._get_current_username(),
+            auth_enabled=self._auth_service.is_auth_enabled(),
         )
+
+    def _get_current_username(self) -> str:
+        """从当前请求 cookie 提取登录用户名。"""
+        if not self._auth_service.is_auth_enabled():
+            return ""
+
+        session_token = request.cookies.get('session_token')
+        return self._auth_service.get_session_username(session_token) or ""
 
     def get_statistics(self) -> Response:
         """查询统计聚合数据。"""

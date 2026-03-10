@@ -75,7 +75,22 @@ body.app-page {
 .app-page .header-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 12px;
+}
+
+.app-page .header-user {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .app-page .header-nav {
@@ -113,6 +128,18 @@ body.app-page {
     color: #fff;
     background: var(--primary);
     border-color: var(--primary);
+}
+
+.app-page .header-nav-link.header-nav-link-logout {
+    color: var(--danger);
+    border-color: #f1d4d8;
+    background: #fef5f6;
+}
+
+.app-page .header-nav-link.header-nav-link-logout:hover {
+    color: #fff;
+    border-color: var(--danger-hover);
+    background: var(--danger-hover);
 }
 
 .app-page .btn,
