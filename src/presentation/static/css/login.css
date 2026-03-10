@@ -13,6 +13,13 @@ body.login-page {
     color: var(--text-primary);
 }
 
+:root[data-theme="dark"] body.login-page {
+    background:
+        radial-gradient(1100px 620px at -10% -15%, #111d34 0%, transparent 60%),
+        radial-gradient(980px 640px at 100% 0%, #15223b 0%, transparent 62%),
+        var(--bg-page);
+}
+
 .login-page .login-shell {
     width: 100%;
     max-width: 420px;
@@ -23,10 +30,18 @@ body.login-page {
     overflow: hidden;
 }
 
+:root[data-theme="dark"] .login-page .login-shell {
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.4);
+}
+
 .login-page .login-head {
     padding: 22px 24px;
     border-bottom: 1px solid var(--line);
     background: linear-gradient(180deg, #fbfdff 0%, #f5f9ff 100%);
+}
+
+:root[data-theme="dark"] .login-page .login-head {
+    background: linear-gradient(180deg, #121d31 0%, #0f1728 100%);
 }
 
 .login-page .login-head h1 {
@@ -63,6 +78,10 @@ body.login-page {
     color: var(--text-primary);
     background: #fff;
     transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
+}
+
+:root[data-theme="dark"] .login-page .form-control {
+    background: #0d1627;
 }
 
 .login-page .form-control:hover {

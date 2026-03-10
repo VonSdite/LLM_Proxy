@@ -24,6 +24,27 @@
     --transition: 180ms ease;
 }
 
+:root[data-theme="dark"] {
+    --bg-page: #0b1220;
+    --surface: #111b2e;
+    --surface-soft: #0f1728;
+    --surface-hover: #17233a;
+    --text-primary: #e6edf7;
+    --text-secondary: #a5b4cc;
+    --text-muted: #93a4c2;
+    --line: #24324c;
+    --line-strong: #314665;
+    --primary: #78a7d8;
+    --primary-hover: #8ab4de;
+    --primary-active: #6798cb;
+    --danger: #e0828f;
+    --danger-hover: #d46e7c;
+    --success: #6ab79f;
+    --focus: rgba(120, 167, 216, 0.3);
+    --shadow-soft: 0 10px 28px rgba(0, 0, 0, 0.38);
+    --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.32);
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -66,6 +87,10 @@ body.app-page {
     background: linear-gradient(180deg, #fbfdff 0%, #f5f9ff 100%);
 }
 
+:root[data-theme="dark"] .app-page .header {
+    background: linear-gradient(180deg, #121d31 0%, #0f1728 100%);
+}
+
 .app-page .header-title h1 {
     margin: 0;
     font-size: 28px;
@@ -102,6 +127,10 @@ body.app-page {
     white-space: nowrap;
 }
 
+:root[data-theme="dark"] .app-page .header-user {
+    background: #0d1627;
+}
+
 .app-page .header-nav {
     display: inline-flex;
     align-items: center;
@@ -110,6 +139,10 @@ body.app-page {
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: #fff;
+}
+
+:root[data-theme="dark"] .app-page .header-nav {
+    background: #0d1627;
 }
 
 .app-page .header-nav-link {
@@ -143,6 +176,11 @@ body.app-page {
     color: var(--danger);
     border-color: #f1d4d8;
     background: #fef5f6;
+}
+
+:root[data-theme="dark"] .app-page .header-nav-link.header-nav-link-logout {
+    background: #321b24;
+    border-color: #5c2d3b;
 }
 
 .app-page .header-nav-link.header-nav-link-logout:hover {
@@ -219,6 +257,14 @@ body.app-page {
     transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
 }
 
+:root[data-theme="dark"] .app-page .form-group input,
+:root[data-theme="dark"] .app-page .form-group textarea,
+:root[data-theme="dark"] .app-page .form-control,
+:root[data-theme="dark"] .app-page .quick-jump input,
+:root[data-theme="dark"] .app-page .page-size-controls select {
+    background: #0d1627;
+}
+
 .app-page .form-group textarea {
     min-height: 82px;
     padding-top: 10px;
@@ -281,6 +327,10 @@ body.app-page {
     transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
 }
 
+:root[data-theme="dark"] .app-page .custom-select-trigger {
+    background: #0d1627;
+}
+
 .app-page .custom-select-trigger::after {
     content: "";
     position: absolute;
@@ -327,6 +377,10 @@ body.app-page {
     overflow-y: auto;
 }
 
+:root[data-theme="dark"] .app-page .custom-select-menu {
+    background: #0d1627;
+}
+
 .app-page .custom-select.open .custom-select-menu {
     display: block;
 }
@@ -366,6 +420,10 @@ body.app-page {
     display: flex;
     justify-content: flex-end;
     align-items: flex-end;
+}
+
+:root[data-theme="dark"] .app-page .table-footer {
+    background: #111a2c;
 }
 
 /* Shared column semantics: numeric columns stay on one line */
@@ -412,6 +470,10 @@ body.app-page {
     transition: background-color var(--transition), border-color var(--transition), color var(--transition);
 }
 
+:root[data-theme="dark"] .app-page .page-nav-text {
+    background: #0d1627;
+}
+
 .app-page .page-nav-text:hover:not(.disabled) {
     background: var(--surface-hover);
     border-color: #b5c9de;
@@ -436,6 +498,60 @@ body.app-page {
     font-size: 13px;
     font-weight: 600;
     white-space: nowrap;
+}
+
+:root[data-theme="dark"] .app-page .page-info,
+:root[data-theme="dark"] .app-page .total-count {
+    background: #0d1627;
+}
+
+.app-page .theme-toggle {
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--line-strong);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color var(--transition), border-color var(--transition), color var(--transition), box-shadow var(--transition);
+}
+
+.app-page .theme-toggle:hover {
+    background: var(--surface-hover);
+    border-color: #b5c9de;
+    color: var(--text-primary);
+}
+
+.app-page .theme-toggle:focus-visible {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--focus);
+}
+
+.app-page .theme-toggle svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
+}
+
+.app-page .theme-icon-moon {
+    display: none;
+}
+
+:root[data-theme="dark"] .app-page .theme-toggle {
+    background: #0d1627;
+}
+
+:root[data-theme="dark"] .app-page .theme-icon-sun {
+    display: none;
+}
+
+:root[data-theme="dark"] .app-page .theme-icon-moon {
+    display: inline;
 }
 
 .app-page .quick-jump,

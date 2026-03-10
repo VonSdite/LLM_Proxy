@@ -3,6 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme');
+            const theme = savedTheme === 'dark' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
     <title>LLM使用统计</title>
     <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="/static/css/admin-base.css">
@@ -17,6 +24,15 @@
                     <p>实时监控 API 请求和 Token 消耗</p>
                 </div>
                 <div class="header-actions">
+                    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">
+                        <svg class="theme-icon-sun" viewBox="0 0 24 24" stroke-width="1.8">
+                            <circle cx="12" cy="12" r="4"></circle>
+                            <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M19.07 4.93l-2.12 2.12M7.05 16.95l-2.12 2.12"></path>
+                        </svg>
+                        <svg class="theme-icon-moon" viewBox="0 0 24 24" stroke-width="1.8">
+                            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z"></path>
+                        </svg>
+                    </button>
                     <nav class="header-nav" aria-label="Main navigation">
                         <a class="header-nav-link active" href="/">统计概览</a>
                         <a class="header-nav-link" href="/users">用户管理</a>
@@ -146,6 +162,27 @@
             activeCustomSelect = null;
         }
 
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            const themeToggle = document.getElementById('themeToggle');
+            if (themeToggle) {
+                themeToggle.setAttribute('aria-label', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+                themeToggle.setAttribute('title', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+            }
+        }
+
+        function initThemeToggle() {
+            const themeToggle = document.getElementById('themeToggle');
+            if (!themeToggle) return;
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            applyTheme(currentTheme);
+            themeToggle.addEventListener('click', function() {
+                const nextTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark';
+                applyTheme(nextTheme);
+            });
+        }
+
         function normalizeNumber(value) {
             const n = Number(value);
             return Number.isFinite(n) ? n : 0;
@@ -259,6 +296,7 @@
 
         // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', function() {
+            initThemeToggle();
             setupCustomSelect('username');
             setupCustomSelect('requestModel');
             setupCustomSelect('pageSizeSelect');
@@ -329,7 +367,7 @@
 
                     html += `
                         <tr>
-                            <td>${stat.ip_address || '-'}</td>
+                            <td>${stat.ip_address ? `<span class="ip-address">${stat.ip_address}</span>` : '-'}</td>
                             <td>${stat.username || '-'}</td>
                             <td>${stat.request_model || '-'}</td>
                             <td>${stat.response_model || '-'}</td>
@@ -448,7 +486,7 @@
 
                 html += `
                     <tr>
-                        <td>${log.ip_address || '-'}</td>
+                        <td>${log.ip_address ? `<span class="ip-address">${log.ip_address}</span>` : '-'}</td>
                         <td>${log.username || '-'}</td>
                         <td>${log.request_model || '-'}</td>
                         <td>${log.response_model || '-'}</td>

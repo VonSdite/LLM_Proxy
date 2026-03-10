@@ -20,6 +20,10 @@
     background: var(--surface);
 }
 
+:root[data-theme="dark"] .dashboard-page .filters-section {
+    background: #0f1728;
+}
+
 .dashboard-page .filters {
     display: flex;
     gap: 14px;
@@ -65,6 +69,26 @@
     transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
 }
 
+:root[data-theme="dark"] .dashboard-page .filter-group input,
+:root[data-theme="dark"] .dashboard-page .filter-group select {
+    background: #0d1627;
+    border-color: var(--line-strong);
+    color: var(--text-primary);
+}
+
+:root[data-theme="dark"] .dashboard-page .filter-group input::placeholder {
+    color: #8ea0be;
+}
+
+:root[data-theme="dark"] .dashboard-page .filter-group input[type="date"] {
+    color-scheme: dark;
+}
+
+:root[data-theme="dark"] .dashboard-page .filter-group input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(85%) sepia(7%) saturate(445%) hue-rotate(185deg) brightness(96%) contrast(92%);
+    opacity: 0.95;
+}
+
 .dashboard-page .filter-group input:hover,
 .dashboard-page .filter-group select:hover {
     border-color: #b9cbde;
@@ -84,6 +108,11 @@
     overflow-x: hidden;
     background: #fff;
     box-shadow: var(--shadow-card);
+}
+
+:root[data-theme="dark"] .dashboard-page .stats-container,
+:root[data-theme="dark"] .dashboard-page .table-container {
+    background: #111b2e;
 }
 
 .dashboard-page .stats-table,
@@ -109,6 +138,11 @@
     overflow-wrap: anywhere;
 }
 
+:root[data-theme="dark"] .dashboard-page .stats-table th,
+:root[data-theme="dark"] .dashboard-page th {
+    background: #15233b;
+}
+
 .dashboard-page .stats-table td,
 .dashboard-page td {
     padding: 13px 14px;
@@ -120,9 +154,19 @@
     background: #fff;
 }
 
+:root[data-theme="dark"] .dashboard-page .stats-table td,
+:root[data-theme="dark"] .dashboard-page td {
+    background: #111b2e;
+}
+
 .dashboard-page .stats-table tbody tr:nth-child(even) td,
 .dashboard-page tbody tr:nth-child(even) td {
     background: #fbfdff;
+}
+
+:root[data-theme="dark"] .dashboard-page .stats-table tbody tr:nth-child(even) td,
+:root[data-theme="dark"] .dashboard-page tbody tr:nth-child(even) td {
+    background: #122038;
 }
 
 .dashboard-page .stats-table tbody tr:hover td,
@@ -130,10 +174,41 @@
     background: #f2f7fd;
 }
 
+:root[data-theme="dark"] .dashboard-page .stats-table tbody tr:hover td,
+:root[data-theme="dark"] .dashboard-page tbody tr:hover td {
+    background: #1a2b45;
+}
+
 .dashboard-page .stats-total-row td {
     font-weight: 700;
     color: var(--text-primary);
     background: #eff5fc;
+}
+
+:root[data-theme="dark"] .dashboard-page .stats-total-row td {
+    background: #1a2a44;
+}
+
+.dashboard-page .ip-address {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9px;
+    border: 1px solid #c8d8ea;
+    background: linear-gradient(180deg, #f9fcff 0%, #f1f6fc 100%);
+    color: #22456f;
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    font-family: "Cascadia Mono", "Consolas", monospace;
+    white-space: nowrap;
+    line-height: 1.1;
+}
+
+:root[data-theme="dark"] .dashboard-page .ip-address {
+    border-color: #2b4469;
+    background: linear-gradient(180deg, #112038 0%, #0d1a30 100%);
+    color: #a7c8f0;
 }
 
 .dashboard-page .loading,
@@ -148,6 +223,11 @@
 .dashboard-page .error {
     color: #9b2c2c;
     background: #fef2f2;
+}
+
+:root[data-theme="dark"] .dashboard-page .error {
+    color: #ffb4bf;
+    background: #3a1f2b;
 }
 
 .dashboard-page .table-footer {
