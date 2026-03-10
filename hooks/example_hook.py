@@ -7,8 +7,8 @@ class Hook(BaseHook):
     """Example hook that demonstrates all available extension points."""
 
     def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
+        ctx.logger("header hook.")
         headers["X-Custom-Header"] = "custom-value"
-        headers["X-User-Id"] = str(ctx.get("user_id", "default"))
         return headers
 
     def input_body_hook(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any]:
