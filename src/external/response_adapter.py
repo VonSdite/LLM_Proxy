@@ -3,6 +3,7 @@
 """上游响应适配：执行 provider 输出钩子并构造 Flask 响应。"""
 
 import json
+import re
 from typing import Any, Callable, Dict, Iterator, Optional
 
 from flask import Response
@@ -62,14 +63,20 @@ def build_proxy_response(
         return stripped[5:].strip()
 
     def process_sse_event(event_text: str) -> Iterator[bytes]:
+        # Preserve non-data SSE fields to avoid breaking strict clients.
+        normalized_text = event_text.replace("\r\n", "\n").replace("\r", "\n")
+        raw_lines = normalized_text.split("\n")
         data_lines = []
-        for raw_line in event_text.splitlines():
+        passthrough_lines = []
+        for raw_line in raw_lines:
             if raw_line.startswith("data:"):
                 data_lines.append(raw_line[5:].strip())
+            elif raw_line != "":
+                passthrough_lines.append(raw_line)
 
         if not data_lines:
-            if event_text.strip():
-                yield (event_text + "\n\n").encode("utf-8")
+            if normalized_text.strip():
+                yield (normalized_text + "\n\n").encode("utf-8")
             return
 
         data_str = "\n".join(data_lines).strip()
@@ -83,7 +90,9 @@ def build_proxy_response(
         try:
             data = json.loads(data_str)
         except json.JSONDecodeError:
-            yield f"data: {data_str}\n\n".encode("utf-8")
+            out_lines = list(passthrough_lines)
+            out_lines.append(f"data: {data_str}")
+            yield ("\n".join(out_lines) + "\n\n").encode("utf-8")
             return
 
         if isinstance(data, dict):
@@ -92,11 +101,17 @@ def build_proxy_response(
         if hook_func:
             modified = hook_func(ctx, data)
             if modified is not None:
-                yield f"data: {json.dumps(modified)}\n\n".encode("utf-8")
+                out_lines = list(passthrough_lines)
+                out_lines.append(f"data: {json.dumps(modified)}")
+                yield ("\n".join(out_lines) + "\n\n").encode("utf-8")
             else:
-                yield f"data: {data_str}\n\n".encode("utf-8")
+                out_lines = list(passthrough_lines)
+                out_lines.append(f"data: {data_str}")
+                yield ("\n".join(out_lines) + "\n\n").encode("utf-8")
         else:
-            yield f"data: {data_str}\n\n".encode("utf-8")
+            out_lines = list(passthrough_lines)
+            out_lines.append(f"data: {data_str}")
+            yield ("\n".join(out_lines) + "\n\n").encode("utf-8")
 
     if not is_stream:
         body = response.content
@@ -138,8 +153,13 @@ def build_proxy_response(
                     yield chunk
                     continue
 
-                while "\n\n" in buffer:
-                    event_text, buffer = buffer.split("\n\n", 1)
+                while True:
+                    # Support both LF-LF and CRLF-CRLF event separators.
+                    split_match = re.search(r"\r?\n\r?\n", buffer)
+                    if not split_match:
+                        break
+                    event_text = buffer[: split_match.start()]
+                    buffer = buffer[split_match.end() :]
                     yield from process_sse_event(event_text)
 
             if buffer:
