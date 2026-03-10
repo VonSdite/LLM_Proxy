@@ -58,14 +58,7 @@ class ProxyController:
             if whitelist_required and not user:
                 self._logger.warning(f"Proxy denied: ip={client_ip} is not in whitelist")
                 return (
-                    jsonify(
-                        {
-                            "error": {
-                                "message": f"IP address {client_ip} is not in whitelist",
-                                "type": "access_denied",
-                            }
-                        }
-                    ),
+                    jsonify({"error": f"IP address {client_ip} is not in whitelist"}),
                     403,
                 )
 
@@ -73,14 +66,7 @@ class ProxyController:
             if not request_data or "model" not in request_data:
                 self._logger.warning("Proxy rejected: missing model in request body")
                 return (
-                    jsonify(
-                        {
-                            "error": {
-                                "message": "Missing 'model' in request body",
-                                "type": "invalid_request_error",
-                            }
-                        }
-                    ),
+                    jsonify({"error": "Missing 'model' in request body"}),
                     400,
                 )
 
@@ -96,14 +82,7 @@ class ProxyController:
             if not provider:
                 self._logger.warning(f"Proxy rejected: unknown model={model_name!r}")
                 return (
-                    jsonify(
-                        {
-                            "error": {
-                                "message": f"Unknown model: {model_name}",
-                                "type": "invalid_request_error",
-                            }
-                        }
-                    ),
+                    jsonify({"error": f"Unknown model: {model_name}"}),
                     400,
                 )
 
@@ -135,14 +114,7 @@ class ProxyController:
             if result is None:
                 self._logger.error(f"Proxy failed after retries: model={model_name!r}, ip={client_ip}")
                 return (
-                    jsonify(
-                        {
-                            "error": {
-                                "message": "Request failed after retries",
-                                "type": "proxy_error",
-                            }
-                        }
-                    ),
+                    jsonify({"error": "Request failed after retries"}),
                     status_code,
                 )
 
@@ -156,22 +128,12 @@ class ProxyController:
                 exc.message,
             )
             return (
-                jsonify(
-                    {
-                        "error": {
-                            "message": exc.message,
-                            "type": exc.error_type,
-                        }
-                    }
-                ),
+                jsonify({"error": exc.message}),
                 exc.status_code,
             )
         except Exception as exc:
             self._logger.error(f"Error in chat_completions: {exc}")
-            return (
-                jsonify({"error": {"message": str(exc), "type": "internal_error"}}),
-                500,
-            )
+            return jsonify({"error": str(exc)}), 500
 
     def list_models(self) -> Response:
         """返回当前可用模型列表。"""
