@@ -21,7 +21,7 @@
 }
 
 :root[data-theme="dark"] .dashboard-page .filters-section {
-    background: #0f1728;
+    background: #0f141b;
 }
 
 .dashboard-page .filters {
@@ -71,13 +71,13 @@
 
 :root[data-theme="dark"] .dashboard-page .filter-group input,
 :root[data-theme="dark"] .dashboard-page .filter-group select {
-    background: #0d1627;
+    background: #0d1117;
     border-color: var(--line-strong);
     color: var(--text-primary);
 }
 
 :root[data-theme="dark"] .dashboard-page .filter-group input::placeholder {
-    color: #8ea0be;
+    color: #7d8590;
 }
 
 :root[data-theme="dark"] .dashboard-page .filter-group input[type="date"] {
@@ -112,7 +112,7 @@
 
 :root[data-theme="dark"] .dashboard-page .stats-container,
 :root[data-theme="dark"] .dashboard-page .table-container {
-    background: #111b2e;
+    background: #161b22;
 }
 
 .dashboard-page .stats-table,
@@ -140,7 +140,7 @@
 
 :root[data-theme="dark"] .dashboard-page .stats-table th,
 :root[data-theme="dark"] .dashboard-page th {
-    background: #15233b;
+    background: #0f141b;
 }
 
 .dashboard-page .stats-table td,
@@ -156,7 +156,8 @@
 
 :root[data-theme="dark"] .dashboard-page .stats-table td,
 :root[data-theme="dark"] .dashboard-page td {
-    background: #111b2e;
+    background: #161b22;
+    border-bottom-color: rgba(139, 148, 158, 0.28);
 }
 
 .dashboard-page .stats-table tbody tr:nth-child(even) td,
@@ -166,7 +167,7 @@
 
 :root[data-theme="dark"] .dashboard-page .stats-table tbody tr:nth-child(even) td,
 :root[data-theme="dark"] .dashboard-page tbody tr:nth-child(even) td {
-    background: #122038;
+    background: #151b23;
 }
 
 .dashboard-page .stats-table tbody tr:hover td,
@@ -176,7 +177,12 @@
 
 :root[data-theme="dark"] .dashboard-page .stats-table tbody tr:hover td,
 :root[data-theme="dark"] .dashboard-page tbody tr:hover td {
-    background: #1a2b45;
+    background: #1f2630;
+}
+
+:root[data-theme="dark"] .dashboard-page .stats-container,
+:root[data-theme="dark"] .dashboard-page .table-container {
+    border-color: #30363d;
 }
 
 .dashboard-page .stats-total-row td {
@@ -186,7 +192,7 @@
 }
 
 :root[data-theme="dark"] .dashboard-page .stats-total-row td {
-    background: #1a2a44;
+    background: #1b2230;
 }
 
 .dashboard-page .ip-address {
@@ -206,9 +212,9 @@
 }
 
 :root[data-theme="dark"] .dashboard-page .ip-address {
-    border-color: #2b4469;
-    background: linear-gradient(180deg, #112038 0%, #0d1a30 100%);
-    color: #a7c8f0;
+    border-color: #30363d;
+    background: linear-gradient(180deg, #111723 0%, #0d1117 100%);
+    color: #9ecbff;
 }
 
 .dashboard-page .loading,
@@ -226,8 +232,8 @@
 }
 
 :root[data-theme="dark"] .dashboard-page .error {
-    color: #ffb4bf;
-    background: #3a1f2b;
+    color: #ffb8bf;
+    background: #3a1f24;
 }
 
 .dashboard-page .table-footer {

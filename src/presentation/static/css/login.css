@@ -15,8 +15,8 @@ body.login-page {
 
 :root[data-theme="dark"] body.login-page {
     background:
-        radial-gradient(1100px 620px at -10% -15%, #111d34 0%, transparent 60%),
-        radial-gradient(980px 640px at 100% 0%, #15223b 0%, transparent 62%),
+        radial-gradient(1100px 620px at -10% -15%, rgba(31, 111, 235, 0.16) 0%, transparent 60%),
+        radial-gradient(980px 640px at 100% 0%, rgba(47, 129, 247, 0.11) 0%, transparent 62%),
         var(--bg-page);
 }
 
@@ -41,7 +41,7 @@ body.login-page {
 }
 
 :root[data-theme="dark"] .login-page .login-head {
-    background: linear-gradient(180deg, #121d31 0%, #0f1728 100%);
+    background: linear-gradient(180deg, #151b23 0%, #0f141b 100%);
 }
 
 .login-page .login-head h1 {
@@ -81,7 +81,7 @@ body.login-page {
 }
 
 :root[data-theme="dark"] .login-page .form-control {
-    background: #0d1627;
+    background: #0d1117;
 }
 
 .login-page .form-control:hover {

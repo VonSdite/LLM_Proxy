@@ -29,7 +29,7 @@
 }
 
 :root[data-theme="dark"] .users-page .users-section {
-    background: #111b2e;
+    background: #161b22;
 }
 
 .users-page .users-section h2 {
@@ -100,7 +100,7 @@
 }
 
 :root[data-theme="dark"] .users-page .users-table th {
-    background: #15233b;
+    background: #0f141b;
 }
 
 .users-page .users-table th.sortable-th {
@@ -143,7 +143,8 @@
 }
 
 :root[data-theme="dark"] .users-page .users-table td {
-    background: #111b2e;
+    background: #161b22;
+    border-bottom-color: rgba(139, 148, 158, 0.28);
 }
 
 .users-page .users-table tbody tr:nth-child(even) td {
@@ -151,7 +152,7 @@
 }
 
 :root[data-theme="dark"] .users-page .users-table tbody tr:nth-child(even) td {
-    background: #122038;
+    background: #151b23;
 }
 
 .users-page .users-table tbody tr:hover td {
@@ -159,7 +160,13 @@
 }
 
 :root[data-theme="dark"] .users-page .users-table tbody tr:hover td {
-    background: #1a2b45;
+    background: #1f2630;
+}
+
+:root[data-theme="dark"] .users-page .add-user-section,
+:root[data-theme="dark"] .users-page .users-section,
+:root[data-theme="dark"] .users-page .users-table {
+    border-color: #30363d;
 }
 
 .users-page .ip-address {
@@ -179,9 +186,9 @@
 }
 
 :root[data-theme="dark"] .users-page .ip-address {
-    border-color: #2b4469;
-    background: linear-gradient(180deg, #112038 0%, #0d1a30 100%);
-    color: #a7c8f0;
+    border-color: #30363d;
+    background: linear-gradient(180deg, #111723 0%, #0d1117 100%);
+    color: #9ecbff;
 }
 
 .users-page .action-buttons {
@@ -208,8 +215,8 @@
 }
 
 :root[data-theme="dark"] .users-page .btn-edit {
-    background: #1a2d49;
-    border-color: #28466d;
+    background: #1b2230;
+    border-color: #30363d;
 }
 
 .users-page .btn-edit:hover {
@@ -225,8 +232,8 @@
 }
 
 :root[data-theme="dark"] .users-page .btn-delete {
-    background: #3a1f2b;
-    border-color: #5c2d3b;
+    background: #3a1f24;
+    border-color: #6e2f37;
 }
 
 .users-page .btn-delete:hover {
@@ -260,8 +267,8 @@
 }
 
 :root[data-theme="dark"] .users-page .slider {
-    background: #1a2b45;
-    border-color: #2d4163;
+    background: #222b36;
+    border-color: #30363d;
 }
 
 .users-page .slider::before {
@@ -310,7 +317,7 @@
 
 :root[data-theme="dark"] .users-page .loading,
 :root[data-theme="dark"] .users-page .empty-state {
-    background: #0f1728;
+    background: #0f141b;
 }
 
 .users-page .error {
@@ -320,9 +327,9 @@
 }
 
 :root[data-theme="dark"] .users-page .error {
-    color: #ffb4bf;
-    border-color: #5c2d3b;
-    background: #3a1f2b;
+    color: #ffb8bf;
+    border-color: #6e2f37;
+    background: #3a1f24;
 }
 
 .users-page .success {
@@ -332,9 +339,9 @@
 }
 
 :root[data-theme="dark"] .users-page .success {
-    background: #193229;
-    border-color: #2f5e4e;
-    color: #a9e2cb;
+    background: #132a21;
+    border-color: #2b6a53;
+    color: #8ddbba;
 }
 
 .users-page .table-footer {

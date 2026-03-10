@@ -25,24 +25,24 @@
 }
 
 :root[data-theme="dark"] {
-    --bg-page: #0b1220;
-    --surface: #111b2e;
-    --surface-soft: #0f1728;
-    --surface-hover: #17233a;
-    --text-primary: #e6edf7;
-    --text-secondary: #a5b4cc;
-    --text-muted: #93a4c2;
-    --line: #24324c;
-    --line-strong: #314665;
-    --primary: #78a7d8;
-    --primary-hover: #8ab4de;
-    --primary-active: #6798cb;
-    --danger: #e0828f;
-    --danger-hover: #d46e7c;
-    --success: #6ab79f;
-    --focus: rgba(120, 167, 216, 0.3);
-    --shadow-soft: 0 10px 28px rgba(0, 0, 0, 0.38);
-    --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.32);
+    --bg-page: #0d1117;
+    --surface: #161b22;
+    --surface-soft: #0f141b;
+    --surface-hover: #1f2630;
+    --text-primary: #e6edf3;
+    --text-secondary: #9da7b3;
+    --text-muted: #7d8590;
+    --line: #30363d;
+    --line-strong: #3d444d;
+    --primary: #2f81f7;
+    --primary-hover: #388bfd;
+    --primary-active: #1f6feb;
+    --danger: #f85149;
+    --danger-hover: #ff7b72;
+    --success: #3fb950;
+    --focus: rgba(47, 129, 247, 0.32);
+    --shadow-soft: 0 12px 34px rgba(1, 4, 9, 0.7);
+    --shadow-card: 0 6px 18px rgba(1, 4, 9, 0.56);
 }
 
 * {
@@ -62,6 +62,13 @@ body.app-page {
     background:
         radial-gradient(1100px 620px at -10% -15%, #eaf2fb 0%, transparent 60%),
         radial-gradient(980px 640px at 100% 0%, #eef4fb 0%, transparent 62%),
+        var(--bg-page);
+}
+
+:root[data-theme="dark"] body.app-page {
+    background:
+        radial-gradient(980px 560px at -10% -15%, rgba(31, 111, 235, 0.16) 0%, transparent 64%),
+        radial-gradient(880px 520px at 100% 0%, rgba(47, 129, 247, 0.11) 0%, transparent 66%),
         var(--bg-page);
 }
 
@@ -88,7 +95,7 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .header {
-    background: linear-gradient(180deg, #121d31 0%, #0f1728 100%);
+    background: linear-gradient(180deg, #151b23 0%, #0f141b 100%);
 }
 
 .app-page .header-title h1 {
@@ -128,7 +135,7 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .header-user {
-    background: #0d1627;
+    background: #0d1117;
 }
 
 .app-page .header-nav {
@@ -142,7 +149,7 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .header-nav {
-    background: #0d1627;
+    background: #0d1117;
 }
 
 .app-page .header-nav-link {
@@ -179,8 +186,8 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .header-nav-link.header-nav-link-logout {
-    background: #321b24;
-    border-color: #5c2d3b;
+    background: #3d1f23;
+    border-color: #6e2f37;
 }
 
 .app-page .header-nav-link.header-nav-link-logout:hover {
@@ -262,7 +269,15 @@ body.app-page {
 :root[data-theme="dark"] .app-page .form-control,
 :root[data-theme="dark"] .app-page .quick-jump input,
 :root[data-theme="dark"] .app-page .page-size-controls select {
-    background: #0d1627;
+    background: #0d1117;
+}
+
+:root[data-theme="dark"] .app-page .form-group input:hover,
+:root[data-theme="dark"] .app-page .form-control:hover,
+:root[data-theme="dark"] .app-page .quick-jump input:hover,
+:root[data-theme="dark"] .app-page .page-size-controls select:hover {
+    background: #111820;
+    border-color: #586069;
 }
 
 .app-page .form-group textarea {
@@ -328,7 +343,12 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .custom-select-trigger {
-    background: #0d1627;
+    background: #0d1117;
+}
+
+:root[data-theme="dark"] .app-page .custom-select:hover .custom-select-trigger {
+    background: #111820;
+    border-color: #586069;
 }
 
 .app-page .custom-select-trigger::after {
@@ -378,7 +398,7 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .custom-select-menu {
-    background: #0d1627;
+    background: #0d1117;
 }
 
 .app-page .custom-select.open .custom-select-menu {
@@ -423,7 +443,7 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .table-footer {
-    background: #111a2c;
+    background: #0f141b;
 }
 
 /* Shared column semantics: numeric columns stay on one line */
@@ -471,7 +491,7 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .page-nav-text {
-    background: #0d1627;
+    background: #0d1117;
 }
 
 .app-page .page-nav-text:hover:not(.disabled) {
@@ -502,7 +522,7 @@ body.app-page {
 
 :root[data-theme="dark"] .app-page .page-info,
 :root[data-theme="dark"] .app-page .total-count {
-    background: #0d1627;
+    background: #0d1117;
 }
 
 .app-page .theme-toggle {
@@ -543,7 +563,15 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .theme-toggle {
-    background: #0d1627;
+    background: #0d1117;
+    border-color: #30363d;
+    color: #c9d1d9;
+}
+
+:root[data-theme="dark"] .app-page .theme-toggle:hover {
+    background: #1f2630;
+    border-color: #58a6ff;
+    color: #e6edf3;
 }
 
 :root[data-theme="dark"] .app-page .theme-icon-sun {
