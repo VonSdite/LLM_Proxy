@@ -18,6 +18,7 @@ from ..presentation import (
 )
 from ..repositories import LogRepository, UserRepository
 from ..services import AuthenticationService, LogService, ProxyService, UserService
+from ..utils import normalize_ip
 from ..utils.database import create_connection_factory
 
 
@@ -31,11 +32,11 @@ class Application:
 
         self._setup_config()
         self._setup_logging()
-        self._setup_request_access_logging()
         self._setup_context()
         self._setup_repositories()
         self._setup_provider_manager()
         self._setup_controllers()
+        self._setup_request_access_logging()
 
         self._logger.info("Application initialized successfully")
 
@@ -102,7 +103,7 @@ class Application:
 
         @self._flask_app.before_request
         def log_request_access() -> None:
-            client_ip = request.remote_addr or "-"
+            client_ip = normalize_ip(request.remote_addr) or "-"
             requested_url = request.url
             model = None
             if (request.content_length or 0) > 0 and request.is_json:
@@ -110,7 +111,14 @@ class Application:
                 if isinstance(payload, dict):
                     model = payload.get("model")
 
+            username = None
+            user = self._user_service.get_user_by_ip(client_ip)
+            if user:
+                username = str(user.get("username") or "")
+
             log_message = f"ip={client_ip} url={requested_url}"
+            if username:
+                log_message = f"{log_message} username={username}"
             if model is not None:
                 log_message = f"{log_message} model={model}"
             self._flask_app.access_logger.info(log_message)
@@ -142,6 +150,7 @@ class Application:
         """初始化服务层并完成路由注册。"""
         auth_service = AuthenticationService(self._ctx)
         user_service = UserService(self._ctx, self._user_repository)
+        self._user_service = user_service
         proxy_service = ProxyService(self._ctx)
         log_service = LogService(self._ctx, self._log_repository)
 
