@@ -27,6 +27,10 @@
     align-items: flex-end;
 }
 
+.dashboard-page .filters .btn {
+    width: 110px;
+}
+
 .dashboard-page .filter-group {
     display: flex;
     flex-direction: column;
