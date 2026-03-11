@@ -61,7 +61,7 @@ class WebController:
     def get_statistics(self) -> Response:
         """查询统计聚合数据。"""
         try:
-            self._logger.info(
+            self._logger.debug(
                 "Statistics queried: start_date=%s end_date=%s username=%s request_model=%s",
                 request.args.get('start_date'),
                 request.args.get('end_date'),
@@ -84,7 +84,7 @@ class WebController:
         try:
             page = max(int(request.args.get('page', 1)), 1)
             page_size = min(max(int(request.args.get('page_size', 50)), 1), 200)
-            self._logger.info(f"Request logs queried: page={page}, page_size={page_size}")
+            self._logger.debug(f"Request logs queried: page={page}, page_size={page_size}")
 
             logs = self._log_service.get_request_logs(
                 page,
@@ -105,7 +105,7 @@ class WebController:
         """查询已出现过请求记录的用户名列表。"""
         try:
             usernames = self._log_service.get_unique_usernames()
-            self._logger.info(f"Usernames queried: count={len(usernames)}")
+            self._logger.debug(f"Usernames queried: count={len(usernames)}")
             return jsonify(usernames)
         except Exception as exc:
             self._logger.error(f'Error getting usernames: {exc}')
@@ -115,7 +115,7 @@ class WebController:
         """查询出现过请求日志的请求模型列表。"""
         try:
             models = self._log_service.get_unique_request_models()
-            self._logger.info(f"Request models queried: count={len(models)}")
+            self._logger.debug(f"Request models queried: count={len(models)}")
             return jsonify(models)
         except Exception as exc:
             self._logger.error(f'Error getting request models: {exc}')

@@ -38,7 +38,7 @@ class UserController:
         try:
             page = request.args.get('page', 1, type=int)
             page_size = request.args.get('page_size', 50, type=int)
-            self._logger.info(f"List users requested: page={page}, page_size={page_size}")
+            self._logger.debug(f"List users requested: page={page}, page_size={page_size}")
 
             users = self._user_service.get_users(page=page, page_size=page_size)
             total = self._user_service.get_total_users_count()

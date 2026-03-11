@@ -81,7 +81,7 @@ class LogService:
                 }
                 for row in rows
             ]
-            self._logger.info(
+            self._logger.debug(
                 "Statistics queried: start_date=%s end_date=%s username=%s rows=%s",
                 start_date,
                 end_date,
@@ -112,12 +112,6 @@ class LogService:
                 username=username,
                 request_model=request_model,
             )
-            self._logger.info(
-                "Request logs queried: page=%s page_size=%s total=%s",
-                page,
-                page_size,
-                result.get("total", 0),
-            )
             return result
         except Exception as exc:
             self._logger.error(f"Failed to get request logs: {exc}")
@@ -133,7 +127,7 @@ class LogService:
         """获取有日志记录的用户名列表。"""
         try:
             usernames = self._repository.get_unique_usernames()
-            self._logger.info(f"Unique usernames queried: count={len(usernames)}")
+            self._logger.debug(f"Unique usernames queried: count={len(usernames)}")
             return usernames
         except Exception as exc:
             self._logger.error(f"Failed to get unique usernames: {exc}")
@@ -143,7 +137,7 @@ class LogService:
         """获取有日志记录的请求模型列表。"""
         try:
             models = self._repository.get_unique_request_models()
-            self._logger.info(f"Unique request models queried: count={len(models)}")
+            self._logger.debug(f"Unique request models queried: count={len(models)}")
             return models
         except Exception as exc:
             self._logger.error(f"Failed to get unique request models: {exc}")
