@@ -80,13 +80,27 @@ body.login-page {
     transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
 }
 
+.login-page .form-control::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+
 :root[data-theme="dark"] .login-page .form-control {
     background: #0d1117;
+}
+
+:root[data-theme="dark"] .login-page .form-control::placeholder {
+    color: #7d8590;
 }
 
 .login-page .form-control:hover {
     border-color: #b9cbde;
     background: #fcfeff;
+}
+
+:root[data-theme="dark"] .login-page .form-control:hover {
+    background: #111820;
+    border-color: #586069;
 }
 
 .login-page .form-control:focus {
