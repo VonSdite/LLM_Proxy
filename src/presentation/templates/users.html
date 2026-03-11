@@ -1,48 +1,12 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>
-        (function() {
-            const savedTheme = localStorage.getItem('theme');
-            const theme = savedTheme === 'dark' ? 'dark' : 'light';
-            document.documentElement.setAttribute('data-theme', theme);
-        })();
-    </script>
-    <title>用户管理</title>
-    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="/static/css/admin-base.css">
-    <link rel="stylesheet" href="/static/css/users.css">
-</head>
-<body class="app-page users-page">
-    <div class="container">
-        <div class="header">
-            <div class="header-title">
-                <h1>用户管理</h1>
-                <p>统一管理白名单用户与 IP</p>
-            </div>
-            <div class="header-actions">
-                <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">
-                    <svg class="theme-icon-sun" viewBox="0 0 24 24" stroke-width="1.8">
-                        <circle cx="12" cy="12" r="4"></circle>
-                        <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M19.07 4.93l-2.12 2.12M7.05 16.95l-2.12 2.12"></path>
-                    </svg>
-                    <svg class="theme-icon-moon" viewBox="0 0 24 24" stroke-width="1.8">
-                        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z"></path>
-                    </svg>
-                </button>
-                <nav class="header-nav" aria-label="Main navigation">
-                    <a class="header-nav-link" href="/">统计概览</a>
-                    <a class="header-nav-link active" href="/users">用户管理</a>
-                </nav>
-                {% if auth_enabled %}
-                <span class="header-user">当前用户：{{ current_username or '未知用户' }}</span>
-                <a class="header-nav-link header-nav-link-logout" href="/logout">退出登录</a>
-                {% endif %}
-            </div>
-        </div>
+{% extends "base_admin.html" %}
 
+{% block page_title %}用户管理{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/users.css">{% endblock %}
+{% block body_class %}users-page{% endblock %}
+{% block header_title %}用户管理{% endblock %}
+{% block header_subtitle %}统一管理白名单用户与 IP{% endblock %}
+
+{% block content %}
         <div class="content">
             <div class="add-user-section">
                 <div class="form-row">
@@ -88,9 +52,9 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
+{% endblock %}
 
+{% block after_container %}
     <!-- 编辑用户模态框 -->
     <div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
@@ -116,7 +80,9 @@
             </div>
         </div>
     </div>
+{% endblock %}
 
+{% block page_scripts %}
     <script src="/static/js/ui-message.js"></script>
     <script>
         const whitelistControlEnabled = {{ 'true' if chat_whitelist_enabled else 'false' }};
@@ -129,7 +95,11 @@
         let currentTotalPages = 1;
         let activeCustomSelect = null;
         let editModalInstance = null;
-        let tokenSortDirection = 'desc';
+        let usersSortState = {
+            key: 'total_tokens',
+            direction: 'desc',
+            type: 'number'
+        };
 
         function closeAllCustomSelects() {
             document.querySelectorAll('.custom-select.open').forEach(select => {
@@ -342,26 +312,67 @@
             }
         }
 
-        // 渲染用户列表
-        function getTotalTokens(user) {
-            const totalTokens = Number(user?.total_tokens);
-            return Number.isFinite(totalTokens) ? totalTokens : 0;
+        function normalizeSortNumber(value) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : 0;
+        }
+
+        function normalizeSortDate(value) {
+            const t = new Date(value).getTime();
+            return Number.isFinite(t) ? t : 0;
+        }
+
+        function compareSortValues(leftValue, rightValue, type) {
+            if (type === 'number' || type === 'date') {
+                return leftValue - rightValue;
+            }
+            return String(leftValue).localeCompare(String(rightValue), 'zh-CN', {
+                sensitivity: 'base',
+                numeric: true
+            });
+        }
+
+        function getUserSortValue(user, key, type) {
+            const value = user?.[key];
+            if (type === 'number') return normalizeSortNumber(value);
+            if (type === 'date') return normalizeSortDate(value);
+            return value ?? '';
+        }
+
+        function getSortIndicator(activeKey, activeDirection, key) {
+            if (activeKey !== key) return '';
+            return activeDirection === 'asc' ? '&uarr;' : '&darr;';
+        }
+
+        function getAriaSort(activeKey, activeDirection, key) {
+            if (activeKey !== key) return 'none';
+            return activeDirection === 'asc' ? 'ascending' : 'descending';
         }
 
         function applyUsersSort() {
-            if (tokenSortDirection === 'asc') {
-                users.sort((a, b) => getTotalTokens(a) - getTotalTokens(b));
-                return;
+            const { key, direction, type } = usersSortState;
+            users = users
+                .map((user, index) => ({ user, index }))
+                .sort((left, right) => {
+                    const leftValue = getUserSortValue(left.user, key, type);
+                    const rightValue = getUserSortValue(right.user, key, type);
+                    const result = compareSortValues(leftValue, rightValue, type);
+                    if (result !== 0) {
+                        return direction === 'asc' ? result : -result;
+                    }
+                    return left.index - right.index;
+                })
+                .map(item => item.user);
+        }
+
+        function toggleUsersSort(key, type) {
+            if (usersSortState.key === key) {
+                usersSortState.direction = usersSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                usersSortState.key = key;
+                usersSortState.type = type;
+                usersSortState.direction = type === 'string' ? 'asc' : 'desc';
             }
-            users.sort((a, b) => getTotalTokens(b) - getTotalTokens(a));
-        }
-
-        function getTokenSortIndicator() {
-            return tokenSortDirection === 'asc' ? '&uarr;' : '&darr;';
-        }
-
-        function toggleTokenSort() {
-            tokenSortDirection = tokenSortDirection === 'desc' ? 'asc' : 'desc';
             applyUsersSort();
             renderUsers();
         }
@@ -378,18 +389,46 @@
                 <table class="users-table">
                     <thead>
                         <tr>
-                            <th>用户名</th>
-                            <th>IP 地址</th>
-                            <th class="num-col">输入token</th>
-                            <th class="num-col">输出token</th>
-                            <th class="sortable-th num-col">
-                                <button type="button" class="sort-button" onclick="toggleTokenSort()">
-                                    总 Token <span class="sort-indicator">${getTokenSortIndicator()}</span>
+                            <th class="sortable-th" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'username')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('username', 'string')">
+                                    用户名 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'username')}</span>
                                 </button>
                             </th>
-                            <th class="num-col">总请求数</th>
-                            ${whitelistControlEnabled ? '<th>白名单访问</th>' : ''}
-                            <th>创建时间</th>
+                            <th class="sortable-th" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'ip_address')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('ip_address', 'string')">
+                                    IP 地址 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'ip_address')}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'prompt_tokens')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('prompt_tokens', 'number')">
+                                    输入token <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'prompt_tokens')}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'completion_tokens')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('completion_tokens', 'number')">
+                                    输出token <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'completion_tokens')}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'total_tokens')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('total_tokens', 'number')">
+                                    总 Token <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'total_tokens')}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'total_request_count')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('total_request_count', 'number')">
+                                    总请求数 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'total_request_count')}</span>
+                                </button>
+                            </th>
+                            ${whitelistControlEnabled ? `<th class="sortable-th" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'whitelist_access_enabled')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('whitelist_access_enabled', 'number')">
+                                    白名单访问 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'whitelist_access_enabled')}</span>
+                                </button>
+                            </th>` : ''}
+                            <th class="sortable-th" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'created_at')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('created_at', 'date')">
+                                    创建时间 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'created_at')}</span>
+                                </button>
+                            </th>
                             <th>操作</th>
                         </tr>
                     </thead>
@@ -646,7 +685,4 @@
         }
 
     </script>
-    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
-</body>
-</html>
-
+{% endblock %}

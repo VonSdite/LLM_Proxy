@@ -11,13 +11,14 @@ from .app_context import AppContext
 from ..config import ConfigManager, ProviderManager
 from ..presentation import (
     AuthenticationController,
+    ProviderController,
     ProxyController,
     UserController,
     WebController,
     create_flask_app,
 )
 from ..repositories import LogRepository, UserRepository
-from ..services import AuthenticationService, LogService, ProxyService, UserService
+from ..services import AuthenticationService, LogService, ProviderService, ProxyService, UserService
 from ..utils import normalize_ip
 from ..utils.database import create_connection_factory
 
@@ -142,9 +143,7 @@ class Application:
     def _setup_provider_manager(self) -> None:
         """加载 provider 配置并注册可用模型。"""
         self._provider_manager = ProviderManager(self._ctx)
-        config_dict = self._config_manager.get_raw_config()
-        providers_config = config_dict.get("providers", [])
-        self._provider_manager.load_providers(providers_config)
+        self.reload_providers()
 
     def _setup_controllers(self) -> None:
         """初始化服务层并完成路由注册。"""
@@ -153,15 +152,23 @@ class Application:
         self._user_service = user_service
         proxy_service = ProxyService(self._ctx)
         log_service = LogService(self._ctx, self._log_repository)
+        provider_service = ProviderService(self._ctx, self._config_path, self.reload_providers)
 
         self._auth_controller = AuthenticationController(self._ctx, auth_service)
         self._user_controller = UserController(self._ctx, user_service, auth_service)
+        self._provider_controller = ProviderController(self._ctx, provider_service, auth_service)
         self._proxy_controller = ProxyController(
             self._ctx, proxy_service, user_service, log_service, self._provider_manager
         )
         self._web_controller = WebController(self._ctx, log_service, auth_service)
 
         self._logger.info("All controllers initialized successfully")
+
+    def reload_providers(self) -> None:
+        self._config_manager.reload()
+        config_dict = self._config_manager.get_raw_config()
+        providers_config = config_dict.get("providers", [])
+        self._provider_manager.load_providers(providers_config)
 
     def run(self) -> None:
         """启动 WSGI 服务。"""

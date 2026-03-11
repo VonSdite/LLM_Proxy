@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Provider 管理 API。"""
+
+from flask import Response, jsonify, request
+
+from ..application.app_context import AppContext
+from ..services import AuthenticationService, ProviderService
+from .decorators import require_authentication
+
+
+class ProviderController:
+    """处理 provider 配置的增删改查与模型拉取。"""
+
+    def __init__(
+        self,
+        ctx: AppContext,
+        provider_service: ProviderService,
+        auth_service: AuthenticationService,
+    ):
+        self._ctx = ctx
+        self._app = ctx.flask_app
+        self._logger = ctx.logger
+        self._provider_service = provider_service
+        self._auth_service = auth_service
+        self._register_routes()
+
+    def _register_routes(self) -> None:
+        auth = require_authentication(self._auth_service)
+
+        self._app.route("/api/providers", methods=["GET"])(auth(self.get_providers))
+        self._app.route("/api/providers", methods=["POST"])(auth(self.create_provider))
+        self._app.route("/api/providers/fetch-models", methods=["GET"])(auth(self.fetch_models))
+        self._app.route("/api/providers/<string:name>", methods=["GET"])(auth(self.get_provider))
+        self._app.route("/api/providers/<string:name>", methods=["PUT"])(auth(self.update_provider))
+        self._app.route("/api/providers/<string:name>", methods=["DELETE"])(auth(self.delete_provider))
+
+    def get_providers(self) -> Response:
+        try:
+            return jsonify(self._provider_service.list_providers())
+        except Exception as exc:
+            self._logger.error(f"Error getting providers: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    def get_provider(self, name: str) -> Response:
+        try:
+            provider = self._provider_service.get_provider(name)
+            if provider is None:
+                return jsonify({"error": "Provider not found"}), 404
+            return jsonify(provider)
+        except Exception as exc:
+            self._logger.error(f"Error getting provider: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    def create_provider(self) -> Response:
+        try:
+            payload = request.get_json(silent=True) or {}
+            provider = self._provider_service.create_provider(payload)
+            self._logger.info(f"Provider created: {provider.get('name')}")
+            return jsonify(provider), 201
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error(f"Error creating provider: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    def update_provider(self, name: str) -> Response:
+        try:
+            payload = request.get_json(silent=True) or {}
+            provider = self._provider_service.update_provider(name, payload)
+            self._logger.info(f"Provider updated: {name} -> {provider.get('name')}")
+            return jsonify(provider)
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if "not found" in message.lower() else 400
+            return jsonify({"error": message}), status_code
+        except Exception as exc:
+            self._logger.error(f"Error updating provider: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    def delete_provider(self, name: str) -> Response:
+        try:
+            self._provider_service.delete_provider(name)
+            self._logger.info(f"Provider deleted: {name}")
+            return jsonify({"message": "Provider deleted successfully"})
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if "not found" in message.lower() else 400
+            return jsonify({"error": message}), status_code
+        except Exception as exc:
+            self._logger.error(f"Error deleting provider: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    def fetch_models(self) -> Response:
+        try:
+            result = self._provider_service.fetch_and_append_models(
+                name=request.args.get("name", ""),
+                api=request.args.get("api", ""),
+                api_key=request.args.get("api_key"),
+                timeout_seconds=request.args.get("timeout_seconds"),
+                verify_ssl=request.args.get("verify_ssl"),
+            )
+            self._logger.info(
+                "Provider models fetched: name=%s added=%s total=%s",
+                request.args.get("name", ""),
+                len(result["added_models"]),
+                len(result["provider"].get("model_list", [])),
+            )
+            return jsonify(result)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error(f"Error fetching provider models: {exc}")
+            return jsonify({"error": str(exc)}), 500

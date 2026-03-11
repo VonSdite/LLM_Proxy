@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme');
+            const theme = savedTheme === 'dark' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
+    <title>{% block page_title %}LLM Proxy{% endblock %}</title>
+    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/css/admin-base.css">
+    {% block page_css %}{% endblock %}
+</head>
+<body class="app-page {% block body_class %}{% endblock %}">
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>{% block header_title %}{% endblock %}</h1>
+                    <p>{% block header_subtitle %}{% endblock %}</p>
+                </div>
+                <div class="header-actions">
+                    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">
+                        <svg class="theme-icon-sun" viewBox="0 0 24 24" stroke-width="1.8">
+                            <circle cx="12" cy="12" r="4"></circle>
+                            <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M19.07 4.93l-2.12 2.12M7.05 16.95l-2.12 2.12"></path>
+                        </svg>
+                        <svg class="theme-icon-moon" viewBox="0 0 24 24" stroke-width="1.8">
+                            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z"></path>
+                        </svg>
+                    </button>
+                    <nav class="header-nav" aria-label="Main navigation">
+                        <a class="header-nav-link{% if active_page == 'index' %} active{% endif %}" href="/">统计概览</a>
+                        <a class="header-nav-link{% if active_page == 'users' %} active{% endif %}" href="/users">用户管理</a>
+                        <a class="header-nav-link{% if active_page == 'providers' %} active{% endif %}" href="/providers">Provider 管理</a>
+                    </nav>
+                    {% if auth_enabled %}
+                    <span class="header-user">当前用户：{{ current_username or '未知用户' }}</span>
+                    <a class="header-nav-link header-nav-link-logout" href="/logout">退出登录</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% block content %}{% endblock %}
+    </div>
+    {% block after_container %}{% endblock %}
+    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    {% block page_scripts %}{% endblock %}
+</body>
+</html>

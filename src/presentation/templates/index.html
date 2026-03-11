@@ -1,49 +1,12 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>
-        (function() {
-            const savedTheme = localStorage.getItem('theme');
-            const theme = savedTheme === 'dark' ? 'dark' : 'light';
-            document.documentElement.setAttribute('data-theme', theme);
-        })();
-    </script>
-    <title>LLM使用统计</title>
-    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="/static/css/admin-base.css">
-    <link rel="stylesheet" href="/static/css/index.css">
-</head>
-<body class="app-page dashboard-page">
-    <div class="container">
-        <div class="header">
-            <div class="header-content">
-                <div class="header-title">
-                    <h1>LLM使用统计</h1>
-                    <p>实时监控 API 请求和 Token 消耗</p>
-                </div>
-                <div class="header-actions">
-                    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">
-                        <svg class="theme-icon-sun" viewBox="0 0 24 24" stroke-width="1.8">
-                            <circle cx="12" cy="12" r="4"></circle>
-                            <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M19.07 4.93l-2.12 2.12M7.05 16.95l-2.12 2.12"></path>
-                        </svg>
-                        <svg class="theme-icon-moon" viewBox="0 0 24 24" stroke-width="1.8">
-                            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8z"></path>
-                        </svg>
-                    </button>
-                    <nav class="header-nav" aria-label="Main navigation">
-                        <a class="header-nav-link active" href="/">统计概览</a>
-                        <a class="header-nav-link" href="/users">用户管理</a>
-                    </nav>
-                    {% if auth_enabled %}
-                    <span class="header-user">当前用户：{{ current_username or '未知用户' }}</span>
-                    <a class="header-nav-link header-nav-link-logout" href="/logout">退出登录</a>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
+{% extends "base_admin.html" %}
+
+{% block page_title %}LLM使用统计{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css">{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block header_title %}LLM使用统计{% endblock %}
+{% block header_subtitle %}实时监控 API 请求和 Token 消耗{% endblock %}
+
+{% block content %}
         <div class="filters-section">
             <div class="filters">
                 <div class="filter-group filter-group-date">
@@ -75,14 +38,14 @@
                 <table class="stats-table">
                     <thead>
                         <tr>
-                            <th>IP</th>
-                            <th>用户名</th>
-                            <th>请求模型</th>
-                            <th>响应模型</th>
-                            <th class="num-col">输入token</th>
-                            <th class="num-col">输出token</th>
-                            <th class="num-col">总 Token</th>
-                            <th class="num-col">请求数</th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('ip_address', 'string')">IP <span class="sort-indicator" id="statsSortIndicator_ip_address"></span></button></th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('username', 'string')">用户名 <span class="sort-indicator" id="statsSortIndicator_username"></span></button></th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="statsSortIndicator_request_model"></span></button></th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="statsSortIndicator_response_model"></span></button></th>
+                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="statsSortIndicator_prompt_tokens"></span></button></th>
+                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="statsSortIndicator_completion_tokens"></span></button></th>
+                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="statsSortIndicator_total_tokens"></span></button></th>
+                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_count', 'number')">请求数 <span class="sort-indicator" id="statsSortIndicator_request_count"></span></button></th>
                         </tr>
                     </thead>
                     <tbody id="statsTable">
@@ -99,16 +62,16 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>IP</th>
-                            <th>用户名</th>
-                            <th>请求模型</th>
-                            <th>响应模型</th>
-                            <th class="num-col">输入token</th>
-                            <th class="num-col">输出token</th>
-                            <th class="num-col">总 Token</th>
-                            <th>开始时间</th>
-                            <th>结束时间</th>
-                            <th class="num-col">耗时(秒)</th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('ip_address', 'string')">IP <span class="sort-indicator" id="logsSortIndicator_ip_address"></span></button></th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('username', 'string')">用户名 <span class="sort-indicator" id="logsSortIndicator_username"></span></button></th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="logsSortIndicator_request_model"></span></button></th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="logsSortIndicator_response_model"></span></button></th>
+                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="logsSortIndicator_prompt_tokens"></span></button></th>
+                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="logsSortIndicator_completion_tokens"></span></button></th>
+                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="logsSortIndicator_total_tokens"></span></button></th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('start_time', 'date')">开始时间 <span class="sort-indicator" id="logsSortIndicator_start_time"></span></button></th>
+                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('end_time', 'date')">结束时间 <span class="sort-indicator" id="logsSortIndicator_end_time"></span></button></th>
+                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('duration', 'number')">耗时(秒) <span class="sort-indicator" id="logsSortIndicator_duration"></span></button></th>
                         </tr>
                     </thead>
                     <tbody id="logsTable">
@@ -142,8 +105,9 @@
                 <span class="total-count" id="totalCount">共 0 条</span>
             </div>
         </div>
-    </div>
+{% endblock %}
 
+{% block page_scripts %}
     <script src="/static/js/ui-message.js"></script>
     <script>
         let currentPage = 1;
@@ -152,6 +116,18 @@
         let jumpDebounceTimer = null;
         let currentTotalPages = 1;
         let activeCustomSelect = null;
+        let statsData = [];
+        let logsData = [];
+        const statsSortState = {
+            key: 'total_tokens',
+            direction: 'desc',
+            type: 'number'
+        };
+        const logsSortState = {
+            key: 'start_time',
+            direction: 'desc',
+            type: 'date'
+        };
 
         function closeAllCustomSelects() {
             document.querySelectorAll('.custom-select.open').forEach(select => {
@@ -188,6 +164,16 @@
             return Number.isFinite(n) ? n : 0;
         }
 
+        function renderModelBadge(value) {
+            if (!value) return '-';
+            return `<span class="table-model-tag">${String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')}</span>`;
+        }
+
         function formatNumberFull(value) {
             return normalizeNumber(value).toLocaleString();
         }
@@ -201,6 +187,123 @@
             const full = formatNumberFull(value);
             const display = formatNumberDisplay(value);
             return `<span class="numeric-value" title="${full}">${display}</span>`;
+        }
+
+        function normalizeSortNumber(value) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : 0;
+        }
+
+        function normalizeSortDate(value) {
+            const t = new Date(value).getTime();
+            return Number.isFinite(t) ? t : 0;
+        }
+
+        function compareSortValues(leftValue, rightValue, type) {
+            if (type === 'number' || type === 'date') {
+                return leftValue - rightValue;
+            }
+            return String(leftValue).localeCompare(String(rightValue), 'zh-CN', {
+                sensitivity: 'base',
+                numeric: true
+            });
+        }
+
+        function sortByState(items, state, valueGetter) {
+            return items
+                .map((item, index) => ({ item, index }))
+                .sort((left, right) => {
+                    const leftValue = valueGetter(left.item, state.key, state.type);
+                    const rightValue = valueGetter(right.item, state.key, state.type);
+                    const result = compareSortValues(leftValue, rightValue, state.type);
+                    if (result !== 0) {
+                        return state.direction === 'asc' ? result : -result;
+                    }
+                    return left.index - right.index;
+                })
+                .map(entry => entry.item);
+        }
+
+        function getIndicator(direction, isActive) {
+            if (!isActive) return '';
+            return direction === 'asc' ? '&uarr;' : '&darr;';
+        }
+
+        function updateSortIndicators(prefix, state, keys) {
+            keys.forEach(key => {
+                const indicator = document.getElementById(`${prefix}SortIndicator_${key}`);
+                if (indicator) {
+                    indicator.innerHTML = getIndicator(state.direction, state.key === key);
+                }
+            });
+
+            const table = prefix === 'stats'
+                ? document.querySelector('.stats-table')
+                : document.querySelector('.table-section table');
+            if (!table) return;
+
+            table.querySelectorAll('th.sortable-th').forEach(th => {
+                th.setAttribute('aria-sort', 'none');
+            });
+
+            const activeIndicator = document.getElementById(`${prefix}SortIndicator_${state.key}`);
+            if (activeIndicator) {
+                const activeHeader = activeIndicator.closest('th.sortable-th');
+                if (activeHeader) {
+                    activeHeader.setAttribute('aria-sort', state.direction === 'asc' ? 'ascending' : 'descending');
+                }
+            }
+        }
+
+        function getStatsSortValue(stat, key, type) {
+            const value = stat?.[key];
+            if (type === 'number') return normalizeSortNumber(value);
+            if (type === 'date') return normalizeSortDate(value);
+            return value ?? '';
+        }
+
+        function getLogSortValue(log, key, type) {
+            if (key === 'duration') {
+                const startTime = normalizeSortDate(log?.start_time);
+                const endTime = normalizeSortDate(log?.end_time);
+                return normalizeSortNumber((endTime - startTime) / 1000);
+            }
+            const value = log?.[key];
+            if (type === 'number') return normalizeSortNumber(value);
+            if (type === 'date') return normalizeSortDate(value);
+            return value ?? '';
+        }
+
+        function applyStatsSort() {
+            statsData = sortByState(statsData, statsSortState, getStatsSortValue);
+        }
+
+        function applyLogsSort() {
+            logsData = sortByState(logsData, logsSortState, getLogSortValue);
+        }
+
+        function toggleStatsSort(key, type) {
+            if (statsSortState.key === key) {
+                statsSortState.direction = statsSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                statsSortState.key = key;
+                statsSortState.type = type;
+                statsSortState.direction = type === 'string' ? 'asc' : 'desc';
+            }
+            applyStatsSort();
+            renderStatistics();
+        }
+
+        function toggleLogsSort(key, type) {
+            if (logsSortState.key === key) {
+                logsSortState.direction = logsSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                logsSortState.key = key;
+                logsSortState.type = type;
+                logsSortState.direction = type === 'string' ? 'asc' : 'desc';
+            }
+            applyLogsSort();
+            renderLogs(logsData);
         }
 
         function syncCustomSelectValue(selectId) {
@@ -305,6 +408,8 @@
             loadUsernames();
             loadRequestModels();
             loadLogs();
+            updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
+            updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
 
             // 设置默认每页大小
             document.getElementById('pageSizeSelect').value = pageSize;
@@ -345,54 +450,62 @@
             try {
                 const params = new URLSearchParams(currentFilters);
                 const response = await fetch(`/api/statistics?${params}`);
-                const stats = await response.json();
-
-                const statsTable = document.getElementById('statsTable');
-                if (stats.length === 0) {
-                    statsTable.innerHTML = '<tr><td colspan="8" class="empty-state">暂无统计数据</td></tr>';
-                    return;
-                }
-
-                let html = '';
-                let totalRequests = 0;
-                let totalTokens = 0;
-                let totalPromptTokens = 0;
-                let totalCompletionTokens = 0;
-
-                stats.forEach(stat => {
-                    totalRequests += stat.request_count;
-                    totalTokens += stat.total_tokens;
-                    totalPromptTokens += stat.prompt_tokens || 0;
-                    totalCompletionTokens += stat.completion_tokens || 0;
-
-                    html += `
-                        <tr>
-                            <td>${stat.ip_address ? `<span class="ip-address">${stat.ip_address}</span>` : '-'}</td>
-                            <td>${stat.username || '-'}</td>
-                            <td>${stat.request_model || '-'}</td>
-                            <td>${stat.response_model || '-'}</td>
-                            <td class="num-col">${renderNumber(stat.prompt_tokens || 0)}</td>
-                            <td class="num-col">${renderNumber(stat.completion_tokens || 0)}</td>
-                            <td class="num-col">${renderNumber(stat.total_tokens || 0)}</td>
-                            <td class="num-col">${renderNumber(stat.request_count || 0)}</td>
-                        </tr>
-                    `;
-                });
-                html += `
-                    <tr class="stats-total-row">
-                        <td colspan="4">总计</td>
-                        <td class="num-col">${renderNumber(totalPromptTokens)}</td>
-                        <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
-                        <td class="num-col">${renderNumber(totalTokens)}</td>
-                        <td class="num-col">${renderNumber(totalRequests)}</td>
-                    </tr>
-                `;
-                statsTable.innerHTML = html;
+                statsData = await response.json();
+                if (!Array.isArray(statsData)) statsData = [];
+                applyStatsSort();
+                renderStatistics();
             } catch (error) {
                 console.error('加载统计数据失败:', error);
                 document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="error">加载统计数据失败</td></tr>';
                 showMessage('加载统计数据失败，请稍后重试', 'error');
             }
+        }
+
+        function renderStatistics() {
+            const statsTable = document.getElementById('statsTable');
+            updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
+
+            if (statsData.length === 0) {
+                statsTable.innerHTML = '<tr><td colspan="8" class="empty-state">暂无统计数据</td></tr>';
+                return;
+            }
+
+            let html = '';
+            let totalRequests = 0;
+            let totalTokens = 0;
+            let totalPromptTokens = 0;
+            let totalCompletionTokens = 0;
+
+            statsData.forEach(stat => {
+                totalRequests += stat.request_count || 0;
+                totalTokens += stat.total_tokens || 0;
+                totalPromptTokens += stat.prompt_tokens || 0;
+                totalCompletionTokens += stat.completion_tokens || 0;
+
+                html += `
+                    <tr>
+                        <td>${stat.ip_address ? `<span class="ip-address">${stat.ip_address}</span>` : '-'}</td>
+                        <td>${stat.username || '-'}</td>
+                        <td>${renderModelBadge(stat.request_model)}</td>
+                        <td>${renderModelBadge(stat.response_model)}</td>
+                        <td class="num-col">${renderNumber(stat.prompt_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(stat.completion_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(stat.total_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(stat.request_count || 0)}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                <tr class="stats-total-row">
+                    <td colspan="4">总计</td>
+                    <td class="num-col">${renderNumber(totalPromptTokens)}</td>
+                    <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
+                    <td class="num-col">${renderNumber(totalTokens)}</td>
+                    <td class="num-col">${renderNumber(totalRequests)}</td>
+                </tr>
+            `;
+            statsTable.innerHTML = html;
         }
 
         // 加载用户名列表
@@ -449,7 +562,9 @@
                 const response = await fetch(`/api/request-logs?${params}`);
                 const data = await response.json();
 
-                renderLogs(data.logs);
+                logsData = Array.isArray(data.logs) ? data.logs : [];
+                applyLogsSort();
+                renderLogs(logsData);
                 updatePagination(data);
             } catch (error) {
                 console.error('加载日志失败:', error);
@@ -461,6 +576,7 @@
         // 渲染日志表格
         function renderLogs(logs) {
             const tbody = document.getElementById('logsTable');
+            updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
 
             if (logs.length === 0) {
                 tbody.innerHTML = `
@@ -488,8 +604,8 @@
                     <tr>
                         <td>${log.ip_address ? `<span class="ip-address">${log.ip_address}</span>` : '-'}</td>
                         <td>${log.username || '-'}</td>
-                        <td>${log.request_model || '-'}</td>
-                        <td>${log.response_model || '-'}</td>
+                        <td>${renderModelBadge(log.request_model)}</td>
+                        <td>${renderModelBadge(log.response_model)}</td>
                         <td class="num-col">${renderNumber(log.prompt_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(log.completion_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(log.total_tokens || 0)}</td>
@@ -619,12 +735,4 @@
             }
         }
     </script>
-    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
-</body>
-</html>
-
-
-
-
-
-
+{% endblock %}

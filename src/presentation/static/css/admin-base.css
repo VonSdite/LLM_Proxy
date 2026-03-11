@@ -98,6 +98,13 @@ body.app-page {
     background: linear-gradient(180deg, #151b23 0%, #0f141b 100%);
 }
 
+.app-page .header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
 .app-page .header-title h1 {
     margin: 0;
     font-size: 28px;
@@ -251,6 +258,7 @@ body.app-page {
 .app-page .form-group input,
 .app-page .form-group textarea,
 .app-page .form-control,
+.app-page select,
 .app-page .quick-jump input,
 .app-page .page-size-controls select {
     width: 100%;
@@ -267,6 +275,7 @@ body.app-page {
 :root[data-theme="dark"] .app-page .form-group input,
 :root[data-theme="dark"] .app-page .form-group textarea,
 :root[data-theme="dark"] .app-page .form-control,
+:root[data-theme="dark"] .app-page select,
 :root[data-theme="dark"] .app-page .quick-jump input,
 :root[data-theme="dark"] .app-page .page-size-controls select {
     background: #0d1117;
@@ -274,6 +283,7 @@ body.app-page {
 
 :root[data-theme="dark"] .app-page .form-group input:hover,
 :root[data-theme="dark"] .app-page .form-control:hover,
+:root[data-theme="dark"] .app-page select:hover,
 :root[data-theme="dark"] .app-page .quick-jump input:hover,
 :root[data-theme="dark"] .app-page .page-size-controls select:hover {
     background: #111820;
@@ -289,6 +299,7 @@ body.app-page {
 
 .app-page .form-group input:hover,
 .app-page .form-control:hover,
+.app-page select:hover,
 .app-page .quick-jump input:hover,
 .app-page .page-size-controls select:hover {
     border-color: #b9cbde;
@@ -298,6 +309,7 @@ body.app-page {
 .app-page .form-group input:focus,
 .app-page .form-group textarea:focus,
 .app-page .form-control:focus,
+.app-page select:focus,
 .app-page .quick-jump input:focus,
 .app-page .page-size-controls select:focus,
 .app-page .custom-select-trigger:focus,
@@ -307,6 +319,39 @@ body.app-page {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--focus);
+}
+
+.app-page select:not(.native-select-hidden) {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 38px;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+        linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position:
+        calc(100% - 18px) calc(50% - 2px),
+        calc(100% - 12px) calc(50% - 2px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+}
+
+.app-page select:not(.native-select-hidden) option {
+    background: #ffffff;
+    color: var(--text-primary);
+}
+
+:root[data-theme="dark"] .app-page select:not(.native-select-hidden) {
+    border-color: #3d444d;
+    background-image:
+        linear-gradient(45deg, transparent 50%, #7d8590 50%),
+        linear-gradient(135deg, #7d8590 50%, transparent 50%);
+    color-scheme: dark;
+}
+
+:root[data-theme="dark"] .app-page select:not(.native-select-hidden) option {
+    background: #0d1117;
+    color: #e6edf3;
 }
 
 .app-page .native-select-hidden {
@@ -399,6 +444,14 @@ body.app-page {
 
 :root[data-theme="dark"] .app-page .custom-select-menu {
     background: #0d1117;
+    border-color: #30363d;
+    box-shadow: 0 16px 34px rgba(1, 4, 9, 0.76);
+}
+
+:root[data-theme="dark"] .app-page .custom-select.open .custom-select-trigger {
+    background: #111820;
+    border-color: var(--primary);
+    color: var(--text-primary);
 }
 
 .app-page .custom-select.open .custom-select-menu {
@@ -434,6 +487,20 @@ body.app-page {
     font-weight: 600;
 }
 
+:root[data-theme="dark"] .app-page .custom-select-option {
+    color: #d7dee7;
+}
+
+:root[data-theme="dark"] .app-page .custom-select-option:hover {
+    background: #182230;
+    color: #9bc7ff;
+}
+
+:root[data-theme="dark"] .app-page .custom-select-option.selected {
+    background: linear-gradient(180deg, rgba(34, 51, 77, 0.98), rgba(24, 38, 58, 0.98));
+    color: #d9eaff;
+}
+
 .app-page .table-footer {
     border-top: 1px solid var(--line);
     background: #f9fbfe;
@@ -449,7 +516,8 @@ body.app-page {
 /* Shared column semantics: numeric columns stay on one line */
 .app-page th.num-col,
 .app-page td.num-col {
-    text-align: right;
+    /* Keep numeric headers aligned with numeric body cells, even when page CSS sets generic th alignment. */
+    text-align: right !important;
     white-space: nowrap !important;
     overflow-wrap: normal !important;
     word-break: normal;
@@ -458,6 +526,35 @@ body.app-page {
 
 .app-page th.num-col .sort-button {
     justify-content: flex-end;
+}
+
+.app-page th.sortable-th {
+    padding: 0;
+}
+
+.app-page .sort-button {
+    width: 100%;
+    padding: 13px 14px;
+    border: none;
+    background: transparent;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: inherit;
+    color: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+}
+
+.app-page .sort-button:hover {
+    color: var(--text-primary);
+}
+
+.app-page .sort-indicator {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1;
 }
 
 .app-page .right-controls {

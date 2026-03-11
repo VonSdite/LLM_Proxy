@@ -12,7 +12,8 @@ class ConfigManager:
     """提供配置项的类型化读取方法。"""
 
     def __init__(self, config_path: Path, root_path: Path):
-        self._config = self._load_config(config_path)
+        self._config_path = Path(config_path).resolve()
+        self._config = self._load_config(self._config_path)
         self._root_path = Path(root_path).resolve()
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -59,6 +60,9 @@ class ConfigManager:
 
     def get_raw_config(self) -> Dict[str, Any]:
         return self._config.copy()
+
+    def reload(self) -> None:
+        self._config = self._load_config(self._config_path)
 
     @staticmethod
     def _load_config(config_path: Union[str, Path]) -> Dict[str, Any]:

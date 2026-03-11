@@ -93,6 +93,18 @@ body.login-page {
     color: #7d8590;
 }
 
+:root[data-theme="dark"] .login-page .form-control:-webkit-autofill,
+:root[data-theme="dark"] .login-page .form-control:-webkit-autofill:hover,
+:root[data-theme="dark"] .login-page .form-control:-webkit-autofill:focus,
+:root[data-theme="dark"] .login-page .form-control:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--text-primary);
+    caret-color: var(--text-primary);
+    -webkit-box-shadow: 0 0 0 1000px #0d1117 inset;
+    box-shadow: 0 0 0 1000px #0d1117 inset;
+    border: 1px solid var(--line-strong);
+    transition: background-color 9999s ease-out 0s;
+}
+
 .login-page .form-control:hover {
     border-color: #b9cbde;
     background: #fcfeff;

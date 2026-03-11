@@ -22,101 +22,104 @@ class WebController:
         self._register_routes()
 
     def _register_routes(self) -> None:
-        """注册页面与统计路由。"""
         auth = require_authentication(self._auth_service)
 
-        self._app.route('/')(auth(self.index))
-        self._app.route('/users')(auth(self.users_page))
+        self._app.route("/")(auth(self.index))
+        self._app.route("/users")(auth(self.users_page))
+        self._app.route("/providers")(auth(self.providers_page))
 
-        self._app.route('/api/statistics', methods=['GET'])(auth(self.get_statistics))
-        self._app.route('/api/request-logs', methods=['GET'])(auth(self.get_request_logs))
-        self._app.route('/api/usernames', methods=['GET'])(auth(self.get_usernames))
-        self._app.route('/api/request-models', methods=['GET'])(auth(self.get_request_models))
+        self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
+        self._app.route("/api/request-logs", methods=["GET"])(auth(self.get_request_logs))
+        self._app.route("/api/usernames", methods=["GET"])(auth(self.get_usernames))
+        self._app.route("/api/request-models", methods=["GET"])(auth(self.get_request_models))
 
     def index(self) -> str:
-        """首页。"""
         return render_template(
-            'index.html',
+            "index.html",
+            active_page="index",
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
         )
 
     def users_page(self) -> str:
-        """用户管理页。"""
         return render_template(
-            'users.html',
+            "users.html",
+            active_page="users",
             chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
         )
 
+    def providers_page(self) -> str:
+        return render_template(
+            "providers.html",
+            active_page="providers",
+            current_username=self._get_current_username(),
+            auth_enabled=self._auth_service.is_auth_enabled(),
+        )
+
     def _get_current_username(self) -> str:
-        """从当前请求 cookie 提取登录用户名。"""
         if not self._auth_service.is_auth_enabled():
             return ""
 
-        session_token = request.cookies.get('session_token')
+        session_token = request.cookies.get("session_token")
         return self._auth_service.get_session_username(session_token) or ""
 
     def get_statistics(self) -> Response:
-        """查询统计聚合数据。"""
         try:
             self._logger.debug(
                 "Statistics queried: start_date=%s end_date=%s username=%s request_model=%s",
-                request.args.get('start_date'),
-                request.args.get('end_date'),
-                request.args.get('username'),
-                request.args.get('request_model'),
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+                request.args.get("username"),
+                request.args.get("request_model"),
             )
             stats = self._log_service.get_statistics(
-                request.args.get('start_date'),
-                request.args.get('end_date'),
-                request.args.get('username'),
-                request.args.get('request_model'),
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+                request.args.get("username"),
+                request.args.get("request_model"),
             )
             return jsonify(stats)
         except Exception as exc:
-            self._logger.error(f'Error getting statistics: {exc}')
-            return jsonify({'error': str(exc)}), 500
+            self._logger.error(f"Error getting statistics: {exc}")
+            return jsonify({"error": str(exc)}), 500
 
     def get_request_logs(self) -> Response:
-        """查询请求日志分页数据。"""
         try:
-            page = max(int(request.args.get('page', 1)), 1)
-            page_size = min(max(int(request.args.get('page_size', 50)), 1), 200)
+            page = max(int(request.args.get("page", 1)), 1)
+            page_size = min(max(int(request.args.get("page_size", 50)), 1), 200)
             self._logger.debug(f"Request logs queried: page={page}, page_size={page_size}")
 
             logs = self._log_service.get_request_logs(
                 page,
                 page_size,
-                request.args.get('start_date'),
-                request.args.get('end_date'),
-                request.args.get('username'),
-                request.args.get('request_model'),
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+                request.args.get("username"),
+                request.args.get("request_model"),
             )
             return jsonify(logs)
         except ValueError:
-            return jsonify({'error': 'page and page_size must be integers'}), 400
+            return jsonify({"error": "page and page_size must be integers"}), 400
         except Exception as exc:
-            self._logger.error(f'Error getting request logs: {exc}')
-            return jsonify({'error': str(exc)}), 500
+            self._logger.error(f"Error getting request logs: {exc}")
+            return jsonify({"error": str(exc)}), 500
 
     def get_usernames(self) -> Response:
-        """查询已出现过请求记录的用户名列表。"""
         try:
             usernames = self._log_service.get_unique_usernames()
             self._logger.debug(f"Usernames queried: count={len(usernames)}")
             return jsonify(usernames)
         except Exception as exc:
-            self._logger.error(f'Error getting usernames: {exc}')
-            return jsonify({'error': str(exc)}), 500
+            self._logger.error(f"Error getting usernames: {exc}")
+            return jsonify({"error": str(exc)}), 500
 
     def get_request_models(self) -> Response:
-        """查询出现过请求日志的请求模型列表。"""
         try:
             models = self._log_service.get_unique_request_models()
             self._logger.debug(f"Request models queried: count={len(models)}")
             return jsonify(models)
         except Exception as exc:
-            self._logger.error(f'Error getting request models: {exc}')
-            return jsonify({'error': str(exc)}), 500
+            self._logger.error(f"Error getting request models: {exc}")
+            return jsonify({"error": str(exc)}), 500
