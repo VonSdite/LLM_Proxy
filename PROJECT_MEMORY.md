@@ -110,7 +110,7 @@
 - 系统内部模型 key 格式：
   - `{provider_name}/{model_name}`
 - 代理接口请求体中的 `model` 必须使用该格式
-- 转发给上游前，`ProxyService` 会把模型名裁剪成最后一段真实模型名
+- 转发给上游前，`ProxyService` 会只移除 `provider_name/` 前缀，保留真实模型名剩余部分原样不变
 
 ## 模型探测链路
 - `ProviderController.fetch_models()`
