@@ -600,6 +600,24 @@
     color: var(--primary);
 }
 
+.providers-page .btn-field-secondary {
+    min-height: 34px;
+    padding: 0 14px;
+    border-color: var(--line-strong);
+    background: rgba(255, 255, 255, 0.88);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.providers-page .btn-field-secondary:hover,
+.providers-page .btn-field-secondary:focus {
+    border-color: var(--primary);
+    background: #ffffff;
+    color: var(--primary);
+    box-shadow: none;
+}
+
 .providers-page .field-help-button {
     width: 22px;
     height: 22px;
@@ -728,12 +746,21 @@
 }
 
 .providers-page .fetch-model-list {
-    max-height: min(52vh, 480px);
+    height: min(52vh, 480px);
     overflow-y: auto;
     padding: 6px;
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
     background: rgba(17, 24, 39, 0.02);
+}
+
+.providers-page .fetch-model-list > .empty-state {
+    min-height: 100%;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 12px;
 }
 
 .providers-page .fetch-model-item {
@@ -838,6 +865,19 @@
 :root[data-theme="dark"] .providers-page .btn-inline-secondary:hover,
 :root[data-theme="dark"] .providers-page .btn-inline-secondary:focus-visible {
     color: #c7e0ff;
+}
+
+:root[data-theme="dark"] .providers-page .btn-field-secondary {
+    border-color: #3b4654;
+    background: linear-gradient(180deg, rgba(28, 36, 49, 0.98), rgba(20, 27, 38, 0.98));
+    color: #bcc8d8;
+}
+
+:root[data-theme="dark"] .providers-page .btn-field-secondary:hover,
+:root[data-theme="dark"] .providers-page .btn-field-secondary:focus {
+    border-color: #5f8fbe;
+    background: linear-gradient(180deg, rgba(35, 46, 62, 1), rgba(24, 33, 46, 1));
+    color: #d9e7f7;
 }
 
 :root[data-theme="dark"] .providers-page .field-help-button {

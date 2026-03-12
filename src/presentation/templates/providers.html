@@ -93,7 +93,7 @@
                                 <span class="field-meta-badge" id="providerModelCount">0 个模型</span>
                             </div>
                             <div class="field-header-actions">
-                                <button type="button" class="btn-inline-secondary" onclick="tidyModelList()">整理</button>
+                                <button type="button" class="btn btn-secondary btn-field-secondary" onclick="tidyModelList()">整理</button>
                                 <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onclick="fetchModels()">拉取模型</button>
                                 <button
                                     type="button"
@@ -399,6 +399,7 @@
 
             renderFetchModelPicker();
             fetchModelPickerModalInstance.show();
+            return normalizedFetchedModels.length;
         }
 
         function toggleFetchedModelSelection(encodedModel, checked, inputElement) {
@@ -568,10 +569,7 @@
         }
 
         function canFetchModels() {
-            return !!(
-                document.getElementById('providerName').value.trim() &&
-                document.getElementById('providerApi').value.trim()
-            );
+            return !!document.getElementById('providerApi').value.trim();
         }
 
         function updateFetchModelsButtonState() {
@@ -754,7 +752,8 @@
                 if (!response.ok) {
                     throw new Error(result.error || '拉取模型失败');
                 }
-                openFetchModelPicker(result.fetched_models);
+                const fetchedCount = openFetchModelPicker(result.fetched_models);
+                showMessage(`已获取到 ${fetchedCount} 个模型`, 'success');
             } catch (error) {
                 console.error('拉取模型失败:', error);
                 showMessage(error.message || '拉取模型失败', 'error');
