@@ -222,7 +222,8 @@
 }
 
 .providers-page .provider-api-cell {
-    max-width: 380px;
+    width: 520px;
+    max-width: 520px;
     color: var(--text-secondary);
 }
 
