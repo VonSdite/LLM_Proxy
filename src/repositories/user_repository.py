@@ -62,13 +62,26 @@ class UserRepository:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get(self, page: int = 1, page_size: int = 50) -> List[Dict[str, Any]]:
+    def _build_search_clause(self, keyword: Optional[str], table_alias: str = "u") -> tuple[str, list[Any]]:
+        """构造用户搜索条件，支持用户名和 IP 模糊匹配。"""
+        normalized = (keyword or "").strip()
+        if not normalized:
+            return "", []
+
+        like_keyword = f"%{normalized}%"
+        return (
+            f"WHERE ({table_alias}.username LIKE ? OR {table_alias}.ip_address LIKE ?)",
+            [like_keyword, like_keyword],
+        )
+
+    def get(self, page: int = 1, page_size: int = 50, keyword: Optional[str] = None) -> List[Dict[str, Any]]:
         """分页查询用户及其聚合统计。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             offset = (page - 1) * page_size
+            where_clause, search_params = self._build_search_clause(keyword, table_alias="u")
             cursor.execute(
-                """
+                f"""
                 SELECT
                     u.id,
                     u.username,
@@ -91,18 +104,27 @@ class UserRepository:
                     FROM daily_request_stats
                     GROUP BY ip_address
                 ) s ON u.ip_address = s.ip_address
+                {where_clause}
                 ORDER BY u.created_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                (page_size, offset),
+                (*search_params, page_size, offset),
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_count(self) -> int:
+    def get_count(self, keyword: Optional[str] = None) -> int:
         """查询用户总数。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) AS count FROM users")
+            where_clause, search_params = self._build_search_clause(keyword, table_alias="u")
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) AS count
+                FROM users u
+                {where_clause}
+                """,
+                search_params,
+            )
             return cursor.fetchone()["count"]
 
     def update(

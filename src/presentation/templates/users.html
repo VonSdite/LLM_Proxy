@@ -24,7 +24,33 @@
         </section>
 
         <section class="users-section">
-                <h2>用户列表</h2>
+                <div class="section-toolbar">
+                    <div class="section-title-group">
+                        <h2>用户列表</h2>
+                    </div>
+                    <div class="section-search" role="search" aria-label="搜索用户">
+                        <div class="section-search-field">
+                            <input
+                                type="text"
+                                id="userSearchInput"
+                                class="form-control"
+                                placeholder="用户名 / IP"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                            <button
+                                type="button"
+                                class="search-clear-button"
+                                id="clearUserSearchBtn"
+                                onclick="clearUserSearch()"
+                                aria-label="清空搜索"
+                                title="清空搜索"
+                                hidden
+                            >&times;</button>
+                        </div>
+                        <button type="button" class="btn btn-primary search-submit-button" onclick="applyUserSearch()">搜索</button>
+                    </div>
+                </div>
                 <div class="users-table-shell" id="usersTableContainer">
                     <div class="loading">加载用户数据...</div>
                 </div>
@@ -92,6 +118,7 @@
         let totalUsers = 0;
         let jumpDebounceTimer = null;
         let currentTotalPages = 1;
+        let currentSearchKeyword = '';
         let activeCustomSelect = null;
         let editModalInstance = null;
         let usersSortState = {
@@ -224,6 +251,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             initThemeToggle();
             setupCustomSelect('pageSizeSelect');
+            initUserSearch();
             loadUsers();
             document.getElementById('pageSizeSelect').value = pageSize;
             syncCustomSelectValue('pageSizeSelect');
@@ -251,6 +279,60 @@
             });
         });
 
+        function initUserSearch() {
+            const userSearchInput = document.getElementById('userSearchInput');
+            if (!userSearchInput) return;
+
+            userSearchInput.value = currentSearchKeyword;
+            updateUserSearchUi(true);
+            userSearchInput.addEventListener('input', function() {
+                updateUserSearchUi();
+            });
+            userSearchInput.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    applyUserSearch();
+                }
+            });
+        }
+
+        function updateUserSearchUi(syncInput = false) {
+            const userSearchInput = document.getElementById('userSearchInput');
+            const clearButton = document.getElementById('clearUserSearchBtn');
+            if (userSearchInput && syncInput) {
+                userSearchInput.value = currentSearchKeyword;
+            }
+            const keywordDraft = userSearchInput ? userSearchInput.value.trim() : currentSearchKeyword;
+            if (clearButton) {
+                clearButton.hidden = !keywordDraft;
+            }
+        }
+
+        function applyUserSearch() {
+            const userSearchInput = document.getElementById('userSearchInput');
+            const nextKeyword = userSearchInput ? userSearchInput.value.trim() : '';
+            currentSearchKeyword = nextKeyword;
+            currentPage = 1;
+            updateUserSearchUi();
+            loadUsers();
+        }
+
+        function clearUserSearch() {
+            const userSearchInput = document.getElementById('userSearchInput');
+            if (!currentSearchKeyword && !userSearchInput?.value.trim()) {
+                return;
+            }
+
+            currentSearchKeyword = '';
+            if (userSearchInput) {
+                userSearchInput.value = '';
+            }
+            currentPage = 1;
+            updateUserSearchUi();
+            loadUsers();
+            userSearchInput?.focus();
+        }
+
         document.addEventListener('click', function(event) {
             if (!event.target.closest('.custom-select')) {
                 closeAllCustomSelects();
@@ -270,6 +352,9 @@
                     page: currentPage,
                     page_size: pageSize
                 });
+                if (currentSearchKeyword) {
+                    params.set('keyword', currentSearchKeyword);
+                }
                 const response = await fetch(`/api/users?${params}`);
                 const data = await response.json();
 
@@ -281,6 +366,7 @@
                     totalUsers = data.total || users.length;
                 }
                 applyUsersSort();
+                updateUserSearchUi();
                 renderUsers();
                 updatePagination();
             } catch (error) {
@@ -360,7 +446,7 @@
             const container = document.getElementById('usersTableContainer');
 
             if (users.length === 0) {
-                container.innerHTML = '<div class="empty-state">暂无用户数据</div>';
+                container.innerHTML = `<div class="empty-state">${currentSearchKeyword ? '未找到匹配的用户' : '暂无用户数据'}</div>`;
                 document.getElementById('tableFooter').style.display = 'none';
                 return;
             }
