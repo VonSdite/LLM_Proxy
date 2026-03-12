@@ -52,7 +52,7 @@ class ProxyService:
 
             body = dict(request_data)
             body = provider.apply_input_body_hook(request_ctx, body)
-            body["model"] = model_name.rsplit("/", 1)[-1]
+            body["model"] = self._get_upstream_model_name(provider.name, model_name)
             return headers, body, request_ctx
 
         for attempt in range(max_retries):
@@ -155,6 +155,13 @@ class ProxyService:
     def _should_retry_status_code(status_code: int) -> bool:
         retryable_status_codes = {408, 409, 425, 429, 500, 502, 503, 504}
         return status_code in retryable_status_codes
+
+    @staticmethod
+    def _get_upstream_model_name(provider_name: str, requested_model_name: str) -> str:
+        prefix = f"{provider_name}/"
+        if requested_model_name.startswith(prefix):
+            return requested_model_name[len(prefix):]
+        return requested_model_name
 
     def _get_http_session(self) -> requests.Session:
         session = getattr(self._http_local, "session", None)
