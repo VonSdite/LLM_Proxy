@@ -28,7 +28,8 @@
                 <div class="users-table-shell" id="usersTableContainer">
                     <div class="loading">加载用户数据...</div>
                 </div>
-                <div class="table-footer" id="tableFooter" style="display: none;">
+        </section>
+        <div class="table-footer" id="tableFooter" style="display: none;">
                     <div class="right-controls">
                         <div class="pagination-controls">
                             <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
@@ -50,7 +51,6 @@
                         <span class="total-count" id="totalCount">共 0 条</span>
                     </div>
                 </div>
-        </section>
 {% endblock %}
 
 {% block after_container %}
@@ -107,27 +107,6 @@
                 if (trigger) trigger.setAttribute('aria-expanded', 'false');
             });
             activeCustomSelect = null;
-        }
-
-        function applyTheme(theme) {
-            document.documentElement.setAttribute('data-theme', theme);
-            localStorage.setItem('theme', theme);
-            const themeToggle = document.getElementById('themeToggle');
-            if (themeToggle) {
-                themeToggle.setAttribute('aria-label', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
-                themeToggle.setAttribute('title', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
-            }
-        }
-
-        function initThemeToggle() {
-            const themeToggle = document.getElementById('themeToggle');
-            if (!themeToggle) return;
-            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-            applyTheme(currentTheme);
-            themeToggle.addEventListener('click', function() {
-                const nextTheme = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark' ? 'light' : 'dark';
-                applyTheme(nextTheme);
-            });
         }
 
         function normalizeNumber(value) {

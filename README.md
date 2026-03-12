@@ -1,9 +1,25 @@
 # LLM_Proxy
 
-一个基于 Flask + gevent 的 OpenAI 兼容代理服务，重点不只是“填 API Key 转发”，而是通过 Hook 机制把不同上游协议、鉴权方式和请求格式收敛成统一的 OpenAI 风格接口。
+## 界面截图
+
+### 统计概览
+
+![统计概览](docs/images/dashboard.png)
+
+### 用户管理
+
+![用户管理](docs/images/users.png)
+
+### Provider 管理
+
+![Provider 管理](docs/images/providers.png)
+
+一个基于 Flask + gevent 的 OpenAI 兼容代理服务，重点不只是“填 API Key 转发”，而是通过 Hook 机制把不同上游协议、鉴权方式和请求格式收敛成统一的 OpenAI 风格接口。对接入方来说，它也可以被理解为一个可控的 ONE API 接入层。
 
 ## 项目亮点
 
+- ONE API 接入定位
+  - 对外统一提供 OpenAI 兼容入口，便于内部系统、脚本或第三方工具按 ONE API 方式接入
 - OpenAI 兼容入口
   - 提供 `POST /v1/chat/completions` 和 `GET /v1/models`
 - 多 Provider / 多模型路由
@@ -15,6 +31,7 @@
   - 也适合处理经过授权的会话型上游集成，例如额外 Cookie、session token、自定义 header、特定 body 字段
 - 管理后台
   - 支持登录、用户管理、Provider 管理、模型探测、白名单控制
+  - 可启用白名单用户管理机制，仅允许白名单内用户使用聊天能力
 - 请求统计
   - 自动记录调用明细和每日聚合 Token 统计
 
@@ -27,8 +44,10 @@
 - 不同厂商响应结构不同，需要统一成 OpenAI 风格
 - 某些模型接入只在特定客户端或内部工具里可用，需要做受控的协议适配
 
-LLM_Proxy 的核心价值就在这里：  
+LLM_Proxy 的核心价值就在这里：
 把“代理转发”升级成“可编排、可适配、可管理的统一入口”。
+
+如果从接入视角描述，这个项目不是单纯的转发层，而是一个带后台管理、路由能力和协议适配能力的 ONE API 接入层。
 
 ## 合规说明
 
@@ -68,6 +87,8 @@ Hook 适配能力的设计目标是支持合法授权前提下的协议兼容和
 
 - 后台登录
 - 用户白名单
+  - 支持全局白名单开关
+  - 支持按用户/IP 维度控制是否允许访问
 - Provider 配置增删改查
 - Provider 模型列表探测
 - 请求日志与聚合统计
@@ -76,7 +97,7 @@ Hook 适配能力的设计目标是支持合法授权前提下的协议兼容和
 
 完整的 Mermaid 版 4+1 架构视图见：
 
-- [docs/architecture-4plus1.md](/d:/001Code/008llm/003LLM_Proxy/docs/architecture-4plus1.md)
+- [docs/architecture-4plus1.md](docs/architecture-4plus1.md)
 
 其中包含：
 
@@ -100,13 +121,13 @@ pip install flask gevent requests pyyaml urllib3
 
 - `server.host`
 - `server.port`
-- `chat.whitelist_enabled`
 - `providers[].name`
 - `providers[].api`
 - `providers[].model_list`
 
 可选字段：
 
+- `chat.whitelist_enabled`
 - `providers[].api_key`
 - `providers[].proxy`
 - `providers[].timeout_seconds`
@@ -119,9 +140,16 @@ pip install flask gevent requests pyyaml urllib3
 - `logging.path`
 - `logging.level`
 
+其中：
+
+- `chat.whitelist_enabled`
+  - 为 `true` 时启用白名单访问控制，仅允许已录入且 `whitelist_access_enabled` 为启用状态的用户 IP 调用 `/v1/chat/completions`
+  - 为 `false` 时关闭白名单限制，代理按普通开放模式工作
+
+
 参考样例见：
 
-- [config.sample.yaml](/d:/001Code/008llm/003LLM_Proxy/config.sample.yaml)
+- [config.sample.yaml](config.sample.yaml)
 
 ### 3. 启动服务
 
@@ -221,7 +249,7 @@ class Hook(BaseHook):
 
 现成示例见：
 
-- [hooks/example_hook.py](/d:/001Code/008llm/003LLM_Proxy/hooks/example_hook.py)
+- [hooks/example_hook.py](hooks/example_hook.py)
 
 ## Hook 适配的典型场景
 
@@ -266,6 +294,7 @@ class Hook(BaseHook):
 - 登录认证
 - 用户管理
 - 白名单开关
+- 白名单用户启停管理
 - Provider 管理
 - 模型探测
 - 请求日志
@@ -300,6 +329,7 @@ class Hook(BaseHook):
 
 也就是说：
 
+- 对接入方来说，它可以作为统一的 ONE API 接入层使用
 - 标准 Provider 可以零适配接入
 - 非标准 Provider 可以最小成本做 Hook 兼容
 - 业务方看到的仍然是统一的 OpenAI 接口

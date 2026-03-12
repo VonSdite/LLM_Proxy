@@ -1,0 +1,9 @@
+<script>
+    (function() {
+        const defaultTheme = 'dark';
+        window.__LLM_PROXY_THEME_CONFIG__ = { defaultTheme: defaultTheme };
+        const savedTheme = localStorage.getItem('theme');
+        const theme = savedTheme === 'light' ? 'light' : defaultTheme;
+        document.documentElement.setAttribute('data-theme', theme);
+    })();
+</script>

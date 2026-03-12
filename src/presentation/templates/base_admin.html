@@ -3,13 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>
-        (function() {
-            const savedTheme = localStorage.getItem('theme');
-            const theme = savedTheme === 'dark' ? 'dark' : 'light';
-            document.documentElement.setAttribute('data-theme', theme);
-        })();
-    </script>
+    {% include "_theme_bootstrap.html" %}
     <title>{% block page_title %}LLM Proxy{% endblock %}</title>
     <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="/static/css/admin-base.css">
@@ -49,6 +43,7 @@
     </div>
     {% block after_container %}{% endblock %}
     <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/theme.js"></script>
     {% block page_scripts %}{% endblock %}
 </body>
 </html>

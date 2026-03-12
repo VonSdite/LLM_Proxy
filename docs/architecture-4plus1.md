@@ -24,11 +24,11 @@
 
 关键代码位置：
 
-- 启动与装配：[main.py](/d:/001Code/008llm/003LLM_Proxy/main.py)
-- 组合根：[application.py](/d:/001Code/008llm/003LLM_Proxy/src/application/application.py)
-- 配置与 Provider 运行时：[config_manager.py](/d:/001Code/008llm/003LLM_Proxy/src/config/config_manager.py) [provider_manager.py](/d:/001Code/008llm/003LLM_Proxy/src/config/provider_manager.py)
-- Hook 协议：[contracts.py](/d:/001Code/008llm/003LLM_Proxy/src/hooks/contracts.py)
-- 代理主链路：[proxy_controller.py](/d:/001Code/008llm/003LLM_Proxy/src/presentation/proxy_controller.py) [proxy_service.py](/d:/001Code/008llm/003LLM_Proxy/src/services/proxy_service.py)
+- 启动与装配：[main.py](../main.py)
+- 组合根：[application.py](../src/application/application.py)
+- 配置与 Provider 运行时：[config_manager.py](../src/config/config_manager.py) [provider_manager.py](../src/config/provider_manager.py)
+- Hook 协议：[contracts.py](../src/hooks/contracts.py)
+- 代理主链路：[proxy_controller.py](../src/presentation/proxy_controller.py) [proxy_service.py](../src/services/proxy_service.py)
 
 ## 1. Logical View
 

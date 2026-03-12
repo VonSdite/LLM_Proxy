@@ -12,16 +12,13 @@
 .dashboard-page .filters-section,
 .dashboard-page .stats-section,
 .dashboard-page .table-section {
-    padding: 22px 26px;
+    padding: 22px var(--page-card-inset);
 }
 
 .dashboard-page .filters-section {
-    border-bottom: 1px solid var(--line);
-    background: var(--surface);
-}
-
-:root[data-theme="dark"] .dashboard-page .filters-section {
-    background: #0f141b;
+    padding: 22px var(--page-card-inset) 0;
+    border-bottom: none;
+    background: transparent;
 }
 
 .dashboard-page .filters {
@@ -29,6 +26,16 @@
     gap: 14px;
     flex-wrap: wrap;
     align-items: flex-end;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+
+:root[data-theme="dark"] .dashboard-page .filters {
+    border-color: #30363d;
+    background: #161b22;
 }
 
 .dashboard-page .filters .btn {
@@ -140,16 +147,21 @@
 }
 
 .dashboard-page .stats-section {
-    padding-top: 16px;
-    border-bottom: 1px solid var(--line);
-    background: var(--surface-soft);
+    padding: 18px var(--page-card-inset) 0;
+    border-bottom: none;
+    background: transparent;
+}
+
+.dashboard-page .table-section {
+    padding: 18px var(--page-card-inset) 0;
+    background: transparent;
 }
 
 .dashboard-page .stats-container,
 .dashboard-page .table-container {
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
-    overflow-x: hidden;
+    overflow: hidden;
     background: #fff;
     box-shadow: var(--shadow-card);
 }
@@ -317,7 +329,27 @@
 }
 
 .dashboard-page .table-footer {
-    padding: 14px 20px;
+    padding: 18px var(--page-card-inset) 22px;
+    border-top: none;
+    background: transparent;
+}
+
+:root[data-theme="dark"] .dashboard-page .table-footer {
+    background: transparent;
+}
+
+.dashboard-page .table-footer .right-controls {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+
+:root[data-theme="dark"] .dashboard-page .table-footer .right-controls {
+    border-color: #30363d;
+    background: #161b22;
 }
 
 .dashboard-page .table-container td {
@@ -329,7 +361,8 @@
     .dashboard-page .header,
     .dashboard-page .filters-section,
     .dashboard-page .stats-section,
-    .dashboard-page .table-section {
+    .dashboard-page .table-section,
+    .dashboard-page .table-footer {
         padding-left: 16px;
         padding-right: 16px;
     }
@@ -359,6 +392,10 @@
     }
 
     .dashboard-page .table-footer {
+        padding: 12px;
+    }
+
+    .dashboard-page .table-footer .right-controls {
         padding: 12px;
     }
 }

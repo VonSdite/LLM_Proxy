@@ -184,26 +184,6 @@
         let fetchedModelSelection = new Set();
         let fetchedModelExistingSelection = new Set();
 
-        function applyTheme(theme) {
-            document.documentElement.setAttribute('data-theme', theme);
-            localStorage.setItem('theme', theme);
-            const themeToggle = document.getElementById('themeToggle');
-            if (!themeToggle) return;
-            const label = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
-            themeToggle.setAttribute('aria-label', label);
-            themeToggle.setAttribute('title', label);
-        }
-
-        function initThemeToggle() {
-            const themeToggle = document.getElementById('themeToggle');
-            if (!themeToggle) return;
-            applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
-            themeToggle.addEventListener('click', function() {
-                const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-                applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
-            });
-        }
-
         function escapeHtml(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
