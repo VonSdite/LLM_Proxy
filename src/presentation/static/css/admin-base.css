@@ -1,6 +1,6 @@
 :root {
     --app-container-max-width: min(96vw, 1860px);
-    --page-card-inset: 34px;
+    --page-card-inset: 24px;
     --bg-page: #f4f8fc;
     --surface: #ffffff;
     --surface-soft: #f8fbff;
@@ -54,7 +54,7 @@
 
 body.app-page {
     min-height: 100vh;
-    padding: 24px;
+    padding: 16px;
     font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1, "lnum" 1;
@@ -742,5 +742,27 @@ body.app-page {
 
     .app-page .right-controls {
         justify-content: flex-end;
+    }
+}
+
+@media (max-width: 640px) {
+    :root {
+        --page-card-inset: 12px;
+    }
+
+    body.app-page {
+        padding: 10px;
+    }
+
+    .app-page .container {
+        border-radius: 10px;
+    }
+
+    .app-page .header {
+        padding: 10px 12px 0;
+    }
+
+    .app-page .header-content {
+        padding: 14px;
     }
 }
