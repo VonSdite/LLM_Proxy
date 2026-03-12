@@ -21,6 +21,7 @@ def build_proxy_response(
     stream_context_func: Any,
     logger: Logger,
     on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
+    forward_stream_usage: bool = False,
 ) -> Response:
     """基于上游响应与输出钩子构建 Flask 响应。"""
     hook_func = getattr(hook, "output_body_hook", None) if hook else None
@@ -62,6 +63,14 @@ def build_proxy_response(
             return None
         return stripped[5:].strip()
 
+    def is_usage_only_stream_chunk(payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        if not isinstance(payload.get("usage"), dict):
+            return False
+        choices = payload.get("choices")
+        return choices is None or (isinstance(choices, list) and len(choices) == 0)
+
     def process_sse_event(event_text: str) -> Iterator[bytes]:
         # Preserve non-data SSE fields to avoid breaking strict clients.
         normalized_text = event_text.replace("\r\n", "\n").replace("\r", "\n")
@@ -97,6 +106,8 @@ def build_proxy_response(
 
         if isinstance(data, dict):
             update_meta_from_payload(data)
+            if not forward_stream_usage and is_usage_only_stream_chunk(data):
+                return
 
         if hook_func:
             modified = hook_func(ctx, data)
