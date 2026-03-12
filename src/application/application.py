@@ -18,7 +18,15 @@ from ..presentation import (
     create_flask_app,
 )
 from ..repositories import LogRepository, UserRepository
-from ..services import AuthenticationService, LogService, ProviderService, ProxyService, UserService
+from ..services import (
+    AuthenticationService,
+    LogService,
+    ModelDiscoveryService,
+    ProviderService,
+    ProxyService,
+    SettingsService,
+    UserService,
+)
 from ..utils import normalize_ip
 from ..utils.database import create_connection_factory
 
@@ -39,7 +47,7 @@ class Application:
         self._setup_controllers()
         self._setup_request_access_logging()
 
-        self._logger.info("Application initialized successfully")
+        self._logger.info('Application initialized successfully')
 
     def _setup_config(self) -> None:
         """初始化配置管理器。"""
@@ -54,18 +62,18 @@ class Application:
         level = getattr(logging, log_level.upper(), logging.INFO)
 
         formatter = logging.Formatter(
-            "%(asctime)s|%(name)s|%(filename)s:%(lineno)d|%(levelname)s|%(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
+            '%(asctime)s|%(name)s|%(filename)s:%(lineno)d|%(levelname)s|%(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
         )
 
-        logger = logging.getLogger("app")
+        logger = logging.getLogger('app')
         logger.handlers.clear()
 
         app_log_handler = RotatingFileHandler(
-            log_path / "app.log",
+            log_path / 'app.log',
             maxBytes=10 * 1024 * 1024,
             backupCount=3,
-            encoding="utf-8",
+            encoding='utf-8',
         )
         app_log_handler.setFormatter(formatter)
         app_log_handler.setLevel(level)
@@ -77,18 +85,18 @@ class Application:
         logger.addHandler(console_handler)
         logger.setLevel(level)
 
-        access_logger = logging.getLogger("access")
+        access_logger = logging.getLogger('access')
         access_logger.handlers.clear()
         access_handler = RotatingFileHandler(
-            log_path / "access.log",
+            log_path / 'access.log',
             maxBytes=10 * 1024 * 1024,
             backupCount=3,
-            encoding="utf-8",
+            encoding='utf-8',
         )
         access_handler.setFormatter(
             logging.Formatter(
-                "%(asctime)s|%(name)s|%(filename)s:%(lineno)d|%(levelname)s|%(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
+                '%(asctime)s|%(name)s|%(filename)s:%(lineno)d|%(levelname)s|%(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S',
             )
         )
         access_handler.setLevel(level)
@@ -100,28 +108,28 @@ class Application:
         self._flask_app.access_logger = access_logger
 
     def _setup_request_access_logging(self) -> None:
-        """注册请求访问日志钩子，仅记录 IP 与 URL。"""
+        """注册请求访问日志钩子，仅记录 IP、URL 与模型。"""
 
         @self._flask_app.before_request
         def log_request_access() -> None:
-            client_ip = normalize_ip(request.remote_addr) or "-"
+            client_ip = normalize_ip(request.remote_addr) or '-'
             requested_url = request.url
             model = None
             if (request.content_length or 0) > 0 and request.is_json:
                 payload = request.get_json(silent=True)
                 if isinstance(payload, dict):
-                    model = payload.get("model")
+                    model = payload.get('model')
 
             username = None
             user = self._user_service.get_user_by_ip(client_ip)
             if user:
-                username = str(user.get("username") or "")
+                username = str(user.get('username') or '')
 
-            log_message = f"ip={client_ip} url={requested_url}"
+            log_message = f'ip={client_ip} url={requested_url}'
             if username:
-                log_message = f"{log_message} username={username}"
+                log_message = f'{log_message} username={username}'
             if model is not None:
-                log_message = f"{log_message} model={model}"
+                log_message = f'{log_message} model={model}'
             self._flask_app.access_logger.info(log_message)
 
     def _setup_context(self) -> None:
@@ -152,22 +160,34 @@ class Application:
         self._user_service = user_service
         proxy_service = ProxyService(self._ctx)
         log_service = LogService(self._ctx, self._log_repository)
-        provider_service = ProviderService(self._ctx, self._config_path, self.reload_providers)
+        provider_service = ProviderService(self._ctx, self.reload_providers)
+        model_discovery_service = ModelDiscoveryService(self._ctx)
+        settings_service = SettingsService(self._ctx)
 
         self._auth_controller = AuthenticationController(self._ctx, auth_service)
         self._user_controller = UserController(self._ctx, user_service, auth_service)
-        self._provider_controller = ProviderController(self._ctx, provider_service, auth_service)
+        self._provider_controller = ProviderController(
+            self._ctx,
+            provider_service,
+            model_discovery_service,
+            settings_service,
+            auth_service,
+        )
         self._proxy_controller = ProxyController(
-            self._ctx, proxy_service, user_service, log_service, self._provider_manager
+            self._ctx,
+            proxy_service,
+            user_service,
+            log_service,
+            self._provider_manager,
         )
         self._web_controller = WebController(self._ctx, log_service, auth_service)
 
-        self._logger.info("All controllers initialized successfully")
+        self._logger.info('All controllers initialized successfully')
 
     def reload_providers(self) -> None:
         self._config_manager.reload()
         config_dict = self._config_manager.get_raw_config()
-        providers_config = config_dict.get("providers", [])
+        providers_config = config_dict.get('providers', [])
         self._provider_manager.load_providers(providers_config)
 
     def run(self) -> None:
@@ -178,5 +198,5 @@ class Application:
         from gevent.pywsgi import WSGIServer
 
         server = WSGIServer((host, port), self._flask_app)
-        self._logger.info(f"Starting LLM Proxy on {host}:{port}...")
+        self._logger.info('Starting LLM Proxy on %s:%s...', host, port)
         server.serve_forever()

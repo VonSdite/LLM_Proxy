@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """配置访问层。"""
 
+import os
+import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
@@ -33,7 +36,7 @@ class ConfigManager:
 
     def get_admin_config(self) -> Optional[Dict[str, str]]:
         admin = self.get('admin')
-        return admin if isinstance(admin, dict) else None
+        return dict(admin) if isinstance(admin, dict) else None
 
     def is_auth_enabled(self) -> bool:
         admin = self.get_admin_config()
@@ -59,7 +62,14 @@ class ConfigManager:
         return self.get('logging.level', 'INFO').upper()
 
     def get_raw_config(self) -> Dict[str, Any]:
-        return self._config.copy()
+        return deepcopy(self._config)
+
+    def write_raw_config(self, config: Dict[str, Any]) -> None:
+        if not isinstance(config, dict):
+            raise ValueError('Configuration file must contain a top-level mapping')
+
+        self._write_config(config)
+        self._config = deepcopy(config)
 
     def reload(self) -> None:
         self._config = self._load_config(self._config_path)
@@ -71,4 +81,29 @@ class ConfigManager:
             raise FileNotFoundError(f'Configuration file not found: {path}')
 
         with open(path, 'r', encoding='utf-8') as file:
-            return yaml.safe_load(file) or {}
+            data = yaml.safe_load(file)
+
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise ValueError('Configuration file must contain a top-level mapping')
+        return data
+
+    def _write_config(self, config: Dict[str, Any]) -> None:
+        temp_file_path: Optional[str] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                'w',
+                encoding='utf-8',
+                dir=self._config_path.parent,
+                delete=False,
+            ) as temp_file:
+                yaml.safe_dump(config, temp_file, allow_unicode=True, sort_keys=False)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+                temp_file_path = temp_file.name
+
+            os.replace(temp_file_path, self._config_path)
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
