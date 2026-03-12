@@ -100,7 +100,7 @@
                                     class="field-help-button"
                                     data-bs-toggle="tooltip"
                                     data-bs-placement="top"
-                                    data-bs-title="从 /v1/models 或 /models 接口拉取模型，并追加到当前列表。"
+                                    data-bs-title="从 /v1/models 或 /models 接口拉取模型，勾选后再加入当前列表。"
                                     aria-label="查看拉取模型说明"
                                 >?</button>
                             </div>
@@ -111,6 +111,36 @@
                 <div class="modal-footer border-top-0">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                     <button type="button" class="btn btn-primary" onclick="saveProvider()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="fetchModelPickerModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <div>
+                        <h5 class="modal-title fw-semibold">选择拉取模型</h5>
+                        <div class="modal-subtitle">已根据当前 Model List 自动预选重复模型，取消勾选可将它们从当前清单移除。</div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <div class="fetch-model-toolbar">
+                        <input type="text" class="form-control" id="fetchModelSearchInput" placeholder="搜索拉取到的模型">
+                        <div class="fetch-model-toolbar-actions">
+                            <button type="button" class="btn-inline-secondary" onclick="selectAllFetchedModels()">全选</button>
+                            <button type="button" class="btn-inline-secondary" onclick="clearFetchedModelsSelection()">清空</button>
+                        </div>
+                    </div>
+                    <div class="fetch-model-summary" id="fetchModelSummary">共拉取 0 个模型，已选 0 个</div>
+                    <div class="fetch-model-note">未出现在本次拉取结果中的现有模型会保留。</div>
+                    <div class="fetch-model-list" id="fetchModelList"></div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="applyFetchedModelsSelection()">加入当前清单</button>
                 </div>
             </div>
         </div>
@@ -145,10 +175,14 @@
         let providers = [];
         let editingProviderName = null;
         let providerModalInstance = null;
+        let fetchModelPickerModalInstance = null;
         let modelDetailModalInstance = null;
         let activeModelProvider = null;
         let chatWhitelistEnabled = initialChatWhitelistEnabled;
         let chatWhitelistSaving = false;
+        let fetchedModelCandidates = [];
+        let fetchedModelSelection = new Set();
+        let fetchedModelExistingSelection = new Set();
 
         function applyTheme(theme) {
             document.documentElement.setAttribute('data-theme', theme);
@@ -272,6 +306,170 @@
             document.getElementById('modelSearchInput').value = '';
             renderModelDetailList();
             modelDetailModalInstance.show();
+        }
+
+        function resetFetchModelPickerState() {
+            fetchedModelCandidates = [];
+            fetchedModelSelection = new Set();
+            fetchedModelExistingSelection = new Set();
+
+            const searchInput = document.getElementById('fetchModelSearchInput');
+            if (searchInput) {
+                searchInput.value = '';
+            }
+
+            const summaryElement = document.getElementById('fetchModelSummary');
+            if (summaryElement) {
+                summaryElement.textContent = '共拉取 0 个模型，已选 0 个';
+            }
+
+            const listElement = document.getElementById('fetchModelList');
+            if (listElement) {
+                listElement.innerHTML = '';
+            }
+        }
+
+        function getFilteredFetchedModels() {
+            const query = (document.getElementById('fetchModelSearchInput')?.value || '').trim().toLowerCase();
+            if (!query) return fetchedModelCandidates;
+            return fetchedModelCandidates.filter(model => String(model).toLowerCase().includes(query));
+        }
+
+        function updateFetchModelSummary(filteredCount = fetchedModelCandidates.length) {
+            const summaryElement = document.getElementById('fetchModelSummary');
+            if (!summaryElement) return;
+
+            const totalCount = fetchedModelCandidates.length;
+            const selectedCount = fetchedModelSelection.size;
+            const existingCount = fetchedModelExistingSelection.size;
+            const visibleText = filteredCount !== totalCount ? `，当前显示 ${filteredCount} 个` : '';
+            const existingText = existingCount ? `，其中 ${existingCount} 个原已在当前清单` : '';
+
+            summaryElement.textContent = `共拉取 ${totalCount} 个模型${visibleText}，已选 ${selectedCount} 个${existingText}`;
+        }
+
+        function renderFetchModelPicker() {
+            const listElement = document.getElementById('fetchModelList');
+            if (!listElement) return;
+
+            const filteredModels = getFilteredFetchedModels();
+            updateFetchModelSummary(filteredModels.length);
+
+            if (!filteredModels.length) {
+                listElement.innerHTML = '<div class="empty-state">没有匹配的拉取模型</div>';
+                return;
+            }
+
+            listElement.innerHTML = filteredModels
+                .map(model => {
+                    const encodedModel = encodeURIComponent(model);
+                    const isSelected = fetchedModelSelection.has(model);
+                    const isExisting = fetchedModelExistingSelection.has(model);
+                    return `
+                        <label class="fetch-model-item${isSelected ? ' selected' : ''}${isExisting ? ' existing' : ''}">
+                            <span class="fetch-model-item-main">
+                                <input
+                                    type="checkbox"
+                                    class="fetch-model-checkbox"
+                                    ${isSelected ? 'checked' : ''}
+                                    onchange="toggleFetchedModelSelection('${encodedModel}', this.checked, this)"
+                                >
+                                <span class="fetch-model-item-name">${escapeHtml(model)}</span>
+                            </span>
+                            ${isExisting ? '<span class="fetch-model-item-badge">已在清单</span>' : ''}
+                        </label>
+                    `;
+                })
+                .join('');
+        }
+
+        function openFetchModelPicker(fetchedModels) {
+            const normalizedFetchedModels = normalizeModelListItems(Array.isArray(fetchedModels) ? fetchedModels.join('\n') : '');
+            const currentModels = normalizeModelListItems(document.getElementById('providerModelList').value);
+            const fetchedModelSet = new Set(normalizedFetchedModels);
+
+            fetchedModelCandidates = normalizedFetchedModels;
+            fetchedModelExistingSelection = new Set(currentModels.filter(model => fetchedModelSet.has(model)));
+            fetchedModelSelection = new Set(fetchedModelExistingSelection);
+
+            const searchInput = document.getElementById('fetchModelSearchInput');
+            if (searchInput) {
+                searchInput.value = '';
+            }
+
+            renderFetchModelPicker();
+            fetchModelPickerModalInstance.show();
+        }
+
+        function toggleFetchedModelSelection(encodedModel, checked, inputElement) {
+            const model = decodeURIComponent(encodedModel);
+            if (checked) {
+                fetchedModelSelection.add(model);
+            } else {
+                fetchedModelSelection.delete(model);
+            }
+
+            const itemElement = inputElement?.closest('.fetch-model-item');
+            if (itemElement) {
+                itemElement.classList.toggle('selected', checked);
+            }
+
+            updateFetchModelSummary(getFilteredFetchedModels().length);
+        }
+
+        function selectAllFetchedModels() {
+            fetchedModelSelection = new Set(fetchedModelCandidates);
+            renderFetchModelPicker();
+        }
+
+        function clearFetchedModelsSelection() {
+            fetchedModelSelection = new Set();
+            renderFetchModelPicker();
+        }
+
+        function applyFetchedModelsSelection() {
+            const textarea = document.getElementById('providerModelList');
+            if (!textarea) return;
+
+            const currentModels = normalizeModelListItems(textarea.value);
+            const currentModelSet = new Set(currentModels);
+            const fetchedModelSet = new Set(fetchedModelCandidates);
+            const selectedFetchedModels = fetchedModelCandidates.filter(model => fetchedModelSelection.has(model));
+            const nextModels = [];
+            const seen = new Set();
+
+            currentModels.forEach(model => {
+                if (fetchedModelSet.has(model) && !fetchedModelSelection.has(model)) {
+                    return;
+                }
+                if (seen.has(model)) {
+                    return;
+                }
+                seen.add(model);
+                nextModels.push(model);
+            });
+
+            selectedFetchedModels.forEach(model => {
+                if (seen.has(model)) {
+                    return;
+                }
+                seen.add(model);
+                nextModels.push(model);
+            });
+
+            const addedCount = selectedFetchedModels.filter(model => !currentModelSet.has(model)).length;
+            const removedCount = currentModels.filter(model => fetchedModelSet.has(model) && !fetchedModelSelection.has(model)).length;
+
+            textarea.value = buildModelListValue(nextModels);
+            updateModelListCount();
+            fetchModelPickerModalInstance.hide();
+
+            if (!addedCount && !removedCount) {
+                showMessage('Model List 未发生变化', 'success');
+                return;
+            }
+
+            showMessage(`Model List 已更新，新增 ${addedCount} 个，移除 ${removedCount} 个`, 'success');
         }
 
         function normalizeModelListItems(value) {
@@ -533,19 +731,12 @@
         async function fetchModels() {
             applyNormalizedModelListValue();
             const payload = collectFormData();
-            if (!payload.name || !payload.api) {
-                showMessage('请先填写并保存 provider 名称和 API 地址', 'error');
-                return;
-            }
-            if (!editingProviderName && !providers.some(item => item.name === payload.name)) {
-                showMessage('请先保存 provider，再拉取模型列表', 'error');
+            if (!payload.api) {
+                showMessage('请先填写 API 地址', 'error');
                 return;
             }
 
-            const params = new URLSearchParams({
-                name: payload.name,
-                api: payload.api
-            });
+            const params = new URLSearchParams({ api: payload.api });
             if (payload.api_key) params.set('api_key', payload.api_key);
             if (payload.proxy) params.set('proxy', payload.proxy);
             if (payload.timeout_seconds) params.set('timeout_seconds', payload.timeout_seconds);
@@ -563,11 +754,7 @@
                 if (!response.ok) {
                     throw new Error(result.error || '拉取模型失败');
                 }
-                fillForm(result.provider);
-                editingProviderName = result.provider.name;
-                await loadProviders();
-                const addedCount = Array.isArray(result.added_models) ? result.added_models.length : 0;
-                showMessage(`模型拉取成功，新增 ${addedCount} 个模型`, 'success');
+                openFetchModelPicker(result.fetched_models);
             } catch (error) {
                 console.error('拉取模型失败:', error);
                 showMessage(error.message || '拉取模型失败', 'error');
@@ -585,8 +772,25 @@
             const modalElement = document.getElementById('providerModal');
             providerModalInstance = new bootstrap.Modal(modalElement);
             modalElement.addEventListener('hidden.bs.modal', function() {
+                if (fetchModelPickerModalInstance) {
+                    fetchModelPickerModalInstance.hide();
+                }
+                resetFetchModelPickerState();
                 editingProviderName = null;
                 fillForm(null);
+            });
+            const fetchModelPickerModalElement = document.getElementById('fetchModelPickerModal');
+            fetchModelPickerModalInstance = new bootstrap.Modal(fetchModelPickerModalElement);
+            fetchModelPickerModalElement.addEventListener('shown.bs.modal', function() {
+                if (modalElement.classList.contains('show')) {
+                    document.body.classList.add('modal-open');
+                }
+            });
+            fetchModelPickerModalElement.addEventListener('hidden.bs.modal', function() {
+                resetFetchModelPickerState();
+                if (modalElement.classList.contains('show')) {
+                    document.body.classList.add('modal-open');
+                }
             });
             const modelDetailModalElement = document.getElementById('modelDetailModal');
             modelDetailModalInstance = new bootstrap.Modal(modelDetailModalElement);
@@ -601,6 +805,7 @@
             document.getElementById('providerModelList').addEventListener('blur', function() {
                 applyNormalizedModelListValue();
             });
+            document.getElementById('fetchModelSearchInput').addEventListener('input', renderFetchModelPicker);
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
             updateModelListCount();
             updateFetchModelsButtonState();

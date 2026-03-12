@@ -94,8 +94,7 @@ class ProviderController:
 
     def fetch_models(self) -> Response:
         try:
-            result = self._provider_service.fetch_and_append_models(
-                name=request.args.get("name", ""),
+            result = self._provider_service.fetch_models_preview(
                 api=request.args.get("api", ""),
                 api_key=request.args.get("api_key"),
                 proxy=request.args.get("proxy"),
@@ -103,10 +102,9 @@ class ProviderController:
                 verify_ssl=request.args.get("verify_ssl"),
             )
             self._logger.info(
-                "Provider models fetched: name=%s added=%s total=%s",
-                request.args.get("name", ""),
-                len(result["added_models"]),
-                len(result["provider"].get("model_list", [])),
+                "Provider models preview fetched: api=%s fetched=%s",
+                request.args.get("api", ""),
+                len(result["fetched_models"]),
             )
             return jsonify(result)
         except ValueError as exc:

@@ -85,42 +85,25 @@ class ProviderService:
         self._write_config(config)
         self._reload_callback()
 
-    def fetch_and_append_models(
+    def fetch_models_preview(
         self,
-        name: str,
         api: str,
         api_key: Optional[str] = None,
         proxy: Optional[str] = None,
         timeout_seconds: Optional[Any] = None,
         verify_ssl: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        if not name or not str(name).strip():
-            raise ValueError("Provider name is required")
         if not api or not str(api).strip():
             raise ValueError("Provider api is required")
 
-        config = self._load_config()
-        providers = self._extract_providers(config)
-        target = self._find_provider(providers, name)
-        if target is None:
-            raise ValueError(f"Provider not found: {name}")
-
         effective_api_key = self._clean_optional_string(api_key)
-        if effective_api_key is None:
-            effective_api_key = self._clean_optional_string(target.get("api_key"))
-
-        effective_proxy = self._parse_optional_proxy(target.get("proxy"))
-        incoming_proxy = self._parse_optional_proxy(proxy)
-        if incoming_proxy is not None:
-            effective_proxy = incoming_proxy
+        effective_proxy = self._parse_optional_proxy(proxy)
 
         effective_timeout = self._parse_optional_positive_int(timeout_seconds)
         if effective_timeout is None:
-            effective_timeout = self._parse_optional_positive_int(target.get("timeout_seconds")) or 30
+            effective_timeout = 30
 
         effective_verify_ssl = self._parse_optional_bool(verify_ssl)
-        if effective_verify_ssl is None:
-            effective_verify_ssl = self._parse_optional_bool(target.get("verify_ssl"))
         if effective_verify_ssl is None:
             effective_verify_ssl = False
 
@@ -131,24 +114,10 @@ class ProviderService:
             timeout_seconds=effective_timeout,
             verify_ssl=effective_verify_ssl,
         )
-        existing_models = self._normalize_model_list(target.get("model_list"))
-        merged_models = self._merge_models(existing_models, fetched_models)
-        added_models = [model for model in merged_models if model not in existing_models]
-
-        if merged_models:
-            target["model_list"] = merged_models
-        elif "model_list" in target:
-            target.pop("model_list", None)
-
-        self._validate_providers(providers)
-        config["providers"] = providers
-        self._write_config(config)
-        self._reload_callback()
 
         return {
-            "provider": self._clone_provider(target),
-            "added_models": added_models,
             "fetched_models": fetched_models,
+            "fetched_count": len(fetched_models),
         }
 
     def update_chat_whitelist_enabled(self, enabled: Any) -> bool:
