@@ -8,6 +8,7 @@
     --text-primary: #0f172a;
     --text-secondary: #475569;
     --text-muted: #64748b;
+    --text-placeholder: #708399;
     --line: #dbe6f2;
     --line-strong: #c6d7e8;
     --primary: #5f8fbe;
@@ -33,6 +34,7 @@
     --text-primary: #e6edf3;
     --text-secondary: #9da7b3;
     --text-muted: #7d8590;
+    --text-placeholder: #7d8590;
     --line: #30363d;
     --line-strong: #3d444d;
     --primary: #2f81f7;
@@ -312,6 +314,14 @@ body.app-page {
     padding-top: 10px;
     padding-bottom: 10px;
     resize: vertical;
+}
+
+.app-page input::placeholder,
+.app-page textarea::placeholder,
+.login-page input::placeholder,
+.login-page textarea::placeholder {
+    color: var(--text-placeholder);
+    opacity: 1;
 }
 
 .app-page .form-group input:hover,

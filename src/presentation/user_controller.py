@@ -38,17 +38,24 @@ class UserController:
         try:
             page = request.args.get('page', 1, type=int)
             page_size = request.args.get('page_size', 50, type=int)
-            self._logger.debug(f"List users requested: page={page}, page_size={page_size}")
+            keyword = (request.args.get('keyword', '', type=str) or '').strip()
+            self._logger.debug(
+                "List users requested: page=%s, page_size=%s, keyword=%r",
+                page,
+                page_size,
+                keyword,
+            )
 
-            users = self._user_service.get_users(page=page, page_size=page_size)
-            total = self._user_service.get_total_users_count()
+            users = self._user_service.get_users(page=page, page_size=page_size, keyword=keyword)
+            total = self._user_service.get_total_users_count(keyword=keyword)
 
             return jsonify({
                 'users': users,
                 'total': total,
                 'page': page,
                 'page_size': page_size,
-                'total_pages': (total + page_size - 1) // page_size
+                'total_pages': (total + page_size - 1) // page_size,
+                'keyword': keyword,
             })
         except Exception as exc:
             self._logger.error(f'Error getting users: {exc}')

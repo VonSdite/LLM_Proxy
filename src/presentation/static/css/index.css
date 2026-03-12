@@ -115,10 +115,6 @@
     color: #e6edf3;
 }
 
-:root[data-theme="dark"] .dashboard-page .filter-group input::placeholder {
-    color: #7d8590;
-}
-
 :root[data-theme="dark"] .dashboard-page .filter-group input[type="date"] {
     color-scheme: dark;
 }

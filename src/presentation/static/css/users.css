@@ -22,10 +22,102 @@
 }
 
 .users-page .users-section h2 {
-    margin: 0 0 14px;
+    margin: 0;
     font-size: 18px;
     font-weight: 650;
     color: var(--text-primary);
+}
+
+.users-page .section-toolbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+}
+
+.users-page .section-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.users-page .section-title-group p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.users-page .section-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: min(100%, 420px);
+}
+
+.users-page .section-search-field {
+    position: relative;
+    flex: 1 1 280px;
+    min-width: 0;
+}
+
+.users-page .section-search .form-control {
+    min-width: 0;
+}
+
+.users-page .section-search-field .form-control {
+    padding-right: 42px;
+}
+
+.users-page .search-clear-button {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #f8fbff;
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1;
+    transform: translateY(-50%);
+    cursor: pointer;
+    transition: color var(--transition), background-color var(--transition), border-color var(--transition);
+}
+
+.users-page .search-clear-button:hover {
+    background: #eef4fb;
+    color: var(--text-primary);
+    border-color: var(--line-strong);
+}
+
+.users-page .search-clear-button:focus-visible {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--focus);
+}
+
+:root[data-theme="dark"] .users-page .search-clear-button {
+    background: #161b22;
+    border-color: #30363d;
+    color: #7d8590;
+}
+
+:root[data-theme="dark"] .users-page .search-clear-button:hover {
+    background: #1f2630;
+    border-color: #3d444d;
+    color: #e6edf3;
+}
+
+.users-page .section-search .btn {
+    flex: 0 0 auto;
+    min-width: 78px;
 }
 
 .users-page .users-table-shell {
@@ -418,8 +510,13 @@
         align-items: flex-start;
     }
 
+    .users-page .section-toolbar,
     .users-page .form-row {
         flex-wrap: wrap;
+    }
+
+    .users-page .section-search {
+        width: 100%;
     }
 
     .users-page .form-group.form-submit {
@@ -439,6 +536,15 @@
     .users-page .form-row {
         flex-direction: column;
         align-items: stretch;
+    }
+
+    .users-page .section-search {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .users-page .section-search .btn {
+        width: 100%;
     }
 
     .users-page .users-table {

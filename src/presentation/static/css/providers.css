@@ -658,17 +658,8 @@
     background: #fff;
 }
 
-.providers-page .modal .form-control::placeholder {
-    color: #8a94a6;
-    opacity: 1;
-}
-
 :root[data-theme="dark"] .providers-page .modal .form-control {
     background: #0d1117;
-}
-
-:root[data-theme="dark"] .providers-page .modal .form-control::placeholder {
-    color: #6f7c90;
 }
 
 .providers-page .modal-footer .btn {

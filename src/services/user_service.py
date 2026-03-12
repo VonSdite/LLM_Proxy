@@ -67,18 +67,18 @@ class UserService:
             self._logger.error(f'Failed to get user: {e}')
             return None
 
-    def get_users(self, page: int = 1, page_size: int = 50) -> List[Dict[str, Any]]:
+    def get_users(self, page: int = 1, page_size: int = 50, keyword: Optional[str] = None) -> List[Dict[str, Any]]:
         """分页查询用户列表。"""
         try:
-            return self._repository.get(page=page, page_size=page_size)
+            return self._repository.get(page=page, page_size=page_size, keyword=keyword)
         except Exception as e:
             self._logger.error(f'Failed to get users: {e}')
             return []
 
-    def get_total_users_count(self) -> int:
+    def get_total_users_count(self, keyword: Optional[str] = None) -> int:
         """查询用户总数。"""
         try:
-            return self._repository.get_count()
+            return self._repository.get_count(keyword=keyword)
         except Exception as e:
             self._logger.error(f'Failed to get users count: {e}')
             return 0
