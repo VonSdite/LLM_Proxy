@@ -54,6 +54,7 @@ class WebController:
         return render_template(
             "providers.html",
             active_page="providers",
+            chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
         )

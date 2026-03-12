@@ -151,6 +151,24 @@ class ProviderService:
             "fetched_models": fetched_models,
         }
 
+    def update_chat_whitelist_enabled(self, enabled: Any) -> bool:
+        parsed_enabled = self._parse_optional_bool(enabled)
+        if parsed_enabled is None:
+            raise ValueError("Whitelist enabled flag is required")
+
+        config = self._load_config()
+        chat_config = config.get("chat")
+        if chat_config is None:
+            chat_config = {}
+            config["chat"] = chat_config
+        if not isinstance(chat_config, dict):
+            raise ValueError("Config field 'chat' must be an object")
+
+        chat_config["whitelist_enabled"] = parsed_enabled
+        self._write_config(config)
+        self._reload_callback()
+        return parsed_enabled
+
     def _load_config(self) -> Dict[str, Any]:
         with open(self._config_path, "r", encoding="utf-8") as file:
             data = yaml.safe_load(file)

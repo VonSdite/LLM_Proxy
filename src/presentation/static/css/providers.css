@@ -26,6 +26,67 @@
     gap: 10px;
 }
 
+.providers-page .toolbar-setting-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.72);
+}
+
+.providers-page .toolbar-setting-card + .toolbar-card {
+    margin-top: 16px;
+}
+
+.providers-page .toolbar-setting-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.providers-page .toolbar-setting-label {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.providers-page .toolbar-setting-hint {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.providers-page .toolbar-setting-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.providers-page .toolbar-setting-status {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.providers-page .toolbar-setting-card[data-enabled="true"] .toolbar-setting-status {
+    color: var(--success);
+}
+
+.providers-page .toolbar-setting-card[data-enabled="true"] {
+    border-color: rgba(28, 164, 113, 0.22);
+    background: rgba(28, 164, 113, 0.06);
+}
+
+.providers-page .toolbar-setting-card[data-saving="true"] .toolbar-setting-status {
+    color: var(--primary-active);
+}
+
 .providers-page .toolbar-pill {
     display: inline-flex;
     align-items: center;
@@ -128,6 +189,20 @@
     color: currentColor;
 }
 
+:root[data-theme="dark"] .providers-page .toolbar-setting-card {
+    border-color: #313b47;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+:root[data-theme="dark"] .providers-page .toolbar-setting-card[data-enabled="true"] {
+    border-color: rgba(46, 160, 104, 0.42);
+    background: rgba(46, 160, 104, 0.1);
+}
+
+:root[data-theme="dark"] .providers-page .toolbar-setting-card[data-saving="true"] .toolbar-setting-status {
+    color: #9bc7ff;
+}
+
 .providers-page .providers-table tbody tr:nth-child(even) td {
     background: #fbfdff;
 }
@@ -226,6 +301,58 @@
     white-space: nowrap;
 }
 
+.providers-page .switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    vertical-align: middle;
+}
+
+.providers-page .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.providers-page .slider {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    border: 1px solid #c8d7e6;
+    background: #e7eef6;
+    cursor: pointer;
+    transition: background-color var(--transition), border-color var(--transition), opacity var(--transition);
+}
+
+.providers-page .slider::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
+    transition: transform var(--transition), background-color var(--transition);
+}
+
+.providers-page .switch input:checked + .slider {
+    background: #e7f5ef;
+    border-color: #b7dccf;
+}
+
+.providers-page .switch input:checked + .slider::before {
+    transform: translateX(20px);
+    background: var(--success);
+}
+
+.providers-page .switch input:disabled + .slider {
+    opacity: 0.72;
+    cursor: wait;
+}
+
 .providers-page .model-summary-bar {
     margin-top: 10px;
     display: flex;
@@ -315,6 +442,15 @@
 
 :root[data-theme="dark"] .providers-page .btn-action {
     background: #0d1117;
+}
+
+:root[data-theme="dark"] .providers-page .slider {
+    background: #222b36;
+    border-color: #30363d;
+}
+
+:root[data-theme="dark"] .providers-page .slider::before {
+    background: #e8eef8;
 }
 
 :root[data-theme="dark"] .providers-page .btn-edit {
@@ -619,6 +755,16 @@
 
     .providers-page .toolbar-pill {
         white-space: normal;
+    }
+
+    .providers-page .toolbar-setting-card {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .providers-page .toolbar-setting-action {
+        width: 100%;
+        justify-content: space-between;
     }
 
     .providers-page .provider-form-grid {

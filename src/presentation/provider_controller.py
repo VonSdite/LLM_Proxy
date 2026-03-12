@@ -31,6 +31,7 @@ class ProviderController:
         self._app.route("/api/providers", methods=["GET"])(auth(self.get_providers))
         self._app.route("/api/providers", methods=["POST"])(auth(self.create_provider))
         self._app.route("/api/providers/fetch-models", methods=["GET"])(auth(self.fetch_models))
+        self._app.route("/api/providers/chat-whitelist", methods=["PUT"])(auth(self.update_chat_whitelist))
         self._app.route("/api/providers/<string:name>", methods=["GET"])(auth(self.get_provider))
         self._app.route("/api/providers/<string:name>", methods=["PUT"])(auth(self.update_provider))
         self._app.route("/api/providers/<string:name>", methods=["DELETE"])(auth(self.delete_provider))
@@ -112,4 +113,16 @@ class ProviderController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error(f"Error fetching provider models: {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    def update_chat_whitelist(self) -> Response:
+        try:
+            payload = request.get_json(silent=True) or {}
+            enabled = self._provider_service.update_chat_whitelist_enabled(payload.get("enabled"))
+            self._logger.info("Chat whitelist updated: enabled=%s", enabled)
+            return jsonify({"enabled": enabled})
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error(f"Error updating chat whitelist: {exc}")
             return jsonify({"error": str(exc)}), 500

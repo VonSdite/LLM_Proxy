@@ -8,6 +8,19 @@
 
 {% block content %}
         <section class="providers-toolbar-section">
+            <div class="toolbar-setting-card" id="chatWhitelistCard">
+                <div class="toolbar-setting-copy">
+                    <span class="toolbar-setting-label">Chat 白名单</span>
+                    <span class="toolbar-setting-hint">控制 Provider Chat 接口是否启用白名单限制，启用后仅允许白名单访问的用户可访问Chat</span>
+                </div>
+                <div class="toolbar-setting-action">
+                    <span class="toolbar-setting-status" id="chatWhitelistStatus">已禁用</span>
+                    <label class="switch toolbar-switch" aria-label="切换 Chat 白名单">
+                        <input type="checkbox" id="chatWhitelistToggle" onchange="toggleChatWhitelist(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
             <div class="toolbar-card">
                 <div class="toolbar-summary">
                     <span class="toolbar-pill toolbar-pill-primary">共 <strong id="providerCount">0</strong> 个 Provider</span>
@@ -124,11 +137,14 @@
 {% block page_scripts %}
     <script src="/static/js/ui-message.js"></script>
     <script>
+        const initialChatWhitelistEnabled = {{ 'true' if chat_whitelist_enabled else 'false' }};
         let providers = [];
         let editingProviderName = null;
         let providerModalInstance = null;
         let modelDetailModalInstance = null;
         let activeModelProvider = null;
+        let chatWhitelistEnabled = initialChatWhitelistEnabled;
+        let chatWhitelistSaving = false;
 
         function applyTheme(theme) {
             document.documentElement.setAttribute('data-theme', theme);
@@ -161,6 +177,49 @@
 
         function decodeProviderName(encodedName) {
             return decodeURIComponent(encodedName);
+        }
+
+        function updateChatWhitelistUi() {
+            const card = document.getElementById('chatWhitelistCard');
+            const status = document.getElementById('chatWhitelistStatus');
+            const toggle = document.getElementById('chatWhitelistToggle');
+            if (!card || !status || !toggle) return;
+
+            card.dataset.enabled = chatWhitelistEnabled ? 'true' : 'false';
+            card.dataset.saving = chatWhitelistSaving ? 'true' : 'false';
+            toggle.checked = !!chatWhitelistEnabled;
+            toggle.disabled = !!chatWhitelistSaving;
+            status.textContent = chatWhitelistSaving
+                ? '保存中...'
+                : (chatWhitelistEnabled ? '已启用' : '已禁用');
+        }
+
+        async function toggleChatWhitelist(enabled) {
+            const previous = chatWhitelistEnabled;
+            chatWhitelistEnabled = !!enabled;
+            chatWhitelistSaving = true;
+            updateChatWhitelistUi();
+
+            try {
+                const response = await fetch('/api/providers/chat-whitelist', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !!enabled })
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '更新 Chat 白名单失败');
+                }
+                chatWhitelistEnabled = !!result.enabled;
+                showMessage(`Chat 白名单已${chatWhitelistEnabled ? '启用' : '禁用'}`, 'success');
+            } catch (error) {
+                console.error('更新 Chat 白名单失败:', error);
+                chatWhitelistEnabled = previous;
+                showMessage(error.message || '更新 Chat 白名单失败', 'error');
+            } finally {
+                chatWhitelistSaving = false;
+                updateChatWhitelistUi();
+            }
         }
 
         function getModelPreview(models, limit = 6) {
@@ -457,6 +516,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             initThemeToggle();
             initTooltips();
+            updateChatWhitelistUi();
             const modalElement = document.getElementById('providerModal');
             providerModalInstance = new bootstrap.Modal(modalElement);
             modalElement.addEventListener('hidden.bs.modal', function() {
