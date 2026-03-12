@@ -78,7 +78,7 @@ class ProxyController:
             request_data["stream_options"] = stream_options
 
             model_name = request_data["model"]
-            provider = self._provider_manager.find_provider_by_model(model_name)
+            provider = self._provider_manager.get_provider_for_model(model_name)
             if not provider:
                 self._logger.warning(f"Proxy rejected: unknown model={model_name!r}")
                 return (
@@ -138,7 +138,7 @@ class ProxyController:
     def list_models(self) -> Response:
         """返回当前可用模型列表。"""
         try:
-            data = [{"id": model_key} for model_key in self._provider_manager.get_all_models()]
+            data = [{"id": model_key} for model_key in self._provider_manager.list_model_names()]
             return jsonify({"object": "list", "data": data})
         except Exception as exc:
             self._logger.error(f"Error listing models: {exc}")

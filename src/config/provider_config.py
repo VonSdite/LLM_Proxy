@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Provider 配置的规范化与校验。"""
+"""Provider 配置 schema、factory 与校验。"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from ..utils.net import normalize_proxy_url
@@ -90,95 +91,169 @@ def normalize_model_list(value: Any) -> List[str]:
     return models
 
 
-def normalize_provider_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    if not isinstance(payload, Mapping):
-        raise ValueError("Provider payload must be an object")
+@dataclass(frozen=True, slots=True)
+class ProviderConfigSchema:
+    """显式表示配置文件中的单个 provider。"""
 
-    name = clean_optional_string(payload.get("name"))
-    api = clean_optional_string(payload.get("api"))
-    if name is None:
-        raise ValueError("Provider name is required")
-    if api is None:
-        raise ValueError("Provider api is required")
+    name: str
+    api: str
+    api_key: Optional[str] = None
+    proxy: Optional[str] = None
+    timeout_seconds: Optional[int] = None
+    max_retries: Optional[int] = None
+    verify_ssl: Optional[bool] = None
+    model_list: tuple[str, ...] = ()
+    hook: Optional[str] = None
 
-    normalized: Dict[str, Any] = {
-        "name": name,
-        "api": api,
-    }
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> "ProviderConfigSchema":
+        """从管理接口 payload 构造规范化 schema。"""
+        return cls._from_mapping(payload)
 
-    api_key = clean_optional_string(payload.get("api_key"))
-    if api_key is not None:
-        normalized["api_key"] = api_key
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any]) -> "ProviderConfigSchema":
+        """从配置文件对象构造规范化 schema。"""
+        return cls._from_mapping(config)
 
-    proxy = normalize_proxy_url(payload.get("proxy"))
-    if proxy is not None:
-        normalized["proxy"] = proxy
+    @classmethod
+    def _from_mapping(cls, config: Mapping[str, Any]) -> "ProviderConfigSchema":
+        if not isinstance(config, Mapping):
+            raise ValueError("Provider config must be an object")
 
-    timeout_seconds = parse_optional_positive_int(payload.get("timeout_seconds"))
-    if timeout_seconds is not None:
-        normalized["timeout_seconds"] = timeout_seconds
+        name = clean_optional_string(config.get("name"))
+        api = clean_optional_string(config.get("api"))
+        if name is None:
+            raise ValueError("Provider name is required")
+        if api is None:
+            raise ValueError("Provider api is required")
 
-    max_retries = parse_optional_positive_int(payload.get("max_retries"))
-    if max_retries is not None:
-        normalized["max_retries"] = max_retries
+        return cls(
+            name=name,
+            api=api,
+            api_key=clean_optional_string(config.get("api_key")),
+            proxy=normalize_proxy_url(config.get("proxy")),
+            timeout_seconds=parse_optional_positive_int(config.get("timeout_seconds")),
+            max_retries=parse_optional_positive_int(config.get("max_retries")),
+            verify_ssl=parse_optional_bool(config.get("verify_ssl")),
+            model_list=tuple(normalize_model_list(config.get("model_list"))),
+            hook=clean_optional_string(config.get("hook")),
+        )
 
-    verify_ssl = parse_optional_bool(payload.get("verify_ssl"))
-    if verify_ssl is not None:
-        normalized["verify_ssl"] = verify_ssl
+    def to_mapping(self) -> Dict[str, Any]:
+        """转换为适合写回配置文件的普通 dict。"""
+        config: Dict[str, Any] = {
+            "name": self.name,
+            "api": self.api,
+        }
 
-    model_list = normalize_model_list(payload.get("model_list"))
-    if model_list:
-        normalized["model_list"] = model_list
+        if self.api_key is not None:
+            config["api_key"] = self.api_key
+        if self.proxy is not None:
+            config["proxy"] = self.proxy
+        if self.timeout_seconds is not None:
+            config["timeout_seconds"] = self.timeout_seconds
+        if self.max_retries is not None:
+            config["max_retries"] = self.max_retries
+        if self.verify_ssl is not None:
+            config["verify_ssl"] = self.verify_ssl
+        if self.model_list:
+            config["model_list"] = list(self.model_list)
+        if self.hook is not None:
+            config["hook"] = self.hook
 
-    hook = clean_optional_string(payload.get("hook"))
-    if hook is not None:
-        normalized["hook"] = hook
-
-    return normalized
-
-
-def normalize_runtime_provider_config(config: Mapping[str, Any]) -> Dict[str, Any]:
-    if not isinstance(config, Mapping):
-        raise ValueError("Provider config must be an object")
-
-    name = clean_optional_string(config.get("name"))
-    api = clean_optional_string(config.get("api"))
-    if name is None:
-        raise ValueError("Provider name is required")
-    if api is None:
-        raise ValueError("Provider api is required")
-
-    return {
-        "name": name,
-        "api": api,
-        "api_key": clean_optional_string(config.get("api_key")) or "",
-        "model_list": normalize_model_list(config.get("model_list")),
-        "proxy": normalize_proxy_url(config.get("proxy")),
-        "timeout_seconds": parse_optional_positive_int(
-            config.get("timeout_seconds"),
-            default=DEFAULT_PROVIDER_TIMEOUT_SECONDS,
-        ),
-        "max_retries": parse_optional_positive_int(
-            config.get("max_retries"),
-            default=DEFAULT_PROVIDER_MAX_RETRIES,
-        ),
-        "verify_ssl": parse_optional_bool(
-            config.get("verify_ssl"),
-            default=DEFAULT_PROVIDER_VERIFY_SSL,
-        ),
-        "hook": clean_optional_string(config.get("hook")),
-    }
+        return config
 
 
-def validate_provider_definitions(providers: Sequence[Mapping[str, Any]]) -> None:
+@dataclass(frozen=True, slots=True)
+class RuntimeProviderSpec:
+    """显式表示运行时使用的 provider 规格。"""
+
+    name: str
+    api: str
+    api_key: str
+    model_list: tuple[str, ...]
+    proxy: Optional[str]
+    timeout_seconds: int
+    max_retries: int
+    verify_ssl: bool
+    hook: Optional[str]
+
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any]) -> "RuntimeProviderSpec":
+        return cls.from_schema(ProviderConfigSchema.from_mapping(config))
+
+    @classmethod
+    def from_schema(cls, config: ProviderConfigSchema) -> "RuntimeProviderSpec":
+        return cls(
+            name=config.name,
+            api=config.api,
+            api_key=config.api_key or "",
+            model_list=config.model_list,
+            proxy=config.proxy,
+            timeout_seconds=config.timeout_seconds or DEFAULT_PROVIDER_TIMEOUT_SECONDS,
+            max_retries=config.max_retries or DEFAULT_PROVIDER_MAX_RETRIES,
+            verify_ssl=(
+                config.verify_ssl
+                if config.verify_ssl is not None
+                else DEFAULT_PROVIDER_VERIFY_SSL
+            ),
+            hook=config.hook,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRuntimeView:
+    """ProviderManager 暴露的只读运行时视图。"""
+
+    name: str
+    api: str
+    model_list: tuple[str, ...]
+    proxy: Optional[str]
+    timeout_seconds: int
+    max_retries: int
+    verify_ssl: bool
+    hook: Optional[str]
+
+    @classmethod
+    def from_spec(cls, spec: RuntimeProviderSpec) -> "ProviderRuntimeView":
+        return cls(
+            name=spec.name,
+            api=spec.api,
+            model_list=spec.model_list,
+            proxy=spec.proxy,
+            timeout_seconds=spec.timeout_seconds,
+            max_retries=spec.max_retries,
+            verify_ssl=spec.verify_ssl,
+            hook=spec.hook,
+        )
+
+
+def build_provider_schemas(
+    providers: Sequence[Mapping[str, Any]],
+) -> tuple[ProviderConfigSchema, ...]:
     seen_names: set[str] = set()
+    seen_model_keys: set[str] = set()
+    schemas: List[ProviderConfigSchema] = []
 
     for index, provider in enumerate(providers):
         if not isinstance(provider, Mapping):
             raise ValueError(f"Provider entry at index {index} must be an object")
 
-        normalized = normalize_runtime_provider_config(provider)
-        name = normalized["name"]
-        if name in seen_names:
-            raise ValueError(f"Duplicate provider name detected: {name}")
-        seen_names.add(name)
+        schema = ProviderConfigSchema.from_mapping(provider)
+        if schema.name in seen_names:
+            raise ValueError(f"Duplicate provider name detected: {schema.name}")
+        seen_names.add(schema.name)
+
+        for model in schema.model_list:
+            model_key = f"{schema.name}/{model}"
+            if model_key in seen_model_keys:
+                raise ValueError(f"Duplicate provider model mapping detected: {model_key}")
+            seen_model_keys.add(model_key)
+
+        schemas.append(schema)
+
+    return tuple(schemas)
+
+
+def validate_provider_definitions(providers: Sequence[Mapping[str, Any]]) -> None:
+    build_provider_schemas(providers)

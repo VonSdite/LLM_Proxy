@@ -4,11 +4,11 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..application.app_context import AppContext
 from ..config.provider_config import (
-    normalize_provider_payload,
+    ProviderConfigSchema,
     validate_provider_definitions,
 )
 
@@ -33,10 +33,11 @@ class ProviderService:
     def create_provider(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = self._extract_providers(config)
-        normalized = normalize_provider_payload(payload)
+        provider_config = ProviderConfigSchema.from_payload(payload)
+        normalized = provider_config.to_mapping()
 
-        if self._find_provider(providers, normalized['name']):
-            raise ValueError(f"Provider already exists: {normalized['name']}")
+        if self._find_provider(providers, provider_config.name):
+            raise ValueError(f"Provider already exists: {provider_config.name}")
 
         providers.append(normalized)
         self._save_providers(config, providers)
@@ -45,15 +46,16 @@ class ProviderService:
     def update_provider(self, current_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = self._extract_providers(config)
-        normalized = normalize_provider_payload(payload)
+        provider_config = ProviderConfigSchema.from_payload(payload)
+        normalized = provider_config.to_mapping()
 
         target = self._find_provider(providers, current_name)
         if target is None:
             raise ValueError(f'Provider not found: {current_name}')
 
-        duplicate = self._find_provider(providers, normalized['name'])
+        duplicate = self._find_provider(providers, provider_config.name)
         if duplicate is not None and duplicate is not target:
-            raise ValueError(f"Provider already exists: {normalized['name']}")
+            raise ValueError(f"Provider already exists: {provider_config.name}")
 
         providers[providers.index(target)] = normalized
         self._save_providers(config, providers)

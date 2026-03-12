@@ -8,7 +8,7 @@ from pathlib import Path
 from flask import request
 
 from .app_context import AppContext
-from ..config import ConfigManager, ProviderManager
+from ..config import ConfigManager, ProviderManager, build_provider_schemas
 from ..presentation import (
     AuthenticationController,
     ProviderController,
@@ -187,8 +187,11 @@ class Application:
     def reload_providers(self) -> None:
         self._config_manager.reload()
         config_dict = self._config_manager.get_raw_config()
-        providers_config = config_dict.get('providers', [])
-        self._provider_manager.load_providers(providers_config)
+        providers_config = config_dict.get("providers", [])
+        if providers_config is None:
+            providers_config = []
+        provider_schemas = build_provider_schemas(providers_config)
+        self._provider_manager.load_providers(provider_schemas)
 
     def run(self) -> None:
         """启动 WSGI 服务。"""

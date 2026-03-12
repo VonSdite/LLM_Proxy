@@ -698,8 +698,8 @@
                     throw new Error(result.error || '保存 provider 失败');
                 }
                 editingProviderName = result.name;
+                providerModalInstance?.hide();
                 showMessage('Provider 保存成功，配置已重载', 'success');
-                fillForm(result);
                 await loadProviders();
             } catch (error) {
                 console.error('保存 provider 失败:', error);

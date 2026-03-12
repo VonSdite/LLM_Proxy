@@ -49,7 +49,7 @@
 - `src/repositories`
   - SQLite 数据访问
 - `src/config`
-  - 配置快照管理、Provider 配置规范化、Provider 运行时注册
+  - 配置快照管理、显式 Provider schema / factory、Provider 运行时注册
 - `src/external`
   - 上游响应适配、流式探测、Provider 运行时对象
 - `src/hooks`
@@ -78,11 +78,13 @@
   - 提供原子写回
   - `get_raw_config()` 返回 `deepcopy`，避免调用方误改内部缓存
 - `provider_config`
-  - 负责 Provider 配置规范化和校验
+  - 负责 `ProviderConfigSchema`、`RuntimeProviderSpec`、`ProviderRuntimeView`
+  - 负责批量 `build_provider_schemas(...)`、配置规范化和校验
 - `ProviderManager`
-  - 负责把配置中的 Provider 转成运行时 `LLMProvider`
-  - 维护 `model -> provider` 映射
-  - 维护 Hook 缓存
+  - 只接收已构建好的 `ProviderConfigSchema`
+  - 负责把 schema 转成运行时 `LLMProvider`
+  - 维护 `model -> provider` 映射、只读 `ProviderRuntimeView` 注册表和 Hook 缓存
+  - 对外优先暴露只读接口：`get_provider_view()`、`list_provider_views()`、`list_model_names()`
 - `LLMProvider`
   - 运行时 Provider 对象
   - 当前会复制 `model_list`，避免共享可变引用
@@ -94,7 +96,7 @@
 4. 如果开启白名单，则按 IP 查询用户，并要求 `whitelist_access_enabled=1`
 5. 校验请求体必须包含 `model`
 6. 补齐 `stream_options.include_usage=true`
-7. 用 `ProviderManager.find_provider_by_model(model)` 获取目标 Provider
+7. 用 `ProviderManager.get_provider_for_model(model)` 获取目标 Provider
 8. `ProxyService.proxy_request(...)` 转发到上游
 9. `response_adapter` 处理普通响应或 SSE 响应
 10. 响应完成后通过回调写入 `request_logs` 并同步更新 `daily_request_stats`
