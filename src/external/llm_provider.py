@@ -16,6 +16,7 @@ class LLMProvider:
         api: str,
         api_key: Optional[str] = None,
         model_list: Optional[list] = None,
+        proxy: Optional[str] = None,
         timeout_seconds: int = 300,
         max_retries: int = 3,
         verify_ssl: bool = False,
@@ -25,6 +26,7 @@ class LLMProvider:
         self.api = api
         self.api_key = api_key
         self.model_list = model_list or []
+        self.proxy = proxy
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.verify_ssl = verify_ssl

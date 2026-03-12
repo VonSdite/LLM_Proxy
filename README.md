@@ -32,9 +32,23 @@ pip install flask gevent requests pyyaml urllib3
 可选字段：
 
 - `admin.username` / `admin.password`
+- `providers[].proxy`
 - `providers[].hook`
 - `logging.path` / `logging.level`
 - `database.path`
+
+`providers[].proxy` 用于为单个 provider 指定上游代理地址，例如：
+
+```yaml
+providers:
+  - name: openai
+    api: https://api.openai.com/v1/chat/completions
+    proxy: http://127.0.0.1:7890
+```
+
+该代理会同时用于：
+- 正常聊天转发请求
+- 管理页中的“拉取模型”请求
 
 ### 3. 启动服务
 

@@ -13,6 +13,7 @@ from urllib3.util.retry import Retry
 from ..application.app_context import AppContext
 from ..external import LLMProvider, build_proxy_response, probe_stream_response
 from ..hooks import HookContext
+from ..utils.net import build_requests_proxies
 
 
 class ProxyService:
@@ -37,6 +38,7 @@ class ProxyService:
         timeout_seconds = provider.timeout_seconds
         max_retries = provider.max_retries
         verify_ssl = provider.verify_ssl
+        request_proxies = build_requests_proxies(provider.proxy)
 
         def build_request(attempt: int) -> Tuple[Dict[str, str], Dict[str, Any], HookContext]:
             headers = dict(request_headers)
@@ -72,6 +74,7 @@ class ProxyService:
                     headers=headers,
                     json=body,
                     stream=requested_stream,
+                    proxies=request_proxies,
                     verify=verify_ssl,
                     timeout=timeout_seconds,
                 )

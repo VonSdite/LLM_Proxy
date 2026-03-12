@@ -13,6 +13,7 @@ providers:
   - name: volcengine
     api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
     api_key:
+    proxy:
     timeout_seconds: 300
     max_retries: 3
     verify_ssl: false

@@ -15,6 +15,7 @@ import yaml
 
 from ..application.app_context import AppContext
 from ..config import ProviderManager
+from ..utils.net import build_requests_proxies, normalize_proxy_url
 
 
 class ProviderService:
@@ -89,6 +90,7 @@ class ProviderService:
         name: str,
         api: str,
         api_key: Optional[str] = None,
+        proxy: Optional[str] = None,
         timeout_seconds: Optional[Any] = None,
         verify_ssl: Optional[Any] = None,
     ) -> Dict[str, Any]:
@@ -107,6 +109,11 @@ class ProviderService:
         if effective_api_key is None:
             effective_api_key = self._clean_optional_string(target.get("api_key"))
 
+        effective_proxy = self._parse_optional_proxy(target.get("proxy"))
+        incoming_proxy = self._parse_optional_proxy(proxy)
+        if incoming_proxy is not None:
+            effective_proxy = incoming_proxy
+
         effective_timeout = self._parse_optional_positive_int(timeout_seconds)
         if effective_timeout is None:
             effective_timeout = self._parse_optional_positive_int(target.get("timeout_seconds")) or 30
@@ -120,6 +127,7 @@ class ProviderService:
         fetched_models = self._fetch_models_from_upstream(
             api=str(api).strip(),
             api_key=effective_api_key,
+            proxy=effective_proxy,
             timeout_seconds=effective_timeout,
             verify_ssl=effective_verify_ssl,
         )
@@ -213,6 +221,10 @@ class ProviderService:
         if api_key is not None:
             normalized["api_key"] = api_key
 
+        proxy = self._parse_optional_proxy(payload.get("proxy"))
+        if proxy is not None:
+            normalized["proxy"] = proxy
+
         timeout_seconds = self._parse_optional_positive_int(payload.get("timeout_seconds"))
         if timeout_seconds is not None:
             normalized["timeout_seconds"] = timeout_seconds
@@ -255,6 +267,12 @@ class ProviderService:
         if parsed <= 0:
             raise ValueError("Expected a positive integer")
         return parsed
+
+    @staticmethod
+    def _parse_optional_proxy(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        return normalize_proxy_url(value)
 
     @staticmethod
     def _parse_optional_bool(value: Any) -> Optional[bool]:
@@ -313,12 +331,14 @@ class ProviderService:
         self,
         api: str,
         api_key: Optional[str],
+        proxy: Optional[str],
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> List[str]:
         headers = {"accept": "application/json"}
         if api_key:
             headers["authorization"] = f"Bearer {api_key}"
+        proxies = build_requests_proxies(proxy)
 
         candidates = self._build_model_endpoint_candidates(api)
         last_error: Optional[str] = None
@@ -329,6 +349,7 @@ class ProviderService:
                     response = session.get(
                         url,
                         headers=headers,
+                        proxies=proxies,
                         timeout=timeout_seconds,
                         verify=verify_ssl,
                     )

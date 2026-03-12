@@ -4,7 +4,7 @@
 {% block page_css %}<link rel="stylesheet" href="/static/css/providers.css">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
-{% block header_subtitle %}直接维护 config.yaml 中的 providers 配置，并在保存后自动重载生效。{% endblock %}
+{% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
 
 {% block content %}
         <section class="providers-toolbar-section">
@@ -31,7 +31,6 @@
                 <div class="modal-header border-bottom-0">
                     <div>
                         <h5 class="modal-title fw-semibold" id="providerModalLabel">新增 Provider</h5>
-                        <div class="modal-subtitle" id="providerModalSubtitle">仅名称和 API 地址为必填项。</div>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
@@ -50,6 +49,10 @@
                             <input type="text" class="form-control" id="providerApiKey" placeholder="留空则不写入配置">
                         </div>
                         <div class="mb-3">
+                            <label class="form-label">代理</label>
+                            <input type="text" class="form-control" id="providerProxy" placeholder="例如 http://127.0.0.1:7890">
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label">Hook 配置</label>
                             <input type="text" class="form-control" id="providerHook" placeholder="例如 example_hook.py">
                         </div>
@@ -64,28 +67,28 @@
                         <div class="mb-3">
                             <label class="form-label">Verify SSL</label>
                             <select class="form-control" id="providerVerifySsl">
-                                <option value="">留空</option>
-                                <option value="true">true</option>
-                                <option value="false">false</option>
+                                <option value="">-</option>
+                                <option value="true">启用</option>
+                                <option value="false">禁用</option>
                             </select>
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Model List</label>
-                        <textarea class="form-control provider-models-textarea" id="providerModelList" placeholder="每行一个模型，留空则不写入配置"></textarea>
-                        <div class="model-editor-panel">
-                            <div class="model-editor-meta">
-                                <span class="model-editor-label">模型预览</span>
-                                <span class="model-editor-count" id="providerModelCount">0 个模型</span>
-                            </div>
-                            <div class="model-editor-preview" id="providerModelPreview">
-                                <div class="model-editor-empty">模型列表为空时，不会写入配置文件。</div>
+                        <div class="field-header">
+                            <label class="form-label" for="providerModelList">Model List</label>
+                            <div class="field-header-actions">
+                                <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onclick="fetchModels()">拉取模型</button>
+                                <button
+                                    type="button"
+                                    class="field-help-button"
+                                    data-bs-toggle="tooltip"
+                                    data-bs-placement="top"
+                                    data-bs-title="从 /v1/models 或 /models 接口拉取模型，并追加到当前列表。"
+                                    aria-label="查看拉取模型说明"
+                                >?</button>
                             </div>
                         </div>
-                    </div>
-                    <div class="fetch-models-bar">
-                        <div class="fetch-models-hint">模型拉取会调用 provider 的 `/v1/models` 或 `/models` 接口，并将结果追加到配置中。</div>
-                        <button type="button" class="btn btn-secondary" id="fetchModelsBtn" onclick="fetchModels()">拉取模型列表</button>
+                        <textarea class="form-control provider-models-textarea" id="providerModelList" placeholder="每行一个模型，留空则不写入配置"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer border-top-0">
@@ -156,16 +159,6 @@
                 .replace(/'/g, '&#39;');
         }
 
-        function formatBoolean(value) {
-            if (value === true) return 'true';
-            if (value === false) return 'false';
-            return '-';
-        }
-
-        function formatOptional(value) {
-            return value === null || value === undefined || value === '' ? '-' : escapeHtml(value);
-        }
-
         function decodeProviderName(encodedName) {
             return decodeURIComponent(encodedName);
         }
@@ -218,39 +211,12 @@
             modelDetailModalInstance.show();
         }
 
-        function parseModelList(rawValue) {
-            const values = String(rawValue || '')
-                .split(/\r?\n|,/)
-                .map(item => item.trim())
-                .filter(Boolean);
-
-            return Array.from(new Set(values));
-        }
-
-        function renderModelEditorPreview() {
-            const textarea = document.getElementById('providerModelList');
-            const previewElement = document.getElementById('providerModelPreview');
-            const countElement = document.getElementById('providerModelCount');
-            if (!textarea || !previewElement || !countElement) return;
-
-            const models = parseModelList(textarea.value);
-            countElement.textContent = `${models.length} 个模型`;
-
-            if (!models.length) {
-                previewElement.innerHTML = '<div class="model-editor-empty">模型列表为空时，不会写入配置文件。</div>';
-                return;
-            }
-
-            previewElement.innerHTML = models
-                .map(model => `<span class="model-editor-chip">${escapeHtml(model)}</span>`)
-                .join('');
-        }
-
         function collectFormData() {
             return {
                 name: document.getElementById('providerName').value.trim(),
                 api: document.getElementById('providerApi').value.trim(),
                 api_key: document.getElementById('providerApiKey').value.trim(),
+                proxy: document.getElementById('providerProxy').value.trim(),
                 timeout_seconds: document.getElementById('providerTimeout').value.trim(),
                 max_retries: document.getElementById('providerRetries').value.trim(),
                 verify_ssl: document.getElementById('providerVerifySsl').value,
@@ -263,18 +229,40 @@
             document.getElementById('providerName').value = provider?.name || '';
             document.getElementById('providerApi').value = provider?.api || '';
             document.getElementById('providerApiKey').value = provider?.api_key || '';
+            document.getElementById('providerProxy').value = provider?.proxy || '';
             document.getElementById('providerTimeout').value = provider?.timeout_seconds || '';
             document.getElementById('providerRetries').value = provider?.max_retries || '';
             document.getElementById('providerVerifySsl').value = provider?.verify_ssl === true ? 'true' : (provider?.verify_ssl === false ? 'false' : '');
             document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? provider.model_list.join('\n') : '';
             document.getElementById('providerHook').value = provider?.hook || '';
-            renderModelEditorPreview();
+            updateFetchModelsButtonState();
+        }
+
+        function initTooltips() {
+            if (!window.bootstrap || !window.bootstrap.Tooltip) return;
+            document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(element => {
+                if (!bootstrap.Tooltip.getInstance(element)) {
+                    new bootstrap.Tooltip(element);
+                }
+            });
+        }
+
+        function canFetchModels() {
+            return !!(
+                document.getElementById('providerName').value.trim() &&
+                document.getElementById('providerApi').value.trim()
+            );
+        }
+
+        function updateFetchModelsButtonState() {
+            const button = document.getElementById('fetchModelsBtn');
+            if (!button || button.dataset.loading === 'true') return;
+            button.disabled = !canFetchModels();
         }
 
         function openCreateModal() {
             editingProviderName = null;
             document.getElementById('providerModalLabel').textContent = '新增 Provider';
-            document.getElementById('providerModalSubtitle').textContent = '仅名称和 API 地址为必填项。';
             fillForm(null);
             providerModalInstance.show();
         }
@@ -284,7 +272,6 @@
             if (!provider) return;
             editingProviderName = name;
             document.getElementById('providerModalLabel').textContent = '编辑 Provider';
-            document.getElementById('providerModalSubtitle').textContent = '保存后会自动重载 provider 配置。';
             fillForm(provider);
             providerModalInstance.show();
         }
@@ -322,10 +309,6 @@
                             <th>名称</th>
                             <th>API 地址</th>
                             <th>模型</th>
-                            <th>Timeout</th>
-                            <th>Retries</th>
-                            <th>Verify SSL</th>
-                            <th>Hook</th>
                             <th>操作</th>
                         </tr>
                     </thead>
@@ -356,14 +339,9 @@
                             <div class="model-tags model-tags-preview">${modelTags}</div>
                             ${modelSummary}
                         </td>
-                        <td>${formatOptional(provider.timeout_seconds)}</td>
-                        <td>${formatOptional(provider.max_retries)}</td>
-                        <td>${formatBoolean(provider.verify_ssl)}</td>
-                        <td>${formatOptional(provider.hook)}</td>
                         <td>
                             <div class="action-buttons">
                                 <button class="btn-action btn-edit" onclick="openEditModal(decodeProviderName('${encodeURIComponent(provider.name)}'))">编辑</button>
-                                <button class="btn-action btn-fetch" onclick="quickFetchModels(decodeProviderName('${encodeURIComponent(provider.name)}'))">拉取模型</button>
                                 <button class="btn-action btn-delete" onclick="deleteProvider(decodeProviderName('${encodeURIComponent(provider.name)}'))">删除</button>
                             </div>
                         </td>
@@ -429,15 +407,6 @@
             }
         }
 
-        async function quickFetchModels(name) {
-            const provider = providers.find(item => item.name === name);
-            if (!provider) return;
-
-            editingProviderName = provider.name;
-            fillForm(provider);
-            await fetchModels();
-        }
-
         async function fetchModels() {
             const payload = collectFormData();
             if (!payload.name || !payload.api) {
@@ -454,11 +423,13 @@
                 api: payload.api
             });
             if (payload.api_key) params.set('api_key', payload.api_key);
+            if (payload.proxy) params.set('proxy', payload.proxy);
             if (payload.timeout_seconds) params.set('timeout_seconds', payload.timeout_seconds);
             if (payload.verify_ssl) params.set('verify_ssl', payload.verify_ssl);
 
             const button = document.getElementById('fetchModelsBtn');
             const originalText = button.textContent;
+            button.dataset.loading = 'true';
             button.disabled = true;
             button.textContent = '拉取中...';
 
@@ -477,13 +448,15 @@
                 console.error('拉取模型失败:', error);
                 showMessage(error.message || '拉取模型失败', 'error');
             } finally {
-                button.disabled = false;
+                button.dataset.loading = 'false';
                 button.textContent = originalText;
+                updateFetchModelsButtonState();
             }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
             initThemeToggle();
+            initTooltips();
             const modalElement = document.getElementById('providerModal');
             providerModalInstance = new bootstrap.Modal(modalElement);
             modalElement.addEventListener('hidden.bs.modal', function() {
@@ -497,9 +470,10 @@
                 document.getElementById('modelSearchInput').value = '';
                 document.getElementById('modelDetailList').innerHTML = '';
             });
-            document.getElementById('providerModelList').addEventListener('input', renderModelEditorPreview);
+            document.getElementById('providerName').addEventListener('input', updateFetchModelsButtonState);
+            document.getElementById('providerApi').addEventListener('input', updateFetchModelsButtonState);
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
-            renderModelEditorPreview();
+            updateFetchModelsButtonState();
             loadProviders();
         });
     </script>

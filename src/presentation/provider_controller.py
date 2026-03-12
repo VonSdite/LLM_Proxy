@@ -97,6 +97,7 @@ class ProviderController:
                 name=request.args.get("name", ""),
                 api=request.args.get("api", ""),
                 api_key=request.args.get("api_key"),
+                proxy=request.args.get("proxy"),
                 timeout_seconds=request.args.get("timeout_seconds"),
                 verify_ssl=request.args.get("verify_ssl"),
             )

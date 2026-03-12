@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from ..application.app_context import AppContext, Logger
 from ..external import LLMProvider
 from ..hooks import HookModule
+from ..utils.net import normalize_proxy_url
 
 
 class ProviderManager:
@@ -40,6 +41,7 @@ class ProviderManager:
         api = config.get('api', '')
         api_key = config.get('api_key', '')
         model_list = config.get('model_list', [])
+        proxy = normalize_proxy_url(config.get('proxy'))
         timeout_seconds = self._to_positive_int(config.get('timeout_seconds', 300), default=300)
         max_retries = self._to_positive_int(config.get('max_retries', 3), default=3)
         verify_ssl = self._to_bool(config.get('verify_ssl', False), default=False)
@@ -62,6 +64,7 @@ class ProviderManager:
             api=api,
             api_key=api_key,
             model_list=model_list,
+            proxy=proxy,
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             verify_ssl=verify_ssl,
