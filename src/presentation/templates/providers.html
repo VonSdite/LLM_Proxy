@@ -88,8 +88,12 @@
                     </div>
                     <div class="mb-3">
                         <div class="field-header">
-                            <label class="form-label" for="providerModelList">Model List</label>
+                            <div class="field-header-meta">
+                                <label class="form-label" for="providerModelList">Model List</label>
+                                <span class="field-meta-badge" id="providerModelCount">0 个模型</span>
+                            </div>
                             <div class="field-header-actions">
+                                <button type="button" class="btn-inline-secondary" onclick="tidyModelList()">整理</button>
                                 <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onclick="fetchModels()">拉取模型</button>
                                 <button
                                     type="button"
@@ -101,7 +105,7 @@
                                 >?</button>
                             </div>
                         </div>
-                        <textarea class="form-control provider-models-textarea" id="providerModelList" placeholder="每行一个模型，留空则不写入配置"></textarea>
+                        <textarea class="form-control provider-models-textarea" id="providerModelList" placeholder="每行一个模型，支持粘贴后整理；保存时会自动去空行并去重"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer border-top-0">
@@ -270,7 +274,65 @@
             modelDetailModalInstance.show();
         }
 
+        function normalizeModelListItems(value) {
+            const rawItems = String(value ?? '').split(/\r?\n/);
+            const models = [];
+            const seen = new Set();
+
+            rawItems.forEach(item => {
+                const model = item.trim();
+                if (!model || seen.has(model)) return;
+                seen.add(model);
+                models.push(model);
+            });
+
+            return models;
+        }
+
+        function buildModelListValue(models) {
+            return models.join('\n');
+        }
+
+        function updateModelListCount() {
+            const countElement = document.getElementById('providerModelCount');
+            const textarea = document.getElementById('providerModelList');
+            if (!countElement || !textarea) return;
+
+            const models = normalizeModelListItems(textarea.value);
+            countElement.textContent = `${models.length} 个模型`;
+        }
+
+        function applyNormalizedModelListValue(showFeedback = false) {
+            const textarea = document.getElementById('providerModelList');
+            if (!textarea) return false;
+
+            const before = textarea.value;
+            const normalizedItems = normalizeModelListItems(before);
+            const normalizedValue = buildModelListValue(normalizedItems);
+            const changed = before !== normalizedValue;
+
+            textarea.value = normalizedValue;
+            updateModelListCount();
+
+            if (showFeedback) {
+                if (changed) {
+                    showMessage(`Model List 已整理，保留 ${normalizedItems.length} 个模型`, 'success');
+                } else {
+                    showMessage('Model List 已是整理后的格式', 'success');
+                }
+            }
+
+            return changed;
+        }
+
+        function tidyModelList() {
+            applyNormalizedModelListValue(true);
+        }
+
         function collectFormData() {
+            const normalizedModelList = buildModelListValue(
+                normalizeModelListItems(document.getElementById('providerModelList').value)
+            );
             return {
                 name: document.getElementById('providerName').value.trim(),
                 api: document.getElementById('providerApi').value.trim(),
@@ -279,7 +341,7 @@
                 timeout_seconds: document.getElementById('providerTimeout').value.trim(),
                 max_retries: document.getElementById('providerRetries').value.trim(),
                 verify_ssl: document.getElementById('providerVerifySsl').value,
-                model_list: document.getElementById('providerModelList').value,
+                model_list: normalizedModelList,
                 hook: document.getElementById('providerHook').value.trim()
             };
         }
@@ -292,8 +354,9 @@
             document.getElementById('providerTimeout').value = provider?.timeout_seconds || '';
             document.getElementById('providerRetries').value = provider?.max_retries || '';
             document.getElementById('providerVerifySsl').value = provider?.verify_ssl === true ? 'true' : (provider?.verify_ssl === false ? 'false' : '');
-            document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? provider.model_list.join('\n') : '';
+            document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? buildModelListValue(provider.model_list) : '';
             document.getElementById('providerHook').value = provider?.hook || '';
+            updateModelListCount();
             updateFetchModelsButtonState();
         }
 
@@ -413,6 +476,7 @@
         }
 
         async function saveProvider() {
+            applyNormalizedModelListValue();
             const payload = collectFormData();
             if (!payload.name) {
                 showMessage('请输入 provider 名称', 'error');
@@ -467,6 +531,7 @@
         }
 
         async function fetchModels() {
+            applyNormalizedModelListValue();
             const payload = collectFormData();
             if (!payload.name || !payload.api) {
                 showMessage('请先填写并保存 provider 名称和 API 地址', 'error');
@@ -532,7 +597,12 @@
             });
             document.getElementById('providerName').addEventListener('input', updateFetchModelsButtonState);
             document.getElementById('providerApi').addEventListener('input', updateFetchModelsButtonState);
+            document.getElementById('providerModelList').addEventListener('input', updateModelListCount);
+            document.getElementById('providerModelList').addEventListener('blur', function() {
+                applyNormalizedModelListValue();
+            });
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
+            updateModelListCount();
             updateFetchModelsButtonState();
             loadProviders();
         });
