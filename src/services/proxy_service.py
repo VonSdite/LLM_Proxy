@@ -30,6 +30,7 @@ class ProxyService:
         request_data: Dict[str, Any],
         request_headers: Dict[str, str],
         on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
+        forward_stream_usage: bool = False,
     ) -> Tuple[Optional[Response], int]:
         """代理请求到目标 provider，并处理重试与输出钩子。"""
         target_url = provider.api
@@ -123,6 +124,7 @@ class ProxyService:
                     stream_with_context,
                     self._logger,
                     on_complete=on_complete,
+                    forward_stream_usage=forward_stream_usage,
                 )
                 self._logger.info(
                     "Upstream request completed: provider=%s status=%s stream=%s",

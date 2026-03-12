@@ -71,6 +71,9 @@ class ProxyController:
                 )
 
             stream_options = request_data.get("stream_options")
+            client_requested_usage_chunk = isinstance(stream_options, dict) and (
+                stream_options.get("include_usage") is True
+            )
             if not isinstance(stream_options, dict):
                 stream_options = {}
             if stream_options.get("include_usage") is not True:
@@ -109,7 +112,11 @@ class ProxyController:
                 )
 
             result, status_code = self._proxy_service.proxy_request(
-                provider, request_data, headers, on_complete=on_proxy_complete
+                provider,
+                request_data,
+                headers,
+                on_complete=on_proxy_complete,
+                forward_stream_usage=client_requested_usage_chunk,
             )
             if result is None:
                 self._logger.error(f"Proxy failed after retries: model={model_name!r}, ip={client_ip}")
