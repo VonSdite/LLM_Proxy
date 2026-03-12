@@ -1,15 +1,8 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    {% include "_theme_bootstrap.html" %}
-    <title>{% block page_title %}LLM Proxy{% endblock %}</title>
-    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="/static/css/admin-base.css">
-    {% block page_css %}{% endblock %}
-</head>
-<body class="app-page {% block body_class %}{% endblock %}">
+{% extends "base_page.html" %}
+
+{% block body_class_prefix %}app-page {% endblock %}
+
+{% block body %}
     <div class="container">
         <div class="header">
             <div class="header-content">
@@ -42,8 +35,4 @@
         {% block content %}{% endblock %}
     </div>
     {% block after_container %}{% endblock %}
-    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
-    <script src="/static/js/theme.js"></script>
-    {% block page_scripts %}{% endblock %}
-</body>
-</html>
+{% endblock %}

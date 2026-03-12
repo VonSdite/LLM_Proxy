@@ -374,6 +374,14 @@
 }
 
 @media (max-width: 640px) {
+    .dashboard-page .filters-section,
+    .dashboard-page .stats-section,
+    .dashboard-page .table-section,
+    .dashboard-page .table-footer {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+
     .dashboard-page .filter-group {
         width: 100%;
         min-width: 0;

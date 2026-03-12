@@ -1050,3 +1050,11 @@
         min-width: 980px;
     }
 }
+
+@media (max-width: 640px) {
+    .providers-page .providers-toolbar-section,
+    .providers-page .providers-section {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+}

@@ -1,15 +1,10 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    {% include "_theme_bootstrap.html" %}
-    <title>管理员登录 - LLM Proxy</title>
-    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="/static/css/admin-base.css">
-    <link rel="stylesheet" href="/static/css/login.css">
-</head>
-<body class="login-page">
+{% extends "base_page.html" %}
+
+{% block page_title %}管理员登录 - LLM Proxy{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/login.css">{% endblock %}
+{% block body_class %}login-page{% endblock %}
+
+{% block body %}
     <div class="login-shell">
         <div class="login-head">
             <h1>登录</h1>
@@ -28,9 +23,10 @@
             </form>
         </div>
     </div>
+{% endblock %}
 
+{% block page_scripts %}
     <script src="/static/js/ui-message.js"></script>
-    <script src="/static/js/theme.js"></script>
     <script>
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -74,6 +70,4 @@
             loginBtn.textContent = '登录';
         });
     </script>
-    <script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+{% endblock %}
