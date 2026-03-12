@@ -7,21 +7,18 @@
 
 .users-page .add-user-section,
 .users-page .users-section {
-    padding: 22px 26px;
+    padding: 22px var(--page-card-inset);
 }
 
 .users-page .add-user-section {
-    border-bottom: 1px solid var(--line);
-    background: var(--surface);
+    padding: 22px var(--page-card-inset) 0;
+    border-bottom: none;
+    background: transparent;
 }
 
 .users-page .users-section {
-    background: var(--surface-soft);
-    padding-top: 16px;
-}
-
-:root[data-theme="dark"] .users-page .add-user-section {
-    background: #0f141b;
+    padding: 18px var(--page-card-inset) 0;
+    background: transparent;
 }
 
 .users-page .users-section h2 {
@@ -51,6 +48,16 @@
     gap: 14px;
     align-items: flex-end;
     margin-bottom: 0;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+
+:root[data-theme="dark"] .users-page .form-row {
+    border-color: #30363d;
+    background: #161b22;
 }
 
 .users-page .form-group {
@@ -353,10 +360,28 @@
 }
 
 .users-page .table-footer {
-    padding: 14px 0 0;
-    margin-top: 14px;
+    padding: 18px var(--page-card-inset) 22px;
+    margin-top: 0;
     border-top: 0;
     background: transparent;
+}
+
+:root[data-theme="dark"] .users-page .table-footer {
+    background: transparent;
+}
+
+.users-page .table-footer .right-controls {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+
+:root[data-theme="dark"] .users-page .table-footer .right-controls {
+    border-color: #30363d;
+    background: #161b22;
 }
 
 .users-page .modal-content {
@@ -382,7 +407,8 @@
 @media (max-width: 900px) {
     .users-page .header,
     .users-page .add-user-section,
-    .users-page .users-section {
+    .users-page .users-section,
+    .users-page .table-footer {
         padding-left: 16px;
         padding-right: 16px;
     }
@@ -404,7 +430,8 @@
 
 @media (max-width: 640px) {
     .users-page .add-user-section,
-    .users-page .users-section {
+    .users-page .users-section,
+    .users-page .table-footer {
         padding-left: 14px;
         padding-right: 14px;
     }

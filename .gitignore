@@ -5,6 +5,5 @@ data
 logs
 .opencode
 .history
-config.yaml
 .record
 
