@@ -7,7 +7,7 @@
 {% block header_subtitle %}直接维护 config.yaml 中的 providers 配置，并在保存后自动重载生效。{% endblock %}
 
 {% block content %}
-        <div class="content">
+        <section class="providers-toolbar-section">
             <div class="toolbar-card">
                 <div class="toolbar-summary">
                     <span class="toolbar-pill toolbar-pill-primary">共 <strong id="providerCount">0</strong> 个 Provider</span>
@@ -15,10 +15,13 @@
                 <button type="button" class="btn btn-primary" onclick="openCreateModal()">新增 Provider</button>
             </div>
 
-            <div class="providers-section" id="providersContainer">
+        </section>
+
+        <section class="providers-section">
+            <div class="providers-table-shell" id="providersContainer">
                 <div class="loading">正在加载 provider 配置...</div>
             </div>
-        </div>
+        </section>
 {% endblock %}
 
 {% block after_container %}

@@ -5,31 +5,23 @@
     gap: 14px;
 }
 
-.users-page .content {
-    padding: 24px;
-    background: var(--surface);
-}
-
 .users-page .add-user-section,
 .users-page .users-section {
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--surface-soft);
-    box-shadow: var(--shadow-card);
+    padding: 22px 26px;
 }
 
 .users-page .add-user-section {
-    padding: 18px;
-    margin-bottom: 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
 }
 
 .users-page .users-section {
-    padding: 18px;
-    background: #fff;
+    background: var(--surface-soft);
+    padding-top: 16px;
 }
 
-:root[data-theme="dark"] .users-page .users-section {
-    background: #161b22;
+:root[data-theme="dark"] .users-page .add-user-section {
+    background: #0f141b;
 }
 
 .users-page .users-section h2 {
@@ -39,10 +31,19 @@
     color: var(--text-primary);
 }
 
-.users-page #usersTableContainer {
+.users-page .users-table-shell {
     width: 100%;
-    overflow-x: hidden;
+    overflow-x: auto;
     overflow-y: visible;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+
+:root[data-theme="dark"] .users-page .users-table-shell {
+    background: #161b22;
+    border-color: #30363d;
 }
 
 .users-page .form-row {
@@ -80,9 +81,6 @@
     border-collapse: separate;
     border-spacing: 0;
     font-size: 14px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    overflow: hidden;
 }
 
 .users-page .users-table th {
@@ -161,12 +159,6 @@
 
 :root[data-theme="dark"] .users-page .users-table tbody tr:hover td {
     background: #1f2630;
-}
-
-:root[data-theme="dark"] .users-page .add-user-section,
-:root[data-theme="dark"] .users-page .users-section,
-:root[data-theme="dark"] .users-page .users-table {
-    border-color: #30363d;
 }
 
 .users-page .ip-address {
@@ -347,9 +339,24 @@
     color: #8ddbba;
 }
 
+.users-page .users-table-shell > .empty-state,
+.users-page .users-table-shell > .loading,
+.users-page .users-table-shell > .error,
+.users-page .users-table-shell > .success {
+    min-height: 132px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
 .users-page .table-footer {
-    padding: 14px 4px 0;
+    padding: 14px 0 0;
     margin-top: 14px;
+    border-top: 0;
+    background: transparent;
 }
 
 .users-page .modal-content {
@@ -374,7 +381,8 @@
 
 @media (max-width: 900px) {
     .users-page .header,
-    .users-page .content {
+    .users-page .add-user-section,
+    .users-page .users-section {
         padding-left: 16px;
         padding-right: 16px;
     }
@@ -395,13 +403,19 @@
 }
 
 @media (max-width: 640px) {
-    .users-page .content {
-        padding: 14px;
+    .users-page .add-user-section,
+    .users-page .users-section {
+        padding-left: 14px;
+        padding-right: 14px;
     }
 
     .users-page .form-row {
         flex-direction: column;
         align-items: stretch;
+    }
+
+    .users-page .users-table {
+        min-width: 980px;
     }
 
     .users-page .users-table th,

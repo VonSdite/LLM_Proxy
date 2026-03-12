@@ -7,8 +7,7 @@
 {% block header_subtitle %}统一管理白名单用户与 IP{% endblock %}
 
 {% block content %}
-        <div class="content">
-            <div class="add-user-section">
+        <section class="add-user-section">
                 <div class="form-row">
                     <div class="form-group">
                         <label>用户名 *</label>
@@ -22,11 +21,11 @@
                         <button class="btn btn-primary" onclick="createUser()">添加</button>
                     </div>
                 </div>
-            </div>
+        </section>
 
-            <div class="users-section">
+        <section class="users-section">
                 <h2>用户列表</h2>
-                <div id="usersTableContainer">
+                <div class="users-table-shell" id="usersTableContainer">
                     <div class="loading">加载用户数据...</div>
                 </div>
                 <div class="table-footer" id="tableFooter" style="display: none;">
@@ -51,7 +50,7 @@
                         <span class="total-count" id="totalCount">共 0 条</span>
                     </div>
                 </div>
-            </div>
+        </section>
 {% endblock %}
 
 {% block after_container %}
@@ -309,6 +308,7 @@
                 console.error('加载用户失败:', error);
                 document.getElementById('usersTableContainer').innerHTML =
                     '<div class="error">加载用户数据失败</div>';
+                document.getElementById('tableFooter').style.display = 'none';
             }
         }
 
@@ -382,6 +382,7 @@
 
             if (users.length === 0) {
                 container.innerHTML = '<div class="empty-state">暂无用户数据</div>';
+                document.getElementById('tableFooter').style.display = 'none';
                 return;
             }
 
