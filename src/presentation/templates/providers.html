@@ -166,6 +166,13 @@
             </div>
         </div>
     </div>
+    <div class="inline-confirm-popover floating-delete-popover" id="providerDeletePopover" data-placement="bottom" hidden>
+        <div class="inline-confirm-text">确认删除？</div>
+        <div class="inline-confirm-actions">
+            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelDeleteProviderConfirm(event)">取消</button>
+            <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteProviderBtn" onclick="confirmDeleteProvider(event)">确认</button>
+        </div>
+    </div>
 {% endblock %}
 
 {% block page_scripts %}
@@ -178,6 +185,8 @@
         let fetchModelPickerModalInstance = null;
         let modelDetailModalInstance = null;
         let activeModelProvider = null;
+        let pendingDeleteProviderName = null;
+        let deletingProviderName = null;
         let chatWhitelistEnabled = initialChatWhitelistEnabled;
         let chatWhitelistSaving = false;
         let fetchedModelCandidates = [];
@@ -195,6 +204,94 @@
 
         function decodeProviderName(encodedName) {
             return decodeURIComponent(encodedName);
+        }
+
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.inline-confirm-wrap') && !event.target.closest('#providerDeletePopover')) {
+                closeDeleteProviderConfirm();
+            }
+        });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeDeleteProviderConfirm();
+            }
+        });
+
+        window.addEventListener('resize', function() {
+            closeDeleteProviderConfirm(false);
+        });
+
+        window.addEventListener('scroll', function() {
+            closeDeleteProviderConfirm(false);
+        }, true);
+
+        function getProviderDeletePopoverElement() {
+            return document.getElementById('providerDeletePopover');
+        }
+
+        function getProviderDeleteTrigger(name) {
+            const triggerKey = encodeURIComponent(name);
+            return Array.from(document.querySelectorAll('[data-provider-delete-trigger]'))
+                .find(element => element.dataset.providerDeleteTrigger === triggerKey) || null;
+        }
+
+        function hideProviderDeletePopover() {
+            const popover = getProviderDeletePopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty('top');
+            popover.style.removeProperty('left');
+            popover.style.removeProperty('--popover-arrow-left');
+            popover.dataset.placement = 'bottom';
+        }
+
+        function syncDeleteProviderPopover() {
+            const popover = getProviderDeletePopoverElement();
+            if (!popover) return;
+
+            if (pendingDeleteProviderName === null) {
+                hideProviderDeletePopover();
+                return;
+            }
+
+            const trigger = getProviderDeleteTrigger(pendingDeleteProviderName);
+            if (!trigger) {
+                pendingDeleteProviderName = null;
+                deletingProviderName = null;
+                hideProviderDeletePopover();
+                return;
+            }
+
+            popover.hidden = false;
+            const confirmButton = document.getElementById('confirmDeleteProviderBtn');
+            if (confirmButton) {
+                confirmButton.disabled = deletingProviderName === pendingDeleteProviderName;
+                confirmButton.textContent = deletingProviderName === pendingDeleteProviderName ? '删除中...' : '确认';
+            }
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 10;
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const left = Math.min(
+                window.innerWidth - popoverRect.width - viewportPadding,
+                Math.max(viewportPadding, triggerRect.left + ((triggerRect.width - popoverRect.width) / 2))
+            );
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? 'bottom' : 'top';
+            popover.style.top = `${top}px`;
+            popover.style.left = `${left}px`;
+            popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
         }
 
         function updateChatWhitelistUi() {
@@ -576,6 +673,9 @@
 
         async function loadProviders() {
             try {
+                pendingDeleteProviderName = null;
+                deletingProviderName = null;
+                hideProviderDeletePopover();
                 const response = await fetch('/api/providers');
                 const data = await response.json();
                 if (!response.ok) {
@@ -616,6 +716,7 @@
             providers.forEach(provider => {
                 const models = Array.isArray(provider.model_list) ? provider.model_list : [];
                 const preview = getModelPreview(models);
+                const isDeletePending = pendingDeleteProviderName === provider.name;
                 const modelTags = preview.visible.length
                     ? preview.visible.map(model => `<span class="model-tag">${escapeHtml(model)}</span>`).join('')
                     : '<span class="muted-text">未配置</span>';
@@ -640,7 +741,14 @@
                         <td>
                             <div class="action-buttons">
                                 <button class="btn-action btn-edit" onclick="openEditModal(decodeProviderName('${encodeURIComponent(provider.name)}'))">编辑</button>
-                                <button class="btn-action btn-delete" onclick="deleteProvider(decodeProviderName('${encodeURIComponent(provider.name)}'))">删除</button>
+                                <div class="inline-confirm-wrap">
+                                    <button
+                                        type="button"
+                                        class="btn-action btn-delete ${isDeletePending ? 'is-active' : ''}"
+                                        data-provider-delete-trigger="${encodeURIComponent(provider.name)}"
+                                        onclick="toggleDeleteProviderConfirm(decodeProviderName('${encodeURIComponent(provider.name)}'), event)"
+                                    >删除</button>
+                                </div>
                             </div>
                         </td>
                     </tr>
@@ -649,6 +757,7 @@
 
             html += '</tbody></table>';
             container.innerHTML = html;
+            syncDeleteProviderPopover();
         }
 
         async function saveProvider() {
@@ -687,8 +796,46 @@
             }
         }
 
-        async function deleteProvider(name) {
-            if (!confirm(`确定删除 provider "${name}" 吗？`)) return;
+        function toggleDeleteProviderConfirm(name, event) {
+            event?.stopPropagation();
+            if (deletingProviderName !== null) return;
+
+            pendingDeleteProviderName = pendingDeleteProviderName === name ? null : name;
+            if (pendingDeleteProviderName !== name) {
+                deletingProviderName = null;
+            }
+            renderProviders();
+        }
+
+        function cancelDeleteProviderConfirm(event) {
+            event?.stopPropagation();
+            closeDeleteProviderConfirm(true);
+        }
+
+        function closeDeleteProviderConfirm(shouldRender = true) {
+            if (pendingDeleteProviderName === null && deletingProviderName === null) return;
+            if (deletingProviderName !== null) {
+                return;
+            }
+            pendingDeleteProviderName = null;
+            hideProviderDeletePopover();
+            if (shouldRender) {
+                renderProviders();
+            } else {
+                document.querySelectorAll('[data-provider-delete-trigger].is-active').forEach(element => {
+                    element.classList.remove('is-active');
+                });
+            }
+        }
+
+        async function confirmDeleteProvider(event) {
+            event?.stopPropagation();
+            const name = pendingDeleteProviderName;
+            if (pendingDeleteProviderName !== name || deletingProviderName === name) return;
+
+            deletingProviderName = name;
+            syncDeleteProviderPopover();
+            renderProviders();
 
             try {
                 const response = await fetch(`/api/providers/${encodeURIComponent(name)}`, {
@@ -698,10 +845,16 @@
                 if (!response.ok) {
                     throw new Error(result.error || '删除 provider 失败');
                 }
+                pendingDeleteProviderName = null;
+                deletingProviderName = null;
+                hideProviderDeletePopover();
                 showMessage('Provider 删除成功，配置已重载', 'success');
                 await loadProviders();
             } catch (error) {
                 console.error('删除 provider 失败:', error);
+                deletingProviderName = null;
+                syncDeleteProviderPopover();
+                renderProviders();
                 showMessage(error.message || '删除 provider 失败', 'error');
             }
         }
