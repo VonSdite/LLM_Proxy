@@ -5,7 +5,10 @@ body.login-page {
     align-items: center;
     justify-content: center;
     padding: 24px;
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.58;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     background:
         radial-gradient(1100px 620px at -10% -15%, #eaf2fb 0%, transparent 60%),
         radial-gradient(980px 640px at 100% 0%, #eef4fb 0%, transparent 62%),
@@ -48,13 +51,14 @@ body.login-page {
     margin: 0;
     font-size: 1.38rem;
     line-height: 1.2;
-    font-weight: 650;
+    font-weight: 600;
     color: var(--text-primary);
 }
 
 .login-page .login-head p {
     margin: 8px 0 0;
     font-size: 0.92rem;
+    line-height: 1.6;
     color: var(--text-secondary);
 }
 

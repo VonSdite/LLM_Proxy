@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}用户管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/users.css">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260313-8">{% endblock %}
 {% block body_class %}users-page{% endblock %}
 {% block header_title %}用户管理{% endblock %}
 {% block header_subtitle %}统一管理白名单用户与 IP{% endblock %}
@@ -51,32 +51,34 @@
                         <button type="button" class="btn btn-primary search-submit-button" onclick="applyUserSearch()">搜索</button>
                     </div>
                 </div>
-                <div class="users-table-shell" id="usersTableContainer">
-                    <div class="loading">加载用户数据...</div>
-                </div>
-        </section>
-        <div class="table-footer" id="tableFooter" style="display: none;">
-                    <div class="right-controls">
-                        <div class="pagination-controls">
-                            <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
-                            <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
-                            <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+                <div class="users-data-shell">
+                    <div class="users-table-shell" id="usersTableContainer">
+                        <div class="loading">加载用户数据...</div>
+                    </div>
+                    <div class="table-footer" id="tableFooter" style="display: none;">
+                        <div class="right-controls">
+                            <div class="pagination-controls">
+                                <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
+                                <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
+                                <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+                            </div>
+                            <div class="quick-jump">
+                                <label for="pageJumpInput">跳至</label>
+                                <input id="pageJumpInput" type="number" min="1" value="1">
+                            </div>
+                            <div class="page-size-controls">
+                                <label for="pageSizeSelect">每页显示:</label>
+                                <select id="pageSizeSelect" onchange="changePageSize()">
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                </select>
+                            </div>
+                            <span class="total-count" id="totalCount">共 0 条</span>
                         </div>
-                        <div class="quick-jump">
-                            <label for="pageJumpInput">跳至</label>
-                            <input id="pageJumpInput" type="number" min="1" value="1">
-                        </div>
-                        <div class="page-size-controls">
-                            <label for="pageSizeSelect">每页显示:</label>
-                            <select id="pageSizeSelect" onchange="changePageSize()">
-                                <option value="50">50</option>
-                                <option value="100">100</option>
-                                <option value="200">200</option>
-                            </select>
-                        </div>
-                        <span class="total-count" id="totalCount">共 0 条</span>
                     </div>
                 </div>
+        </section>
 {% endblock %}
 
 {% block after_container %}

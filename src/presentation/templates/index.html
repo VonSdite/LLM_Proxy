@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260313-10">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}实时监控 API 请求和 Token 消耗{% endblock %}
@@ -16,6 +16,14 @@
                 <div class="filter-group filter-group-date">
                     <label>结束日期:</label>
                     <input type="date" id="endDate">
+                </div>
+                <div class="filter-group filter-group-presets">
+                    <label>常用时间</label>
+                    <div class="date-preset-group" role="group" aria-label="常用时间范围">
+                        <button type="button" class="date-preset-btn" data-date-preset="last3" onclick="applyDatePreset('last3')">近3天</button>
+                        <button type="button" class="date-preset-btn" data-date-preset="last7" onclick="applyDatePreset('last7')">近7天</button>
+                        <button type="button" class="date-preset-btn" data-date-preset="all" onclick="applyDatePreset('all')">全部时间</button>
+                    </div>
                 </div>
                 <div class="filter-group filter-group-select">
                     <label>用户名</label>
@@ -58,51 +66,52 @@
         </div>
 
         <div class="table-section">
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('ip_address', 'string')">IP <span class="sort-indicator" id="logsSortIndicator_ip_address"></span></button></th>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('username', 'string')">用户名 <span class="sort-indicator" id="logsSortIndicator_username"></span></button></th>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="logsSortIndicator_request_model"></span></button></th>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="logsSortIndicator_response_model"></span></button></th>
-                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="logsSortIndicator_prompt_tokens"></span></button></th>
-                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="logsSortIndicator_completion_tokens"></span></button></th>
-                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="logsSortIndicator_total_tokens"></span></button></th>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('start_time', 'date')">开始时间 <span class="sort-indicator" id="logsSortIndicator_start_time"></span></button></th>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('end_time', 'date')">结束时间 <span class="sort-indicator" id="logsSortIndicator_end_time"></span></button></th>
-                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('duration', 'number')">耗时(秒) <span class="sort-indicator" id="logsSortIndicator_duration"></span></button></th>
-                        </tr>
-                    </thead>
-                    <tbody id="logsTable">
-                        <tr>
-                            <td colspan="10" class="loading">加载请求数据...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="table-footer" id="tableFooter" style="display: none;">
-            <div class="right-controls">
-                <div class="pagination-controls">
-                    <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
-                    <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
-                    <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+            <div class="table-card-shell">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('ip_address', 'string')">IP <span class="sort-indicator" id="logsSortIndicator_ip_address"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('username', 'string')">用户名 <span class="sort-indicator" id="logsSortIndicator_username"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="logsSortIndicator_request_model"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="logsSortIndicator_response_model"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="logsSortIndicator_prompt_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="logsSortIndicator_completion_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="logsSortIndicator_total_tokens"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('start_time', 'date')">开始时间 <span class="sort-indicator" id="logsSortIndicator_start_time"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('end_time', 'date')">结束时间 <span class="sort-indicator" id="logsSortIndicator_end_time"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('duration', 'number')">耗时(秒) <span class="sort-indicator" id="logsSortIndicator_duration"></span></button></th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTable">
+                            <tr>
+                                <td colspan="10" class="loading">加载请求数据...</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
-                <div class="quick-jump">
-                    <label for="pageJumpInput">跳至</label>
-                    <input id="pageJumpInput" type="number" min="1" value="1">
+                <div class="table-footer" id="tableFooter" style="display: none;">
+                    <div class="right-controls">
+                        <div class="pagination-controls">
+                            <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
+                            <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
+                            <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+                        </div>
+                        <div class="quick-jump">
+                            <label for="pageJumpInput">跳至</label>
+                            <input id="pageJumpInput" type="number" min="1" value="1">
+                        </div>
+                        <div class="page-size-controls">
+                            <label for="pageSizeSelect">每页显示:</label>
+                            <select id="pageSizeSelect" onchange="changePageSize()">
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="200">200</option>
+                            </select>
+                        </div>
+                        <span class="total-count" id="totalCount">共 0 条</span>
+                    </div>
                 </div>
-                <div class="page-size-controls">
-                    <label for="pageSizeSelect">每页显示:</label>
-                    <select id="pageSizeSelect" onchange="changePageSize()">
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                        <option value="200">200</option>
-                    </select>
-                </div>
-                <span class="total-count" id="totalCount">共 0 条</span>
             </div>
         </div>
 {% endblock %}
@@ -143,14 +152,80 @@
             return Number.isFinite(n) ? n : 0;
         }
 
-        function renderModelBadge(value) {
-            if (!value) return '-';
-            return `<span class="table-model-tag">${String(value)
+        function toDateInput(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function buildDatePresetRange(preset) {
+            if (preset === 'all') {
+                return { startDate: '', endDate: '' };
+            }
+
+            const end = new Date();
+            const start = new Date();
+            const offsetDays = preset === 'last7' ? 6 : 2;
+            start.setDate(end.getDate() - offsetDays);
+            return {
+                startDate: toDateInput(start),
+                endDate: toDateInput(end)
+            };
+        }
+
+        function detectDatePreset(startDate, endDate) {
+            if (!startDate && !endDate) {
+                return 'all';
+            }
+
+            const last3 = buildDatePresetRange('last3');
+            if (startDate === last3.startDate && endDate === last3.endDate) {
+                return 'last3';
+            }
+
+            const last7 = buildDatePresetRange('last7');
+            if (startDate === last7.startDate && endDate === last7.endDate) {
+                return 'last7';
+            }
+
+            return null;
+        }
+
+        function updateDatePresetUi() {
+            const startDate = document.getElementById('startDate')?.value || '';
+            const endDate = document.getElementById('endDate')?.value || '';
+            const activePreset = detectDatePreset(startDate, endDate);
+            document.querySelectorAll('.date-preset-btn').forEach(button => {
+                const isActive = button.dataset.datePreset === activePreset;
+                button.classList.toggle('is-active', isActive);
+                button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            });
+        }
+
+        function applyDatePreset(preset, shouldApplyFilters = true) {
+            const { startDate, endDate } = buildDatePresetRange(preset);
+            document.getElementById('startDate').value = startDate;
+            document.getElementById('endDate').value = endDate;
+            updateDatePresetUi();
+            if (shouldApplyFilters) {
+                applyFilters();
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;')}</span>`;
+                .replace(/'/g, '&#39;');
+        }
+
+        function renderModelBadge(value) {
+            if (!value) return '-';
+            const safeValue = escapeHtml(value);
+            return `<span class="table-model-tag" title="${safeValue}">${safeValue}</span>`;
         }
 
         function formatNumberFull(value) {
@@ -410,6 +485,8 @@
                     }, 450);
                 });
             }
+            document.getElementById('startDate')?.addEventListener('change', updateDatePresetUi);
+            document.getElementById('endDate')?.addEventListener('change', updateDatePresetUi);
         });
 
         document.addEventListener('click', function(event) {
@@ -463,7 +540,7 @@
 
                 html += `
                     <tr>
-                        <td>${stat.ip_address ? `<span class="ip-address">${stat.ip_address}</span>` : '-'}</td>
+                        <td>${stat.ip_address ? `<span class="ip-address" title="${escapeHtml(stat.ip_address)}">${escapeHtml(stat.ip_address)}</span>` : '-'}</td>
                         <td>${stat.username || '-'}</td>
                         <td>${renderModelBadge(stat.request_model)}</td>
                         <td>${renderModelBadge(stat.response_model)}</td>
@@ -581,7 +658,7 @@
 
                 html += `
                     <tr>
-                        <td>${log.ip_address ? `<span class="ip-address">${log.ip_address}</span>` : '-'}</td>
+                        <td>${log.ip_address ? `<span class="ip-address" title="${escapeHtml(log.ip_address)}">${escapeHtml(log.ip_address)}</span>` : '-'}</td>
                         <td>${log.username || '-'}</td>
                         <td>${renderModelBadge(log.request_model)}</td>
                         <td>${renderModelBadge(log.response_model)}</td>
@@ -659,6 +736,8 @@
             const username = document.getElementById('username').value;
             const requestModel = document.getElementById('requestModel').value;
 
+            updateDatePresetUi();
+
             if (startDate) currentFilters.start_date = startDate;
             if (endDate) currentFilters.end_date = endDate;
             if (username) currentFilters.username = username;
@@ -670,24 +749,14 @@
         }
 
         function setDefaultDateRange() {
-            const end = new Date();
-            const start = new Date();
-            start.setDate(end.getDate() - 2);
-
-            const toDateInput = (date) => {
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                return `${year}-${month}-${day}`;
-            };
-
-            document.getElementById('startDate').value = toDateInput(start);
-            document.getElementById('endDate').value = toDateInput(end);
-
+            const defaultRange = buildDatePresetRange('last3');
+            document.getElementById('startDate').value = defaultRange.startDate;
+            document.getElementById('endDate').value = defaultRange.endDate;
             currentFilters = {
-                start_date: toDateInput(start),
-                end_date: toDateInput(end),
+                start_date: defaultRange.startDate,
+                end_date: defaultRange.endDate,
             };
+            updateDatePresetUi();
         }
 
         // 上一页
