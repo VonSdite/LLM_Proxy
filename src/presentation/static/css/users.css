@@ -120,19 +120,33 @@
     min-width: 78px;
 }
 
-.users-page .users-table-shell {
+.users-page .users-data-shell {
     width: 100%;
-    overflow-x: auto;
-    overflow-y: visible;
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
+    overflow: hidden;
+    padding-bottom: 14px;
     background: #fff;
     box-shadow: var(--shadow-card);
 }
 
-:root[data-theme="dark"] .users-page .users-table-shell {
+:root[data-theme="dark"] .users-page .users-data-shell {
     background: #161b22;
     border-color: #30363d;
+}
+
+.users-page .users-table-shell {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+:root[data-theme="dark"] .users-page .users-table-shell {
+    background: transparent;
 }
 
 .users-page .form-row {
@@ -168,11 +182,20 @@
 
 .users-page .form-group label,
 .users-page .form-label {
-    display: block;
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
     margin-bottom: 7px;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.15;
+    letter-spacing: 0.02em;
+    font-weight: 700;
+    color: #334155;
+}
+
+:root[data-theme="dark"] .users-page .form-group label,
+:root[data-theme="dark"] .users-page .form-label {
+    color: #d5dde7;
 }
 
 .users-page .users-table {
@@ -183,13 +206,13 @@
 }
 
 .users-page .users-table th {
-    padding: 13px 14px;
+    padding: 12px 14px;
     text-align: left;
     font-size: 12px;
     font-weight: 700;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     background: #f4f8fd;
     border-bottom: 1px solid var(--line);
     white-space: normal;
@@ -206,7 +229,7 @@
 
 .users-page .sort-button {
     width: 100%;
-    padding: 13px 14px;
+    padding: 12px 14px;
     border: none;
     background: transparent;
     display: inline-flex;
@@ -263,26 +286,28 @@
 .users-page .ip-address {
     display: inline-flex;
     align-items: center;
-    min-height: 30px;
-    padding: 0 12px;
-    border-radius: 999px;
-    border: 1px solid #bfd6ee;
-    background: linear-gradient(180deg, #f4f9ff 0%, #eaf3ff 100%);
-    color: #29507c;
+    max-width: 100%;
+    min-height: 26px;
+    padding: 0 10px;
+    border-radius: 9px;
+    border: 1px solid rgba(100, 116, 139, 0.2);
+    background: rgba(15, 23, 42, 0.04);
+    color: #334155;
     font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.015em;
-    font-family: "JetBrains Mono", "Cascadia Mono", "Consolas", monospace;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    font-family: var(--font-mono);
     white-space: nowrap;
     line-height: 1;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    box-shadow: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 :root[data-theme="dark"] .users-page .ip-address {
-    border-color: #2d5a8a;
-    background: linear-gradient(180deg, rgba(19, 35, 56, 0.96) 0%, rgba(14, 28, 45, 0.96) 100%);
-    color: #cfe5ff;
-    box-shadow: inset 0 1px 0 rgba(125, 180, 255, 0.08);
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.08);
+    color: #cbd5e1;
 }
 
 .users-page .action-buttons {
@@ -542,7 +567,7 @@
 }
 
 .users-page .table-footer {
-    padding: 18px var(--page-card-inset) 22px;
+    padding: 12px 14px 0;
     margin-top: 0;
     border-top: 0;
     background: transparent;
@@ -554,16 +579,15 @@
 
 .users-page .table-footer .right-controls {
     width: 100%;
-    padding: 14px 16px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: #fff;
-    box-shadow: var(--shadow-card);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
 :root[data-theme="dark"] .users-page .table-footer .right-controls {
-    border-color: #30363d;
-    background: #161b22;
+    background: transparent;
 }
 
 .users-page .modal-content {
@@ -683,8 +707,7 @@
 @media (max-width: 900px) {
     .users-page .header,
     .users-page .add-user-section,
-    .users-page .users-section,
-    .users-page .table-footer {
+    .users-page .users-section {
         padding-left: 16px;
         padding-right: 16px;
     }
@@ -711,8 +734,7 @@
 
 @media (max-width: 640px) {
     .users-page .add-user-section,
-    .users-page .users-section,
-    .users-page .table-footer {
+    .users-page .users-section {
         padding-left: 12px;
         padding-right: 12px;
     }
@@ -733,6 +755,14 @@
 
     .users-page .users-table {
         min-width: 980px;
+    }
+
+    .users-page .sort-button {
+        padding: 10px 11px;
+    }
+
+    .users-page .table-footer {
+        padding: 10px 12px 16px;
     }
 
     .users-page .users-table th,

@@ -1,6 +1,9 @@
 :root {
     --app-container-max-width: min(96vw, 1860px);
     --page-card-inset: 24px;
+    --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-numeric: "Segoe UI Variable Text", "Segoe UI", "SF Pro Display", "Roboto", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", "Consolas", "PingFang SC", "Microsoft YaHei UI", monospace;
     --bg-page: #f4f8fc;
     --surface: #ffffff;
     --surface-soft: #f8fbff;
@@ -57,7 +60,10 @@
 body.app-page {
     min-height: 100vh;
     padding: 16px;
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family: var(--font-sans);
+    line-height: 1.58;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1, "lnum" 1;
     color: var(--text-primary);
@@ -78,7 +84,9 @@ body.app-page {
 .app-page .numeric-value {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1, "lnum" 1;
-    font-family: "Segoe UI", "Cascadia Mono", "Consolas", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family: var(--font-numeric);
+    font-weight: 600;
+    letter-spacing: 0.01em;
 }
 
 .app-page .container {
@@ -122,20 +130,22 @@ body.app-page {
     border-bottom-left-radius: inherit;
     border-bottom-right-radius: inherit;
     background-clip: padding-box;
+    padding-bottom: 22px;
 }
 
 .app-page .header-title h1 {
     margin: 0;
     font-size: 28px;
     line-height: 1.2;
-    font-weight: 650;
-    letter-spacing: 0.01em;
+    font-weight: 600;
+    letter-spacing: 0;
     color: var(--text-primary);
 }
 
 .app-page .header-title p {
     margin: 8px 0 0;
     font-size: 14px;
+    line-height: 1.6;
     color: var(--text-secondary);
 }
 

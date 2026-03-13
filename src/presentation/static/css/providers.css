@@ -141,30 +141,39 @@
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
+    font-size: 14px;
 }
 
 .providers-page .providers-table th,
 .providers-page .providers-table td {
-    padding: 14px 16px;
     border-bottom: 1px solid var(--line);
     vertical-align: top;
 }
 
 .providers-page .providers-table th {
-    background: #f6f9fd;
+    padding: 12px 14px;
+    text-align: left;
+    background: #f4f8fd;
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
-    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 :root[data-theme="dark"] .providers-page .providers-table th {
-    background: #151b23;
+    background: #0f141b;
 }
 
 .providers-page .providers-table td {
+    padding: 13px 14px;
     background: #fff;
     color: var(--text-primary);
+    line-height: 1.45;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 :root[data-theme="dark"] .providers-page .providers-table td {
@@ -424,6 +433,7 @@
 
 .providers-page .providers-table td:last-child {
     width: 124px;
+    vertical-align: middle;
 }
 
 .providers-page .btn-edit {
@@ -637,7 +647,18 @@
 }
 
 .providers-page .modal .form-label {
-    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    font-size: 12px;
+    line-height: 1.15;
+    letter-spacing: 0.02em;
+    font-weight: 700;
+    color: #334155;
+}
+
+:root[data-theme="dark"] .providers-page .modal .form-label {
+    color: #d5dde7;
 }
 
 .providers-page .field-header {
