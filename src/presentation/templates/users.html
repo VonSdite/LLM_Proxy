@@ -105,6 +105,13 @@
             </div>
         </div>
     </div>
+    <div class="inline-confirm-popover floating-delete-popover" id="userDeletePopover" data-placement="bottom" hidden>
+        <div class="inline-confirm-text">确认删除？</div>
+        <div class="inline-confirm-actions">
+            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelDeleteUserConfirm(event)">取消</button>
+            <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteUserBtn" onclick="confirmDeleteUser(event)">确认</button>
+        </div>
+    </div>
 {% endblock %}
 
 {% block page_scripts %}
@@ -121,6 +128,8 @@
         let currentSearchKeyword = '';
         let activeCustomSelect = null;
         let editModalInstance = null;
+        let pendingDeleteUserId = null;
+        let deletingUserId = null;
         let usersSortState = {
             key: 'total_tokens',
             direction: 'desc',
@@ -337,17 +346,98 @@
             if (!event.target.closest('.custom-select')) {
                 closeAllCustomSelects();
             }
+            if (!event.target.closest('.inline-confirm-wrap') && !event.target.closest('#userDeletePopover')) {
+                closeDeleteUserConfirm();
+            }
         });
 
         document.addEventListener('keydown', function(event) {
             if (event.key === 'Escape') {
                 closeAllCustomSelects();
+                closeDeleteUserConfirm();
             }
         });
+
+        window.addEventListener('resize', function() {
+            closeDeleteUserConfirm(false);
+        });
+
+        window.addEventListener('scroll', function() {
+            closeDeleteUserConfirm(false);
+        }, true);
+
+        function getUserDeletePopoverElement() {
+            return document.getElementById('userDeletePopover');
+        }
+
+        function getUserDeleteTrigger(userId) {
+            return document.querySelector(`[data-user-delete-trigger="${userId}"]`);
+        }
+
+        function hideUserDeletePopover() {
+            const popover = getUserDeletePopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty('top');
+            popover.style.removeProperty('left');
+            popover.style.removeProperty('--popover-arrow-left');
+            popover.dataset.placement = 'bottom';
+        }
+
+        function syncDeleteUserPopover() {
+            const popover = getUserDeletePopoverElement();
+            if (!popover) return;
+
+            if (pendingDeleteUserId === null) {
+                hideUserDeletePopover();
+                return;
+            }
+
+            const trigger = getUserDeleteTrigger(pendingDeleteUserId);
+            if (!trigger) {
+                pendingDeleteUserId = null;
+                deletingUserId = null;
+                hideUserDeletePopover();
+                return;
+            }
+
+            popover.hidden = false;
+            const confirmButton = document.getElementById('confirmDeleteUserBtn');
+            if (confirmButton) {
+                confirmButton.disabled = deletingUserId === pendingDeleteUserId;
+                confirmButton.textContent = deletingUserId === pendingDeleteUserId ? '删除中...' : '确认';
+            }
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 10;
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const left = Math.min(
+                window.innerWidth - popoverRect.width - viewportPadding,
+                Math.max(viewportPadding, triggerRect.left + ((triggerRect.width - popoverRect.width) / 2))
+            );
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? 'bottom' : 'top';
+            popover.style.top = `${top}px`;
+            popover.style.left = `${left}px`;
+            popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
+        }
 
         // 加载用户列表
         async function loadUsers() {
             try {
+                pendingDeleteUserId = null;
+                deletingUserId = null;
+                hideUserDeletePopover();
                 const params = new URLSearchParams({
                     page: currentPage,
                     page_size: pageSize
@@ -503,6 +593,7 @@
 
             users.forEach(user => {
                 const whitelistEnabled = !!user.whitelist_access_enabled;
+                const isDeletePending = pendingDeleteUserId === user.id;
 
                 html += `
                     <tr>
@@ -523,7 +614,14 @@
                         <td>
                             <div class="action-buttons">
                                 <button class="btn-action btn-edit" onclick="openEditModal(${user.id})">编辑</button>
-                                <button class="btn-action btn-delete" onclick="deleteUser(${user.id})">删除</button>
+                                <div class="inline-confirm-wrap">
+                                    <button
+                                        type="button"
+                                        class="btn-action btn-delete ${isDeletePending ? 'is-active' : ''}"
+                                        data-user-delete-trigger="${user.id}"
+                                        onclick="toggleDeleteUserConfirm(${user.id}, event)"
+                                    >删除</button>
+                                </div>
                             </div>
                         </td>
                     </tr>
@@ -532,6 +630,7 @@
 
             html += '</tbody></table>';
             container.innerHTML = html;
+            syncDeleteUserPopover();
         }
 
         // 更新分页
@@ -717,8 +816,46 @@
         }
 
         // 删除用户
-        async function deleteUser(userId) {
-            if (!confirm('确定要删除该用户吗？')) return;
+        function toggleDeleteUserConfirm(userId, event) {
+            event?.stopPropagation();
+            if (deletingUserId !== null) return;
+
+            pendingDeleteUserId = pendingDeleteUserId === userId ? null : userId;
+            if (pendingDeleteUserId !== userId) {
+                deletingUserId = null;
+            }
+            renderUsers();
+        }
+
+        function cancelDeleteUserConfirm(event) {
+            event?.stopPropagation();
+            closeDeleteUserConfirm(true);
+        }
+
+        function closeDeleteUserConfirm(shouldRender = true) {
+            if (pendingDeleteUserId === null && deletingUserId === null) return;
+            if (deletingUserId !== null) {
+                return;
+            }
+            pendingDeleteUserId = null;
+            hideUserDeletePopover();
+            if (shouldRender) {
+                renderUsers();
+            } else {
+                document.querySelectorAll('[data-user-delete-trigger].is-active').forEach(element => {
+                    element.classList.remove('is-active');
+                });
+            }
+        }
+
+        async function confirmDeleteUser(event) {
+            event?.stopPropagation();
+            const userId = pendingDeleteUserId;
+            if (pendingDeleteUserId !== userId || deletingUserId === userId) return;
+
+            deletingUserId = userId;
+            syncDeleteUserPopover();
+            renderUsers();
 
             try {
                 const response = await fetch(`/api/users/${userId}`, {
@@ -728,13 +865,22 @@
                 const result = await response.json();
 
                 if (response.ok) {
+                    pendingDeleteUserId = null;
+                    deletingUserId = null;
+                    hideUserDeletePopover();
                     showMessage('用户删除成功', 'success');
-                    loadUsers();
+                    await loadUsers();
                 } else {
+                    deletingUserId = null;
+                    syncDeleteUserPopover();
+                    renderUsers();
                     showMessage(result.error || '删除失败', 'error');
                 }
             } catch (error) {
                 console.error('删除用户失败:', error);
+                deletingUserId = null;
+                syncDeleteUserPopover();
+                renderUsers();
                 showMessage('删除用户失败', 'error');
             }
         }
