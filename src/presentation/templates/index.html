@@ -20,7 +20,7 @@
                 <div class="filter-group filter-group-presets">
                     <label>常用时间</label>
                     <div class="date-preset-group" role="group" aria-label="常用时间范围">
-                        <button type="button" class="date-preset-btn" data-date-preset="last3" onclick="applyDatePreset('last3')">近3天</button>
+                        <button type="button" class="date-preset-btn" data-date-preset="today" onclick="applyDatePreset('today')">今天</button>
                         <button type="button" class="date-preset-btn" data-date-preset="last7" onclick="applyDatePreset('last7')">近7天</button>
                         <button type="button" class="date-preset-btn" data-date-preset="all" onclick="applyDatePreset('all')">全部时间</button>
                     </div>
@@ -165,9 +165,12 @@
             }
 
             const end = new Date();
-            const start = new Date();
-            const offsetDays = preset === 'last7' ? 6 : 2;
-            start.setDate(end.getDate() - offsetDays);
+            const start = new Date(end);
+
+            if (preset === 'last7') {
+                start.setDate(end.getDate() - 6);
+            }
+
             return {
                 startDate: toDateInput(start),
                 endDate: toDateInput(end)
@@ -179,9 +182,9 @@
                 return 'all';
             }
 
-            const last3 = buildDatePresetRange('last3');
-            if (startDate === last3.startDate && endDate === last3.endDate) {
-                return 'last3';
+            const today = buildDatePresetRange('today');
+            if (startDate === today.startDate && endDate === today.endDate) {
+                return 'today';
             }
 
             const last7 = buildDatePresetRange('last7');
@@ -749,7 +752,7 @@
         }
 
         function setDefaultDateRange() {
-            const defaultRange = buildDatePresetRange('last3');
+            const defaultRange = buildDatePresetRange('today');
             document.getElementById('startDate').value = defaultRange.startDate;
             document.getElementById('endDate').value = defaultRange.endDate;
             currentFilters = {
