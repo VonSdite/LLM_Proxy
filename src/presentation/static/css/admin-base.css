@@ -8,6 +8,9 @@
     --surface: #ffffff;
     --surface-soft: #f8fbff;
     --surface-hover: #f2f7fd;
+    --nav-tab-hover-bg: #edf4fc;
+    --nav-tab-hover-border: #c6d9ec;
+    --nav-tab-hover-text: #4575a4;
     --text-primary: #0f172a;
     --text-secondary: #475569;
     --text-muted: #64748b;
@@ -34,6 +37,9 @@
     --surface: #161b22;
     --surface-soft: #0f141b;
     --surface-hover: #1f2630;
+    --nav-tab-hover-bg: #18304b;
+    --nav-tab-hover-border: #2f5b8f;
+    --nav-tab-hover-text: #dbeafe;
     --text-primary: #e6edf3;
     --text-secondary: #9da7b3;
     --text-muted: #7d8590;
@@ -204,9 +210,9 @@ body.app-page {
 }
 
 .app-page .header-nav-link:hover {
-    color: var(--text-primary);
-    background: var(--surface-hover);
-    border-color: var(--line);
+    color: var(--nav-tab-hover-text);
+    background: var(--nav-tab-hover-bg);
+    border-color: var(--nav-tab-hover-border);
 }
 
 .app-page .header-nav-link.active {

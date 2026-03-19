@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260319-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260319-4">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}实时监控 API 请求和 Token 消耗{% endblock %}
@@ -41,75 +41,96 @@
             </div>
         </div>
 
-        <div class="stats-section">
-            <div class="stats-container">
-                <table class="stats-table">
-                    <thead>
-                        <tr>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('ip_address', 'string')">IP <span class="sort-indicator" id="statsSortIndicator_ip_address"></span></button></th>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('username', 'string')">用户名 <span class="sort-indicator" id="statsSortIndicator_username"></span></button></th>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="statsSortIndicator_request_model"></span></button></th>
-                            <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="statsSortIndicator_response_model"></span></button></th>
-                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="statsSortIndicator_prompt_tokens"></span></button></th>
-                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="statsSortIndicator_completion_tokens"></span></button></th>
-                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="statsSortIndicator_total_tokens"></span></button></th>
-                            <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_count', 'number')">请求数 <span class="sort-indicator" id="statsSortIndicator_request_count"></span></button></th>
-                        </tr>
-                    </thead>
-                    <tbody id="statsTable">
-                        <tr>
-                            <td colspan="8" class="loading">加载统计数据...</td>
-                        </tr>
-                    </tbody>
-                </table>
+        <div class="dashboard-tabs-section">
+            <div class="dashboard-tabs" role="tablist" aria-label="统计视图">
+                <button
+                    type="button"
+                    class="dashboard-tab-btn is-active"
+                    id="dashboardTabBtn_stats"
+                    onclick="switchDashboardTab('stats')"
+                    aria-selected="true"
+                    aria-controls="dashboardTabPanel_stats"
+                >统计汇总</button>
+                <button
+                    type="button"
+                    class="dashboard-tab-btn"
+                    id="dashboardTabBtn_logs"
+                    onclick="switchDashboardTab('logs')"
+                    aria-selected="false"
+                    aria-controls="dashboardTabPanel_logs"
+                >请求明细</button>
             </div>
-        </div>
 
-        <div class="table-section">
-            <div class="table-card-shell">
-                <div class="table-container">
-                    <table>
+            <div class="dashboard-tab-panel is-active" id="dashboardTabPanel_stats" role="tabpanel" aria-labelledby="dashboardTabBtn_stats">
+                <div class="stats-container">
+                    <table class="stats-table">
                         <thead>
                             <tr>
-                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('ip_address', 'string')">IP <span class="sort-indicator" id="logsSortIndicator_ip_address"></span></button></th>
-                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('username', 'string')">用户名 <span class="sort-indicator" id="logsSortIndicator_username"></span></button></th>
-                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="logsSortIndicator_request_model"></span></button></th>
-                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="logsSortIndicator_response_model"></span></button></th>
-                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="logsSortIndicator_prompt_tokens"></span></button></th>
-                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="logsSortIndicator_completion_tokens"></span></button></th>
-                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="logsSortIndicator_total_tokens"></span></button></th>
-                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('start_time', 'date')">开始时间 <span class="sort-indicator" id="logsSortIndicator_start_time"></span></button></th>
-                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('end_time', 'date')">结束时间 <span class="sort-indicator" id="logsSortIndicator_end_time"></span></button></th>
-                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('duration', 'number')">耗时(秒) <span class="sort-indicator" id="logsSortIndicator_duration"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('ip_address', 'string')">IP <span class="sort-indicator" id="statsSortIndicator_ip_address"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('username', 'string')">用户名 <span class="sort-indicator" id="statsSortIndicator_username"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="statsSortIndicator_request_model"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="statsSortIndicator_response_model"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="statsSortIndicator_prompt_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="statsSortIndicator_completion_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="statsSortIndicator_total_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_count', 'number')">请求数 <span class="sort-indicator" id="statsSortIndicator_request_count"></span></button></th>
                             </tr>
                         </thead>
-                        <tbody id="logsTable">
+                        <tbody id="statsTable">
                             <tr>
-                                <td colspan="10" class="loading">加载请求数据...</td>
+                                <td colspan="8" class="loading">加载统计数据...</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-                <div class="table-footer" id="tableFooter" style="display: none;">
-                    <div class="right-controls">
-                        <div class="pagination-controls">
-                            <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
-                            <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
-                            <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+            </div>
+
+            <div class="dashboard-tab-panel" id="dashboardTabPanel_logs" role="tabpanel" aria-labelledby="dashboardTabBtn_logs" hidden>
+                <div class="table-card-shell">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('ip_address', 'string')">IP <span class="sort-indicator" id="logsSortIndicator_ip_address"></span></button></th>
+                                    <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('username', 'string')">用户名 <span class="sort-indicator" id="logsSortIndicator_username"></span></button></th>
+                                    <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="logsSortIndicator_request_model"></span></button></th>
+                                    <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="logsSortIndicator_response_model"></span></button></th>
+                                    <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="logsSortIndicator_prompt_tokens"></span></button></th>
+                                    <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="logsSortIndicator_completion_tokens"></span></button></th>
+                                    <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="logsSortIndicator_total_tokens"></span></button></th>
+                                    <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('start_time', 'date')">开始时间 <span class="sort-indicator" id="logsSortIndicator_start_time"></span></button></th>
+                                    <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('end_time', 'date')">结束时间 <span class="sort-indicator" id="logsSortIndicator_end_time"></span></button></th>
+                                    <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('duration', 'number')">耗时(秒) <span class="sort-indicator" id="logsSortIndicator_duration"></span></button></th>
+                                </tr>
+                            </thead>
+                            <tbody id="logsTable">
+                                <tr>
+                                    <td colspan="10" class="loading">加载请求数据...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="table-footer" id="tableFooter" style="display: none;">
+                        <div class="right-controls">
+                            <div class="pagination-controls">
+                                <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
+                                <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
+                                <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+                            </div>
+                            <div class="quick-jump">
+                                <label for="pageJumpInput">跳至</label>
+                                <input id="pageJumpInput" type="number" min="1" value="1">
+                            </div>
+                            <div class="page-size-controls">
+                                <label for="pageSizeSelect">每页显示:</label>
+                                <select id="pageSizeSelect" onchange="changePageSize()">
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                </select>
+                            </div>
+                            <span class="total-count" id="totalCount">共 0 条</span>
                         </div>
-                        <div class="quick-jump">
-                            <label for="pageJumpInput">跳至</label>
-                            <input id="pageJumpInput" type="number" min="1" value="1">
-                        </div>
-                        <div class="page-size-controls">
-                            <label for="pageSizeSelect">每页显示:</label>
-                            <select id="pageSizeSelect" onchange="changePageSize()">
-                                <option value="50">50</option>
-                                <option value="100">100</option>
-                                <option value="200">200</option>
-                            </select>
-                        </div>
-                        <span class="total-count" id="totalCount">共 0 条</span>
                     </div>
                 </div>
             </div>
@@ -127,6 +148,9 @@
         let activeCustomSelect = null;
         let statsData = [];
         let logsData = [];
+        let activeDashboardTab = 'stats';
+        let statsRequestToken = 0;
+        let logsRequestToken = 0;
         const statsSortState = {
             key: 'total_tokens',
             direction: 'desc',
@@ -137,6 +161,50 @@
             direction: 'desc',
             type: 'date'
         };
+
+        function getDashboardTabButton(tabName) {
+            return document.getElementById(`dashboardTabBtn_${tabName}`);
+        }
+
+        function getDashboardTabPanel(tabName) {
+            return document.getElementById(`dashboardTabPanel_${tabName}`);
+        }
+
+        function syncDashboardTabUi() {
+            ['stats', 'logs'].forEach(tabName => {
+                const isActive = tabName === activeDashboardTab;
+                const button = getDashboardTabButton(tabName);
+                const panel = getDashboardTabPanel(tabName);
+
+                if (button) {
+                    button.classList.toggle('is-active', isActive);
+                    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                }
+
+                if (panel) {
+                    panel.classList.toggle('is-active', isActive);
+                    panel.hidden = !isActive;
+                }
+            });
+        }
+
+        function loadActiveDashboardTabData() {
+            if (activeDashboardTab === 'stats') {
+                loadStatistics();
+                return;
+            }
+            loadLogs();
+        }
+
+        function switchDashboardTab(tabName) {
+            if (!['stats', 'logs'].includes(tabName)) {
+                return;
+            }
+
+            activeDashboardTab = tabName;
+            syncDashboardTabUi();
+            loadActiveDashboardTabData();
+        }
 
         function closeAllCustomSelects() {
             document.querySelectorAll('.custom-select.open').forEach(select => {
@@ -295,8 +363,8 @@
             });
 
             const table = prefix === 'stats'
-                ? document.querySelector('.stats-table')
-                : document.querySelector('.table-section table');
+                ? document.querySelector('#dashboardTabPanel_stats table')
+                : document.querySelector('#dashboardTabPanel_logs table');
             if (!table) return;
 
             table.querySelectorAll('th.sortable-th').forEach(th => {
@@ -461,12 +529,12 @@
             setupCustomSelect('requestModel');
             setupCustomSelect('pageSizeSelect');
             setDefaultDateRange();
-            loadStatistics();
             loadUsernames();
             loadRequestModels();
-            loadLogs();
             updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
             updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
+            syncDashboardTabUi();
+            switchDashboardTab(activeDashboardTab);
 
             // 设置默认每页大小
             document.getElementById('pageSizeSelect').value = pageSize;
@@ -506,14 +574,20 @@
 
         // 加载统计数据
         async function loadStatistics() {
+            const requestToken = ++statsRequestToken;
+            document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="loading">鍔犺浇缁熻鏁版嵁...</td></tr>';
+
             try {
                 const params = new URLSearchParams(currentFilters);
-                const response = await fetch(`/api/statistics?${params}`);
-                statsData = await response.json();
+                const response = await fetch(`/api/statistics?${params}`, { cache: 'no-store' });
+                const data = await response.json();
+                if (requestToken !== statsRequestToken) return;
+                statsData = data;
                 if (!Array.isArray(statsData)) statsData = [];
                 applyStatsSort();
                 renderStatistics();
             } catch (error) {
+                if (requestToken !== statsRequestToken) return;
                 console.error('加载统计数据失败:', error);
                 document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="error">加载统计数据失败</td></tr>';
                 showMessage('加载统计数据失败，请稍后重试', 'error');
@@ -613,6 +687,8 @@
 
         // 加载日志数据
         async function loadLogs() {
+            const requestToken = ++logsRequestToken;
+            document.getElementById('tableFooter').style.display = 'none';
             // 显示加载状态
             document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="loading">加载请求数据...</td></tr>';
 
@@ -623,14 +699,17 @@
                     ...currentFilters
                 });
 
-                const response = await fetch(`/api/request-logs?${params}`);
+                const response = await fetch(`/api/request-logs?${params}`, { cache: 'no-store' });
                 const data = await response.json();
+                if (requestToken !== logsRequestToken) return;
 
                 logsData = Array.isArray(data.logs) ? data.logs : [];
                 applyLogsSort();
                 renderLogs(logsData);
                 updatePagination(data);
             } catch (error) {
+                if (requestToken !== logsRequestToken) return;
+                document.getElementById('tableFooter').style.display = 'none';
                 console.error('加载日志失败:', error);
                 document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="error">加载日志失败</td></tr>';
                 showMessage('加载日志失败，请稍后重试', 'error');
@@ -752,8 +831,7 @@
             if (requestModel) currentFilters.request_model = requestModel;
 
             currentPage = 1;
-            loadStatistics();
-            loadLogs();
+            loadActiveDashboardTabData();
         }
 
         function setDefaultDateRange() {
@@ -786,7 +864,7 @@
             const newPageSize = parseInt(document.getElementById('pageSizeSelect').value);
             if (newPageSize !== pageSize) {
                 pageSize = newPageSize;
-                currentPage = 1; // 重置到第一页
+                currentPage = 1;
                 loadLogs();
             }
         }

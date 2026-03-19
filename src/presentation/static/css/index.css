@@ -1,3 +1,7 @@
+.dashboard-page {
+    --dashboard-control-height: 40px;
+}
+
 .dashboard-page .header-content {
     display: flex;
     justify-content: space-between;
@@ -10,6 +14,7 @@
 }
 
 .dashboard-page .filters-section,
+.dashboard-page .dashboard-tabs-section,
 .dashboard-page .stats-section,
 .dashboard-page .table-section {
     padding: 22px var(--page-card-inset);
@@ -40,6 +45,81 @@
 
 .dashboard-page .filters .btn {
     width: 110px;
+    min-height: var(--dashboard-control-height);
+    height: var(--dashboard-control-height);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dashboard-page .dashboard-tabs-section {
+    padding: 18px var(--page-card-inset) 0;
+    background: transparent;
+}
+
+.dashboard-page .dashboard-tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    margin-bottom: 18px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: var(--shadow-card);
+}
+
+.dashboard-page .dashboard-tab-btn {
+    min-width: 104px;
+    height: 36px;
+    padding: 0 16px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--transition), color var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+
+.dashboard-page .dashboard-tab-btn:hover,
+.dashboard-page .dashboard-tab-btn:focus-visible {
+    color: var(--nav-tab-hover-text);
+    background: var(--nav-tab-hover-bg);
+    border-color: var(--nav-tab-hover-border);
+    outline: none;
+}
+
+.dashboard-page .dashboard-tab-btn.is-active {
+    color: #ffffff;
+    background: linear-gradient(180deg, #3a7fed, #2f6ed4);
+    box-shadow: 0 10px 20px rgba(58, 127, 237, 0.24);
+}
+
+.dashboard-page .dashboard-tab-panel[hidden] {
+    display: none !important;
+}
+
+:root[data-theme="dark"] .dashboard-page .dashboard-tabs {
+    border-color: #30363d;
+    background: rgba(22, 27, 34, 0.94);
+}
+
+:root[data-theme="dark"] .dashboard-page .dashboard-tab-btn {
+    color: #9da7b3;
+}
+
+:root[data-theme="dark"] .dashboard-page .dashboard-tab-btn:hover,
+:root[data-theme="dark"] .dashboard-page .dashboard-tab-btn:focus-visible {
+    color: var(--nav-tab-hover-text);
+    background: var(--nav-tab-hover-bg);
+}
+
+:root[data-theme="dark"] .dashboard-page .dashboard-tab-btn.is-active {
+    color: #f8fbff;
+    background: linear-gradient(180deg, #2f81f7, #1f6feb);
+    box-shadow: 0 10px 22px rgba(31, 111, 235, 0.28);
 }
 
 .dashboard-page .filter-group {
@@ -80,29 +160,33 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 40px;
+    min-height: var(--dashboard-control-height);
     flex-wrap: wrap;
 }
 
 .dashboard-page .date-preset-btn {
     min-width: 68px;
-    height: 32px;
-    padding: 0 12px;
+    min-height: var(--dashboard-control-height);
+    height: var(--dashboard-control-height);
+    padding: 0 14px;
     border: 1px solid var(--line-strong);
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.88);
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     transition: border-color var(--transition), background-color var(--transition), color var(--transition), box-shadow var(--transition);
 }
 
 .dashboard-page .date-preset-btn:hover,
 .dashboard-page .date-preset-btn:focus-visible {
-    border-color: var(--primary);
-    background: #ffffff;
-    color: var(--primary);
+    border-color: var(--nav-tab-hover-border);
+    background: var(--nav-tab-hover-bg);
+    color: var(--nav-tab-hover-text);
     outline: none;
 }
 
@@ -116,14 +200,26 @@
 .dashboard-page .filter-group input,
 .dashboard-page .filter-group select {
     width: 100%;
-    height: 40px;
+    min-height: var(--dashboard-control-height);
+    height: var(--dashboard-control-height);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     background: #fff;
     color: var(--text-primary);
     padding: 0 12px;
     font-size: 14px;
+    line-height: 1.2;
     transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
+}
+
+.dashboard-page .custom-select-trigger {
+    min-height: var(--dashboard-control-height);
+    height: var(--dashboard-control-height);
+    padding: 0 38px 0 12px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
 }
 
 .dashboard-page .filter-group select {
@@ -173,9 +269,9 @@
 
 :root[data-theme="dark"] .dashboard-page .date-preset-btn:hover,
 :root[data-theme="dark"] .dashboard-page .date-preset-btn:focus-visible {
-    border-color: #5f8fbe;
-    background: #111820;
-    color: #c7e0ff;
+    border-color: var(--nav-tab-hover-border);
+    background: var(--nav-tab-hover-bg);
+    color: var(--nav-tab-hover-text);
 }
 
 :root[data-theme="dark"] .dashboard-page .date-preset-btn.is-active {
@@ -447,6 +543,7 @@
 @media (max-width: 900px) {
     .dashboard-page .header,
     .dashboard-page .filters-section,
+    .dashboard-page .dashboard-tabs-section,
     .dashboard-page .stats-section,
     .dashboard-page .table-section {
         padding-left: 16px;
@@ -461,10 +558,21 @@
 
 @media (max-width: 640px) {
     .dashboard-page .filters-section,
+    .dashboard-page .dashboard-tabs-section,
     .dashboard-page .stats-section,
     .dashboard-page .table-section {
         padding-left: 12px;
         padding-right: 12px;
+    }
+
+    .dashboard-page .dashboard-tabs {
+        display: flex;
+        width: 100%;
+    }
+
+    .dashboard-page .dashboard-tab-btn {
+        flex: 1 1 0;
+        min-width: 0;
     }
 
     .dashboard-page .filter-group {
