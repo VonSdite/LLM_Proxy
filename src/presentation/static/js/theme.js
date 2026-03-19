@@ -20,7 +20,7 @@
             return nextTheme;
         }
 
-        const label = nextTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+        const label = nextTheme === 'dark' ? '切换到浅色主题' : '切换到深色主题';
         themeToggle.setAttribute('aria-label', label);
         themeToggle.setAttribute('title', label);
         return nextTheme;

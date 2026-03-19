@@ -1,4 +1,5 @@
 import ssl
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -167,6 +168,79 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn('<option value="">-</option>', html)
         self.assertIn("WebSocket", html)
         self.assertIn("provider-transport-badge", html)
+        self.assertIn("showActionError('保存 Provider'", html)
+        self.assertIn("showActionError('删除 Provider'", html)
+        self.assertIn("showActionError('拉取模型'", html)
+
+
+class FrontendMessageLocalizationTests(unittest.TestCase):
+    def test_ui_message_script_contains_localized_error_formatter(self) -> None:
+        script_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "js" / "ui-message.js"
+        script = script_path.read_text(encoding="utf-8")
+
+        self.assertIn("function formatActionErrorMessage(", script)
+        self.assertIn("window.showActionError = showActionError;", script)
+        self.assertIn("invalid username or password", script)
+        self.assertIn("用户名或密码错误", script)
+        self.assertIn("上游接口鉴权失败（401）", script)
+        self.assertNotIn("failed to fetch models", script)
+        self.assertNotIn("whitelist control is disabled", script)
+        self.assertNotIn("failed to toggle user status", script)
+
+    def test_templates_use_versioned_scripts_and_localized_titles(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "src" / "presentation"
+        login_html = (root / "templates" / "login.html").read_text(encoding="utf-8")
+        users_html = (root / "templates" / "users.html").read_text(encoding="utf-8")
+        index_html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+        base_page_html = (root / "templates" / "base_page.html").read_text(encoding="utf-8")
+        base_admin_html = (root / "templates" / "base_admin.html").read_text(encoding="utf-8")
+        theme_js = (root / "static" / "js" / "theme.js").read_text(encoding="utf-8")
+
+        self.assertIn('/static/js/ui-message.js?v=20260319-1', login_html)
+        self.assertIn('/static/js/ui-message.js?v=20260319-1', users_html)
+        self.assertIn('/static/js/ui-message.js?v=20260319-1', index_html)
+        self.assertIn('/static/js/theme.js?v=20260319-1', base_page_html)
+        self.assertIn('aria-label="切换主题"', base_admin_html)
+        self.assertIn('title="切换主题"', base_admin_html)
+        self.assertIn("showActionError('登录'", login_html)
+        self.assertIn("showActionError('创建用户'", users_html)
+        self.assertIn("showActionError('更新用户'", users_html)
+        self.assertIn("showActionError('删除用户'", users_html)
+        self.assertIn("切换到浅色主题", theme_js)
+        self.assertIn("切换到深色主题", theme_js)
+        self.assertNotIn("Toggle theme", base_admin_html)
+        self.assertNotIn("Switch to light theme", theme_js)
+        self.assertNotIn("Switch to dark theme", theme_js)
+
+    def test_ui_message_formatter_appends_upstream_original_error(self) -> None:
+        script_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "js" / "ui-message.js"
+        node_script = f"""
+const fs = require("fs");
+const vm = require("vm");
+const source = fs.readFileSync({str(script_path)!r}, "utf8");
+const sandbox = {{
+  window: {{}},
+  console: console,
+}};
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+const output = sandbox.window.formatActionErrorMessage(
+  "拉取模型",
+  "https://example.com/v1/models returned 401",
+  {{ fallback: "拉取模型失败" }}
+);
+process.stdout.write(output);
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        stdout = completed.stdout.decode("utf-8")
+
+        self.assertIn("上游接口鉴权失败（401）", stdout)
+        self.assertIn("原始信息：https://example.com/v1/models returned 401", stdout)
 
 
 if __name__ == "__main__":

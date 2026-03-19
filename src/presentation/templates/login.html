@@ -26,7 +26,7 @@
 {% endblock %}
 
 {% block page_scripts %}
-    <script src="/static/js/ui-message.js"></script>
+    <script src="/static/js/ui-message.js?v=20260319-1"></script>
     <script>
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -53,14 +53,13 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    showMessage('登录成功，正在跳转...', 'success');
                     setTimeout(() => {
                         window.location.href = '/';
                     }, 500);
                     return;
                 }
 
-                showMessage(data.error || '登录失败，请检查用户名和密码', 'error');
+                showActionError('登录', data.error, { fallback: '登录失败，请检查用户名和密码' });
             } catch (error) {
                 console.error('登录请求失败:', error);
                 showMessage('网络错误，请稍后重试', 'error');
