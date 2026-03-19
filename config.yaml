@@ -10,5 +10,6 @@ providers:
 - name: volcengine
   api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
   transport: http
+  verify_ssl: false
   model_list:
   - kimi-k2.5
