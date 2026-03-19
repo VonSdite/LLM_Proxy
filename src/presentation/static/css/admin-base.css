@@ -232,6 +232,34 @@ body.app-page {
     background: var(--danger-hover);
 }
 
+#ui-toast-container {
+    width: min(420px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    pointer-events: none;
+}
+
+#ui-toast-container .toast {
+    width: 100%;
+    max-width: 100%;
+    pointer-events: auto;
+}
+
+#ui-toast-container .toast .d-flex {
+    min-width: 0;
+    align-items: flex-start;
+}
+
+#ui-toast-container .toast-body {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+#ui-toast-container .btn-close {
+    flex-shrink: 0;
+}
+
 .app-page .btn,
 .app-page .header-nav-btn {
     min-height: 40px;

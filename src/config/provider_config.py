@@ -6,12 +6,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+from urllib.parse import urlparse
 
 from ..utils.net import normalize_proxy_url
 
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 300
 DEFAULT_PROVIDER_MAX_RETRIES = 3
 DEFAULT_PROVIDER_VERIFY_SSL = False
+DEFAULT_PROVIDER_TRANSPORT = "http"
+SUPPORTED_PROVIDER_TRANSPORTS = {"http", "websocket"}
+SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https", "ws", "wss"}
 
 
 def clean_optional_string(value: Any) -> Optional[str]:
@@ -91,12 +95,35 @@ def normalize_model_list(value: Any) -> List[str]:
     return models
 
 
+def resolve_provider_transport(api: str, transport: Any = None) -> str:
+    """解析 provider 上游传输类型。"""
+    scheme = urlparse(api).scheme.lower()
+    if scheme not in SUPPORTED_PROVIDER_API_SCHEMES:
+        supported_schemes = ", ".join(sorted(SUPPORTED_PROVIDER_API_SCHEMES))
+        raise ValueError(f"Provider api must use one of: {supported_schemes}")
+
+    normalized_transport = clean_optional_string(transport)
+    if normalized_transport is not None:
+        lowered = normalized_transport.lower()
+        if lowered not in SUPPORTED_PROVIDER_TRANSPORTS:
+            supported = ", ".join(sorted(SUPPORTED_PROVIDER_TRANSPORTS))
+            raise ValueError(f"Provider transport must be one of: {supported}")
+        if lowered == "http" and scheme in {"ws", "wss"}:
+            raise ValueError("Provider transport 'http' requires api to use http:// or https://")
+        return lowered
+
+    if scheme in {"ws", "wss"}:
+        return "websocket"
+    return DEFAULT_PROVIDER_TRANSPORT
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderConfigSchema:
     """显式表示配置文件中的单个 provider。"""
 
     name: str
     api: str
+    transport: str = DEFAULT_PROVIDER_TRANSPORT
     api_key: Optional[str] = None
     proxy: Optional[str] = None
     timeout_seconds: Optional[int] = None
@@ -130,6 +157,7 @@ class ProviderConfigSchema:
         return cls(
             name=name,
             api=api,
+            transport=resolve_provider_transport(api, config.get("transport")),
             api_key=clean_optional_string(config.get("api_key")),
             proxy=normalize_proxy_url(config.get("proxy")),
             timeout_seconds=parse_optional_positive_int(config.get("timeout_seconds")),
@@ -144,6 +172,7 @@ class ProviderConfigSchema:
         config: Dict[str, Any] = {
             "name": self.name,
             "api": self.api,
+            "transport": self.transport,
         }
 
         if self.api_key is not None:
@@ -170,6 +199,7 @@ class RuntimeProviderSpec:
 
     name: str
     api: str
+    transport: str
     api_key: str
     model_list: tuple[str, ...]
     proxy: Optional[str]
@@ -187,6 +217,7 @@ class RuntimeProviderSpec:
         return cls(
             name=config.name,
             api=config.api,
+            transport=config.transport,
             api_key=config.api_key or "",
             model_list=config.model_list,
             proxy=config.proxy,
@@ -207,6 +238,7 @@ class ProviderRuntimeView:
 
     name: str
     api: str
+    transport: str
     model_list: tuple[str, ...]
     proxy: Optional[str]
     timeout_seconds: int
@@ -219,6 +251,7 @@ class ProviderRuntimeView:
         return cls(
             name=spec.name,
             api=spec.api,
+            transport=spec.transport,
             model_list=spec.model_list,
             proxy=spec.proxy,
             timeout_seconds=spec.timeout_seconds,

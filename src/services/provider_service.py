@@ -23,12 +23,18 @@ class ProviderService:
 
     def list_providers(self) -> List[Dict[str, Any]]:
         config = self._config_manager.get_raw_config()
-        return self._extract_providers(config)
+        return [
+            ProviderConfigSchema.from_mapping(provider).to_mapping()
+            for provider in self._extract_providers(config)
+        ]
 
     def get_provider(self, name: str) -> Optional[Dict[str, Any]]:
         config = self._config_manager.get_raw_config()
         providers = self._extract_providers(config)
-        return self._find_provider(providers, name)
+        provider = self._find_provider(providers, name)
+        if provider is None:
+            return None
+        return ProviderConfigSchema.from_mapping(provider).to_mapping()
 
     def create_provider(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         config = self._config_manager.get_raw_config()

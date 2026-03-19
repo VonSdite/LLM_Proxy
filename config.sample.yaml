@@ -12,6 +12,7 @@ admin:
 providers:
   - name: volcengine
     api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
+    transport: http
     api_key:
     proxy:
     timeout_seconds: 300
@@ -23,12 +24,20 @@ providers:
 
   - name: volc
     api: https://ark.cn-beijing.volces.com/api/v3/chat/completions
+    transport: http
     api_key:
     model_list:
       - glm-4-7-251222
       - deepseek-v3-2-251201
       - MiniMax-M2.5
       - Kimi-K2.5
+
+  # - name: codex
+  #   api: wss://example.com/v1/chat/completions
+  #   transport: websocket
+  #   api_key:
+  #   model_list:
+  #     - gpt-4.1
 
 # logging:  # 可选
 #   path:

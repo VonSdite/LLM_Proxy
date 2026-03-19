@@ -16,6 +16,7 @@
 这个项目当前最有区分度的能力不是“普通 API 代理”，而是：
 
 - 通过 Hook 机制在请求头、请求体、响应体三个阶段做协议适配
+- Provider 运行时显式携带 `transport`，把 HTTP/SSE 与 WebSocket 上游统一收敛到同一条代理链路
 - 既能接标准 OpenAI 风格上游，也能接非标准协议上游
 - 适合处理 Claude / Anthropic 一类需要格式转换的接入场景
 - 也适合处理经过授权的会话型集成，例如额外 Cookie、session token、自定义 header 或私有参数
@@ -29,6 +30,7 @@
 - 配置与 Provider 运行时：[config_manager.py](../src/config/config_manager.py) [provider_manager.py](../src/config/provider_manager.py)
 - Hook 协议：[contracts.py](../src/hooks/contracts.py)
 - 代理主链路：[proxy_controller.py](../src/presentation/proxy_controller.py) [proxy_service.py](../src/services/proxy_service.py)
+- WebSocket 上游桥接：[upstream_websocket.py](../src/external/upstream_websocket.py)
 
 ## 1. Logical View
 
@@ -60,7 +62,7 @@ flowchart LR
             ConfigMgr["ConfigManager"]
             ProviderCfg["provider_config"]
             ProviderMgr["ProviderManager"]
-            LLMProvider["LLMProvider"]
+            LLMProvider["LLMProvider\ntransport=http|websocket"]
         end
 
         subgraph Persistence["Persistence"]
@@ -73,6 +75,7 @@ flowchart LR
             Hooks["Hook Modules"]
             Adapter["response_adapter"]
             Probe["stream_probe"]
+            WSBridge["upstream_websocket"]
             Upstream["Upstream LLM Providers"]
         end
     end
@@ -102,6 +105,7 @@ flowchart LR
     ProxySvc --> LLMProvider
     ProxySvc --> Adapter
     ProxySvc --> Probe
+    ProxySvc --> WSBridge
     ProviderMgr --> ProviderCfg
     ProviderMgr --> LLMProvider
     ProviderMgr --> Hooks
@@ -118,9 +122,9 @@ flowchart LR
 
 - `Presentation` 负责 HTTP 路由、鉴权入口、页面渲染和请求/响应封装
 - `Services` 负责用例编排，不直接共享全局可变配置
-- `Config / Provider Runtime` 负责 YAML 配置快照、显式 `ProviderConfigSchema` / `RuntimeProviderSpec` 工厂、只读运行时视图和模型到 Provider 的运行时映射
+- `Config / Provider Runtime` 负责 YAML 配置快照、显式 `ProviderConfigSchema` / `RuntimeProviderSpec` 工厂、只读运行时视图、模型到 Provider 的运行时映射，以及 provider 传输类型解析
 - `Persistence` 负责 SQLite 读写
-- `External Integration` 负责上游协议适配、流式探测、Hook 扩展和上游 Provider 集成
+- `External Integration` 负责上游协议适配、流式探测、WebSocket 消息桥接、Hook 扩展和上游 Provider 集成
 
 其中最重要的扩展边界是 Hook：
 
@@ -196,7 +200,7 @@ flowchart TB
             UserCache["UserService\nIP -> User 缓存"]
             ConfigCache["ConfigManager\n配置快照缓存"]
             ProviderRegistry["ProviderManager\nmodel -> provider 映射\nhook cache"]
-            HttpLocal["ProxyService\nthread-local requests.Session"]
+            TransportClients["ProxyService\nthread-local requests.Session\nper-request websocket connection"]
         end
     end
 
@@ -216,13 +220,13 @@ flowchart TB
     FlaskApp --> UserCache
     FlaskApp --> ConfigCache
     FlaskApp --> ProviderRegistry
-    FlaskApp --> HttpLocal
+    FlaskApp --> TransportClients
 
     ConfigCache <--> ConfigFile
     UserCache <--> DB
     ProviderRegistry <--> HooksDir
     FlaskApp --> LogFiles
-    HttpLocal <--> Upstream
+    TransportClients <--> Upstream
 ```
 
 进程视图要点：
@@ -231,7 +235,7 @@ flowchart TB
 - `AuthenticationService` 的 Session 存在进程内存中，重启后失效
 - `UserService` 有 IP 维度缓存
 - `ProviderManager` 持有运行时模型路由表、只读 `ProviderRuntimeView` 注册表和 Hook 缓存
-- `ProxyService` 维护 thread-local `requests.Session`
+- `ProxyService` 维护 thread-local `requests.Session`，并在需要时建立短生命周期 websocket 上游连接
 - Hook 模块以运行时动态加载方式参与请求路径
 - 如果未来引入多实例部署，这些内存态要重新设计
 
@@ -271,16 +275,16 @@ flowchart LR
     App --> HooksDir
     App --> Logs
 
-    App <-->|HTTPS| P1
-    App <-->|HTTPS| P2
-    App <-->|HTTPS| PN
+    App <-->|HTTPS / WSS| P1
+    App <-->|HTTPS / WSS| P2
+    App <-->|HTTPS / WSS| PN
 ```
 
 物理视图要点：
 
 - 当前部署结构很简单，单机即可运行
 - 本地状态包括配置文件、SQLite、日志文件、Hook 文件
-- 外部依赖主要是上游模型 Provider 的 HTTP API
+- 外部依赖主要是上游模型 Provider 的 HTTP API 或 WebSocket API
 
 ## 5. Scenario View
 
@@ -351,6 +355,7 @@ sequenceDiagram
 
     Admin->>ProviderCtl: GET /api/providers/fetch-models?api=...
     ProviderCtl->>DiscoverySvc: fetch_models_preview(...)
+    Note over DiscoverySvc: 如果 provider.api 为 ws:// 或 wss://\n先映射为对应的 http:// 或 https:// 再探测
     DiscoverySvc->>Upstream: GET /v1/models or /models
     Upstream-->>DiscoverySvc: JSON models payload
     DiscoverySvc-->>ProviderCtl: fetched_models
@@ -382,11 +387,11 @@ sequenceDiagram
     end
 
     ProxyCtl->>ProviderMgr: get_provider_for_model(model)
-    ProviderMgr-->>ProxyCtl: LLMProvider
+    ProviderMgr-->>ProxyCtl: LLMProvider(transport)
     ProxyCtl->>ProxySvc: proxy_request(provider, body, headers, on_complete)
     ProxySvc->>Hook: header_hook / input_body_hook
-    ProxySvc->>Upstream: POST provider.api
-    Upstream-->>ProxySvc: response or SSE stream
+    ProxySvc->>Upstream: HTTP POST or WebSocket connect + send JSON
+    Upstream-->>ProxySvc: JSON / SSE / WebSocket message stream
     ProxySvc->>Adapter: build_proxy_response(...)
     Adapter->>Hook: output_body_hook
     Adapter-->>Client: Flask Response
@@ -431,6 +436,7 @@ sequenceDiagram
 - 控制平面和数据平面在职责上已经分离出清晰轮廓
 - Hook 扩展点足够轻量，但表达力很强
 - 兼容层能力使项目不局限于“标准 API Key 型接入”
+- 通过显式 `transport` 与外部桥接层，HTTP/SSE 和 WebSocket 上游不再混杂在同一段响应解析逻辑里
 
 当前架构边界：
 
@@ -438,6 +444,7 @@ sequenceDiagram
 - `presentation` 层仍承担部分接口协议细节和错误映射责任
 - `config` 子系统已经收敛为配置快照、显式 schema/factory、Provider 注册三类职责，但仍集中在同一 package 中
 - Hook 动态加载带来了灵活性，也带来了调试、观测和测试复杂性
+- 当前 WebSocket 上游连接仍是“按请求建立、按请求关闭”，尚未像 CLIProxyAPI 那样引入长会话复用与增量输入状态机
 
 ## 7. Evolution Suggestions
 

@@ -3,7 +3,8 @@
 """网络相关工具函数。"""
 
 import ipaddress
-from typing import Dict, Optional
+import ssl
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 
@@ -59,3 +60,32 @@ def build_requests_proxies(proxy_value: Optional[str]) -> Optional[Dict[str, str
         "http": normalized,
         "https": normalized,
     }
+
+
+def build_websocket_connect_options(
+    proxy_value: Optional[str],
+    verify_ssl: bool,
+) -> Dict[str, Any]:
+    """构造 websocket-client 连接参数。"""
+    options: Dict[str, Any] = {
+        "enable_multithread": True,
+        "sslopt": {
+            "cert_reqs": ssl.CERT_REQUIRED if verify_ssl else ssl.CERT_NONE,
+        },
+    }
+
+    normalized = normalize_proxy_url(proxy_value)
+    if normalized is None:
+        return options
+
+    parsed = urlparse(normalized)
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise ValueError("WebSocket upstream currently only supports http/https proxy")
+
+    options["http_proxy_host"] = parsed.hostname
+    options["http_proxy_port"] = parsed.port or (443 if scheme == "https" else 80)
+    if parsed.username:
+        options["http_proxy_auth"] = (parsed.username, parsed.password or "")
+
+    return options

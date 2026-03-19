@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260313-3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260319-3">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
@@ -58,6 +58,13 @@
                             <input type="text" class="form-control" id="providerApi" placeholder="例如 https://api.openai.com/v1/chat/completions">
                         </div>
                         <div class="mb-3">
+                            <label class="form-label">上游传输</label>
+                            <select class="form-control" id="providerTransport">
+                                <option value="http">HTTP</option>
+                                <option value="websocket">WebSocket</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label">API Key</label>
                             <input type="text" class="form-control" id="providerApiKey" placeholder="留空则不写入配置">
                         </div>
@@ -78,9 +85,8 @@
                             <input type="number" class="form-control" id="providerRetries" min="1" placeholder="例如 3">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Verify SSL</label>
+                            <label class="form-label">证书校验（HTTPS/WSS）</label>
                             <select class="form-control" id="providerVerifySsl">
-                                <option value="">-</option>
                                 <option value="true">启用</option>
                                 <option value="false">禁用</option>
                             </select>
@@ -100,7 +106,7 @@
                                     class="field-help-button"
                                     data-bs-toggle="tooltip"
                                     data-bs-placement="top"
-                                    data-bs-title="从 /v1/models 或 /models 接口拉取模型，勾选后再加入当前列表。"
+                                    data-bs-title="从 /v1/models 或 /models 接口拉取模型；如果当前 API 是 ws/wss，会自动尝试对应的 HTTP/HTTPS 地址。"
                                     aria-label="查看拉取模型说明"
                                 >?</button>
                             </div>
@@ -122,21 +128,29 @@
                 <div class="modal-header border-bottom-0">
                     <div>
                         <h5 class="modal-title fw-semibold">选择拉取模型</h5>
-                        <div class="modal-subtitle">已根据当前 Model List 自动预选重复模型，取消勾选可将它们从当前清单移除。</div>
+                        <div class="modal-subtitle">根据当前 Model List 自动预选重复模型，取消勾选可将它们从当前清单移除，未出现在本次拉取结果中的现有模型会保留。</div>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body pt-0">
                     <div class="fetch-model-toolbar">
-                        <input type="text" class="form-control" id="fetchModelSearchInput" placeholder="搜索拉取到的模型">
-                        <div class="fetch-model-toolbar-actions">
-                            <button type="button" class="btn-inline-secondary" onclick="selectAllFetchedModels()">全选</button>
-                            <button type="button" class="btn-inline-secondary" onclick="clearFetchedModelsSelection()">清空</button>
-                        </div>
+                        <input type="text" class="form-control" id="fetchModelSearchInput" placeholder="搜索">
                     </div>
                     <div class="fetch-model-summary" id="fetchModelSummary">共拉取 0 个模型，已选 0 个</div>
-                    <div class="fetch-model-note">未出现在本次拉取结果中的现有模型会保留。</div>
-                    <div class="fetch-model-list" id="fetchModelList"></div>
+                    <div class="fetch-model-list" id="fetchModelList">
+                        <div class="fetch-model-list-header">
+                            <label class="fetch-model-list-header-main" for="fetchModelSelectAllCheckbox">
+                                <input
+                                    type="checkbox"
+                                    class="fetch-model-checkbox"
+                                    id="fetchModelSelectAllCheckbox"
+                                    onchange="toggleFilteredFetchedModels(this.checked)"
+                                >
+                                <span class="fetch-model-list-header-title">模型名称</span>
+                            </label>
+                        </div>
+                        <div class="fetch-model-list-body" id="fetchModelListBody"></div>
+                    </div>
                 </div>
                 <div class="modal-footer border-top-0">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -400,9 +414,16 @@
                 summaryElement.textContent = '共拉取 0 个模型，已选 0 个';
             }
 
-            const listElement = document.getElementById('fetchModelList');
-            if (listElement) {
-                listElement.innerHTML = '';
+            const selectAllCheckbox = document.getElementById('fetchModelSelectAllCheckbox');
+            if (selectAllCheckbox) {
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = false;
+                selectAllCheckbox.disabled = true;
+            }
+
+            const listBodyElement = document.getElementById('fetchModelListBody');
+            if (listBodyElement) {
+                listBodyElement.innerHTML = '';
             }
         }
 
@@ -425,19 +446,32 @@
             summaryElement.textContent = `共拉取 ${totalCount} 个模型${visibleText}，已选 ${selectedCount} 个${existingText}`;
         }
 
+        function syncFetchModelSelectAllState(filteredModels = getFilteredFetchedModels()) {
+            const selectAllCheckbox = document.getElementById('fetchModelSelectAllCheckbox');
+            if (!selectAllCheckbox) return;
+
+            const visibleCount = filteredModels.length;
+            const selectedVisibleCount = filteredModels.filter(model => fetchedModelSelection.has(model)).length;
+
+            selectAllCheckbox.disabled = visibleCount === 0;
+            selectAllCheckbox.indeterminate = visibleCount > 0 && selectedVisibleCount > 0 && selectedVisibleCount < visibleCount;
+            selectAllCheckbox.checked = visibleCount > 0 && selectedVisibleCount === visibleCount;
+        }
+
         function renderFetchModelPicker() {
-            const listElement = document.getElementById('fetchModelList');
-            if (!listElement) return;
+            const listBodyElement = document.getElementById('fetchModelListBody');
+            if (!listBodyElement) return;
 
             const filteredModels = getFilteredFetchedModels();
             updateFetchModelSummary(filteredModels.length);
+            syncFetchModelSelectAllState(filteredModels);
 
             if (!filteredModels.length) {
-                listElement.innerHTML = '<div class="empty-state">没有匹配的拉取模型</div>';
+                listBodyElement.innerHTML = '<div class="empty-state">没有匹配的拉取模型</div>';
                 return;
             }
 
-            listElement.innerHTML = filteredModels
+            listBodyElement.innerHTML = filteredModels
                 .map(model => {
                     const encodedModel = encodeURIComponent(model);
                     const isSelected = fetchedModelSelection.has(model);
@@ -492,16 +526,19 @@
                 itemElement.classList.toggle('selected', checked);
             }
 
-            updateFetchModelSummary(getFilteredFetchedModels().length);
+            const filteredModels = getFilteredFetchedModels();
+            updateFetchModelSummary(filteredModels.length);
+            syncFetchModelSelectAllState(filteredModels);
         }
 
-        function selectAllFetchedModels() {
-            fetchedModelSelection = new Set(fetchedModelCandidates);
-            renderFetchModelPicker();
-        }
-
-        function clearFetchedModelsSelection() {
-            fetchedModelSelection = new Set();
+        function toggleFilteredFetchedModels(checked) {
+            getFilteredFetchedModels().forEach(model => {
+                if (checked) {
+                    fetchedModelSelection.add(model);
+                } else {
+                    fetchedModelSelection.delete(model);
+                }
+            });
             renderFetchModelPicker();
         }
 
@@ -612,6 +649,7 @@
             return {
                 name: document.getElementById('providerName').value.trim(),
                 api: document.getElementById('providerApi').value.trim(),
+                transport: document.getElementById('providerTransport').value,
                 api_key: document.getElementById('providerApiKey').value.trim(),
                 proxy: document.getElementById('providerProxy').value.trim(),
                 timeout_seconds: document.getElementById('providerTimeout').value.trim(),
@@ -623,17 +661,46 @@
         }
 
         function fillForm(provider) {
+            const inferredTransport = inferTransportFromApi(provider?.api || '');
+            const resolvedTransport = provider?.transport || inferredTransport;
             document.getElementById('providerName').value = provider?.name || '';
             document.getElementById('providerApi').value = provider?.api || '';
+            document.getElementById('providerTransport').value = resolvedTransport;
             document.getElementById('providerApiKey').value = provider?.api_key || '';
             document.getElementById('providerProxy').value = provider?.proxy || '';
             document.getElementById('providerTimeout').value = provider?.timeout_seconds || '';
             document.getElementById('providerRetries').value = provider?.max_retries || '';
-            document.getElementById('providerVerifySsl').value = provider?.verify_ssl === true ? 'true' : (provider?.verify_ssl === false ? 'false' : '');
+            document.getElementById('providerVerifySsl').value = provider?.verify_ssl === true ? 'true' : 'false';
             document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? buildModelListValue(provider.model_list) : '';
             document.getElementById('providerHook').value = provider?.hook || '';
             updateModelListCount();
             updateFetchModelsButtonState();
+        }
+
+        function inferTransportFromApi(apiValue) {
+            const normalized = String(apiValue ?? '').trim().toLowerCase();
+            if (normalized.startsWith('ws://') || normalized.startsWith('wss://')) {
+                return 'websocket';
+            }
+            return 'http';
+        }
+
+        function getTransportDisplayMeta(transportValue) {
+            const normalized = String(transportValue ?? '').trim().toLowerCase();
+            if (normalized === 'websocket') {
+                return {
+                    label: 'WebSocket',
+                    className: 'is-websocket'
+                };
+            }
+            return {
+                label: 'HTTP',
+                className: 'is-http'
+            };
+        }
+
+        function getEffectiveTransport() {
+            return document.getElementById('providerTransport')?.value || inferTransportFromApi(document.getElementById('providerApi')?.value || '');
         }
 
         function initTooltips() {
@@ -717,6 +784,7 @@
                 const models = Array.isArray(provider.model_list) ? provider.model_list : [];
                 const preview = getModelPreview(models);
                 const isDeletePending = pendingDeleteProviderName === provider.name;
+                const transportMeta = getTransportDisplayMeta(provider.transport || inferTransportFromApi(provider.api || ''));
                 const modelTags = preview.visible.length
                     ? preview.visible.map(model => `<span class="model-tag">${escapeHtml(model)}</span>`).join('')
                     : '<span class="muted-text">未配置</span>';
@@ -732,7 +800,12 @@
 
                 html += `
                     <tr>
-                        <td class="provider-name-cell">${escapeHtml(provider.name)}</td>
+                        <td class="provider-name-cell">
+                            <div class="provider-name-line">
+                                <span class="provider-name-text">${escapeHtml(provider.name)}</span>
+                                <span class="provider-transport-badge ${transportMeta.className}">${transportMeta.label}</span>
+                            </div>
+                        </td>
                         <td class="provider-api-cell" title="${escapeHtml(provider.api)}"><span class="provider-api-text">${escapeHtml(provider.api)}</span></td>
                         <td>
                             <div class="model-tags model-tags-preview">${modelTags}</div>
@@ -933,6 +1006,7 @@
             });
             document.getElementById('providerName').addEventListener('input', updateFetchModelsButtonState);
             document.getElementById('providerApi').addEventListener('input', updateFetchModelsButtonState);
+            document.getElementById('providerTransport').addEventListener('change', updateFetchModelsButtonState);
             document.getElementById('providerModelList').addEventListener('input', updateModelListCount);
             document.getElementById('providerModelList').addEventListener('blur', function() {
                 applyNormalizedModelListValue();

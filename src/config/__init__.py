@@ -9,7 +9,6 @@ from .provider_config import (
     RuntimeProviderSpec,
     build_provider_schemas,
 )
-from .provider_manager import ProviderManager
 
 __all__ = [
     "ConfigManager",
@@ -19,3 +18,11 @@ __all__ = [
     "build_provider_schemas",
     "ProviderManager",
 ]
+
+
+def __getattr__(name: str):
+    if name == "ProviderManager":
+        from .provider_manager import ProviderManager
+
+        return ProviderManager
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
