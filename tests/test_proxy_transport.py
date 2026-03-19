@@ -1,3 +1,4 @@
+import json
 import ssl
 import subprocess
 import sys
@@ -186,6 +187,74 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("showActionError('保存 Provider'", html)
         self.assertIn("showActionError('删除 Provider'", html)
         self.assertIn("showActionError('拉取模型'", html)
+
+
+    def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
+        html = template_path.read_text(encoding="utf-8")
+
+        self.assertNotIn("addEventListener('blur'", html)
+        self.assertNotIn("applyNormalizedModelListValue();", html)
+
+        script_start = html.index("function normalizeModelListItems")
+        script_end = html.index("function fillForm")
+        script = html[script_start:script_end]
+
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{
+  console,
+  messages: [],
+  showMessage(message, level) {{
+    sandbox.messages.push({{ message, level }});
+  }},
+  document: {{
+    elements: {{
+      providerModelList: {{ value: " beta \\nAlpha\\nalpha\\nBeta\\nbeta\\n" }},
+      providerModelCount: {{ textContent: "" }},
+      providerName: {{ value: " demo " }},
+      providerApi: {{ value: " https://example.com/v1/chat/completions " }},
+      providerTransport: {{ value: "http" }},
+      providerApiKey: {{ value: " secret " }},
+      providerProxy: {{ value: "" }},
+      providerTimeout: {{ value: "" }},
+      providerRetries: {{ value: "" }},
+      providerVerifySsl: {{ value: "false" }},
+      providerHook: {{ value: "" }},
+    }},
+    getElementById(id) {{
+      return this.elements[id] || null;
+    }},
+  }},
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+
+const collectedBefore = sandbox.collectFormData();
+sandbox.tidyModelList();
+const collectedAfter = sandbox.collectFormData();
+
+process.stdout.write(JSON.stringify({{
+  beforeModelList: collectedBefore.model_list,
+  afterTextarea: sandbox.document.elements.providerModelList.value,
+  afterModelList: collectedAfter.model_list,
+  countText: sandbox.document.elements.providerModelCount.textContent,
+  message: sandbox.messages[0]?.message || "",
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual("beta\nAlpha\nalpha\nBeta", payload["beforeModelList"])
+        self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterTextarea"])
+        self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterModelList"])
+        self.assertIn("4", payload["countText"])
+        self.assertIn("整理并排序", payload["message"])
 
 
 class FrontendMessageLocalizationTests(unittest.TestCase):
