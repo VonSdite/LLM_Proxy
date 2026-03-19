@@ -4,6 +4,7 @@
 
 import json
 import threading
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -27,6 +28,16 @@ from ..hooks import HookContext
 from ..utils.net import build_requests_proxies, build_websocket_connect_options
 
 
+@dataclass(frozen=True, slots=True)
+class ProxyErrorInfo:
+    """Structured failure information for locally generated proxy errors."""
+
+    message: str
+    status_code: int = 502
+    error_type: str = "upstream_error"
+    error_code: Optional[str] = None
+
+
 class ProxyService:
     """处理上游 LLM 代理请求。"""
 
@@ -42,7 +53,7 @@ class ProxyService:
         request_headers: Dict[str, str],
         on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
         forward_stream_usage: bool = False,
-    ) -> Tuple[Optional[Response], int]:
+    ) -> Tuple[Optional[Response], int, Optional[ProxyErrorInfo]]:
         """代理请求到目标 provider，并处理重试与输出钩子。"""
         target_url = provider.api
         model_name = request_data["model"]
@@ -51,6 +62,7 @@ class ProxyService:
         max_retries = provider.max_retries
         verify_ssl = provider.verify_ssl
         request_proxies = build_requests_proxies(provider.proxy)
+        last_error: Optional[ProxyErrorInfo] = None
 
         def build_request(attempt: int) -> Tuple[Dict[str, str], Dict[str, Any], HookContext]:
             headers = dict(request_headers)
@@ -92,15 +104,20 @@ class ProxyService:
                     verify_ssl,
                 )
 
+                upstream_error = None
+                if status_code >= 400:
+                    upstream_error = self._summarize_upstream_error(response_for_hook, is_stream)
+
                 should_retry_status = self._should_retry_status_code(status_code)
                 if should_retry_status and attempt < max_retries - 1:
                     self._logger.warning(
-                        "Retryable upstream status (attempt %s/%s): provider=%s transport=%s status=%s, retrying",
+                        "Retryable upstream status (attempt %s/%s): provider=%s transport=%s status=%s error=%s, retrying",
                         attempt + 1,
                         max_retries,
                         provider.name,
                         provider.transport,
                         status_code,
+                        upstream_error or "<empty>",
                     )
                     response_for_hook.close()
                     continue
@@ -111,6 +128,17 @@ class ProxyService:
                         requested_stream,
                         is_stream,
                         provider.transport,
+                    )
+
+                if status_code >= 400:
+                    log_method = self._logger.warning if status_code < 500 else self._logger.error
+                    log_method(
+                        "Upstream returned error: provider=%s transport=%s status=%s stream=%s error=%s",
+                        provider.name,
+                        provider.transport,
+                        status_code,
+                        is_stream,
+                        upstream_error or "<empty>",
                     )
 
                 response = build_proxy_response(
@@ -135,8 +163,9 @@ class ProxyService:
                     response.call_on_close(response_for_hook.close)
                 else:
                     response_for_hook.close()
-                return response, status_code
+                return response, status_code, None
             except requests.exceptions.RequestException as exc:
+                last_error = self._build_transport_error_info("HTTP", exc, max_retries)
                 self._logger.error(
                     "HTTP upstream request error (attempt %s/%s): %s",
                     attempt + 1,
@@ -146,6 +175,7 @@ class ProxyService:
                 if attempt < max_retries - 1:
                     continue
             except (websocket.WebSocketException, OSError) as exc:
+                last_error = self._build_transport_error_info("WebSocket", exc, max_retries)
                 self._logger.error(
                     "WebSocket upstream request error (attempt %s/%s): %s",
                     attempt + 1,
@@ -155,7 +185,14 @@ class ProxyService:
                 if attempt < max_retries - 1:
                     continue
 
-        return None, 502
+        if last_error is None:
+            last_error = ProxyErrorInfo(
+                message="Upstream request failed after retries",
+                status_code=502,
+                error_type="upstream_error",
+                error_code="upstream_request_failed",
+            )
+        return None, last_error.status_code, last_error
 
     def _open_upstream_response(
         self,
@@ -304,6 +341,97 @@ class ProxyService:
             "error": f"WebSocket upstream handshake failed: {exc}",
         }
         return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    @staticmethod
+    def _build_transport_error_info(
+        transport: str,
+        exc: Exception,
+        max_retries: int,
+    ) -> ProxyErrorInfo:
+        attempt_label = "attempt" if max_retries == 1 else "attempts"
+        return ProxyErrorInfo(
+            message=f"{transport} upstream request failed after {max_retries} {attempt_label}: {exc}",
+            status_code=502,
+            error_type="upstream_error",
+            error_code="upstream_request_failed",
+        )
+
+    @classmethod
+    def _summarize_upstream_error(cls, response: Any, is_stream: bool) -> Optional[str]:
+        if is_stream:
+            return None
+
+        raw_body = getattr(response, "content", None)
+        if raw_body is None:
+            return None
+
+        if isinstance(raw_body, bytes):
+            body_text = raw_body.decode("utf-8", errors="ignore").strip()
+        else:
+            body_text = str(raw_body).strip()
+
+        if not body_text:
+            return None
+
+        try:
+            payload = json.loads(body_text)
+        except json.JSONDecodeError:
+            return cls._truncate_error_text(body_text)
+
+        message = cls._extract_error_message(payload)
+        if message:
+            return cls._truncate_error_text(message)
+        return cls._truncate_error_text(json.dumps(payload, ensure_ascii=False))
+
+    @classmethod
+    def _extract_error_message(cls, payload: Any) -> Optional[str]:
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                return cls._join_error_parts(
+                    error.get("message"),
+                    error_type=error.get("type"),
+                    error_code=error.get("code"),
+                )
+            if error not in (None, ""):
+                return str(error)
+            if payload.get("message") not in (None, ""):
+                return str(payload.get("message"))
+        return None
+
+    @staticmethod
+    def _join_error_parts(
+        message: Any,
+        *,
+        error_type: Any = None,
+        error_code: Any = None,
+    ) -> Optional[str]:
+        parts = []
+        if message not in (None, ""):
+            parts.append(str(message).strip())
+
+        tags = []
+        if error_type not in (None, ""):
+            tags.append(f"type={error_type}")
+        if error_code not in (None, ""):
+            tags.append(f"code={error_code}")
+
+        if tags:
+            suffix = ", ".join(tags)
+            if parts:
+                parts[0] = f"{parts[0]} ({suffix})"
+            else:
+                parts.append(suffix)
+
+        if not parts:
+            return None
+        return parts[0]
+
+    @staticmethod
+    def _truncate_error_text(text: str, limit: int = 1000) -> str:
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + "..."
 
     @staticmethod
     def _get_upstream_model_name(provider_name: str, requested_model_name: str) -> str:

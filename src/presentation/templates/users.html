@@ -117,7 +117,7 @@
 {% endblock %}
 
 {% block page_scripts %}
-    <script src="/static/js/ui-message.js"></script>
+    <script src="/static/js/ui-message.js?v=20260319-1"></script>
     <script>
         const whitelistControlEnabled = {{ 'true' if chat_whitelist_enabled else 'false' }};
         let users = [];
@@ -725,7 +725,7 @@
                     document.getElementById('newIpAddress').value = '';
                     loadUsers();
                 } else {
-                    showMessage(result.error || '创建失败', 'error');
+                    showActionError('创建用户', result.error, { fallback: '创建用户失败' });
                 }
             } catch (error) {
                 console.error('创建用户失败:', error);
@@ -789,7 +789,7 @@
                     closeEditModal();
                     loadUsers();
                 } else {
-                    showMessage(result.error || '更新失败', 'error');
+                    showActionError('更新用户', result.error, { fallback: '更新用户失败' });
                 }
             } catch (error) {
                 console.error('更新用户失败:', error);
@@ -876,7 +876,7 @@
                     deletingUserId = null;
                     syncDeleteUserPopover();
                     renderUsers();
-                    showMessage(result.error || '删除失败', 'error');
+                    showActionError('删除用户', result.error, { fallback: '删除用户失败' });
                 }
             } catch (error) {
                 console.error('删除用户失败:', error);

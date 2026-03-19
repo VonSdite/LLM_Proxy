@@ -190,7 +190,7 @@
 {% endblock %}
 
 {% block page_scripts %}
-    <script src="/static/js/ui-message.js"></script>
+    <script src="/static/js/ui-message.js?v=20260319-1"></script>
     <script>
         const initialChatWhitelistEnabled = {{ 'true' if chat_whitelist_enabled else 'false' }};
         let providers = [];
@@ -344,7 +344,7 @@
             } catch (error) {
                 console.error('更新 Chat 白名单失败:', error);
                 chatWhitelistEnabled = previous;
-                showMessage(error.message || '更新 Chat 白名单失败', 'error');
+                showActionError('更新 Chat 白名单', error, { fallback: '更新 Chat 白名单失败' });
             } finally {
                 chatWhitelistSaving = false;
                 updateChatWhitelistUi();
@@ -865,7 +865,7 @@
                 await loadProviders();
             } catch (error) {
                 console.error('保存 provider 失败:', error);
-                showMessage(error.message || '保存 provider 失败', 'error');
+                showActionError('保存 Provider', error, { fallback: '保存 Provider 失败' });
             }
         }
 
@@ -928,7 +928,7 @@
                 deletingProviderName = null;
                 syncDeleteProviderPopover();
                 renderProviders();
-                showMessage(error.message || '删除 provider 失败', 'error');
+                showActionError('删除 Provider', error, { fallback: '删除 Provider 失败' });
             }
         }
 
@@ -962,7 +962,7 @@
                 showMessage(`已获取到 ${fetchedCount} 个模型`, 'success');
             } catch (error) {
                 console.error('拉取模型失败:', error);
-                showMessage(error.message || '拉取模型失败', 'error');
+                showActionError('拉取模型', error, { fallback: '拉取模型失败' });
             } finally {
                 button.dataset.loading = 'false';
                 button.textContent = originalText;
