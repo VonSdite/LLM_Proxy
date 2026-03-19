@@ -155,8 +155,18 @@ class ProviderTemplateTransportTests(unittest.TestCase):
     def test_provider_template_contains_transport_field(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "presentation"
+            / "static"
+            / "css"
+            / "providers.css"
+        )
+        css = css_path.read_text(encoding="utf-8")
 
         self.assertIn('id="providerTransport"', html)
+        self.assertIn('/static/css/providers.css?v=20260319-6', html)
         self.assertIn('class="field-help-button"', html)
         self.assertIn('data-bs-toggle="tooltip"', html)
         self.assertIn('id="fetchModelSelectAllCheckbox"', html)
@@ -168,6 +178,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn('<option value="">-</option>', html)
         self.assertIn("WebSocket", html)
         self.assertIn("provider-transport-badge", html)
+        self.assertIn('class="provider-model-cell"', html)
+        self.assertIn(".providers-page .providers-table td.provider-name-cell {", css)
+        self.assertIn(".providers-page .providers-table td.provider-api-cell {", css)
+        self.assertIn(".providers-page .providers-table td.provider-model-cell {", css)
+        self.assertIn("vertical-align: middle;", css)
         self.assertIn("showActionError('保存 Provider'", html)
         self.assertIn("showActionError('删除 Provider'", html)
         self.assertIn("showActionError('拉取模型'", html)
@@ -199,6 +214,7 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn('/static/js/ui-message.js?v=20260319-1', login_html)
         self.assertIn('/static/js/ui-message.js?v=20260319-1', users_html)
         self.assertIn('/static/js/ui-message.js?v=20260319-1', index_html)
+        self.assertIn('/static/css/admin-base.css?v=20260319-3', base_page_html)
         self.assertIn('/static/js/theme.js?v=20260319-1', base_page_html)
         self.assertIn('aria-label="切换主题"', base_admin_html)
         self.assertIn('title="切换主题"', base_admin_html)
@@ -241,6 +257,39 @@ process.stdout.write(output);
 
         self.assertIn("上游接口鉴权失败（401）", stdout)
         self.assertIn("原始信息：https://example.com/v1/models returned 401", stdout)
+
+
+class DashboardTemplateTests(unittest.TestCase):
+    def test_index_template_uses_lazy_loaded_tabs(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "src" / "presentation"
+        index_html = (
+            root
+            / "templates"
+            / "index.html"
+        ).read_text(encoding="utf-8")
+        index_css = (root / "static" / "css" / "index.css").read_text(encoding="utf-8")
+        admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
+
+        self.assertIn('/static/css/index.css?v=20260319-4', index_html)
+        self.assertIn('dashboard-tabs-section', index_html)
+        self.assertIn('id="dashboardTabBtn_stats"', index_html)
+        self.assertIn('id="dashboardTabBtn_logs"', index_html)
+        self.assertIn("function switchDashboardTab(", index_html)
+        self.assertIn("function loadActiveDashboardTabData()", index_html)
+        self.assertIn("switchDashboardTab(activeDashboardTab);", index_html)
+        self.assertIn("if (!['stats', 'logs'].includes(tabName)) {", index_html)
+        self.assertIn("fetch(`/api/statistics?${params}`, { cache: 'no-store' })", index_html)
+        self.assertIn("fetch(`/api/request-logs?${params}`, { cache: 'no-store' })", index_html)
+        self.assertNotIn("dashboardTabDirtyState", index_html)
+        self.assertNotIn("markDashboardTabsDirty();", index_html)
+        self.assertIn("document.querySelector('#dashboardTabPanel_logs table')", index_html)
+        self.assertIn("--dashboard-control-height: 40px;", index_css)
+        self.assertIn(".dashboard-page .custom-select-trigger {", index_css)
+        self.assertIn("height: var(--dashboard-control-height);", index_css)
+        self.assertIn("--nav-tab-hover-bg:", admin_base_css)
+        self.assertIn(".app-page .header-nav-link:hover {", admin_base_css)
+        self.assertIn("background: var(--nav-tab-hover-bg);", admin_base_css)
+        self.assertIn("border-color: var(--nav-tab-hover-border);", index_css)
 
 
 if __name__ == "__main__":

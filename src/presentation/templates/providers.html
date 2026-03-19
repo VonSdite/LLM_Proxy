@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260319-3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260319-6">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
@@ -807,7 +807,7 @@
                             </div>
                         </td>
                         <td class="provider-api-cell" title="${escapeHtml(provider.api)}"><span class="provider-api-text">${escapeHtml(provider.api)}</span></td>
-                        <td>
+                        <td class="provider-model-cell">
                             <div class="model-tags model-tags-preview">${modelTags}</div>
                             ${modelSummary}
                         </td>
