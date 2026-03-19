@@ -24,6 +24,9 @@
   - 提供 `POST /v1/chat/completions` 和 `GET /v1/models`
 - 多 Provider / 多模型路由
   - 通过 `provider/model` 形式精确路由到不同上游
+- 双上游传输
+  - `Provider` 运行时显式区分 `http` 与 `websocket`
+  - 对下游仍保持统一的 `/v1/chat/completions` 入口
 - Hook 扩展机制
   - 可在请求头、请求体、响应体三个阶段做定制化改写
 - 非标准上游适配
@@ -146,7 +149,7 @@ Hook 适配能力的设计目标是支持合法授权前提下的协议兼容和
 ### 1. 安装依赖
 
 ```bash
-pip install flask gevent requests pyyaml urllib3
+pip install flask gevent requests pyyaml urllib3 websocket-client
 ```
 
 ### 2. 准备配置文件
@@ -157,6 +160,7 @@ pip install flask gevent requests pyyaml urllib3
 - `server.port`
 - `providers[].name`
 - `providers[].api`
+- `providers[].transport`
 - `providers[].model_list`
 
 可选字段：
@@ -179,6 +183,9 @@ pip install flask gevent requests pyyaml urllib3
 - `chat.whitelist_enabled`
   - 为 `true` 时启用白名单访问控制，仅允许已录入且 `whitelist_access_enabled` 为启用状态的用户 IP 调用 `/v1/chat/completions`
   - 为 `false` 时关闭白名单限制，代理按普通开放模式工作
+- `providers[].transport`
+  - 支持 `http` 与 `websocket`
+  - 后台表单使用显式选择；如果你直接编辑配置文件并省略该字段，运行时会按 `api` 的 scheme 自动推断
 
 
 参考样例见：
@@ -221,6 +228,7 @@ curl http://127.0.0.1:8080/v1/chat/completions ^
 providers:
   - name: openai
     api: https://api.openai.com/v1/chat/completions
+    transport: http
     api_key: ${OPENAI_API_KEY}
     model_list:
       - gpt-4.1
@@ -233,11 +241,30 @@ providers:
 providers:
   - name: anthropic
     api: https://example.com/v1/chat/completions
+    transport: http
     api_key:
     model_list:
       - claude-sonnet
     hook: anthropic_compat.py
 ```
+
+### WebSocket 上游 Provider
+
+```yaml
+providers:
+  - name: codex
+    api: wss://example.com/v1/chat/completions
+    transport: websocket
+    api_key: ${CODEX_TOKEN}
+    model_list:
+      - gpt-4.1
+```
+
+说明：
+
+- 对下游客户端仍然使用 `POST /v1/chat/completions`
+- 代理层会把请求体作为 websocket 文本消息发给上游，并把上游消息桥接成 OpenAI 风格流式响应
+- 后台“拉取模型”会在 `api` 为 `ws://` 或 `wss://` 时，自动尝试对应的 `http://` 或 `https://` 地址去探测 `/v1/models` / `/models`
 
 这类 Hook 常见用途：
 

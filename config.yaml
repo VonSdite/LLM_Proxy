@@ -1,24 +1,14 @@
 server:
   port: 8080
   host: 0.0.0.0
-
 chat:
   whitelist_enabled: true
-
 admin:
   username: admin
   password: admin
-
 providers:
-  - name: volcengine
-    api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
-    api_key:
-    model_list:
-      - kimi-k2.5
-
-# logging:  # 可选
-#   path:
-#   level:
-
-# database:  # 可选
-#   path:
+- name: volcengine
+  api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
+  transport: http
+  model_list:
+  - kimi-k2.5

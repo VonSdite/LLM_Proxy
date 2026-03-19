@@ -14,6 +14,7 @@ class LLMProvider:
 
     name: str
     api: str
+    transport: str = "http"
     api_key: Optional[str] = None
     model_list: tuple[str, ...] = ()
     proxy: Optional[str] = None

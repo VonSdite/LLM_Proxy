@@ -5,5 +5,17 @@
 from .llm_provider import LLMProvider
 from .response_adapter import build_proxy_response
 from .stream_probe import probe_stream_response
+from .upstream_websocket import (
+    StaticUpstreamResponse,
+    WebSocketUpstreamResponse,
+    collect_websocket_response_body,
+)
 
-__all__ = ["LLMProvider", "build_proxy_response", "probe_stream_response"]
+__all__ = [
+    "LLMProvider",
+    "StaticUpstreamResponse",
+    "WebSocketUpstreamResponse",
+    "build_proxy_response",
+    "collect_websocket_response_body",
+    "probe_stream_response",
+]

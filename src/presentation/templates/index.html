@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260313-10">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260319-1">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}实时监控 API 请求和 Token 消耗{% endblock %}
@@ -525,7 +525,12 @@
             updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
 
             if (statsData.length === 0) {
-                statsTable.innerHTML = '<tr><td colspan="8" class="empty-state">暂无统计数据</td></tr>';
+                statsTable.innerHTML = `<tr><td colspan="10" class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
+                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <p>暂无统计数据</p>
+                            </td></tr>`;
                 return;
             }
 

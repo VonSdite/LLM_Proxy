@@ -72,6 +72,7 @@ class ProviderManager:
         provider = LLMProvider(
             name=spec.name,
             api=spec.api,
+            transport=spec.transport,
             api_key=spec.api_key,
             model_list=spec.model_list,
             proxy=spec.proxy,

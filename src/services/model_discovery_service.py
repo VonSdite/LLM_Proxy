@@ -99,7 +99,13 @@ class ModelDiscoveryService:
         if not parsed.scheme or not parsed.netloc:
             raise ValueError('Provider api must be a valid absolute URL')
 
-        root = f'{parsed.scheme}://{parsed.netloc}'
+        normalized_scheme = parsed.scheme.lower()
+        if normalized_scheme == 'ws':
+            normalized_scheme = 'http'
+        elif normalized_scheme == 'wss':
+            normalized_scheme = 'https'
+
+        root = f'{normalized_scheme}://{parsed.netloc}'
         path = parsed.path.rstrip('/')
         path_prefixes = ['']
 
