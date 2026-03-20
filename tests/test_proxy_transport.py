@@ -169,6 +169,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
     def test_provider_template_contains_transport_field(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
+        users_template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "users.html"
+        users_html = users_template_path.read_text(encoding="utf-8")
         css_path = (
             Path(__file__).resolve().parents[1]
             / "src"
@@ -201,6 +203,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("showActionError('删除 Provider'", html)
         self.assertIn("showActionError('拉取模型'", html)
 
+
+        self.assertNotIn('id="chatWhitelistToggle"', html)
+        self.assertIn('id="chatWhitelistToggle"', users_html)
 
     def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"

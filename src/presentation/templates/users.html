@@ -7,6 +7,22 @@
 {% block header_subtitle %}统一管理白名单用户与 IP{% endblock %}
 
 {% block content %}
+        <section class="users-whitelist-section">
+                <div class="whitelist-setting-card" id="chatWhitelistCard">
+                    <div class="whitelist-setting-copy">
+                        <span class="whitelist-setting-label">Chat 白名单</span>
+                        <span class="whitelist-setting-hint">控制 Provider Chat 接口是否启用白名单限制，启用后仅允许白名单访问的用户可访问 Chat</span>
+                    </div>
+                    <div class="whitelist-setting-action">
+                        <span class="whitelist-setting-status" id="chatWhitelistStatus">已禁用</span>
+                        <label class="switch" aria-label="切换 Chat 白名单">
+                            <input type="checkbox" id="chatWhitelistToggle" onchange="toggleChatWhitelist(this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+        </section>
+
         <section class="add-user-section">
                 <div class="form-row">
                     <div class="form-group">
@@ -119,7 +135,9 @@
 {% block page_scripts %}
     <script src="/static/js/ui-message.js?v=20260319-1"></script>
     <script>
-        const whitelistControlEnabled = {{ 'true' if chat_whitelist_enabled else 'false' }};
+        const initialWhitelistControlEnabled = {{ 'true' if chat_whitelist_enabled else 'false' }};
+        let whitelistControlEnabled = initialWhitelistControlEnabled;
+        let chatWhitelistSaving = false;
         let users = [];
         let editingUserId = null;
         let currentPage = 1;
@@ -165,6 +183,51 @@
             const full = formatNumberFull(value);
             const display = formatNumberDisplay(value);
             return `<span class="numeric-value" title="${full}">${display}</span>`;
+        }
+
+        function updateChatWhitelistUi() {
+            const card = document.getElementById('chatWhitelistCard');
+            const status = document.getElementById('chatWhitelistStatus');
+            const toggle = document.getElementById('chatWhitelistToggle');
+            if (!card || !status || !toggle) return;
+
+            card.dataset.enabled = whitelistControlEnabled ? 'true' : 'false';
+            card.dataset.saving = chatWhitelistSaving ? 'true' : 'false';
+            toggle.checked = !!whitelistControlEnabled;
+            toggle.disabled = !!chatWhitelistSaving;
+            status.textContent = chatWhitelistSaving
+                ? '保存中...'
+                : (whitelistControlEnabled ? '已启用' : '已禁用');
+        }
+
+        async function toggleChatWhitelist(enabled) {
+            const previous = whitelistControlEnabled;
+            whitelistControlEnabled = !!enabled;
+            chatWhitelistSaving = true;
+            updateChatWhitelistUi();
+            renderUsers();
+
+            try {
+                const response = await fetch('/api/providers/chat-whitelist', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !!enabled })
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '更新 Chat 白名单失败');
+                }
+                whitelistControlEnabled = !!result.enabled;
+                showMessage(`Chat 白名单已${whitelistControlEnabled ? '启用' : '禁用'}`, 'success');
+            } catch (error) {
+                console.error('更新 Chat 白名单失败:', error);
+                whitelistControlEnabled = previous;
+                showActionError('更新 Chat 白名单', error, { fallback: '更新 Chat 白名单失败' });
+            } finally {
+                chatWhitelistSaving = false;
+                updateChatWhitelistUi();
+                renderUsers();
+            }
         }
 
         function syncCustomSelectValue(selectId) {
@@ -261,6 +324,7 @@
         // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', function() {
             initThemeToggle();
+            updateChatWhitelistUi();
             setupCustomSelect('pageSizeSelect');
             initUserSearch();
             loadUsers();
