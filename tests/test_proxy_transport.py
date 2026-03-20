@@ -191,7 +191,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("证书校验（HTTPS/WSS）", html)
         self.assertNotIn('<option value="">-</option>', html)
         self.assertIn("WebSocket", html)
-        self.assertIn("provider-transport-badge", html)
+        self.assertNotIn("provider-transport-badge", html)
         self.assertIn('class="provider-model-cell"', html)
         self.assertIn(".providers-page .providers-table td.provider-name-cell {", css)
         self.assertIn(".providers-page .providers-table td.provider-api-cell {", css)

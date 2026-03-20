@@ -696,20 +696,6 @@
             return 'http';
         }
 
-        function getTransportDisplayMeta(transportValue) {
-            const normalized = String(transportValue ?? '').trim().toLowerCase();
-            if (normalized === 'websocket') {
-                return {
-                    label: 'WebSocket',
-                    className: 'is-websocket'
-                };
-            }
-            return {
-                label: 'HTTP',
-                className: 'is-http'
-            };
-        }
-
         function getEffectiveTransport() {
             return document.getElementById('providerTransport')?.value || inferTransportFromApi(document.getElementById('providerApi')?.value || '');
         }
@@ -795,7 +781,6 @@
                 const models = Array.isArray(provider.model_list) ? provider.model_list : [];
                 const preview = getModelPreview(models);
                 const isDeletePending = pendingDeleteProviderName === provider.name;
-                const transportMeta = getTransportDisplayMeta(provider.transport || inferTransportFromApi(provider.api || ''));
                 const modelTags = preview.visible.length
                     ? preview.visible.map(model => `<span class="model-tag">${escapeHtml(model)}</span>`).join('')
                     : '<span class="muted-text">未配置</span>';
@@ -812,10 +797,7 @@
                 html += `
                     <tr>
                         <td class="provider-name-cell">
-                            <div class="provider-name-line">
-                                <span class="provider-name-text">${escapeHtml(provider.name)}</span>
-                                <span class="provider-transport-badge ${transportMeta.className}">${transportMeta.label}</span>
-                            </div>
+                            <span class="provider-name-text">${escapeHtml(provider.name)}</span>
                         </td>
                         <td class="provider-api-cell" title="${escapeHtml(provider.api)}"><span class="provider-api-text">${escapeHtml(provider.api)}</span></td>
                         <td class="provider-model-cell">
