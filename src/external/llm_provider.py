@@ -18,7 +18,7 @@ class LLMProvider:
     api_key: Optional[str] = None
     model_list: tuple[str, ...] = ()
     proxy: Optional[str] = None
-    timeout_seconds: int = 300
+    timeout_seconds: int = 1200
     max_retries: int = 3
     verify_ssl: bool = False
     hook: Optional[HookModule] = None

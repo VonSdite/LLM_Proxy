@@ -9,7 +9,7 @@ from websocket import ABNF
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config.provider_config import ProviderConfigSchema
+from src.config.provider_config import ProviderConfigSchema, RuntimeProviderSpec
 from src.external.upstream_websocket import (
     WebSocketUpstreamResponse,
     collect_websocket_response_body,
@@ -46,6 +46,19 @@ class ProviderTransportTests(unittest.TestCase):
         )
 
         self.assertEqual("websocket", schema.transport)
+
+    def test_provider_timeout_defaults_to_1200_seconds(self) -> None:
+        schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "codex",
+                "api": "https://example.com/v1/chat/completions",
+                "model_list": ["gpt-4.1"],
+            }
+        )
+
+        self.assertIsNone(schema.timeout_seconds)
+        runtime = RuntimeProviderSpec.from_schema(schema)
+        self.assertEqual(1200, runtime.timeout_seconds)
 
     def test_provider_transport_allows_explicit_override(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
