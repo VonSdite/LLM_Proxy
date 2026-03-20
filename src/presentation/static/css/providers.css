@@ -28,68 +28,6 @@
     gap: 10px;
 }
 
-.providers-page .toolbar-setting-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 12px 14px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: #fff;
-    box-shadow: var(--shadow-card);
-}
-
-.providers-page .toolbar-setting-card + .toolbar-card {
-    margin-top: 16px;
-}
-
-.providers-page .toolbar-setting-copy {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.providers-page .toolbar-setting-label {
-    color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 700;
-}
-
-.providers-page .toolbar-setting-hint {
-    color: var(--text-secondary);
-    font-size: 12px;
-    line-height: 1.45;
-}
-
-.providers-page .toolbar-setting-action {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-}
-
-.providers-page .toolbar-setting-status {
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 700;
-    white-space: nowrap;
-}
-
-.providers-page .toolbar-setting-card[data-enabled="true"] .toolbar-setting-status {
-    color: var(--success);
-}
-
-.providers-page .toolbar-setting-card[data-enabled="true"] {
-    border-color: rgba(28, 164, 113, 0.22);
-    background: rgba(28, 164, 113, 0.06);
-}
-
-.providers-page .toolbar-setting-card[data-saving="true"] .toolbar-setting-status {
-    color: var(--primary-active);
-}
-
 .providers-page .toolbar-pill {
     display: inline-flex;
     align-items: center;
@@ -201,23 +139,9 @@
     color: currentColor;
 }
 
-:root[data-theme="dark"] .providers-page .toolbar-setting-card {
-    border-color: #313b47;
-    background: #161b22;
-}
-
 :root[data-theme="dark"] .providers-page .toolbar-card {
     border-color: #313b47;
     background: #161b22;
-}
-
-:root[data-theme="dark"] .providers-page .toolbar-setting-card[data-enabled="true"] {
-    border-color: rgba(46, 160, 104, 0.42);
-    background: rgba(46, 160, 104, 0.1);
-}
-
-:root[data-theme="dark"] .providers-page .toolbar-setting-card[data-saving="true"] .toolbar-setting-status {
-    color: #9bc7ff;
 }
 
 .providers-page .providers-table tbody tr:nth-child(even) td {
@@ -1189,16 +1113,6 @@
 
     .providers-page .toolbar-pill {
         white-space: normal;
-    }
-
-    .providers-page .toolbar-setting-card {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .providers-page .toolbar-setting-action {
-        width: 100%;
-        justify-content: space-between;
     }
 
     .providers-page .provider-form-grid {

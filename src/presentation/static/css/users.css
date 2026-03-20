@@ -5,9 +5,74 @@
     gap: 14px;
 }
 
+.users-page .users-whitelist-section,
 .users-page .add-user-section,
 .users-page .users-section {
     padding: 22px var(--page-card-inset);
+}
+
+.users-page .users-whitelist-section {
+    padding-bottom: 0;
+    border-bottom: none;
+    background: transparent;
+}
+
+.users-page .whitelist-setting-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+
+.users-page .whitelist-setting-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.users-page .whitelist-setting-label {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.users-page .whitelist-setting-hint {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.users-page .whitelist-setting-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.users-page .whitelist-setting-status {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.users-page .whitelist-setting-card[data-enabled="true"] .whitelist-setting-status {
+    color: var(--success);
+}
+
+.users-page .whitelist-setting-card[data-enabled="true"] {
+    border-color: rgba(28, 164, 113, 0.22);
+    background: rgba(28, 164, 113, 0.06);
+}
+
+.users-page .whitelist-setting-card[data-saving="true"] .whitelist-setting-status {
+    color: var(--primary-active);
 }
 
 .users-page .add-user-section {
@@ -164,6 +229,20 @@
 :root[data-theme="dark"] .users-page .form-row {
     border-color: #30363d;
     background: #161b22;
+}
+
+:root[data-theme="dark"] .users-page .whitelist-setting-card {
+    border-color: #313b47;
+    background: #161b22;
+}
+
+:root[data-theme="dark"] .users-page .whitelist-setting-card[data-enabled="true"] {
+    border-color: rgba(46, 160, 104, 0.42);
+    background: rgba(46, 160, 104, 0.1);
+}
+
+:root[data-theme="dark"] .users-page .whitelist-setting-card[data-saving="true"] .whitelist-setting-status {
+    color: #9bc7ff;
 }
 
 .users-page .form-group {
@@ -706,6 +785,7 @@
 
 @media (max-width: 900px) {
     .users-page .header,
+    .users-page .users-whitelist-section,
     .users-page .add-user-section,
     .users-page .users-section {
         padding-left: 16px;
@@ -718,6 +798,7 @@
     }
 
     .users-page .section-toolbar,
+    .users-page .whitelist-setting-card,
     .users-page .form-row {
         flex-wrap: wrap;
     }
@@ -733,12 +814,14 @@
 }
 
 @media (max-width: 640px) {
+    .users-page .users-whitelist-section,
     .users-page .add-user-section,
     .users-page .users-section {
         padding-left: 12px;
         padding-right: 12px;
     }
 
+    .users-page .whitelist-setting-card,
     .users-page .form-row {
         flex-direction: column;
         align-items: stretch;
