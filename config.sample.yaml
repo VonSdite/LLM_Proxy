@@ -15,7 +15,7 @@ providers:
     transport: http
     api_key:
     proxy:
-    timeout_seconds: 300
+    timeout_seconds: 1200
     max_retries: 3
     verify_ssl: false
     model_list:
