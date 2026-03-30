@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from ..application.app_context import AppContext
 from ..repositories import UserRepository
 from ..utils import is_valid_ip
+from ..utils.local_time import normalize_local_datetime_text
 
 
 class UserService:
@@ -39,6 +40,17 @@ class UserService:
                 if ip_address:
                     self._user_by_ip_cache.pop(ip_address, None)
 
+    @staticmethod
+    def _normalize_user_timestamps(user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """统一用户时间字段格式。"""
+        if not user:
+            return user
+
+        normalized = dict(user)
+        normalized["created_at"] = normalize_local_datetime_text(normalized.get("created_at"))
+        normalized["updated_at"] = normalize_local_datetime_text(normalized.get("updated_at"))
+        return normalized
+
     def create_user(self, username: str, ip_address: str) -> Optional[int]:
         """创建用户。"""
         try:
@@ -62,7 +74,7 @@ class UserService:
     def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         """按 ID 查询用户。"""
         try:
-            return self._repository.get_by_id(user_id)
+            return self._normalize_user_timestamps(self._repository.get_by_id(user_id))
         except Exception as e:
             self._logger.error(f'Failed to get user: {e}')
             return None
@@ -70,7 +82,8 @@ class UserService:
     def get_users(self, page: int = 1, page_size: int = 50, keyword: Optional[str] = None) -> List[Dict[str, Any]]:
         """分页查询用户列表。"""
         try:
-            return self._repository.get(page=page, page_size=page_size, keyword=keyword)
+            users = self._repository.get(page=page, page_size=page_size, keyword=keyword)
+            return [self._normalize_user_timestamps(user) for user in users]
         except Exception as e:
             self._logger.error(f'Failed to get users: {e}')
             return []
@@ -168,7 +181,7 @@ class UserService:
                 return None
             if require_whitelist_access and not bool(cached_user.get('whitelist_access_enabled')):
                 return None
-            return cached_user
+            return self._normalize_user_timestamps(cached_user)
         except Exception as e:
             self._logger.error(f'Failed to get user by IP: {e}')
             return None

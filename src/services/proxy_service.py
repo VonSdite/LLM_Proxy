@@ -2,30 +2,30 @@
 # -*- coding: utf-8 -*-
 """上游 LLM 代理服务。"""
 
+from __future__ import annotations
+
 import json
-import threading
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple
-from urllib.parse import urlparse
+from dataclasses import dataclass, replace
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 import requests
 import websocket
 from flask import Response, stream_with_context
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from ..application.app_context import AppContext
-from ..external import (
-    LLMProvider,
-    StaticUpstreamResponse,
-    WebSocketUpstreamResponse,
-    build_proxy_response,
-    collect_websocket_response_body,
-    probe_stream_response,
-)
-from ..external.stream_probe import BufferedUpstreamResponse
+from ..executors import OpenedUpstreamResponse, build_default_executor_registry
+from ..external import LLMProvider
 from ..hooks import HookContext
-from ..utils.net import build_requests_proxies, build_websocket_connect_options
+from ..proxy_core import (
+    DownstreamChunk,
+    decode_stream_events,
+    encode_downstream_chunk,
+    encode_downstream_response_body,
+    is_terminal_chunk,
+    should_emit_terminal_chunk,
+)
+from ..translators import Translator, build_default_translator_registry
+from ..utils.net import build_requests_proxies
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +44,8 @@ class ProxyService:
     def __init__(self, ctx: AppContext):
         self._logger = ctx.logger
         self._root_path = ctx.root_path
-        self._http_local = threading.local()
+        self._executor_registry = build_default_executor_registry(self._logger)
+        self._translator_registry = build_default_translator_registry()
 
     def proxy_request(
         self,
@@ -54,122 +55,146 @@ class ProxyService:
         on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
         forward_stream_usage: bool = False,
     ) -> Tuple[Optional[Response], int, Optional[ProxyErrorInfo]]:
-        """代理请求到目标 provider，并处理重试与输出钩子。"""
+        """代理请求到目标 provider，并处理重试、格式转换与 guard。"""
         target_url = provider.api
-        model_name = request_data["model"]
-
+        requested_model = request_data["model"]
+        upstream_model = self._get_upstream_model_name(provider.name, requested_model)
         timeout_seconds = provider.timeout_seconds
         max_retries = provider.max_retries
         verify_ssl = provider.verify_ssl
         request_proxies = build_requests_proxies(provider.proxy)
+        translator = self._translator_registry.get(provider.source_format, provider.target_format)
         last_error: Optional[ProxyErrorInfo] = None
+        self._ensure_supported_target_format(provider.target_format)
 
-        def build_request(attempt: int) -> Tuple[Dict[str, str], Dict[str, Any], HookContext]:
+        def build_request(
+            attempt: int,
+        ) -> Tuple[Dict[str, str], Dict[str, Any], Dict[str, Any], HookContext]:
+            initial_stream = bool(request_data.get("stream", False))
+            request_ctx = HookContext(
+                retry=attempt,
+                root_path=self._root_path,
+                logger=self._logger,
+                provider_name=provider.name,
+                request_model=requested_model,
+                upstream_model=upstream_model,
+                provider_source_format=provider.source_format,
+                provider_target_format=provider.target_format,
+                transport=provider.transport,
+                stream=initial_stream,
+            )
+
             headers = dict(request_headers)
             headers["content-type"] = "application/json"
-
             if provider.api_key:
                 headers["authorization"] = f"Bearer {provider.api_key}"
-
-            request_ctx = HookContext(retry=attempt, root_path=self._root_path, logger=self._logger)
             headers = provider.apply_header_hook(request_ctx, headers)
 
-            body = dict(request_data)
-            body = provider.apply_input_body_hook(request_ctx, body)
-            body["model"] = self._get_upstream_model_name(provider.name, model_name)
-            return headers, body, request_ctx
+            guarded_body = provider.apply_request_guard(request_ctx, dict(request_data))
+            guarded_stream = bool(guarded_body.get("stream", False))
+            if guarded_stream != request_ctx.stream:
+                request_ctx = replace(request_ctx, stream=guarded_stream)
+
+            translated_body = translator.translate_request(upstream_model, guarded_body, guarded_stream)
+            return headers, guarded_body, translated_body, request_ctx
 
         for attempt in range(max_retries):
-            headers, body, request_ctx = build_request(attempt)
-            requested_stream = bool(body.get("stream", False))
+            headers, guarded_body, translated_body, request_ctx = build_request(attempt)
+            requested_stream = request_ctx.stream
             self._logger.info(
-                "Proxying upstream request: provider=%s transport=%s model=%s attempt=%s/%s stream=%s",
+                "Proxying upstream request: provider=%s transport=%s source=%s target=%s model=%s attempt=%s/%s stream=%s",
                 provider.name,
                 provider.transport,
-                body.get("model"),
+                provider.source_format,
+                provider.target_format,
+                translated_body.get("model"),
                 attempt + 1,
                 max_retries,
                 requested_stream,
             )
 
             try:
-                response_for_hook, is_stream, status_code = self._open_upstream_response(
-                    provider,
-                    headers,
-                    body,
-                    requested_stream,
-                    target_url,
+                opened = self._coerce_opened_response(
+                    self._open_upstream_response(
+                        provider,
+                        headers,
+                        translated_body,
+                        requested_stream,
+                        target_url,
                     request_proxies,
                     timeout_seconds,
                     verify_ssl,
+                    )
                 )
 
-                upstream_error = None
-                if status_code >= 400:
-                    upstream_error = self._summarize_upstream_error(response_for_hook, is_stream)
-
-                should_retry_status = self._should_retry_status_code(status_code)
-                if should_retry_status and attempt < max_retries - 1:
+                if self._should_retry_status_code(opened.status_code) and attempt < max_retries - 1:
                     self._logger.warning(
-                        "Retryable upstream status (attempt %s/%s): provider=%s transport=%s status=%s error=%s, retrying",
+                        "Retryable upstream status (attempt %s/%s): provider=%s status=%s stream=%s, retrying",
                         attempt + 1,
                         max_retries,
                         provider.name,
-                        provider.transport,
-                        status_code,
-                        upstream_error or "<empty>",
+                        opened.status_code,
+                        opened.is_stream,
                     )
-                    response_for_hook.close()
+                    opened.response.close()
                     continue
 
-                if requested_stream != is_stream:
+                if requested_stream != opened.is_stream:
                     self._logger.warning(
-                        "Stream mode mismatch: requested_stream=%s upstream_stream=%s transport=%s",
-                        requested_stream,
-                        is_stream,
-                        provider.transport,
-                    )
-
-                if status_code >= 400:
-                    log_method = self._logger.warning if status_code < 500 else self._logger.error
-                    log_method(
-                        "Upstream returned error: provider=%s transport=%s status=%s stream=%s error=%s",
+                        "Stream mode mismatch: provider=%s requested_stream=%s upstream_stream=%s decoder=%s content_type=%s",
                         provider.name,
-                        provider.transport,
-                        status_code,
-                        is_stream,
-                        upstream_error or "<empty>",
+                        requested_stream,
+                        opened.is_stream,
+                        opened.stream_format,
+                        opened.content_type,
                     )
 
-                response = build_proxy_response(
-                    provider.hook,
-                    request_ctx,
-                    response_for_hook,
-                    is_stream,
-                    self._filter_response_headers,
-                    stream_with_context,
-                    self._logger,
-                    on_complete=on_complete,
-                    forward_stream_usage=forward_stream_usage,
-                )
+                if opened.status_code >= 400:
+                    return (
+                        self._build_error_response(provider, opened),
+                        opened.status_code,
+                        None,
+                    )
+
+                if opened.is_stream:
+                    response = self._build_stream_response(
+                        provider=provider,
+                        translator=translator,
+                        request_ctx=request_ctx,
+                        original_request=guarded_body,
+                        translated_request=translated_body,
+                        opened=opened,
+                        on_complete=on_complete,
+                        forward_stream_usage=forward_stream_usage,
+                    )
+                else:
+                    response = self._build_nonstream_response(
+                        provider=provider,
+                        translator=translator,
+                        request_ctx=request_ctx,
+                        original_request=guarded_body,
+                        translated_request=translated_body,
+                        opened=opened,
+                        on_complete=on_complete,
+                    )
+
                 self._logger.info(
-                    "Upstream request completed: provider=%s transport=%s status=%s stream=%s",
+                    "Upstream request completed: provider=%s transport=%s source=%s target=%s status=%s stream=%s",
                     provider.name,
                     provider.transport,
-                    status_code,
-                    is_stream,
+                    provider.source_format,
+                    provider.target_format,
+                    opened.status_code,
+                    opened.is_stream,
                 )
-                if is_stream:
-                    response.call_on_close(response_for_hook.close)
-                else:
-                    response_for_hook.close()
-                return response, status_code, None
+                return response, opened.status_code, None
             except requests.exceptions.RequestException as exc:
                 last_error = self._build_transport_error_info("HTTP", exc, max_retries)
                 self._logger.error(
-                    "HTTP upstream request error (attempt %s/%s): %s",
+                    "HTTP upstream request error (attempt %s/%s): provider=%s error=%s",
                     attempt + 1,
                     max_retries,
+                    provider.name,
                     exc,
                 )
                 if attempt < max_retries - 1:
@@ -177,9 +202,10 @@ class ProxyService:
             except (websocket.WebSocketException, OSError) as exc:
                 last_error = self._build_transport_error_info("WebSocket", exc, max_retries)
                 self._logger.error(
-                    "WebSocket upstream request error (attempt %s/%s): %s",
+                    "WebSocket upstream request error (attempt %s/%s): provider=%s error=%s",
                     attempt + 1,
                     max_retries,
+                    provider.name,
                     exc,
                 )
                 if attempt < max_retries - 1:
@@ -194,6 +220,176 @@ class ProxyService:
             )
         return None, last_error.status_code, last_error
 
+    def _build_stream_response(
+        self,
+        *,
+        provider: LLMProvider,
+        translator: Translator,
+        request_ctx: HookContext,
+        original_request: Dict[str, Any],
+        translated_request: Dict[str, Any],
+        opened: OpenedUpstreamResponse,
+        on_complete: Optional[Callable[[Dict[str, Any]], None]],
+        forward_stream_usage: bool,
+    ) -> Response:
+        response = opened.response
+        meta = self._create_empty_meta()
+        completed = False
+        terminal_sent = False
+
+        def safe_on_complete() -> None:
+            nonlocal completed
+            if completed:
+                return
+            completed = True
+            if on_complete:
+                try:
+                    on_complete(meta)
+                except Exception as exc:
+                    self._logger.error("Error in on_complete callback: %s", exc)
+
+        def generate() -> Iterator[bytes]:
+            nonlocal terminal_sent
+            state: Dict[str, Any] = {}
+            try:
+                upstream_chunks = response.iter_content(chunk_size=None)
+                for event in decode_stream_events(upstream_chunks, opened.stream_format):
+                    downstream_chunks = translator.translate_stream_event(
+                        self._get_upstream_model_name(provider.name, request_ctx.request_model),
+                        original_request,
+                        translated_request,
+                        event,
+                        state,
+                    )
+                    for downstream_chunk in downstream_chunks:
+                        guarded_chunk = self._guard_stream_chunk(provider, request_ctx, downstream_chunk)
+                        if guarded_chunk is None:
+                            continue
+                        if is_terminal_chunk(guarded_chunk, provider.target_format):
+                            terminal_sent = True
+                        if guarded_chunk.kind == "done":
+                            encoded_terminal = encode_downstream_chunk(guarded_chunk, provider.target_format)
+                            if encoded_terminal:
+                                yield encoded_terminal
+                            continue
+                        if (
+                            provider.target_format == "openai_chat"
+                            and guarded_chunk.kind == "json"
+                            and not forward_stream_usage
+                            and self._is_usage_only_stream_chunk(guarded_chunk.payload)
+                        ):
+                            continue
+                        if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
+                            self._update_meta_from_payload(meta, guarded_chunk.payload)
+                        encoded_chunk = encode_downstream_chunk(guarded_chunk, provider.target_format)
+                        if encoded_chunk:
+                            yield encoded_chunk
+
+                if should_emit_terminal_chunk(provider.target_format) and not terminal_sent:
+                    encoded_terminal = encode_downstream_chunk(
+                        DownstreamChunk(kind="done"),
+                        provider.target_format,
+                    )
+                    if encoded_terminal:
+                        yield encoded_terminal
+            finally:
+                try:
+                    response.close()
+                finally:
+                    safe_on_complete()
+
+        headers = self._filter_response_headers(getattr(response, "headers", {}))
+        headers["Content-Type"] = "text/event-stream; charset=utf-8"
+        headers["Cache-Control"] = "no-cache"
+        return Response(
+            stream_with_context(generate()),
+            status=opened.status_code,
+            headers=headers,
+        )
+
+    def _build_nonstream_response(
+        self,
+        *,
+        provider: LLMProvider,
+        translator: Translator,
+        request_ctx: HookContext,
+        original_request: Dict[str, Any],
+        translated_request: Dict[str, Any],
+        opened: OpenedUpstreamResponse,
+        on_complete: Optional[Callable[[Dict[str, Any]], None]],
+    ) -> Response:
+        response = opened.response
+        try:
+            raw_body = self._read_response_body(response)
+            parsed_body = self._parse_json_bytes(raw_body)
+            translated_payload = translator.translate_nonstream_response(
+                self._get_upstream_model_name(provider.name, request_ctx.request_model),
+                original_request,
+                translated_request,
+                parsed_body if parsed_body is not None else raw_body,
+            )
+            guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
+            body_to_send = translated_payload if guarded_payload is None else guarded_payload
+
+            meta = self._create_empty_meta()
+            if isinstance(body_to_send, dict):
+                self._update_meta_from_payload(meta, body_to_send)
+            if on_complete:
+                try:
+                    on_complete(meta)
+                except Exception as exc:
+                    self._logger.error("Error in on_complete callback: %s", exc)
+
+            response_body = encode_downstream_response_body(body_to_send, provider.target_format)
+            headers = self._filter_response_headers(getattr(response, "headers", {}))
+            headers["Content-Type"] = self._resolve_nonstream_content_type(body_to_send, opened.content_type)
+            return Response(
+                response_body,
+                status=opened.status_code,
+                headers=headers,
+            )
+        finally:
+            response.close()
+
+    def _build_error_response(self, provider: LLMProvider, opened: OpenedUpstreamResponse) -> Response:
+        response = opened.response
+        try:
+            body = self._read_response_body(response)
+            summary = self._summarize_upstream_error(body, opened.content_type)
+            log_method = self._logger.warning if opened.status_code < 500 else self._logger.error
+            log_method(
+                "Upstream returned error: provider=%s transport=%s format=%s status=%s stream=%s error=%s",
+                provider.name,
+                provider.transport,
+                f"{provider.source_format}->{provider.target_format}",
+                opened.status_code,
+                opened.is_stream,
+                summary or "<empty>",
+            )
+            headers = self._filter_response_headers(getattr(response, "headers", {}))
+            if opened.content_type:
+                headers["Content-Type"] = opened.content_type
+            return Response(body, status=opened.status_code, headers=headers)
+        finally:
+            response.close()
+
+    def _guard_stream_chunk(
+        self,
+        provider: LLMProvider,
+        request_ctx: HookContext,
+        chunk: DownstreamChunk,
+    ) -> Optional[DownstreamChunk]:
+        if chunk.kind == "done":
+            return chunk
+
+        guarded_payload = provider.apply_response_guard(request_ctx, chunk.payload)
+        payload = chunk.payload if guarded_payload is None else guarded_payload
+        if isinstance(payload, DownstreamChunk):
+            return payload
+        if isinstance(payload, (dict, list)):
+            return DownstreamChunk(kind="json", payload=payload, event=chunk.event)
+        return DownstreamChunk(kind="text", payload=payload, event=chunk.event)
+
     def _open_upstream_response(
         self,
         provider: LLMProvider,
@@ -204,143 +400,35 @@ class ProxyService:
         request_proxies: Optional[Dict[str, str]],
         timeout_seconds: int,
         verify_ssl: bool,
-    ) -> Tuple[Any, bool, int]:
-        if provider.transport == "websocket":
-            return self._open_websocket_upstream_response(
-                provider,
-                headers,
-                body,
-                requested_stream,
-                timeout_seconds,
-                verify_ssl,
-            )
-
-        return self._open_http_upstream_response(
-            provider,
-            headers,
-            body,
-            requested_stream,
-            target_url,
-            request_proxies,
-            timeout_seconds,
-            verify_ssl,
-        )
-
-    def _open_http_upstream_response(
-        self,
-        provider: LLMProvider,
-        headers: Dict[str, str],
-        body: Dict[str, Any],
-        requested_stream: bool,
-        target_url: str,
-        request_proxies: Optional[Dict[str, str]],
-        timeout_seconds: int,
-        verify_ssl: bool,
-    ) -> Tuple[Any, bool, int]:
-        http_session = self._get_http_session()
-        upstream_response = http_session.post(
-            target_url,
+    ) -> OpenedUpstreamResponse:
+        del target_url
+        executor = self._executor_registry.get(provider.transport)
+        return executor.execute(
+            provider=provider,
             headers=headers,
-            json=body,
-            stream=requested_stream,
-            proxies=request_proxies,
-            verify=verify_ssl,
-            timeout=timeout_seconds,
+            body=body,
+            requested_stream=requested_stream,
+            timeout_seconds=timeout_seconds,
+            verify_ssl=verify_ssl,
+            request_proxies=request_proxies,
         )
 
-        status_code = upstream_response.status_code
-        content_type = (upstream_response.headers.get("Content-Type") or "").lower()
-        upstream_stream = "text/event-stream" in content_type
-        response_for_hook: Any = upstream_response
-        if requested_stream and not upstream_stream:
-            response_for_hook, is_stream = probe_stream_response(upstream_response)
-            self._logger.warning(
-                "Stream mode probed for mismatch: requested_stream=%s upstream_stream=%s probed_stream=%s content_type=%s",
-                requested_stream,
-                upstream_stream,
-                is_stream,
-                content_type,
-            )
-        else:
-            is_stream = upstream_stream
-
-        return response_for_hook, is_stream, status_code
-
-    def _open_websocket_upstream_response(
-        self,
-        provider: LLMProvider,
-        headers: Dict[str, str],
-        body: Dict[str, Any],
-        requested_stream: bool,
-        timeout_seconds: int,
-        verify_ssl: bool,
-    ) -> Tuple[Any, bool, int]:
-        websocket_url = self._get_upstream_websocket_url(provider.api)
-        handshake_headers = self._build_websocket_handshake_headers(headers)
-
-        try:
-            connection = websocket.create_connection(
-                websocket_url,
-                timeout=timeout_seconds,
-                header=handshake_headers,
-                **build_websocket_connect_options(provider.proxy, verify_ssl),
-            )
-        except websocket.WebSocketBadStatusException as exc:
-            status_code = int(getattr(exc, "status_code", 502) or 502)
-            body_bytes = self._build_websocket_error_body(exc)
-            response = BufferedUpstreamResponse(
-                StaticUpstreamResponse(
-                    status_code=status_code,
-                    headers={"Content-Type": "application/json"},
-                ),
-                body_bytes,
-            )
-            return response, False, status_code
-
-        connection.send(json.dumps(body, ensure_ascii=False))
-
-        if requested_stream:
-            response = WebSocketUpstreamResponse(connection)
-            return response, True, response.status_code
-
-        response_body = collect_websocket_response_body(connection, self._logger)
-        response = BufferedUpstreamResponse(
-            StaticUpstreamResponse(
-                status_code=200,
-                headers={"Content-Type": "application/json"},
-                on_close=connection.close,
-            ),
-            response_body,
-        )
-        return response, False, response.status_code
-
     @staticmethod
-    def _build_websocket_handshake_headers(headers: Dict[str, str]) -> Dict[str, str]:
-        excluded = {
-            "accept",
-            "content-length",
-            "content-type",
-            "connection",
-            "upgrade",
-        }
-        return {
-            key: value
-            for key, value in headers.items()
-            if key.lower() not in excluded
-        }
-
-    @staticmethod
-    def _build_websocket_error_body(exc: websocket.WebSocketBadStatusException) -> bytes:
-        response_body = getattr(exc, "resp_body", None)
-        if isinstance(response_body, bytes) and response_body.strip():
-            return response_body
-        if isinstance(response_body, str) and response_body.strip():
-            return response_body.encode("utf-8")
-
-        payload = {
-            "error": f"WebSocket upstream handshake failed: {exc}",
-        }
-        return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    def _coerce_opened_response(result: Any) -> OpenedUpstreamResponse:
+        if isinstance(result, OpenedUpstreamResponse):
+            return result
+        if isinstance(result, tuple) and len(result) == 3:
+            response, is_stream, status_code = result
+            headers = getattr(response, "headers", {}) or {}
+            content_type = (headers.get("Content-Type") or "").lower()
+            return OpenedUpstreamResponse(
+                response=response,
+                status_code=int(status_code),
+                content_type=content_type,
+                is_stream=bool(is_stream),
+                stream_format="sse_json" if is_stream else "nonstream",
+            )
+        raise TypeError(f"Unsupported upstream response result: {type(result)!r}")
 
     @staticmethod
     def _build_transport_error_info(
@@ -357,19 +445,12 @@ class ProxyService:
         )
 
     @classmethod
-    def _summarize_upstream_error(cls, response: Any, is_stream: bool) -> Optional[str]:
-        if is_stream:
+    def _summarize_upstream_error(cls, raw_body: bytes, content_type: str) -> Optional[str]:
+        del content_type
+        if not raw_body:
             return None
 
-        raw_body = getattr(response, "content", None)
-        if raw_body is None:
-            return None
-
-        if isinstance(raw_body, bytes):
-            body_text = raw_body.decode("utf-8", errors="ignore").strip()
-        else:
-            body_text = str(raw_body).strip()
-
+        body_text = raw_body.decode("utf-8", errors="ignore").strip()
         if not body_text:
             return None
 
@@ -434,6 +515,65 @@ class ProxyService:
         return text[: limit - 3] + "..."
 
     @staticmethod
+    def _create_empty_meta() -> Dict[str, Any]:
+        return {
+            "response_model": None,
+            "total_tokens": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+        }
+
+    @staticmethod
+    def _update_meta_from_payload(meta: Dict[str, Any], payload: Dict[str, Any]) -> None:
+        model = payload.get("model")
+        if model:
+            meta["response_model"] = model
+        if payload.get("modelVersion") is not None:
+            meta["response_model"] = payload.get("modelVersion")
+        usage = payload.get("usage")
+        usage_metadata = payload.get("usageMetadata")
+        response = payload.get("response")
+        if isinstance(response, dict):
+            if response.get("model") is not None:
+                meta["response_model"] = response.get("model")
+            if response.get("modelVersion") is not None:
+                meta["response_model"] = response.get("modelVersion")
+            if isinstance(response.get("usage"), dict):
+                usage = response.get("usage")
+            if isinstance(response.get("usageMetadata"), dict):
+                usage_metadata = response.get("usageMetadata")
+        if isinstance(usage, dict):
+            if usage.get("total_tokens") is not None:
+                meta["total_tokens"] = int(usage.get("total_tokens") or 0)
+            elif usage.get("input_tokens") is not None or usage.get("output_tokens") is not None:
+                meta["total_tokens"] = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+            if usage.get("prompt_tokens") is not None:
+                meta["prompt_tokens"] = int(usage.get("prompt_tokens") or 0)
+            elif usage.get("input_tokens") is not None:
+                meta["prompt_tokens"] = int(usage.get("input_tokens") or 0)
+            if usage.get("completion_tokens") is not None:
+                meta["completion_tokens"] = int(usage.get("completion_tokens") or 0)
+            elif usage.get("output_tokens") is not None:
+                meta["completion_tokens"] = int(usage.get("output_tokens") or 0)
+            return
+        if not isinstance(usage_metadata, dict):
+            return
+        meta["prompt_tokens"] = int(usage_metadata.get("promptTokenCount") or 0)
+        meta["completion_tokens"] = int(usage_metadata.get("candidatesTokenCount") or 0)
+        meta["total_tokens"] = int(
+            usage_metadata.get("totalTokenCount") or (meta["prompt_tokens"] + meta["completion_tokens"])
+        )
+
+    @staticmethod
+    def _is_usage_only_stream_chunk(payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        if not isinstance(payload.get("usage"), dict):
+            return False
+        choices = payload.get("choices")
+        return choices is None or (isinstance(choices, list) and len(choices) == 0)
+
+    @staticmethod
     def _get_upstream_model_name(provider_name: str, requested_model_name: str) -> str:
         prefix = f"{provider_name}/"
         if requested_model_name.startswith(prefix):
@@ -441,39 +581,43 @@ class ProxyService:
         return requested_model_name
 
     @staticmethod
-    def _get_upstream_websocket_url(api: str) -> str:
-        parsed = urlparse(api.strip())
-        if parsed.scheme.lower() in {"ws", "wss"}:
-            return parsed.geturl()
-        if parsed.scheme.lower() == "http":
-            return parsed._replace(scheme="ws").geturl()
-        if parsed.scheme.lower() == "https":
-            return parsed._replace(scheme="wss").geturl()
-        raise ValueError("WebSocket upstream api must use ws://, wss://, http:// or https://")
+    def _ensure_supported_target_format(target_format: str) -> None:
+        if str(target_format or "").strip().lower() not in {
+            "openai_chat",
+            "openai_responses",
+            "claude_chat",
+            "codex",
+        }:
+            raise ValueError(f"Unsupported downstream target_format: {target_format}")
+
+    @staticmethod
+    def _read_response_body(response: Any) -> bytes:
+        content = getattr(response, "content", None)
+        if isinstance(content, bytes):
+            return content
+        if isinstance(content, str):
+            return content.encode("utf-8")
+        return b"".join(response.iter_content(chunk_size=None))
+
+    @staticmethod
+    def _parse_json_bytes(raw_body: bytes) -> Optional[Any]:
+        if not raw_body:
+            return None
+        try:
+            return json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+
+    @staticmethod
+    def _resolve_nonstream_content_type(payload: Any, upstream_content_type: str) -> str:
+        if isinstance(payload, (dict, list)):
+            return "application/json; charset=utf-8"
+        return upstream_content_type or "application/octet-stream"
 
     @staticmethod
     def _should_retry_status_code(status_code: int) -> bool:
         retryable_status_codes = {408, 409, 425, 429, 500, 502, 503, 504}
         return status_code in retryable_status_codes
-
-    def _get_http_session(self) -> requests.Session:
-        session = getattr(self._http_local, "session", None)
-        if session is None:
-            session = self._build_http_session()
-            self._http_local.session = session
-        return session
-
-    @staticmethod
-    def _build_http_session() -> requests.Session:
-        session = requests.Session()
-        adapter = HTTPAdapter(
-            pool_connections=100,
-            pool_maxsize=100,
-            max_retries=Retry(total=0, connect=0, read=0, redirect=0, status=0),
-        )
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-        return session
 
     @staticmethod
     def _filter_response_headers(headers: Any) -> Dict[str, str]:
@@ -487,5 +631,7 @@ class ProxyService:
             "trailers",
             "upgrade",
             "set-cookie",
+            "content-length",
+            "content-encoding",
         }
         return {key: value for key, value in headers.items() if key.lower() not in excluded}

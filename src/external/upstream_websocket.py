@@ -32,7 +32,7 @@ class StaticUpstreamResponse:
 
 
 class WebSocketUpstreamResponse:
-    """把 websocket 消息流包装成 SSE 风格字节流。"""
+    """Expose upstream websocket messages as raw byte chunks."""
 
     def __init__(
         self,
@@ -40,10 +40,10 @@ class WebSocketUpstreamResponse:
         *,
         status_code: int = 200,
         headers: Optional[Dict[str, str]] = None,
-    ):
+     ):
         self._connection = connection
         self.status_code = status_code
-        self.headers = headers or {"Content-Type": "text/event-stream"}
+        self.headers = headers or {"Content-Type": "application/json"}
 
     def iter_content(self, chunk_size: Optional[int] = None) -> Iterator[bytes]:
         del chunk_size
@@ -99,21 +99,16 @@ def collect_websocket_response_body(connection: Any, logger: Any = None) -> byte
 
 
 def normalize_websocket_message(payload: Any) -> Optional[bytes]:
-    """把单个 websocket 消息归一化成 SSE 事件。"""
-    text = _coerce_text(payload)
-    if text is None:
+    """Normalize a websocket frame to raw bytes without altering boundaries."""
+    if payload is None:
         return None
+    if isinstance(payload, bytes):
+        return payload if payload.strip() else None
 
-    stripped = text.strip()
-    if not stripped:
+    text = str(payload)
+    if not text.strip():
         return None
-
-    if stripped.startswith(("data:", "event:", ":")):
-        if stripped.endswith("\n\n"):
-            return stripped.encode("utf-8")
-        return f"{stripped}\n\n".encode("utf-8")
-
-    return f"data: {stripped}\n\n".encode("utf-8")
+    return text.encode("utf-8")
 
 
 def extract_websocket_payload(payload: Any) -> Optional[bytes]:

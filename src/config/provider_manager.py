@@ -73,6 +73,8 @@ class ProviderManager:
             name=spec.name,
             api=spec.api,
             transport=spec.transport,
+            source_format=spec.source_format,
+            target_format=spec.target_format,
             api_key=spec.api_key,
             model_list=spec.model_list,
             proxy=spec.proxy,

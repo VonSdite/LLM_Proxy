@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from flask import Flask
 
@@ -68,6 +69,23 @@ class FakeProviderManager:
     def list_model_names(self) -> tuple[str, ...]:
         return tuple(f"{self._provider.name}/{model}" for model in self._provider.model_list)
 
+    def get_provider_view(self, provider_name: str):
+        if provider_name != self._provider.name:
+            return None
+        return SimpleNamespace(
+            name=self._provider.name,
+            api=self._provider.api,
+            transport=self._provider.transport,
+            source_format=self._provider.source_format,
+            target_format=self._provider.target_format,
+            model_list=self._provider.model_list,
+            proxy=self._provider.proxy,
+            timeout_seconds=self._provider.timeout_seconds,
+            max_retries=self._provider.max_retries,
+            verify_ssl=self._provider.verify_ssl,
+            hook=self._provider.hook,
+        )
+
 
 class StubProxyService:
     def __init__(self, proxy_result) -> None:
@@ -79,6 +97,51 @@ class StubProxyService:
 
 
 class ProxyControllerErrorFormatTests(unittest.TestCase):
+    def test_list_models_includes_provider_protocol_metadata(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/responses",
+            transport="http",
+            source_format="openai_responses",
+            target_format="codex",
+            model_list=("gpt-5-codex",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().get("/v1/models")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {
+                "object": "list",
+                "data": [
+                    {
+                        "id": "demo/gpt-5-codex",
+                        "object": "model",
+                        "owned_by": "demo",
+                        "provider_name": "demo",
+                        "source_format": "openai_responses",
+                        "target_format": "codex",
+                        "transport": "http",
+                    }
+                ],
+            },
+            response.get_json(),
+        )
+
     def test_chat_completions_returns_openai_style_error_payload_for_upstream_failures(self) -> None:
         provider = LLMProvider(
             name="demo",
@@ -134,6 +197,269 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             any("upstream_error=HTTP upstream request failed after 2 attempts: dial tcp timeout" in msg for msg in logger.messages("error"))
         )
 
+    def test_responses_route_rejects_target_format_mismatch(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            target_format="openai_chat",
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/responses",
+            json={"model": "demo/gpt-4.1", "input": "hi"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            {
+                "error": {
+                    "message": "Model demo/gpt-4.1 is configured for downstream format openai_chat, not one of openai_responses, codex",
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "target_format_mismatch",
+                }
+            },
+            response.get_json(),
+        )
+
+    def test_responses_route_allows_openai_responses_target(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            target_format="openai_responses",
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService(
+                (
+                    app.response_class(
+                        '{"id":"resp_1","object":"response"}',
+                        status=200,
+                        mimetype="application/json",
+                    ),
+                    200,
+                    None,
+                )
+            ),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/responses",
+            json={"model": "demo/gpt-4.1", "input": "hi"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual('{"id":"resp_1","object":"response"}', response.get_data(as_text=True))
+
+    def test_responses_route_allows_codex_target(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/responses",
+            model_list=("gpt-5.2",),
+            target_format="codex",
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService(
+                (
+                    app.response_class(
+                        '{"id":"resp_1","object":"response"}',
+                        status=200,
+                        mimetype="application/json",
+                    ),
+                    200,
+                    None,
+                )
+            ),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/responses",
+            json={"model": "demo/gpt-5.2", "input": "hi"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual('{"id":"resp_1","object":"response"}', response.get_data(as_text=True))
+
+    def test_messages_route_rejects_target_format_mismatch(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            target_format="openai_chat",
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/messages",
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "Model demo/gpt-4.1 is configured for downstream format openai_chat, not claude_chat",
+                },
+            },
+            response.get_json(),
+        )
+
+    def test_messages_route_allows_claude_target(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/messages",
+            model_list=("claude-sonnet-4-5",),
+            target_format="claude_chat",
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService(
+                (
+                    app.response_class(
+                        '{"id":"msg_1","type":"message"}',
+                        status=200,
+                        mimetype="application/json",
+                    ),
+                    200,
+                    None,
+                )
+            ),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/messages",
+            json={
+                "model": "demo/claude-sonnet-4-5",
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            },
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual('{"id":"msg_1","type":"message"}', response.get_data(as_text=True))
+
+    def test_messages_route_returns_claude_style_error_payload_for_upstream_failures(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/messages",
+            model_list=("claude-sonnet-4-5",),
+            target_format="claude_chat",
+        )
+        logger = FakeLogger()
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=logger,
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService(
+                (
+                    None,
+                    502,
+                    ProxyErrorInfo(
+                        message="Upstream Claude request failed: overloaded",
+                        status_code=502,
+                        error_type="api_error",
+                        error_code="upstream_overloaded",
+                    ),
+                )
+            ),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/messages",
+            json={
+                "model": "demo/claude-sonnet-4-5",
+                "max_tokens": 256,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            },
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(502, response.status_code)
+        self.assertEqual(
+            {
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": "Upstream Claude request failed: overloaded",
+                },
+            },
+            response.get_json(),
+        )
+        self.assertTrue(any("upstream_error=Upstream Claude request failed: overloaded" in msg for msg in logger.messages("error")))
 
 class ProxyServiceErrorLoggingTests(unittest.TestCase):
     def test_proxy_service_logs_upstream_error_payload(self) -> None:

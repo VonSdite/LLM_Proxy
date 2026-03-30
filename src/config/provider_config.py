@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Provider 配置 schema、factory 与校验。"""
+"""Provider config schema, factory helpers, and validation."""
 
 from __future__ import annotations
 
@@ -14,8 +14,30 @@ DEFAULT_PROVIDER_TIMEOUT_SECONDS = 1200
 DEFAULT_PROVIDER_MAX_RETRIES = 3
 DEFAULT_PROVIDER_VERIFY_SSL = False
 DEFAULT_PROVIDER_TRANSPORT = "http"
+DEFAULT_PROVIDER_SOURCE_FORMAT = "openai_chat"
+DEFAULT_PROVIDER_TARGET_FORMAT = "openai_chat"
 SUPPORTED_PROVIDER_TRANSPORTS = {"http", "websocket"}
+SUPPORTED_PROVIDER_PROTOCOLS = {
+    "openai_chat",
+    "openai_responses",
+    "claude_chat",
+    "codex",
+}
 SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https", "ws", "wss"}
+SUPPORTED_PROVIDER_FIELDS = {
+    "name",
+    "api",
+    "transport",
+    "source_format",
+    "target_format",
+    "api_key",
+    "proxy",
+    "timeout_seconds",
+    "max_retries",
+    "verify_ssl",
+    "model_list",
+    "hook",
+}
 
 
 def clean_optional_string(value: Any) -> Optional[str]:
@@ -96,7 +118,6 @@ def normalize_model_list(value: Any) -> List[str]:
 
 
 def resolve_provider_transport(api: str, transport: Any = None) -> str:
-    """解析 provider 上游传输类型。"""
     scheme = urlparse(api).scheme.lower()
     if scheme not in SUPPORTED_PROVIDER_API_SCHEMES:
         supported_schemes = ", ".join(sorted(SUPPORTED_PROVIDER_API_SCHEMES))
@@ -117,13 +138,34 @@ def resolve_provider_transport(api: str, transport: Any = None) -> str:
     return DEFAULT_PROVIDER_TRANSPORT
 
 
+def resolve_provider_protocol(
+    value: Any,
+    *,
+    default: str,
+    field_name: str,
+) -> str:
+    resolved = (clean_optional_string(value) or default).lower()
+    if resolved not in SUPPORTED_PROVIDER_PROTOCOLS:
+        supported = ", ".join(sorted(SUPPORTED_PROVIDER_PROTOCOLS))
+        raise ValueError(f"Provider {field_name} must be one of: {supported}")
+    return resolved
+
+
+def validate_provider_fields(config: Mapping[str, Any]) -> None:
+    unknown_fields = sorted(str(key) for key in config.keys() if str(key) not in SUPPORTED_PROVIDER_FIELDS)
+    if unknown_fields:
+        raise ValueError(f"Unsupported provider field(s): {', '.join(unknown_fields)}")
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderConfigSchema:
-    """显式表示配置文件中的单个 provider。"""
+    """Normalized provider configuration schema."""
 
     name: str
     api: str
     transport: str = DEFAULT_PROVIDER_TRANSPORT
+    source_format: str = DEFAULT_PROVIDER_SOURCE_FORMAT
+    target_format: str = DEFAULT_PROVIDER_TARGET_FORMAT
     api_key: Optional[str] = None
     proxy: Optional[str] = None
     timeout_seconds: Optional[int] = None
@@ -134,18 +176,18 @@ class ProviderConfigSchema:
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "ProviderConfigSchema":
-        """从管理接口 payload 构造规范化 schema。"""
         return cls._from_mapping(payload)
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> "ProviderConfigSchema":
-        """从配置文件对象构造规范化 schema。"""
         return cls._from_mapping(config)
 
     @classmethod
     def _from_mapping(cls, config: Mapping[str, Any]) -> "ProviderConfigSchema":
         if not isinstance(config, Mapping):
             raise ValueError("Provider config must be an object")
+
+        validate_provider_fields(config)
 
         name = clean_optional_string(config.get("name"))
         api = clean_optional_string(config.get("api"))
@@ -158,6 +200,16 @@ class ProviderConfigSchema:
             name=name,
             api=api,
             transport=resolve_provider_transport(api, config.get("transport")),
+            source_format=resolve_provider_protocol(
+                config.get("source_format"),
+                default=DEFAULT_PROVIDER_SOURCE_FORMAT,
+                field_name="source_format",
+            ),
+            target_format=resolve_provider_protocol(
+                config.get("target_format"),
+                default=DEFAULT_PROVIDER_TARGET_FORMAT,
+                field_name="target_format",
+            ),
             api_key=clean_optional_string(config.get("api_key")),
             proxy=normalize_proxy_url(config.get("proxy")),
             timeout_seconds=parse_optional_positive_int(config.get("timeout_seconds")),
@@ -168,11 +220,12 @@ class ProviderConfigSchema:
         )
 
     def to_mapping(self) -> Dict[str, Any]:
-        """转换为适合写回配置文件的普通 dict。"""
         config: Dict[str, Any] = {
             "name": self.name,
             "api": self.api,
             "transport": self.transport,
+            "source_format": self.source_format,
+            "target_format": self.target_format,
         }
 
         if self.api_key is not None:
@@ -195,11 +248,13 @@ class ProviderConfigSchema:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeProviderSpec:
-    """显式表示运行时使用的 provider 规格。"""
+    """Provider runtime specification."""
 
     name: str
     api: str
     transport: str
+    source_format: str
+    target_format: str
     api_key: str
     model_list: tuple[str, ...]
     proxy: Optional[str]
@@ -218,6 +273,8 @@ class RuntimeProviderSpec:
             name=config.name,
             api=config.api,
             transport=config.transport,
+            source_format=config.source_format,
+            target_format=config.target_format,
             api_key=config.api_key or "",
             model_list=config.model_list,
             proxy=config.proxy,
@@ -234,11 +291,13 @@ class RuntimeProviderSpec:
 
 @dataclass(frozen=True, slots=True)
 class ProviderRuntimeView:
-    """ProviderManager 暴露的只读运行时视图。"""
+    """Read-only runtime view exposed by ProviderManager."""
 
     name: str
     api: str
     transport: str
+    source_format: str
+    target_format: str
     model_list: tuple[str, ...]
     proxy: Optional[str]
     timeout_seconds: int
@@ -252,6 +311,8 @@ class ProviderRuntimeView:
             name=spec.name,
             api=spec.api,
             transport=spec.transport,
+            source_format=spec.source_format,
+            target_format=spec.target_format,
             model_list=spec.model_list,
             proxy=spec.proxy,
             timeout_seconds=spec.timeout_seconds,

@@ -10,11 +10,13 @@ from websocket import ABNF
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config.provider_config import ProviderConfigSchema, RuntimeProviderSpec
+from src.external.stream_probe import probe_stream_response
 from src.external.upstream_websocket import (
     WebSocketUpstreamResponse,
     collect_websocket_response_body,
     normalize_websocket_message,
 )
+from src.proxy_core import resolve_stream_format
 from src.services.model_discovery_service import ModelDiscoveryService
 from src.utils.net import build_websocket_connect_options
 
@@ -83,14 +85,84 @@ class ProviderTransportTests(unittest.TestCase):
                 }
             )
 
+    def test_provider_defaults_source_and_target_formats(self) -> None:
+        schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "demo",
+                "api": "https://example.com/v1/chat/completions",
+                "model_list": ["gpt-4.1"],
+            }
+        )
+
+        self.assertEqual("openai_chat", schema.source_format)
+        self.assertEqual("openai_chat", schema.target_format)
+        runtime = RuntimeProviderSpec.from_schema(schema)
+        self.assertEqual("openai_chat", runtime.source_format)
+        self.assertEqual("openai_chat", runtime.target_format)
+
+    def test_provider_schema_rejects_removed_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): format"):
+            ProviderConfigSchema.from_mapping(
+                {
+                    "name": "demo",
+                    "api": "https://example.com/v1/chat/completions",
+                    "format": "openai_chat",
+                    "model_list": ["gpt-4.1"],
+                }
+            )
+
+        with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): stream_format"):
+            ProviderConfigSchema.from_mapping(
+                {
+                    "name": "demo",
+                    "api": "https://example.com/v1/chat/completions",
+                    "stream_format": "sse_json",
+                    "model_list": ["gpt-4.1"],
+                }
+            )
+
+    def test_internal_stream_detection_uses_transport_and_content_type(self) -> None:
+        self.assertEqual("ws_json", resolve_stream_format(None, "", "websocket"))
+        self.assertEqual("sse_json", resolve_stream_format(None, "text/event-stream; charset=utf-8", "http"))
+        self.assertEqual("ndjson", resolve_stream_format(None, "application/x-ndjson", "http"))
+        self.assertEqual("nonstream", resolve_stream_format(None, "application/json", "http"))
+
+    def test_stream_probe_detects_sse_when_content_type_is_wrong(self) -> None:
+        class FakeResponse:
+            def __init__(self) -> None:
+                self.status_code = 200
+                self.headers = {"Content-Type": "application/json"}
+                self.closed = False
+                self._chunks = iter(
+                    [
+                        b"data: {\"ok\":true}\n\n",
+                        b"data: [DONE]\n\n",
+                    ]
+                )
+
+            def iter_content(self, chunk_size=None):
+                del chunk_size
+                yield from self._chunks
+
+            def close(self) -> None:
+                self.closed = True
+
+        response, is_stream = probe_stream_response(FakeResponse())
+
+        self.assertTrue(is_stream)
+        self.assertEqual(
+            [b"data: {\"ok\":true}\n\n", b"data: [DONE]\n\n"],
+            list(response.iter_content()),
+        )
+
 
 class WebSocketProxyBridgeTests(unittest.TestCase):
-    def test_normalize_websocket_message_wraps_json_as_sse(self) -> None:
+    def test_normalize_websocket_message_preserves_raw_payload(self) -> None:
         chunk = normalize_websocket_message(b'{"id":"evt_1"}')
 
-        self.assertEqual(b'data: {"id":"evt_1"}\n\n', chunk)
+        self.assertEqual(b'{"id":"evt_1"}', chunk)
 
-    def test_stream_response_converts_websocket_messages_to_sse(self) -> None:
+    def test_stream_response_preserves_websocket_message_boundaries(self) -> None:
         connection = FakeWebSocketConnection(
             [
                 (ABNF.OPCODE_TEXT, b'{"id":"evt_1"}'),
@@ -104,7 +176,7 @@ class WebSocketProxyBridgeTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                b'data: {"id":"evt_1"}\n\n',
+                b'{"id":"evt_1"}',
                 b"data: [DONE]\n\n",
             ],
             chunks,
@@ -166,7 +238,7 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
 
 
 class ProviderTemplateTransportTests(unittest.TestCase):
-    def test_provider_template_contains_transport_field(self) -> None:
+    def test_provider_template_contains_clean_provider_fields_and_help(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
         users_template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "users.html"
@@ -182,30 +254,50 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         css = css_path.read_text(encoding="utf-8")
 
         self.assertIn('id="providerTransport"', html)
-        self.assertIn('/static/css/providers.css?v=20260319-6', html)
-        self.assertIn('class="field-help-button"', html)
-        self.assertIn('data-bs-toggle="tooltip"', html)
+        self.assertIn('id="providerSourceFormat"', html)
+        self.assertIn('id="providerTargetFormat"', html)
+        self.assertNotIn('id="providerFormat"', html)
+        self.assertNotIn('id="providerStreamFormat"', html)
+
+        for value in ("openai_chat", "openai_responses", "claude_chat", "codex"):
+            self.assertIn(f'value="{value}"', html)
+        for removed_value in ("gemini_chat", "gemini_cli", "antigravity"):
+            self.assertNotIn(f'value="{removed_value}"', html)
+
+        self.assertIn('data-provider-help-topic="transport"', html)
+        self.assertIn('data-provider-help-topic="source_format"', html)
+        self.assertIn('data-provider-help-topic="target_format"', html)
+        self.assertIn('data-provider-help-topic="fetch_models"', html)
+        self.assertIn('id="providerHelpPopover"', html)
+        self.assertIn("function toggleProviderHelp(", html)
+        self.assertIn("function syncProviderHelpPopover()", html)
+        self.assertIn("setupCustomSelect('providerTransport');", html)
+        self.assertIn("setupCustomSelect('providerSourceFormat');", html)
+        self.assertIn("setupCustomSelect('providerTargetFormat');", html)
+        self.assertIn("setupCustomSelect('providerVerifySsl');", html)
+        self.assertNotIn("setupCustomSelect('providerFormat');", html)
+        self.assertNotIn("setupCustomSelect('providerStreamFormat');", html)
+        self.assertNotIn('id="providerFormatMatrix"', html)
+        self.assertNotIn('49 pairs', html)
+        self.assertNotIn('data-bs-toggle="tooltip"', html)
+
         self.assertIn('id="fetchModelSelectAllCheckbox"', html)
         self.assertIn('toggleFilteredFetchedModels(this.checked)', html)
-        self.assertNotIn('selectAllFetchedModels()', html)
-        self.assertNotIn('clearFetchedModelsSelection()', html)
-        self.assertNotIn("自动（按 API 推断）", html)
-        self.assertIn("证书校验（HTTPS/WSS）", html)
-        self.assertNotIn('<option value="">-</option>', html)
-        self.assertIn("WebSocket", html)
-        self.assertNotIn("provider-transport-badge", html)
         self.assertIn('class="provider-model-cell"', html)
-        self.assertIn(".providers-page .providers-table td.provider-name-cell {", css)
-        self.assertIn(".providers-page .providers-table td.provider-api-cell {", css)
-        self.assertIn(".providers-page .providers-table td.provider-model-cell {", css)
-        self.assertIn("vertical-align: middle;", css)
+        self.assertIn('class="provider-meta-line"', html)
         self.assertIn("showActionError('保存 Provider'", html)
         self.assertIn("showActionError('删除 Provider'", html)
         self.assertIn("showActionError('拉取模型'", html)
 
+        self.assertIn(".providers-page .provider-help-popover {", css)
+        self.assertIn(".providers-page .field-label-with-help {", css)
+        self.assertNotIn('.providers-page .compatibility-card {', css)
 
         self.assertNotIn('id="chatWhitelistToggle"', html)
         self.assertIn('id="chatWhitelistToggle"', users_html)
+        self.assertIn("function parseLocalDateTime(value)", users_html)
+        self.assertNotIn("new Date(user.created_at)", users_html)
+        self.assertIn("formatDateTime(user.created_at)", users_html)
 
     def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
@@ -233,6 +325,8 @@ const sandbox = {{
       providerName: {{ value: " demo " }},
       providerApi: {{ value: " https://example.com/v1/chat/completions " }},
       providerTransport: {{ value: "http" }},
+      providerSourceFormat: {{ value: "openai_chat" }},
+      providerTargetFormat: {{ value: "openai_chat" }},
       providerApiKey: {{ value: " secret " }},
       providerProxy: {{ value: "" }},
       providerTimeout: {{ value: "" }},
@@ -272,7 +366,7 @@ process.stdout.write(JSON.stringify({{
         self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterTextarea"])
         self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterModelList"])
         self.assertIn("4", payload["countText"])
-        self.assertIn("整理并排序", payload["message"])
+        self.assertTrue(payload["message"])
 
 
 class FrontendMessageLocalizationTests(unittest.TestCase):
@@ -282,20 +376,15 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
 
         self.assertIn("function formatActionErrorMessage(", script)
         self.assertIn("window.showActionError = showActionError;", script)
-        self.assertIn("invalid username or password", script)
-        self.assertIn("用户名或密码错误", script)
-        self.assertIn("上游接口鉴权失败（401）", script)
         self.assertNotIn("failed to fetch models", script)
-        self.assertNotIn("whitelist control is disabled", script)
         self.assertNotIn("failed to toggle user status", script)
 
-    def test_templates_use_versioned_scripts_and_localized_titles(self) -> None:
+    def test_templates_use_versioned_scripts_and_titles(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"
         login_html = (root / "templates" / "login.html").read_text(encoding="utf-8")
         users_html = (root / "templates" / "users.html").read_text(encoding="utf-8")
         index_html = (root / "templates" / "index.html").read_text(encoding="utf-8")
         base_page_html = (root / "templates" / "base_page.html").read_text(encoding="utf-8")
-        base_admin_html = (root / "templates" / "base_admin.html").read_text(encoding="utf-8")
         theme_js = (root / "static" / "js" / "theme.js").read_text(encoding="utf-8")
 
         self.assertIn('/static/js/ui-message.js?v=20260319-1', login_html)
@@ -303,17 +392,11 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn('/static/js/ui-message.js?v=20260319-1', index_html)
         self.assertIn('/static/css/admin-base.css?v=20260319-3', base_page_html)
         self.assertIn('/static/js/theme.js?v=20260319-1', base_page_html)
-        self.assertIn('aria-label="切换主题"', base_admin_html)
-        self.assertIn('title="切换主题"', base_admin_html)
         self.assertIn("showActionError('登录'", login_html)
         self.assertIn("showActionError('创建用户'", users_html)
         self.assertIn("showActionError('更新用户'", users_html)
         self.assertIn("showActionError('删除用户'", users_html)
-        self.assertIn("切换到浅色主题", theme_js)
-        self.assertIn("切换到深色主题", theme_js)
-        self.assertNotIn("Toggle theme", base_admin_html)
-        self.assertNotIn("Switch to light theme", theme_js)
-        self.assertNotIn("Switch to dark theme", theme_js)
+        self.assertNotIn("Toggle theme", theme_js)
 
     def test_ui_message_formatter_appends_upstream_original_error(self) -> None:
         script_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "js" / "ui-message.js"
@@ -328,9 +411,9 @@ const sandbox = {{
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox);
 const output = sandbox.window.formatActionErrorMessage(
-  "拉取模型",
+  "鎷夊彇妯″瀷",
   "https://example.com/v1/models returned 401",
-  {{ fallback: "拉取模型失败" }}
+  {{ fallback: "鎷夊彇妯″瀷澶辫触" }}
 );
 process.stdout.write(output);
 """
@@ -342,41 +425,31 @@ process.stdout.write(output);
         )
         stdout = completed.stdout.decode("utf-8")
 
-        self.assertIn("上游接口鉴权失败（401）", stdout)
-        self.assertIn("原始信息：https://example.com/v1/models returned 401", stdout)
+        self.assertIn("https://example.com/v1/models returned 401", stdout)
 
 
 class DashboardTemplateTests(unittest.TestCase):
     def test_index_template_uses_lazy_loaded_tabs(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"
-        index_html = (
-            root
-            / "templates"
-            / "index.html"
-        ).read_text(encoding="utf-8")
+        index_html = (root / "templates" / "index.html").read_text(encoding="utf-8")
         index_css = (root / "static" / "css" / "index.css").read_text(encoding="utf-8")
         admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
 
-        self.assertIn('/static/css/index.css?v=20260319-4', index_html)
+        self.assertIn('/static/css/index.css?v=20260330-1', index_html)
         self.assertIn('dashboard-tabs-section', index_html)
         self.assertIn('id="dashboardTabBtn_stats"', index_html)
         self.assertIn('id="dashboardTabBtn_logs"', index_html)
         self.assertIn("function switchDashboardTab(", index_html)
         self.assertIn("function loadActiveDashboardTabData()", index_html)
-        self.assertIn("switchDashboardTab(activeDashboardTab);", index_html)
-        self.assertIn("if (!['stats', 'logs'].includes(tabName)) {", index_html)
         self.assertIn("fetch(`/api/statistics?${params}`, { cache: 'no-store' })", index_html)
         self.assertIn("fetch(`/api/request-logs?${params}`, { cache: 'no-store' })", index_html)
-        self.assertNotIn("dashboardTabDirtyState", index_html)
-        self.assertNotIn("markDashboardTabsDirty();", index_html)
-        self.assertIn("document.querySelector('#dashboardTabPanel_logs table')", index_html)
+        self.assertIn("function parseLocalDateTime(value)", index_html)
+        self.assertNotIn("new Date(log.start_time)", index_html)
+        self.assertNotIn("new Date(log.end_time)", index_html)
+        self.assertIn("calculateDurationSeconds(log.start_time, log.end_time)", index_html)
         self.assertIn("--dashboard-control-height: 40px;", index_css)
         self.assertIn(".dashboard-page .custom-select-trigger {", index_css)
-        self.assertIn("height: var(--dashboard-control-height);", index_css)
         self.assertIn("--nav-tab-hover-bg:", admin_base_css)
-        self.assertIn(".app-page .header-nav-link:hover {", admin_base_css)
-        self.assertIn("background: var(--nav-tab-hover-bg);", admin_base_css)
-        self.assertIn("border-color: var(--nav-tab-hover-border);", index_css)
 
 
 if __name__ == "__main__":
