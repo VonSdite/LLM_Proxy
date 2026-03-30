@@ -4,14 +4,25 @@ from src.hooks import BaseHook, HookContext
 
 
 class Hook(BaseHook):
-    """Example hook that demonstrates all available extension points."""
+    """Example hook that demonstrates the header/guard extension points."""
 
     def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
-        ctx.logger("header hook.")
+        ctx.logger.info(
+            "header_hook invoked: provider=%s model=%s stream=%s",
+            ctx.provider_name,
+            ctx.request_model,
+            ctx.stream,
+        )
         headers["X-Custom-Header"] = "custom-value"
         return headers
 
-    def input_body_hook(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any]:
+    def request_guard(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any]:
+        ctx.logger.info(
+            "request_guard invoked: provider=%s source=%s target=%s",
+            ctx.provider_name,
+            ctx.provider_source_format,
+            ctx.provider_target_format,
+        )
         messages = body.get("messages")
         if isinstance(messages, list):
             for msg in messages:
@@ -20,11 +31,8 @@ class Hook(BaseHook):
                     msg["content"] = f"[PREFIX] {original}"
         return body
 
-    def output_body_hook(self, ctx: HookContext, body: Any) -> Any:
+    def response_guard(self, ctx: HookContext, body: Any) -> Any:
         if not isinstance(body, dict):
-            return body
-
-        if body.get("type") == "done":
             return body
 
         choices = body.get("choices")
@@ -32,8 +40,8 @@ class Hook(BaseHook):
             for choice in choices:
                 if not isinstance(choice, dict):
                     continue
-                delta = choice.get("delta")
-                if isinstance(delta, dict) and "content" in delta:
+                delta = choice.get("delta") or choice.get("message")
+                if isinstance(delta, dict) and "content" in delta and isinstance(delta.get("content"), str):
                     original = str(delta.get("content", ""))
                     delta["content"] = f"[MODIFIED] {original}"
 

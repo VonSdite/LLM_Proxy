@@ -1,407 +1,229 @@
-# LLM_Proxy
+# LLM Proxy
 
-## 界面截图
+一个面向多上游协议、少量稳定下游协议面的 LLM 代理服务。
 
-### 统计概览
+当前版本按“首版干净架构”实现，只保留 OpenAI / Claude / Codex 三个协议家族，不保留旧字段、旧别名或 Gemini 相关兼容逻辑。
 
-![统计概览](docs/images/dashboard.png)
+## 特性
 
-### 用户管理
+- 上游协议只保留 4 个 `source_format`
+  - `openai_chat`
+  - `openai_responses`
+  - `claude_chat`
+  - `codex`
+- 下游协议只保留 4 个 `target_format`
+  - `openai_chat`
+  - `openai_responses`
+  - `claude_chat`
+  - `codex`
+- 对外路由只保留：
+  - `POST /v1/chat/completions`
+  - `POST /v1/responses`
+  - `POST /v1/messages`
+  - `GET /v1/models`
+- 统一代理链路：
+  - `executor -> decoder -> translator -> guard -> encoder`
+- Provider 公共配置只保留：
+  - `name`
+  - `api`
+  - `transport`
+  - `source_format`
+  - `target_format`
+  - `api_key`
+  - `proxy`
+  - `timeout_seconds`
+  - `max_retries`
+  - `verify_ssl`
+  - `model_list`
+  - `hook`
+- 用户扩展点只保留：
+  - `header_hook`
+  - `request_guard`
+  - `response_guard`
 
-![用户管理](docs/images/users.png)
+## 下游协议面
 
-### Provider 管理
+| target_format | route | 典型客户端 |
+| --- | --- | --- |
+| `openai_chat` | `POST /v1/chat/completions` | OpenCode、Cherry Studio(OpenAI provider)、通用 OpenAI-compatible SDK |
+| `openai_responses` | `POST /v1/responses` | Responses API 客户端、自研 agent |
+| `codex` | `POST /v1/responses` | Codex |
+| `claude_chat` | `POST /v1/messages` | Claude Code、Cherry Studio(Anthropic provider) |
 
-![Provider 管理](docs/images/providers.png)
+注意：
 
-一个基于 Flask + gevent 的 OpenAI 兼容代理服务，重点不只是“填 API Key 转发”，而是通过 Hook 机制把不同上游协议、鉴权方式和请求格式收敛成统一的 OpenAI 风格接口。对接入方来说，它也可以被理解为一个可控的 ONE API 接入层。
+- `target_format` 和下游 route 必须严格对齐。
+- 一个 provider 配成 `openai_chat` 后，不能再被 `/v1/responses` 或 `/v1/messages` 混用。
+- `/v1/responses` 同时承接 `openai_responses` 和 `codex`。
+- `/v1/models` 会额外返回每个模型对应的 `source_format`、`target_format` 和 `transport`，方便下游做能力发现。
 
-## 项目亮点
+## 上游怎么选 `source_format`
 
-- ONE API 接入定位
-  - 对外统一提供 OpenAI 兼容入口，便于内部系统、脚本或第三方工具按 ONE API 方式接入
-- OpenAI 兼容入口
-  - 提供 `POST /v1/chat/completions` 和 `GET /v1/models`
-- 多 Provider / 多模型路由
-  - 通过 `provider/model` 形式精确路由到不同上游
-- 双上游传输
-  - `Provider` 运行时显式区分 `http` 与 `websocket`
-  - 对下游仍保持统一的 `/v1/chat/completions` 入口
-- Hook 扩展机制
-  - 可在请求头、请求体、响应体三个阶段做定制化改写
-- 非标准上游适配
-  - 适合处理 Claude / Anthropic 一类需要请求格式转换的场景
-  - 也适合处理经过授权的会话型上游集成，例如额外 Cookie、session token、自定义 header、特定 body 字段
-- 管理后台
-  - 支持登录、用户管理、Provider 管理、模型探测、白名单控制
-  - 可启用白名单用户管理机制，仅允许白名单内用户使用聊天能力
-- 请求统计
-  - 自动记录调用明细和每日聚合 Token 统计
+先看上游真实接口的 URL 和请求体，再选 `source_format`：
 
-## 这个项目解决什么问题
+| 上游接口形态 | source_format |
+| --- | --- |
+| `/v1/chat/completions`，请求体主字段是 `messages` | `openai_chat` |
+| `/v1/responses`，请求体主字段是 `input` / `instructions` | `openai_responses` |
+| `/v1/messages` | `claude_chat` |
+| Codex / Responses-only 变体，需要 Codex 特化请求整形 | `codex` |
 
-大多数模型服务只需要配置 `api` 和 `api_key` 就能接入，但真实集成里经常会遇到这几类问题：
+常见例子：
 
-- 上游接口不是 OpenAI 格式，需要字段转换
-- 上游要求额外请求头、Cookie、session token 或特殊参数
-- 不同厂商响应结构不同，需要统一成 OpenAI 风格
-- 某些模型接入只在特定客户端或内部工具里可用，需要做受控的协议适配
+- vLLM / OpenRouter / Ollama OpenAI 兼容层：通常选 `openai_chat`
+- OpenAI Responses API：选 `openai_responses`
+- Anthropic Messages API：选 `claude_chat`
+- Codex：选 `codex`
 
-LLM_Proxy 的核心价值就在这里：
-把“代理转发”升级成“可编排、可适配、可管理的统一入口”。
+## `codex` 和 `openai_responses` 的关系
 
-如果从接入视角描述，这个项目不是单纯的转发层，而是一个带后台管理、路由能力和协议适配能力的 ONE API 接入层。
+`codex` 不是独立路由族，它是 OpenAI Responses 家族下的特化标签：
 
-## 典型使用场景
+- 和 `openai_responses` 共用 `/v1/responses`
+- 和 `openai_responses` 共用 Responses encoder
+- 但保留 Codex 请求整形差异，例如：
+  - `system` -> `developer`
+  - `store = false`
+  - `parallel_tool_calls = true`
+  - `include = ["reasoning.encrypted_content"]`
 
-### 1. 家里 NAS / 小主机部署，供局域网统一使用
+## Provider 配置
 
-这个项目很适合部署在家里的 `NAS`、迷你主机或常开服务器上，作为局域网内统一的 LLM 接入入口。
+### 样例
 
-常见用法是：
+见 [config.sample.yaml](/d:/001Code/008llm/003LLM_Proxy/config.sample.yaml)。
 
-- 在 `NAS` 上启动 `LLM_Proxy`
-- 把不同上游模型能力统一挂到这一个服务后面
-- 在局域网内给桌面端工具、脚本、自动化流程统一提供一个 OpenAI 兼容接口
+最小 provider 例子：
 
-这样做的好处是：
-
-- 局域网内客户端只需要记住一个代理地址
-- 上游 API Key、Hook 适配逻辑、Provider 路由都集中在服务端管理
-- 更适合做白名单控制、用户管理和请求统计
-
-### 2. OpenClaw 等客户端接入局域网代理
-
-如果你把服务部署在局域网设备上，那么像 `OpenClaw` 这类客户端看到的只是一个局域网内的 OpenAI 兼容接口，例如：
-
-```text
-http://192.168.1.10:8080/v1/chat/completions
+```yaml
+providers:
+  - name: openai-chat
+    api: https://api.openai.com/v1/chat/completions
+    transport: http
+    source_format: openai_chat
+    target_format: openai_chat
+    api_key: sk-your-openai-key
+    verify_ssl: true
+    model_list:
+      - gpt-4.1
 ```
 
-对客户端来说：
-
-- 不需要直接感知真实上游厂商地址
-- 不需要关心上游是否是非标准协议
-- 只需要按 OpenAI / ONE API 风格填写局域网代理地址即可
-
-而协议转换、鉴权补充、模型路由、白名单控制等能力，全部由 `LLM_Proxy` 在局域网代理层统一处理。
-
-## 合规说明
-
-Hook 适配能力的设计目标是支持合法授权前提下的协议兼容和私有集成。
-
-- 仅应在你拥有访问权限的前提下使用额外的 Cookie、token、header 或会话凭据
-- 应遵守上游服务的产品条款、访问策略和安全要求
-- README 和示例不会提供抓包、绕过限制或规避授权的操作步骤
-
-## 核心能力概览
-
-### 1. 标准 Provider 接入
-
-对标准 OpenAI 风格上游，通常只需要配置：
+### 字段说明
 
 - `name`
+  - provider 名称，模型会以 `provider/model` 的形式暴露给下游
 - `api`
-- `api_key`
+  - 真实上游地址
+- `transport`
+  - `http` 或 `websocket`
+- `source_format`
+  - 上游真实协议
+- `target_format`
+  - 下游看到的协议
 - `model_list`
+  - 这个 provider 暴露给下游的模型名列表
+- `hook`
+  - Hook 文件名，放在 `hooks/` 下
 
-这种情况下不需要写 Hook。
+### 不再支持的字段
 
-### 2. Hook 方式做协议适配
+当前版本会直接拒绝这些旧字段：
 
-对非标准上游，可以通过 Hook 处理：
+- `format`
+- `stream_format`
+- 任何 Gemini / Antigravity 相关格式值
 
-- `header_hook`
-  - 注入额外 header、Cookie、鉴权字段
-- `input_body_hook`
-  - 把 OpenAI 风格请求体转换成上游需要的格式
-- `output_body_hook`
-  - 把上游响应转换回统一的 OpenAI 风格
+## 流式处理
 
-这也是项目当前最有区分度的能力。
+`stream_format` 已经不是公共配置项。
 
-### 3. 管理与运维能力
+代理内部会自动识别上游响应：
 
-- 后台登录
-- 用户白名单
-  - 支持全局白名单开关
-  - 支持按用户/IP 维度控制是否允许访问
-- Provider 配置增删改查
-- Provider 模型列表探测
-- 请求日志与聚合统计
+- WebSocket 上游：按 JSON 消息流处理
+- HTTP `text/event-stream`：按 SSE JSON 处理
+- `application/x-ndjson` / `ndjson` / `jsonl`：按 NDJSON 处理
+- 其他 HTTP：按非流式处理
+- 如果声明不是 SSE，但首块看起来像 SSE，内部会做一次首块探测兜底
 
-## 架构文档
+这部分是实现细节，不需要用户手工选择。
 
-完整的 Mermaid 版 4+1 架构视图见：
+## Hook
 
-- [docs/architecture-4plus1.md](docs/architecture-4plus1.md)
+Hook 示例见 [hooks/example_hook.py](/d:/001Code/008llm/003LLM_Proxy/hooks/example_hook.py)。
 
-其中包含：
+支持的接口：
 
-- 逻辑视图
-- 开发视图
-- 进程视图
-- 物理视图
-- 关键场景时序图
+```python
+class Hook(BaseHook):
+    def header_hook(self, ctx, headers):
+        return headers
 
-## 快速开始
+    def request_guard(self, ctx, body):
+        return body
 
-### 1. 安装依赖
-
-```bash
-pip install flask gevent requests pyyaml urllib3 websocket-client
+    def response_guard(self, ctx, body):
+        return body
 ```
 
-### 2. 准备配置文件
+`HookContext` 里和协议相关的字段是：
 
-复制并编辑 `config.yaml`，至少确认这些字段：
+- `provider_name`
+- `request_model`
+- `upstream_model`
+- `provider_source_format`
+- `provider_target_format`
+- `transport`
+- `stream`
 
-- `server.host`
-- `server.port`
-- `providers[].name`
-- `providers[].api`
-- `providers[].transport`
-- `providers[].model_list`
+推荐分工：
 
-可选字段：
+- `translator`
+  - 做协议适配
+- `guard`
+  - 做安全审查、护栏、审计、脱敏
 
-- `chat.whitelist_enabled`
-- `providers[].api_key`
-- `providers[].proxy`
-- `providers[].timeout_seconds`
-- `providers[].max_retries`
-- `providers[].verify_ssl`
-- `providers[].hook`
-- `admin.username`
-- `admin.password`
-- `database.path`
-- `logging.path`
-- `logging.level`
+## Provider 页面
 
-其中：
+Provider 管理页不再展示兼容矩阵，也不再让用户选择流格式。
 
-- `chat.whitelist_enabled`
-  - 为 `true` 时启用白名单访问控制，仅允许已录入且 `whitelist_access_enabled` 为启用状态的用户 IP 调用 `/v1/chat/completions`
-  - 为 `false` 时关闭白名单限制，代理按普通开放模式工作
-- `providers[].transport`
-  - 支持 `http` 与 `websocket`
-  - 后台表单使用显式选择；如果你直接编辑配置文件并省略该字段，运行时会按 `api` 的 scheme 自动推断
+页面上会提供 3 个帮助入口：
 
+- `transport`
+- `source_format`
+- `target_format`
 
-参考样例见：
+点击 `?` 会解释：
 
-- [config.sample.yaml](config.sample.yaml)
+- 上游 / 下游分别是什么意思
+- 怎么从 URL 和请求体判断 `source_format`
+- 哪些客户端通常对应哪个 `target_format`
 
-### 3. 启动服务
+## 运行
 
 ```bash
 python main.py
 ```
 
-或指定配置文件：
+默认监听配置文件里的 `server.host` 和 `server.port`。
+
+## 测试
 
 ```bash
-python main.py --config path/to/config.yaml
+python -m unittest discover -s tests
+python -m compileall src tests hooks
 ```
 
-### 4. 调用接口
+## 目录
 
-获取模型列表：
-
-```bash
-curl http://127.0.0.1:8080/v1/models
-```
-
-发起聊天请求：
-
-```bash
-curl http://127.0.0.1:8080/v1/chat/completions ^
-  -H "Content-Type: application/json" ^
-  -d "{\"model\":\"volc/glm-4-7-251222\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"stream\":false}"
-```
-
-## 配置示例
-
-### 标准 OpenAI 风格 Provider
-
-```yaml
-providers:
-  - name: openai
-    api: https://api.openai.com/v1/chat/completions
-    transport: http
-    api_key: ${OPENAI_API_KEY}
-    model_list:
-      - gpt-4.1
-      - gpt-4o-mini
-```
-
-### 带 Hook 的 Provider
-
-```yaml
-providers:
-  - name: anthropic
-    api: https://example.com/v1/chat/completions
-    transport: http
-    api_key:
-    model_list:
-      - claude-sonnet
-    hook: anthropic_compat.py
-```
-
-### WebSocket 上游 Provider
-
-```yaml
-providers:
-  - name: codex
-    api: wss://example.com/v1/chat/completions
-    transport: websocket
-    api_key: ${CODEX_TOKEN}
-    model_list:
-      - gpt-4.1
-```
-
-说明：
-
-- 对下游客户端仍然使用 `POST /v1/chat/completions`
-- 代理层会把请求体作为 websocket 文本消息发给上游，并把上游消息桥接成 OpenAI 风格流式响应
-- 后台“拉取模型”会在 `api` 为 `ws://` 或 `wss://` 时，自动尝试对应的 `http://` 或 `https://` 地址去探测 `/v1/models` / `/models`
-
-这类 Hook 常见用途：
-
-- 把 OpenAI 风格 `messages` 转成上游要求的结构
-- 注入额外鉴权 header / Cookie
-- 修正响应字段，统一 `choices`、`usage`、`model`
-
-## Hook API
-
-Hook 模块需要导出一个名为 `Hook` 的类，通常继承：
-
-```python
-from src.hooks import BaseHook, HookContext
-```
-
-可选实现的方法：
-
-- `header_hook(ctx, headers) -> headers`
-- `input_body_hook(ctx, body) -> body`
-- `output_body_hook(ctx, body) -> body`
-
-示例：
-
-```python
-from typing import Any
-
-from src.hooks import BaseHook, HookContext
-
-
-class Hook(BaseHook):
-    """Anthropic / 私有网关适配示例骨架。"""
-
-    def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
-        headers["X-Client"] = "llm-proxy"
-        return headers
-
-    def input_body_hook(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any]:
-        return body
-
-    def output_body_hook(self, ctx: HookContext, body: Any) -> Any:
-        return body
-```
-
-现成示例见：
-
-- [hooks/example_hook.py](hooks/example_hook.py)
-
-## Hook 适配的典型场景
-
-### Claude / Anthropic 格式转换
-
-某些上游并不直接接受 OpenAI 风格的：
-
-- `messages`
-- `tools`
-- `stream` / `usage`
-
-这时可以在 Hook 中做双向转换：
-
-- 请求进入代理时，从 OpenAI 格式改写成上游格式
-- 响应返回客户端前，再还原成统一的 OpenAI 风格
-
-### 会话型或私有上游集成
-
-某些经过授权的私有集成可能要求：
-
-- 额外 Cookie
-- session token
-- 自定义 header
-- 特定 body 标记
-
-这时可以通过 `header_hook` 和 `input_body_hook` 注入这些字段，实现受控反代接入。
-
-### 响应清洗或增强
-
-有些上游：
-
-- 不返回标准 `usage`
-- 返回字段名不一致
-- 流式块格式不完全兼容
-
-可以在 `output_body_hook` 中统一处理。
-
-## 后台能力
-
-后台当前提供：
-
-- 登录认证
-- 用户管理
-- 白名单开关
-- 白名单用户启停管理
-- Provider 管理
-- 模型探测
-- 请求日志
-- 聚合统计
-
-主要页面：
-
-- `/`
-- `/users`
-- `/providers`
-
-## 数据存储
-
-默认使用 SQLite：
-
-- 数据库文件：`data/requests.db`
-- 配置文件：`config.yaml`
-- 日志目录：`logs/`
-- Hook 目录：`hooks/`
-
-主要表：
-
-- `users`
-- `request_logs`
-- `daily_request_stats`
-
-## 当前架构判断
-
-这个项目当前最值得保留的设计不是“又一个 OpenAI 代理”，而是：
-
-**把 Provider 转发、协议适配、会话注入和后台管理放进了同一个可控边界里。**
-
-也就是说：
-
-- 对接入方来说，它可以作为统一的 ONE API 接入层使用
-- 标准 Provider 可以零适配接入
-- 非标准 Provider 可以最小成本做 Hook 兼容
-- 业务方看到的仍然是统一的 OpenAI 接口
-
-## 后续建议
-
-如果后续继续演进，优先建议：
-
-- 增加更多官方示例 Hook
-  - 例如 Claude 兼容骨架
-  - 例如 session header 注入骨架
-- 把 Provider 配置 schema 进一步显式化
-- 增加自动化测试覆盖 Hook 输入输出转换
-- 增加 README 中的真实接入案例文档
+- [src/services/proxy_service.py](/d:/001Code/008llm/003LLM_Proxy/src/services/proxy_service.py)
+  - 主代理链路
+- [src/translators/registry.py](/d:/001Code/008llm/003LLM_Proxy/src/translators/registry.py)
+  - 四个协议族之间的 translator registry
+- [src/config/provider_config.py](/d:/001Code/008llm/003LLM_Proxy/src/config/provider_config.py)
+  - Provider 公共配置模型
+- [src/presentation/proxy_controller.py](/d:/001Code/008llm/003LLM_Proxy/src/presentation/proxy_controller.py)
+  - 下游路由入口
+- [src/presentation/templates/providers.html](/d:/001Code/008llm/003LLM_Proxy/src/presentation/templates/providers.html)
+  - Provider 管理页
+- [docs/architecture-4plus1.md](/d:/001Code/008llm/003LLM_Proxy/docs/architecture-4plus1.md)
+  - 4+1 架构说明

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""代理控制器。"""
+"""Proxy request controller for OpenAI and Claude compatible routes."""
 
-from typing import Any, Dict, Optional
+from __future__ import annotations
 
-from datetime import datetime
+from typing import Any, Dict, Iterable, Optional
+
 from flask import Response, jsonify, request
 
 from ..application.app_context import AppContext
@@ -13,10 +14,11 @@ from ..hooks import HookAbortError
 from ..services import LogService, ProxyService, UserService
 from ..services.proxy_service import ProxyErrorInfo
 from ..utils import normalize_ip
+from ..utils.local_time import now_local_datetime
 
 
 class ProxyController:
-    """处理模型代理相关路由。"""
+    """Expose downstream OpenAI-compatible proxy routes."""
 
     def __init__(
         self,
@@ -37,16 +39,15 @@ class ProxyController:
         self._register_routes()
 
     def _register_routes(self) -> None:
-        """注册代理路由。"""
         self._app.route("/v1/chat/completions", methods=["POST"])(self.chat_completions)
+        self._app.route("/v1/responses", methods=["POST"])(self.responses)
+        self._app.route("/v1/messages", methods=["POST"])(self.messages)
         self._app.route("/v1/models", methods=["GET"])(self.list_models)
 
     def _get_user_by_ip(self, ip_address: str) -> Optional[Dict[str, Any]]:
-        """按 IP 查询白名单用户。"""
         return self._user_service.get_user_by_ip(ip_address, require_whitelist_access=True)
 
     def _is_whitelist_required(self) -> bool:
-        """读取是否开启白名单访问控制。"""
         return self._config_manager.is_chat_whitelist_enabled()
 
     @staticmethod
@@ -54,8 +55,19 @@ class ProxyController:
         message: str,
         *,
         error_type: str,
+        status_code: int = 400,
         code: Optional[str] = None,
+        error_format: str = "openai_chat",
     ) -> Dict[str, Any]:
+        normalized_format = str(error_format or "").strip().lower()
+        if normalized_format == "claude_chat":
+            return {
+                "type": "error",
+                "error": {
+                    "type": error_type,
+                    "message": message,
+                },
+            }
         return {
             "error": {
                 "message": message,
@@ -72,65 +84,149 @@ class ProxyController:
         *,
         error_type: str,
         code: Optional[str] = None,
+        error_format: str = "openai_chat",
     ) -> tuple[Response, int]:
         return (
-            jsonify(self._build_error_payload(message, error_type=error_type, code=code)),
+            jsonify(
+                self._build_error_payload(
+                    message,
+                    error_type=error_type,
+                    status_code=status_code,
+                    code=code,
+                    error_format=error_format,
+                )
+            ),
             status_code,
         )
 
     def chat_completions(self) -> Response:
-        """代理上游 chat/completions 请求。"""
+        return self._proxy_completion_request(
+            route_name="chat_completions",
+            expected_target_formats=("openai_chat",),
+            inspect_stream_usage=True,
+        )
+
+    def responses(self) -> Response:
+        return self._proxy_completion_request(
+            route_name="responses",
+            expected_target_formats=("openai_responses", "codex"),
+            inspect_stream_usage=False,
+        )
+
+    def messages(self) -> Response:
+        return self._proxy_completion_request(
+            route_name="messages",
+            expected_target_formats=("claude_chat",),
+            inspect_stream_usage=False,
+        )
+
+    def _proxy_completion_request(
+        self,
+        *,
+        route_name: str,
+        expected_target_formats: Iterable[str],
+        inspect_stream_usage: bool,
+        error_format: Optional[str] = None,
+    ) -> Response:
+        normalized_expected_target_formats = tuple(
+            str(item or "").strip().lower() for item in expected_target_formats if str(item or "").strip()
+        )
+        if not normalized_expected_target_formats:
+            raise ValueError("expected_target_formats must not be empty")
+        resolved_error_format = error_format or normalized_expected_target_formats[0]
         try:
             client_ip = normalize_ip(request.remote_addr)
-            self._logger.info(f"Proxy request received: ip={client_ip}")
+            self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
             whitelist_required = self._is_whitelist_required()
             user = self._get_user_by_ip(client_ip) if whitelist_required else None
             if whitelist_required and not user:
-                self._logger.warning(f"Proxy denied: ip={client_ip} is not in whitelist")
+                self._logger.warning("Proxy denied: ip=%s is not in whitelist", client_ip)
                 return self._error_response(
                     f"IP address {client_ip} is not in whitelist",
                     403,
                     error_type="permission_error",
                     code="ip_not_whitelisted",
+                    error_format=resolved_error_format,
                 )
 
             request_data = request.get_json(silent=True)
-            if not request_data or "model" not in request_data:
-                self._logger.warning("Proxy rejected: missing model in request body")
+            if request_data is None:
+                request_data = {}
+            if not isinstance(request_data, dict):
+                self._logger.warning("Proxy rejected: request body is not a JSON object route=%s", route_name)
+                return self._error_response(
+                    "Request body must be a JSON object",
+                    400,
+                    error_type="invalid_request_error",
+                    code="invalid_request_body",
+                    error_format=resolved_error_format,
+                )
+
+            request_data = dict(request_data)
+            if "model" not in request_data:
+                self._logger.warning("Proxy rejected: missing model in request body route=%s", route_name)
                 return self._error_response(
                     "Missing 'model' in request body",
                     400,
                     error_type="invalid_request_error",
                     code="missing_model",
+                    error_format=resolved_error_format,
                 )
-
-            stream_options = request_data.get("stream_options")
-            client_requested_usage_chunk = isinstance(stream_options, dict) and (
-                stream_options.get("include_usage") is True
-            )
-            if not isinstance(stream_options, dict):
-                stream_options = {}
-            if stream_options.get("include_usage") is not True:
-                stream_options["include_usage"] = True
-            request_data["stream_options"] = stream_options
 
             model_name = request_data["model"]
             provider = self._provider_manager.get_provider_for_model(model_name)
             if not provider:
-                self._logger.warning(f"Proxy rejected: unknown model={model_name!r}")
+                self._logger.warning("Proxy rejected: unknown model=%r route=%s", model_name, route_name)
                 return self._error_response(
                     f"Unknown model: {model_name}",
                     400,
                     error_type="invalid_request_error",
                     code="unknown_model",
+                    error_format=resolved_error_format,
+                )
+
+            provider_target_format = str(getattr(provider, "target_format", "") or "").strip().lower()
+            if provider_target_format not in normalized_expected_target_formats:
+                self._logger.warning(
+                    "Proxy rejected: model=%s configured for target_format=%s route=%s",
+                    model_name,
+                    provider_target_format or "<empty>",
+                    route_name,
+                )
+                if len(normalized_expected_target_formats) == 1:
+                    expected_hint = normalized_expected_target_formats[0]
+                    mismatch_message = (
+                        f"Model {model_name} is configured for downstream format "
+                        f"{provider_target_format or '<empty>'}, not {expected_hint}"
+                    )
+                else:
+                    expected_hint = ", ".join(normalized_expected_target_formats)
+                    mismatch_message = (
+                        f"Model {model_name} is configured for downstream format "
+                        f"{provider_target_format or '<empty>'}, not one of {expected_hint}"
+                    )
+                return self._error_response(
+                    mismatch_message,
+                    400,
+                    error_type="invalid_request_error",
+                    code="target_format_mismatch",
+                    error_format=resolved_error_format,
+                )
+
+            client_requested_usage_chunk = False
+            if inspect_stream_usage:
+                stream_options = request_data.get("stream_options")
+                client_requested_usage_chunk = isinstance(stream_options, dict) and (
+                    stream_options.get("include_usage") is True
                 )
 
             headers = self._filter_request_headers(request.headers)
-            start_time = datetime.now()
+            start_time = now_local_datetime()
 
             def on_proxy_complete(response_meta: Dict[str, Any]) -> None:
                 self._logger.info(
-                    "Proxy completed: model=%s response_model=%s total_tokens=%s ip=%s",
+                    "Proxy completed: route=%s model=%s response_model=%s total_tokens=%s ip=%s",
+                    route_name,
                     model_name,
                     response_meta.get("response_model"),
                     response_meta.get("total_tokens", 0),
@@ -143,7 +239,7 @@ class ProxyController:
                     prompt_tokens=response_meta.get("prompt_tokens", 0),
                     completion_tokens=response_meta.get("completion_tokens", 0),
                     start_time=start_time,
-                    end_time=datetime.now(),
+                    end_time=now_local_datetime(),
                     ip_address=client_ip,
                 )
 
@@ -162,7 +258,8 @@ class ProxyController:
                     error_code="upstream_request_failed",
                 )
                 self._logger.error(
-                    "Proxy failed after retries: model=%s ip=%s status=%s upstream_error=%s",
+                    "Proxy failed after retries: route=%s model=%s ip=%s status=%s upstream_error=%s",
+                    route_name,
                     model_name,
                     client_ip,
                     status_code,
@@ -173,12 +270,14 @@ class ProxyController:
                     status_code,
                     error_type=failure_info.error_type,
                     code=failure_info.error_code,
+                    error_format=resolved_error_format,
                 )
 
             return result
         except HookAbortError as exc:
             self._logger.warning(
-                "Proxy blocked by hook: ip=%s status=%s type=%s message=%s",
+                "Proxy blocked by hook: route=%s ip=%s status=%s type=%s message=%s",
+                route_name,
                 normalize_ip(request.remote_addr),
                 exc.status_code,
                 exc.error_type,
@@ -189,23 +288,41 @@ class ProxyController:
                 exc.status_code,
                 error_type=exc.error_type,
                 code=exc.error_type,
+                error_format=resolved_error_format,
             )
         except Exception as exc:
-            self._logger.error(f"Error in chat_completions: {exc}")
+            self._logger.error("Error in %s: %s", route_name, exc)
             return self._error_response(
                 str(exc),
                 500,
                 error_type="server_error",
                 code="internal_error",
+                error_format=resolved_error_format,
             )
 
     def list_models(self) -> Response:
-        """返回当前可用模型列表。"""
         try:
-            data = [{"id": model_key} for model_key in self._provider_manager.list_model_names()]
+            data = []
+            for model_key in self._provider_manager.list_model_names():
+                provider_name, _, _ = str(model_key).partition("/")
+                provider_view = self._provider_manager.get_provider_view(provider_name)
+                source_format = getattr(provider_view, "source_format", None)
+                target_format = getattr(provider_view, "target_format", None)
+                transport = getattr(provider_view, "transport", None)
+                data.append(
+                    {
+                        "id": model_key,
+                        "object": "model",
+                        "owned_by": provider_name or "proxy",
+                        "provider_name": provider_name or "proxy",
+                        "source_format": source_format,
+                        "target_format": target_format,
+                        "transport": transport,
+                    }
+                )
             return jsonify({"object": "list", "data": data})
         except Exception as exc:
-            self._logger.error(f"Error listing models: {exc}")
+            self._logger.error("Error listing models: %s", exc)
             return self._error_response(
                 str(exc),
                 500,
@@ -215,7 +332,6 @@ class ProxyController:
 
     @staticmethod
     def _filter_request_headers(headers: Any) -> Dict[str, str]:
-        """过滤不应转发到上游的 hop-by-hop 请求头。"""
         excluded = {
             "host",
             "content-length",

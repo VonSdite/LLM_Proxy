@@ -24,7 +24,7 @@ def build_proxy_response(
     forward_stream_usage: bool = False,
 ) -> Response:
     """基于上游响应与输出钩子构建 Flask 响应。"""
-    hook_func = getattr(hook, "output_body_hook", None) if hook else None
+    hook_func = getattr(hook, "response_guard", None) if hook else None
     meta: Dict[str, Any] = {
         "response_model": None,
         "total_tokens": 0,
@@ -136,7 +136,7 @@ def build_proxy_response(
                 response_body = json.dumps(modified).encode("utf-8")
         except json.JSONDecodeError as exc:
             logger.warning(
-                "Non-stream response is not valid JSON, skip output_body_hook: status=%s content_type=%s error=%s",
+                "Non-stream response is not valid JSON, skip response_guard: status=%s content_type=%s error=%s",
                 response.status_code,
                 response.headers.get("Content-Type"),
                 exc,

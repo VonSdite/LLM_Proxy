@@ -10,38 +10,73 @@ admin:
   password: admin
 
 providers:
-  - name: volcengine
-    api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
+  - name: openai-chat
+    api: https://api.openai.com/v1/chat/completions
     transport: http
-    api_key:
-    proxy:
+    source_format: openai_chat
+    target_format: openai_chat
+    api_key: sk-your-openai-key
+    verify_ssl: true
     timeout_seconds: 1200
     max_retries: 3
-    verify_ssl: false
     model_list:
-      - kimi-k2.5
+      - gpt-4.1
+      - gpt-4.1-mini
     hook: example_hook.py
 
-  - name: volc
-    api: https://ark.cn-beijing.volces.com/api/v3/chat/completions
+  - name: responses-upstream
+    api: https://api.openai.com/v1/responses
     transport: http
-    api_key:
+    source_format: openai_responses
+    target_format: openai_chat
+    api_key: sk-your-openai-key
+    verify_ssl: true
+    timeout_seconds: 1200
+    max_retries: 3
     model_list:
-      - glm-4-7-251222
-      - deepseek-v3-2-251201
-      - MiniMax-M2.5
-      - Kimi-K2.5
+      - gpt-4.1
 
-  # - name: codex
-  #   api: wss://example.com/v1/chat/completions
-  #   transport: websocket
-  #   api_key:
-  #   model_list:
-  #     - gpt-4.1
+  - name: claude-messages
+    api: https://api.anthropic.com/v1/messages
+    transport: http
+    source_format: claude_chat
+    target_format: claude_chat
+    api_key: sk-ant-your-anthropic-key
+    verify_ssl: true
+    timeout_seconds: 1200
+    max_retries: 3
+    model_list:
+      - claude-sonnet-4-5
 
-# logging:  # 可选
-#   path:
-#   level:
+  - name: codex
+    api: https://api.openai.com/v1/responses
+    transport: http
+    source_format: codex
+    target_format: codex
+    api_key: sk-your-openai-key
+    verify_ssl: true
+    timeout_seconds: 1200
+    max_retries: 3
+    model_list:
+      - gpt-5-codex
 
-# database:  # 可选
-#   path:
+  # OpenCode / Cherry Studio (OpenAI provider) commonly use:
+  #   target_format: openai_chat
+  #
+  # Claude Code / Cherry Studio (Anthropic provider) commonly use:
+  #   target_format: claude_chat
+  #
+  # Codex commonly uses:
+  #   target_format: codex
+  #
+  # Common upstream choices:
+  #   /v1/chat/completions -> source_format: openai_chat
+  #   /v1/responses       -> source_format: openai_responses
+  #   /v1/messages        -> source_format: claude_chat
+  #
+  # There is no public stream_format field.
+  # The proxy auto-detects upstream responses internally:
+  #   HTTP text/event-stream -> SSE JSON
+  #   WebSocket             -> JSON messages
+  #   application/x-ndjson  -> NDJSON
+  #   other HTTP responses  -> non-stream

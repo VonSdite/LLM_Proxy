@@ -15,6 +15,8 @@ class LLMProvider:
     name: str
     api: str
     transport: str = "http"
+    source_format: str = "openai_chat"
+    target_format: str = "openai_chat"
     api_key: Optional[str] = None
     model_list: tuple[str, ...] = ()
     proxy: Optional[str] = None
@@ -31,7 +33,22 @@ class LLMProvider:
             return self.hook.header_hook(ctx, headers)
         return headers
 
-    def apply_input_body_hook(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
-        if self.hook and hasattr(self.hook, "input_body_hook"):
-            return self.hook.input_body_hook(ctx, body)
+    def apply_request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.hook:
+            return body
+
+        guard = getattr(self.hook, "request_guard", None)
+        if callable(guard):
+            guarded = guard(ctx, body)
+            return body if guarded is None else guarded
+        return body
+
+    def apply_response_guard(self, ctx: HookContext, body: Any) -> Any:
+        if not self.hook:
+            return body
+
+        guard = getattr(self.hook, "response_guard", None)
+        if callable(guard):
+            guarded = guard(ctx, body)
+            return body if guarded is None else guarded
         return body

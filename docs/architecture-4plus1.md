@@ -1,459 +1,272 @@
-# LLM_Proxy 4+1 Architecture View
+# 4+1 Architecture
 
-本文档描述当前代码实现对应的 4+1 架构视图，作为后续重构、评审和需求变更时的基线。
+## 1. Context
 
-维护约束：
-- 涉及模块职责、依赖关系、主请求链路、运行时状态、配置加载/重载机制、Hook 机制、部署拓扑的修改时，需要同步更新本文件。
-- 如果代码实现与本图不一致，以代码为准，但提交中应补齐文档更新。
+这个项目是一个协议翻译型 LLM Proxy。
 
-## 0. Architecture Summary
+它的目标不是“支持所有厂商的所有接口”，而是用一套干净的首版架构，稳定支持：
 
-系统当前是一个单进程、分层式单体应用，按职责分成两条主轴：
+- 上游协议族
+  - `openai_chat`
+  - `openai_responses`
+  - `claude_chat`
+  - `codex`
+- 下游协议面
+  - `POST /v1/chat/completions`
+  - `POST /v1/responses`
+  - `POST /v1/messages`
+  - `GET /v1/models`
 
-- 控制平面：后台管理、认证、用户、Provider 配置、系统设置
-- 数据平面：OpenAI 兼容代理、模型路由、上游请求转发、响应适配、日志落库
+这个版本不保留 Gemini / Antigravity，也不保留旧字段兼容逻辑。
 
-这个项目当前最有区分度的能力不是“普通 API 代理”，而是：
+## 2. Logical View
 
-- 通过 Hook 机制在请求头、请求体、响应体三个阶段做协议适配
-- Provider 运行时显式携带 `transport`，把 HTTP/SSE 与 WebSocket 上游统一收敛到同一条代理链路
-- 既能接标准 OpenAI 风格上游，也能接非标准协议上游
-- 适合处理 Claude / Anthropic 一类需要格式转换的接入场景
-- 也适合处理经过授权的会话型集成，例如额外 Cookie、session token、自定义 header 或私有参数
+### 2.1 Core Pipeline
 
-这里强调的是“授权前提下的兼容与适配”，不是绕过访问控制。
+系统按下面的统一链路工作：
 
-关键代码位置：
-
-- 启动与装配：[main.py](../main.py)
-- 组合根：[application.py](../src/application/application.py)
-- 配置与 Provider 运行时：[config_manager.py](../src/config/config_manager.py) [provider_manager.py](../src/config/provider_manager.py)
-- Hook 协议：[contracts.py](../src/hooks/contracts.py)
-- 代理主链路：[proxy_controller.py](../src/presentation/proxy_controller.py) [proxy_service.py](../src/services/proxy_service.py)
-- WebSocket 上游桥接：[upstream_websocket.py](../src/external/upstream_websocket.py)
-
-## 1. Logical View
-
-```mermaid
-flowchart LR
-    Browser["浏览器管理端"]
-    ApiClient["OpenAI 兼容 API Client"]
-
-    subgraph App["LLM_Proxy 应用"]
-        subgraph Presentation["Presentation"]
-            WebCtl["WebController"]
-            AuthCtl["AuthenticationController"]
-            UserCtl["UserController"]
-            ProviderCtl["ProviderController"]
-            ProxyCtl["ProxyController"]
-        end
-
-        subgraph Services["Services"]
-            AuthSvc["AuthenticationService"]
-            UserSvc["UserService"]
-            ProviderSvc["ProviderService"]
-            DiscoverySvc["ModelDiscoveryService"]
-            SettingsSvc["SettingsService"]
-            ProxySvc["ProxyService"]
-            LogSvc["LogService"]
-        end
-
-        subgraph ConfigRuntime["Config / Provider Runtime"]
-            ConfigMgr["ConfigManager"]
-            ProviderCfg["provider_config"]
-            ProviderMgr["ProviderManager"]
-            LLMProvider["LLMProvider\ntransport=http|websocket"]
-        end
-
-        subgraph Persistence["Persistence"]
-            UserRepo["UserRepository"]
-            LogRepo["LogRepository"]
-            SQLite[("SQLite")]
-        end
-
-        subgraph Integration["External Integration"]
-            Hooks["Hook Modules"]
-            Adapter["response_adapter"]
-            Probe["stream_probe"]
-            WSBridge["upstream_websocket"]
-            Upstream["Upstream LLM Providers"]
-        end
-    end
-
-    Browser --> WebCtl
-    Browser --> AuthCtl
-    Browser --> UserCtl
-    Browser --> ProviderCtl
-    ApiClient --> ProxyCtl
-
-    AuthCtl --> AuthSvc
-    UserCtl --> UserSvc
-    ProviderCtl --> ProviderSvc
-    ProviderCtl --> DiscoverySvc
-    ProviderCtl --> SettingsSvc
-    ProxyCtl --> ProxySvc
-    ProxyCtl --> UserSvc
-    ProxyCtl --> ProviderMgr
-    ProxyCtl --> LogSvc
-    WebCtl --> ConfigMgr
-
-    AuthSvc --> ConfigMgr
-    ProviderSvc --> ConfigMgr
-    ProviderSvc --> ProviderCfg
-    DiscoverySvc --> Upstream
-    SettingsSvc --> ConfigMgr
-    ProxySvc --> LLMProvider
-    ProxySvc --> Adapter
-    ProxySvc --> Probe
-    ProxySvc --> WSBridge
-    ProviderMgr --> ProviderCfg
-    ProviderMgr --> LLMProvider
-    ProviderMgr --> Hooks
-    Adapter --> Hooks
-
-    UserSvc --> UserRepo
-    LogSvc --> LogRepo
-    UserRepo --> SQLite
-    LogRepo --> SQLite
-    ConfigMgr --> ConfigFile[("config.yaml")]
+```text
+downstream request
+  -> controller
+  -> provider lookup
+  -> header_hook / request_guard
+  -> translator.translate_request()
+  -> executor
+  -> decoder
+  -> translator.translate_response()
+  -> response_guard
+  -> encoder
+  -> downstream response
 ```
 
-逻辑划分：
+### 2.2 Major Components
 
-- `Presentation` 负责 HTTP 路由、鉴权入口、页面渲染和请求/响应封装
-- `Services` 负责用例编排，不直接共享全局可变配置
-- `Config / Provider Runtime` 负责 YAML 配置快照、显式 `ProviderConfigSchema` / `RuntimeProviderSpec` 工厂、只读运行时视图、模型到 Provider 的运行时映射，以及 provider 传输类型解析
-- `Persistence` 负责 SQLite 读写
-- `External Integration` 负责上游协议适配、流式探测、WebSocket 消息桥接、Hook 扩展和上游 Provider 集成
+- `ProxyController`
+  - 校验下游 route 和 `target_format`
+  - 构造标准错误体
+- `ProviderManager`
+  - 加载 provider 配置
+  - 维护 `provider/model -> provider` 映射
+- `ProxyService`
+  - 组装整条代理链路
+- `ExecutorRegistry`
+  - 负责 HTTP / WebSocket 上游连接
+- `Decoder`
+  - 将上游流拆成统一事件
+- `TranslatorRegistry`
+  - 负责 `source_format -> target_format` 协议适配
+- `Encoder`
+  - 将统一 chunk 编码成下游协议
+- `Hook`
+  - 只负责 header 和 guard
 
-其中最重要的扩展边界是 Hook：
+### 2.3 Protocol Families
 
-- `header_hook`
-- `input_body_hook`
-- `output_body_hook`
+| family | 用途 |
+| --- | --- |
+| `openai_chat` | OpenAI Chat Completions 语义 |
+| `openai_responses` | OpenAI Responses 语义 |
+| `claude_chat` | Anthropic Messages 语义 |
+| `codex` | OpenAI Responses 家族下的 Codex 特化语义 |
 
-它使系统从“静态代理”升级成“可编排协议适配器”。
+`codex` 的设计原则：
 
-## 2. Development View
-
-```mermaid
-flowchart TB
-    Main["main.py"]
-
-    subgraph Src["src/"]
-        Application["application/"]
-        Presentation["presentation/"]
-        Services["services/"]
-        Repositories["repositories/"]
-        Config["config/"]
-        External["external/"]
-        Hooks["hooks/"]
-        Utils["utils/"]
-    end
-
-    Main --> Application
-    Main --> Utils
-
-    Application --> Presentation
-    Application --> Services
-    Application --> Repositories
-    Application --> Config
-    Application --> Utils
-
-    Presentation --> Application
-    Presentation --> Services
-    Presentation --> Config
-
-    Services --> Application
-    Services --> Repositories
-    Services --> Config
-    Services --> External
-    Services --> Utils
-
-    Config --> Application
-    Config --> External
-    Config --> Utils
-
-    Repositories --> Utils
-
-    External --> Hooks
-```
-
-开发视图解读：
-
-- `application` 是组合根，不承载具体业务规则
-- `presentation -> services` 是主要调用方向
-- `services -> repositories/config/external` 是业务侧依赖方向
-- `config` 更像运行时配置和 Provider 注册子系统
-- `hooks` 是面向定制集成的外部扩展点
+- 共用 `/v1/responses`
+- 共用 Responses encoder
+- 保留请求规范化差异
 
 ## 3. Process View
 
-```mermaid
-flowchart TB
-    subgraph Process["单个 Python 进程"]
-        WSGI["gevent WSGIServer"]
-        FlaskApp["Flask App"]
+### 3.1 Downstream Route Contract
 
-        subgraph RuntimeState["进程内运行时状态"]
-            SessionState["AuthenticationService\n内存 Session"]
-            UserCache["UserService\nIP -> User 缓存"]
-            ConfigCache["ConfigManager\n配置快照缓存"]
-            ProviderRegistry["ProviderManager\nmodel -> provider 映射\nhook cache"]
-            TransportClients["ProxyService\nthread-local requests.Session\nper-request websocket connection"]
-        end
-    end
+`target_format` 和 route family 强绑定：
 
-    subgraph Local["本地资源"]
-        ConfigFile[("config.yaml")]
-        DB[("data/requests.db")]
-        HooksDir[("hooks/*.py")]
-        LogFiles[("logs/*.log")]
-    end
+| route | allowed target_format |
+| --- | --- |
+| `/v1/chat/completions` | `openai_chat` |
+| `/v1/responses` | `openai_responses`, `codex` |
+| `/v1/messages` | `claude_chat` |
 
-    subgraph Remote["外部网络资源"]
-        Upstream["Upstream LLM Providers"]
-    end
+不匹配时，controller 直接返回 400，不会继续请求上游。
 
-    WSGI --> FlaskApp
-    FlaskApp --> SessionState
-    FlaskApp --> UserCache
-    FlaskApp --> ConfigCache
-    FlaskApp --> ProviderRegistry
-    FlaskApp --> TransportClients
+`GET /v1/models` 除了模型 id，还会返回模型所属 provider 的：
 
-    ConfigCache <--> ConfigFile
-    UserCache <--> DB
-    ProviderRegistry <--> HooksDir
-    FlaskApp --> LogFiles
-    TransportClients <--> Upstream
+- `source_format`
+- `target_format`
+- `transport`
+
+### 3.2 Provider Runtime Contract
+
+Provider 公共运行时字段只有：
+
+- `name`
+- `api`
+- `transport`
+- `source_format`
+- `target_format`
+- `api_key`
+- `proxy`
+- `timeout_seconds`
+- `max_retries`
+- `verify_ssl`
+- `model_list`
+- `hook`
+
+其中：
+
+- `source_format`
+  - 上游真实协议
+- `target_format`
+  - 下游暴露协议
+- `transport`
+  - HTTP 或 WebSocket
+
+没有公共 `stream_format` 字段。
+
+### 3.3 Internal Stream Detection
+
+流式识别完全是内部实现细节：
+
+- `transport = websocket`
+  - 按 WebSocket JSON 消息处理
+- HTTP `Content-Type = text/event-stream`
+  - 按 SSE JSON 处理
+- HTTP `Content-Type` 含 `ndjson/jsonl`
+  - 按 NDJSON 处理
+- 其他
+  - 按非流式处理
+- 如果请求声明为流式，但首块看起来像 SSE
+  - 触发首块探测兜底
+
+这层能力保留在 executor / decoder 中，不暴露给用户配置。
+
+## 4. Development View
+
+### 4.1 Directory Responsibilities
+
+- `src/presentation/`
+  - HTTP route、管理页面、API controller
+- `src/services/`
+  - 代理主流程和业务服务
+- `src/config/`
+  - 配置加载、schema、provider runtime
+- `src/executors/`
+  - transport executor
+- `src/proxy_core/`
+  - decoder、encoder、shared contracts
+- `src/translators/`
+  - protocol translators
+- `src/hooks/`
+  - hook contracts
+
+### 4.2 Key Files
+
+- [src/services/proxy_service.py](/d:/001Code/008llm/003LLM_Proxy/src/services/proxy_service.py)
+  - 主代理 orchestration
+- [src/config/provider_config.py](/d:/001Code/008llm/003LLM_Proxy/src/config/provider_config.py)
+  - Provider schema
+- [src/executors/registry.py](/d:/001Code/008llm/003LLM_Proxy/src/executors/registry.py)
+  - HTTP / WebSocket executors
+- [src/proxy_core/decoders.py](/d:/001Code/008llm/003LLM_Proxy/src/proxy_core/decoders.py)
+  - 流式解码
+- [src/proxy_core/encoder.py](/d:/001Code/008llm/003LLM_Proxy/src/proxy_core/encoder.py)
+  - 下游编码
+- [src/translators/registry.py](/d:/001Code/008llm/003LLM_Proxy/src/translators/registry.py)
+  - 4x4 translator registry
+- [src/presentation/templates/providers.html](/d:/001Code/008llm/003LLM_Proxy/src/presentation/templates/providers.html)
+  - Provider 页面与帮助说明
+
+## 5. Physical View
+
+部署上是单体服务：
+
+- 一个 Flask 应用
+- 一个配置文件
+- 多个 provider 指向多个真实上游
+- 下游统一接入这个代理
+
+```text
+Client / Agent / IDE
+        |
+        v
+    LLM Proxy
+        |
+        +--> OpenAI Chat upstream
+        +--> OpenAI Responses upstream
+        +--> Claude Messages upstream
+        +--> Codex upstream
 ```
 
-进程视图要点：
+## 6. Scenarios
 
-- 当前是单进程单实例内存态设计
-- `AuthenticationService` 的 Session 存在进程内存中，重启后失效
-- `UserService` 有 IP 维度缓存
-- `ProviderManager` 持有运行时模型路由表、只读 `ProviderRuntimeView` 注册表和 Hook 缓存
-- `ProxyService` 维护 thread-local `requests.Session`，并在需要时建立短生命周期 websocket 上游连接
-- Hook 模块以运行时动态加载方式参与请求路径
-- 如果未来引入多实例部署，这些内存态要重新设计
-
-## 4. Physical View
-
-```mermaid
-flowchart LR
-    subgraph Clients["客户端"]
-        Browser["浏览器管理端"]
-        SDK["SDK / Curl / OpenAI Client"]
-    end
-
-    subgraph Host["部署主机"]
-        subgraph Service["LLM_Proxy 服务进程"]
-            Entry["main.py"]
-            Server["gevent WSGIServer"]
-            App["Flask + Controllers + Services"]
-        end
-
-        ConfigFile[("config.yaml")]
-        DB[("data/requests.db")]
-        HooksDir[("hooks/*.py")]
-        Logs[("logs/*.log")]
-    end
-
-    subgraph Providers["外部 Provider"]
-        P1["Provider A"]
-        P2["Provider B"]
-        PN["Provider N"]
-    end
-
-    Browser <-->|HTTP/HTTPS| Server
-    SDK <-->|HTTP/HTTPS| Server
-
-    App --> ConfigFile
-    App --> DB
-    App --> HooksDir
-    App --> Logs
-
-    App <-->|HTTPS / WSS| P1
-    App <-->|HTTPS / WSS| P2
-    App <-->|HTTPS / WSS| PN
-```
-
-物理视图要点：
-
-- 当前部署结构很简单，单机即可运行
-- 本地状态包括配置文件、SQLite、日志文件、Hook 文件
-- 外部依赖主要是上游模型 Provider 的 HTTP API 或 WebSocket API
-
-## 5. Scenario View
-
-### 5.1 管理员登录
-
-```mermaid
-sequenceDiagram
-    actor Admin as 管理员浏览器
-    participant AuthCtl as AuthenticationController
-    participant AuthSvc as AuthenticationService
-    participant ConfigMgr as ConfigManager
-
-    Admin->>AuthCtl: POST /api/login
-    AuthCtl->>AuthSvc: authenticate(username, password)
-    AuthSvc->>ConfigMgr: get_admin_config()
-    ConfigMgr-->>AuthSvc: admin credentials
-    AuthSvc-->>AuthCtl: authenticated / rejected
-
-    alt 认证成功
-        AuthCtl->>AuthSvc: create_session(username)
-        AuthSvc-->>AuthCtl: session token
-        AuthCtl-->>Admin: Set-Cookie + 200
-    else 认证失败
-        AuthCtl-->>Admin: 401
-    end
-```
-
-### 5.2 Provider 配置变更并自动重载
-
-```mermaid
-sequenceDiagram
-    actor Admin as 管理员浏览器
-    participant ProviderCtl as ProviderController
-    participant ProviderSvc as ProviderService
-    participant ConfigMgr as ConfigManager
-    participant App as Application
-    participant ProviderMgr as ProviderManager
-    participant ProviderCfg as provider_config
-    participant Hooks as hooks/*.py
-
-    Admin->>ProviderCtl: PUT /api/providers/{name}
-    ProviderCtl->>ProviderSvc: update_provider(payload)
-    ProviderSvc->>ConfigMgr: get_raw_config()
-    ConfigMgr-->>ProviderSvc: config snapshot
-    ProviderSvc->>ProviderCfg: ProviderConfigSchema.from_payload()
-    ProviderSvc->>ProviderCfg: validate_provider_definitions()
-    ProviderSvc->>ConfigMgr: write_raw_config(updated config)
-    ProviderSvc->>App: reload_providers()
-    App->>ConfigMgr: reload()
-    App->>ConfigMgr: get_raw_config()
-    App->>ProviderCfg: build_provider_schemas(providers_config)
-    App->>ProviderMgr: load_providers(provider_schemas)
-    ProviderMgr->>ProviderCfg: RuntimeProviderSpec.from_schema()
-    ProviderMgr->>Hooks: load hook modules if configured
-    ProviderMgr-->>App: runtime registry + readonly views refreshed
-    ProviderSvc-->>ProviderCtl: updated provider
-    ProviderCtl-->>Admin: 200 OK
-```
-
-### 5.3 后台探测上游模型列表
+### 6.1 OpenAI Chat Downstream -> Responses Upstream
 
 ```mermaid
 sequenceDiagram
-    actor Admin as 管理员浏览器
-    participant ProviderCtl as ProviderController
-    participant DiscoverySvc as ModelDiscoveryService
-    participant Upstream as Upstream Provider
+    participant Client
+    participant Controller
+    participant Service
+    participant Translator
+    participant Executor
 
-    Admin->>ProviderCtl: GET /api/providers/fetch-models?api=...
-    ProviderCtl->>DiscoverySvc: fetch_models_preview(...)
-    Note over DiscoverySvc: 如果 provider.api 为 ws:// 或 wss://\n先映射为对应的 http:// 或 https:// 再探测
-    DiscoverySvc->>Upstream: GET /v1/models or /models
-    Upstream-->>DiscoverySvc: JSON models payload
-    DiscoverySvc-->>ProviderCtl: fetched_models
-    ProviderCtl-->>Admin: 200 JSON
+    Client->>Controller: POST /v1/chat/completions
+    Controller->>Service: proxy_request()
+    Service->>Translator: openai_responses -> openai_chat
+    Translator-->>Service: translated upstream request
+    Service->>Executor: execute HTTP request
+    Executor-->>Service: stream events
+    Service->>Translator: translate stream events
+    Translator-->>Service: openai_chat chunks
+    Service-->>Controller: SSE response
+    Controller-->>Client: chat.completion.chunk stream
 ```
 
-### 5.4 代理一次 `/v1/chat/completions`
+### 6.2 Claude Downstream -> OpenAI Chat Upstream
 
 ```mermaid
 sequenceDiagram
-    actor Client as API Client
-    participant ProxyCtl as ProxyController
-    participant ConfigMgr as ConfigManager
-    participant UserSvc as UserService
-    participant ProviderMgr as ProviderManager
-    participant ProxySvc as ProxyService
-    participant Hook as Hook Module
-    participant Upstream as Upstream Provider
-    participant Adapter as response_adapter
-    participant LogSvc as LogService
-    participant LogRepo as LogRepository
+    participant Client
+    participant Controller
+    participant Service
+    participant Translator
+    participant Executor
 
-    Client->>ProxyCtl: POST /v1/chat/completions
-    ProxyCtl->>ConfigMgr: is_chat_whitelist_enabled()
-
-    alt 白名单开启
-        ProxyCtl->>UserSvc: get_user_by_ip(ip, require_whitelist_access=true)
-        UserSvc-->>ProxyCtl: user / None
-    end
-
-    ProxyCtl->>ProviderMgr: get_provider_for_model(model)
-    ProviderMgr-->>ProxyCtl: LLMProvider(transport)
-    ProxyCtl->>ProxySvc: proxy_request(provider, body, headers, on_complete)
-    ProxySvc->>Hook: header_hook / input_body_hook
-    ProxySvc->>Upstream: HTTP POST or WebSocket connect + send JSON
-    Upstream-->>ProxySvc: JSON / SSE / WebSocket message stream
-    ProxySvc->>Adapter: build_proxy_response(...)
-    Adapter->>Hook: output_body_hook
-    Adapter-->>Client: Flask Response
-    Adapter->>LogSvc: on_complete(meta)
-    LogSvc->>LogRepo: insert(...)
+    Client->>Controller: POST /v1/messages
+    Controller->>Service: proxy_request()
+    Service->>Translator: openai_chat -> claude_chat
+    Translator-->>Service: upstream chat request
+    Service->>Executor: execute HTTP request
+    Executor-->>Service: chat SSE stream
+    Service->>Translator: translate to claude events
+    Translator-->>Service: message_start/content_block_delta/message_stop
+    Service-->>Client: Claude-style SSE
 ```
 
-### 5.5 非标准上游协议适配
+## 7. Design Decisions
 
-```mermaid
-sequenceDiagram
-    actor Client as OpenAI Client
-    participant ProxyCtl as ProxyController
-    participant ProviderMgr as ProviderManager
-    participant ProxySvc as ProxyService
-    participant Hook as Compatibility Hook
-    participant Upstream as Non-OpenAI Upstream
-    participant Adapter as response_adapter
+### 7.1 Why only four protocol families
 
-    Client->>ProxyCtl: POST /v1/chat/completions (OpenAI format)
-    ProxyCtl->>ProviderMgr: get_provider_for_model(model)
-    ProviderMgr-->>ProxyCtl: runtime provider with hook
-    ProxyCtl->>ProxySvc: proxy_request(...)
-    ProxySvc->>Hook: header_hook(headers)
-    Note over Hook: 注入额外 header / Cookie / session token\n仅用于合法授权的集成场景
-    ProxySvc->>Hook: input_body_hook(body)
-    Note over Hook: 把 OpenAI body 改写成 Anthropic / 私有上游格式
-    ProxySvc->>Upstream: POST adapted request
-    Upstream-->>ProxySvc: non-standard response
-    ProxySvc->>Adapter: build_proxy_response(...)
-    Adapter->>Hook: output_body_hook(body)
-    Note over Hook: 统一响应结构、usage、choices、stream chunk
-    Adapter-->>Client: OpenAI-compatible response
-```
+因为项目当前的目标客户端只需要：
 
-## 6. Current Architectural Assessment
+- OpenCode
+- Codex
+- Claude Code
+- Cherry Studio
 
-当前架构优点：
+Gemini / Antigravity 这类协议面会显著增加配置复杂度，但对当前目标收益很低，因此本版直接移除。
 
-- 模块划分清楚，学习成本低
-- 单进程单文件配置的运维复杂度很低
-- 控制平面和数据平面在职责上已经分离出清晰轮廓
-- Hook 扩展点足够轻量，但表达力很强
-- 兼容层能力使项目不局限于“标准 API Key 型接入”
-- 通过显式 `transport` 与外部桥接层，HTTP/SSE 和 WebSocket 上游不再混杂在同一段响应解析逻辑里
+### 7.2 Why no public `stream_format`
 
-当前架构边界：
+因为流格式判断应该是代理内部责任，而不是用户负担。
 
-- 运行时状态仍集中在单进程内存中，不适合多实例横向扩展
-- `presentation` 层仍承担部分接口协议细节和错误映射责任
-- `config` 子系统已经收敛为配置快照、显式 schema/factory、Provider 注册三类职责，但仍集中在同一 package 中
-- Hook 动态加载带来了灵活性，也带来了调试、观测和测试复杂性
-- 当前 WebSocket 上游连接仍是“按请求建立、按请求关闭”，尚未像 CLIProxyAPI 那样引入长会话复用与增量输入状态机
+用户只需要清楚：
 
-## 7. Evolution Suggestions
+- 上游是什么协议
+- 下游要暴露成什么协议
+- 上游通过 HTTP 还是 WebSocket 连接
 
-如果后面继续演进，优先建议是：
+上游到底是 SSE、NDJSON 还是非流式，由 executor / decoder 自动判断。
 
-- 增加官方维护的 Hook 示例库
-  - Claude / Anthropic 兼容示例
-  - session header / Cookie 注入示例
-  - 私有网关适配示例
-- 基于 `ProviderRuntimeView` 增加后台运行时诊断或只读观测能力
-- 补充 Hook 输入输出转换测试
-- 评估是否把 Session、Provider Registry、User IP 缓存从单进程内存态解耦
+### 7.3 Why keep `codex` separate
+
+因为它虽然共用 Responses 路由和编码器，但请求语义仍有差异；把它保留成独立 family，能让配置和 translator 逻辑更清晰。

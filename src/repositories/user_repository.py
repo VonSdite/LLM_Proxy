@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """用户仓储。"""
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from ..utils.database import ConnectionFactory
+from ..utils.local_time import now_local_datetime_text
 
 
 class UserRepository:
@@ -26,8 +26,8 @@ class UserRepository:
                     username TEXT NOT NULL,
                     ip_address TEXT NOT NULL UNIQUE,
                     whitelist_access_enabled INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
                 """
             )
@@ -36,14 +36,17 @@ class UserRepository:
 
     def create(self, username: str, ip_address: str) -> Optional[int]:
         """创建用户记录。"""
+        now_text = now_local_datetime_text()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO users (username, ip_address, whitelist_access_enabled, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO users (
+                    username, ip_address, whitelist_access_enabled, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (username, ip_address, 1, datetime.now()),
+                (username, ip_address, 1, now_text, now_text),
             )
             return cursor.lastrowid
 
@@ -152,7 +155,7 @@ class UserRepository:
             return False
 
         updates.append("updated_at = ?")
-        params.append(datetime.now())
+        params.append(now_local_datetime_text())
         params.append(user_id)
 
         with self._get_connection() as conn:

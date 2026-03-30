@@ -3,10 +3,15 @@
 """请求日志仓储。"""
 
 import sqlite3
-from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from ..utils.database import ConnectionFactory
+from ..utils.local_time import (
+    ensure_local_datetime,
+    format_local_date,
+    format_local_datetime,
+    now_local_datetime_text,
+)
 
 
 class LogRepository:
@@ -30,9 +35,9 @@ class LogRepository:
                     total_tokens INTEGER,
                     prompt_tokens INTEGER DEFAULT 0,
                     completion_tokens INTEGER DEFAULT 0,
-                    start_time TIMESTAMP NOT NULL,
-                    end_time TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    start_time TEXT NOT NULL,
+                    end_time TEXT,
+                    created_at TEXT NOT NULL
                 )
                 '''
             )
@@ -50,8 +55,8 @@ class LogRepository:
                     total_tokens INTEGER NOT NULL DEFAULT 0,
                     prompt_tokens INTEGER NOT NULL DEFAULT 0,
                     completion_tokens INTEGER NOT NULL DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
                     UNIQUE(stat_date, ip_address, request_model, response_model)
                 )
                 '''
@@ -70,15 +75,14 @@ class LogRepository:
         total_tokens: int,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
+        start_time: Optional[object] = None,
+        end_time: Optional[object] = None,
         ip_address: Optional[str] = None,
     ) -> Optional[int]:
         """写入单条请求日志，并同步更新日聚合统计。"""
-        if start_time is None:
-            start_time = datetime.now()
-        if end_time is None:
-            end_time = datetime.now()
+        start_time_value = ensure_local_datetime(start_time)
+        end_time_value = ensure_local_datetime(end_time)
+        now_text = now_local_datetime_text()
         safe_total_tokens = int(total_tokens or 0)
         safe_prompt_tokens = int(prompt_tokens or 0)
         safe_completion_tokens = int(completion_tokens or 0)
@@ -90,8 +94,8 @@ class LogRepository:
                 '''
                 INSERT INTO request_logs
                 (ip_address, request_model, response_model, total_tokens,
-                 prompt_tokens, completion_tokens, start_time, end_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 prompt_tokens, completion_tokens, start_time, end_time, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
                 (
                     ip_address,
@@ -100,19 +104,21 @@ class LogRepository:
                     safe_total_tokens,
                     safe_prompt_tokens,
                     safe_completion_tokens,
-                    start_time,
-                    end_time,
+                    format_local_datetime(start_time_value),
+                    format_local_datetime(end_time_value),
+                    now_text,
                 ),
             )
-            stat_date = start_time.strftime('%Y-%m-%d')
+            stat_date = format_local_date(start_time_value)
             cursor.execute(
                 '''
                 INSERT INTO daily_request_stats
                 (
                     stat_date, ip_address, request_model, response_model,
-                    request_count, total_tokens, prompt_tokens, completion_tokens, updated_at
+                    request_count, total_tokens, prompt_tokens, completion_tokens,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
                 ON CONFLICT(stat_date, ip_address, request_model, response_model)
                 DO UPDATE SET
                     request_count = request_count + 1,
@@ -129,7 +135,8 @@ class LogRepository:
                     safe_total_tokens,
                     safe_prompt_tokens,
                     safe_completion_tokens,
-                    datetime.now(),
+                    now_text,
+                    now_text,
                 ),
             )
             return cursor.lastrowid
@@ -200,7 +207,7 @@ class LogRepository:
 
             if start_date:
                 conditions.append('l.start_time >= ?')
-                params.append(f'{start_date} 00:00:00')
+                params.append(f'{start_date} 00:00:00.000000')
             if end_date:
                 conditions.append('l.start_time < DATE(?, "+1 day")')
                 params.append(end_date)
@@ -223,7 +230,8 @@ class LogRepository:
 
             data_query = f'''
                 SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
-                       l.total_tokens, l.prompt_tokens, l.completion_tokens, l.start_time, l.end_time
+                       l.total_tokens, l.prompt_tokens, l.completion_tokens,
+                       l.start_time, l.end_time, l.created_at
                 FROM request_logs l
                 LEFT JOIN users u ON l.ip_address = u.ip_address
                 WHERE {where_clause}

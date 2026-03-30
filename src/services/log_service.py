@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from ..application.app_context import AppContext
 from ..repositories import LogRepository
+from ..utils.local_time import normalize_local_datetime_text
 
 
 class LogService:
@@ -16,6 +17,15 @@ class LogService:
         self._ctx = ctx
         self._logger = ctx.logger
         self._repository = repository
+
+    @staticmethod
+    def _normalize_log_timestamps(log: Dict[str, Any]) -> Dict[str, Any]:
+        """统一请求日志时间字段格式。"""
+        normalized = dict(log)
+        normalized["start_time"] = normalize_local_datetime_text(normalized.get("start_time"))
+        normalized["end_time"] = normalize_local_datetime_text(normalized.get("end_time"))
+        normalized["created_at"] = normalize_local_datetime_text(normalized.get("created_at"))
+        return normalized
 
     def log_request(
         self,
@@ -112,6 +122,7 @@ class LogService:
                 username=username,
                 request_model=request_model,
             )
+            result["logs"] = [self._normalize_log_timestamps(log) for log in result.get("logs", [])]
             return result
         except Exception as exc:
             self._logger.error(f"Failed to get request logs: {exc}")

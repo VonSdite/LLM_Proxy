@@ -538,8 +538,43 @@
             return Number.isFinite(n) ? n : 0;
         }
 
+        function parseLocalDateTime(value) {
+            if (value instanceof Date) {
+                return Number.isFinite(value.getTime()) ? value : null;
+            }
+            if (value === null || value === undefined) {
+                return null;
+            }
+
+            const text = String(value).trim();
+            if (!text) {
+                return null;
+            }
+
+            const match = text.match(
+                /^(\d{4})-(\d{2})-(\d{2})[\sT](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/
+            );
+            if (!match) {
+                return null;
+            }
+
+            const microseconds = (match[7] || '').padEnd(6, '0').slice(0, 6);
+            const milliseconds = Math.floor(Number(microseconds) / 1000);
+            const date = new Date(
+                Number(match[1]),
+                Number(match[2]) - 1,
+                Number(match[3]),
+                Number(match[4]),
+                Number(match[5]),
+                Number(match[6]),
+                milliseconds
+            );
+            return Number.isFinite(date.getTime()) ? date : null;
+        }
+
         function normalizeSortDate(value) {
-            const t = new Date(value).getTime();
+            const date = parseLocalDateTime(value);
+            const t = date ? date.getTime() : Number.NaN;
             return Number.isFinite(t) ? t : 0;
         }
 
@@ -676,7 +711,7 @@
                                 <span class="slider"></span>
                             </label>
                         </td>` : ''}
-                        <td>${formatDateTime(new Date(user.created_at))}</td>
+                        <td>${formatDateTime(user.created_at)}</td>
                         <td>
                             <div class="action-buttons">
                                 <button class="btn-action btn-edit" onclick="openEditModal(${user.id})">编辑</button>
@@ -951,7 +986,11 @@
             }
         }
 
-        function formatDateTime(date) {
+        function formatDateTime(value) {
+            const date = parseLocalDateTime(value);
+            if (!date) {
+                return '-';
+            }
             return date.toLocaleString('zh-CN', {
                 year: 'numeric',
                 month: '2-digit',

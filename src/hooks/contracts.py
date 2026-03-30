@@ -4,7 +4,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Protocol
+from typing import Any, Dict, Optional, Protocol
 
 from ..application.app_context import Logger
 
@@ -26,16 +26,23 @@ class HookContext:
     retry: int
     root_path: Path
     logger: Logger
+    provider_name: str = ""
+    request_model: str = ""
+    upstream_model: str = ""
+    provider_source_format: str = "openai_chat"
+    provider_target_format: str = "openai_chat"
+    transport: str = "http"
+    stream: bool = False
 
 
 class HookModule(Protocol):
     def header_hook(self, ctx: HookContext, headers: Dict[str, str]) -> Dict[str, str]:
         ...
 
-    def input_body_hook(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
+    def request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
         ...
 
-    def output_body_hook(self, ctx: HookContext, body: Any) -> Any:
+    def response_guard(self, ctx: HookContext, body: Any) -> Any:
         ...
 
 
@@ -45,8 +52,8 @@ class BaseHook:
     def header_hook(self, ctx: HookContext, headers: Dict[str, str]) -> Dict[str, str]:
         return headers
 
-    def input_body_hook(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
+    def request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
         return body
 
-    def output_body_hook(self, ctx: HookContext, body: Any) -> Any:
+    def response_guard(self, ctx: HookContext, body: Any) -> Any:
         return body
