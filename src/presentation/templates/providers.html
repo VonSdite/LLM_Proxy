@@ -902,11 +902,13 @@
             if (!select) {
                 return;
             }
-            const resolvedFallback = fallbackValue || '';
-            const resolvedValue = desiredValue || resolvedFallback;
+            const resolvedFallback = fallbackValue ?? '';
+            const resolvedValue = desiredValue !== undefined && desiredValue !== null && desiredValue !== ''
+                ? String(desiredValue)
+                : String(resolvedFallback);
             select.value = resolvedValue;
             if (select.value !== resolvedValue) {
-                select.value = resolvedFallback;
+                select.value = String(resolvedFallback);
             }
             syncCustomSelectValue(elementId);
         }
@@ -916,14 +918,14 @@
             const resolvedTransport = provider?.transport || inferredTransport;
             document.getElementById('providerName').value = provider?.name || '';
             document.getElementById('providerApi').value = provider?.api || '';
-            document.getElementById('providerTransport').value = resolvedTransport;
+            setSelectValueOrFallback('providerTransport', resolvedTransport, inferredTransport);
             setSelectValueOrFallback('providerSourceFormat', provider?.source_format, 'openai_chat');
             setSelectValueOrFallback('providerTargetFormat', provider?.target_format, 'openai_chat');
             document.getElementById('providerApiKey').value = provider?.api_key || '';
             document.getElementById('providerProxy').value = provider?.proxy || '';
             document.getElementById('providerTimeout').value = provider?.timeout_seconds || '';
             document.getElementById('providerRetries').value = provider?.max_retries || '';
-            document.getElementById('providerVerifySsl').value = provider?.verify_ssl === true ? 'true' : 'false';
+            setSelectValueOrFallback('providerVerifySsl', provider?.verify_ssl === true ? 'true' : 'false', 'false');
             document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? buildModelListValue(provider.model_list) : '';
             document.getElementById('providerHook').value = provider?.hook || '';
             updateModelListCount();
