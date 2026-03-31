@@ -617,7 +617,7 @@
         // 加载统计数据
         async function loadStatistics() {
             const requestToken = ++statsRequestToken;
-            document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="loading">鍔犺浇缁熻鏁版嵁...</td></tr>';
+            document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="loading">加载统计数据...</td></tr>';
 
             try {
                 const params = new URLSearchParams(currentFilters);
