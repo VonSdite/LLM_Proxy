@@ -15,7 +15,7 @@ from flask import Response, stream_with_context
 from ..application.app_context import AppContext
 from ..executors import OpenedUpstreamResponse, build_default_executor_registry
 from ..external import LLMProvider
-from ..hooks import HookContext
+from ..hooks import HookContext, HookErrorType
 from ..proxy_core import (
     DownstreamChunk,
     decode_stream_events,
@@ -65,6 +65,8 @@ class ProxyService:
         request_proxies = build_requests_proxies(provider.proxy)
         translator = self._translator_registry.get(provider.source_format, provider.target_format)
         last_error: Optional[ProxyErrorInfo] = None
+        previous_status_code: Optional[int] = None
+        previous_error_type: Optional[HookErrorType] = None
         self._ensure_supported_target_format(provider.target_format)
 
         def build_request(
@@ -82,6 +84,8 @@ class ProxyService:
                 provider_target_format=provider.target_format,
                 transport=provider.transport,
                 stream=initial_stream,
+                last_status_code=previous_status_code,
+                last_error_type=previous_error_type,
             )
 
             headers = dict(request_headers)
@@ -128,6 +132,8 @@ class ProxyService:
                 )
 
                 if self._should_retry_status_code(opened.status_code) and attempt < max_retries - 1:
+                    previous_status_code = opened.status_code
+                    previous_error_type = None
                     self._logger.warning(
                         "Retryable upstream status (attempt %s/%s): provider=%s status=%s stream=%s, retrying",
                         attempt + 1,
@@ -189,6 +195,8 @@ class ProxyService:
                 )
                 return response, opened.status_code, None
             except requests.exceptions.RequestException as exc:
+                previous_status_code = None
+                previous_error_type = self._classify_request_error(exc)
                 last_error = self._build_transport_error_info("HTTP", exc, max_retries)
                 self._logger.error(
                     "HTTP upstream request error (attempt %s/%s): provider=%s error=%s",
@@ -200,6 +208,8 @@ class ProxyService:
                 if attempt < max_retries - 1:
                     continue
             except (websocket.WebSocketException, OSError) as exc:
+                previous_status_code = None
+                previous_error_type = self._classify_websocket_error(exc)
                 last_error = self._build_transport_error_info("WebSocket", exc, max_retries)
                 self._logger.error(
                     "WebSocket upstream request error (attempt %s/%s): provider=%s error=%s",
@@ -618,6 +628,20 @@ class ProxyService:
     def _should_retry_status_code(status_code: int) -> bool:
         retryable_status_codes = {408, 409, 425, 429, 500, 502, 503, 504}
         return status_code in retryable_status_codes
+
+    @staticmethod
+    def _classify_request_error(exc: requests.exceptions.RequestException) -> HookErrorType:
+        if isinstance(exc, requests.exceptions.Timeout):
+            return HookErrorType.TIMEOUT
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            return HookErrorType.CONNECTION_ERROR
+        return HookErrorType.TRANSPORT_ERROR
+
+    @staticmethod
+    def _classify_websocket_error(exc: Exception) -> HookErrorType:
+        if isinstance(exc, websocket.WebSocketException):
+            return HookErrorType.WEBSOCKET_ERROR
+        return HookErrorType.TRANSPORT_ERROR
 
     @staticmethod
     def _filter_response_headers(headers: Any) -> Dict[str, str]:

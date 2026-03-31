@@ -3,6 +3,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+import requests
+import websocket
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.application.app_context import AppContext
 from src.external import LLMProvider, StaticUpstreamResponse
 from src.external.stream_probe import BufferedUpstreamResponse
+from src.hooks import BaseHook, HookContext, HookErrorType
 from src.presentation.proxy_controller import ProxyController
 from src.services.proxy_service import ProxyErrorInfo, ProxyService
 
@@ -94,6 +97,15 @@ class StubProxyService:
     def proxy_request(self, *args, **kwargs):
         del args, kwargs
         return self._proxy_result
+
+
+class ContextRecordingHook(BaseHook):
+    def __init__(self) -> None:
+        self.contexts: list[HookContext] = []
+
+    def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
+        self.contexts.append(ctx)
+        return headers
 
 
 class ProxyControllerErrorFormatTests(unittest.TestCase):
@@ -502,6 +514,211 @@ class ProxyServiceErrorLoggingTests(unittest.TestCase):
                 for msg in logger.messages("warning")
             )
         )
+
+
+class ProxyServiceRetryHookContextTests(unittest.TestCase):
+    def _build_service(self) -> ProxyService:
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=Flask(__name__),
+        )
+        return ProxyService(ctx)
+
+    @staticmethod
+    def _chat_completion_response(status_code: int, body: bytes) -> tuple[BufferedUpstreamResponse, bool, int]:
+        response = BufferedUpstreamResponse(
+            StaticUpstreamResponse(
+                status_code=status_code,
+                headers={"Content-Type": "application/json"},
+            ),
+            body,
+        )
+        return response, False, status_code
+
+    @staticmethod
+    def _success_response() -> tuple[BufferedUpstreamResponse, bool, int]:
+        return ProxyServiceRetryHookContextTests._chat_completion_response(
+            200,
+            (
+                b'{"id":"chatcmpl_1","object":"chat.completion","created":123,"model":"gpt-4.1",'
+                b'"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],'
+                b'"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}'
+            ),
+        )
+
+    def test_hook_sees_previous_retryable_status_code_on_next_attempt(self) -> None:
+        service = self._build_service()
+        hook = ContextRecordingHook()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            hook=hook,
+            max_retries=2,
+        )
+        attempts = iter(
+            [
+                self._chat_completion_response(
+                    429,
+                    b'{"error":{"message":"Rate limit reached","type":"rate_limit_error","code":"rate_limit_exceeded"}}',
+                ),
+                self._success_response(),
+            ]
+        )
+        service._open_upstream_response = lambda *args, **kwargs: next(attempts)  # type: ignore[method-assign]
+
+        response, status_code, failure_info = service.proxy_request(
+            provider,
+            {"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            {},
+        )
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual(2, len(hook.contexts))
+        self.assertIsNone(hook.contexts[0].last_status_code)
+        self.assertIsNone(hook.contexts[0].last_error_type)
+        self.assertEqual(429, hook.contexts[1].last_status_code)
+        self.assertIsNone(hook.contexts[1].last_error_type)
+
+    def test_hook_sees_timeout_error_type_on_next_attempt(self) -> None:
+        service = self._build_service()
+        hook = ContextRecordingHook()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            hook=hook,
+            max_retries=2,
+        )
+        calls = {"count": 0}
+
+        def stub_open_upstream_response(*args, **kwargs):
+            del args, kwargs
+            if calls["count"] == 0:
+                calls["count"] += 1
+                raise requests.exceptions.Timeout("timed out")
+            return self._success_response()
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        response, status_code, failure_info = service.proxy_request(
+            provider,
+            {"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            {},
+        )
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual(2, len(hook.contexts))
+        self.assertIsNone(hook.contexts[1].last_status_code)
+        self.assertEqual(HookErrorType.TIMEOUT, hook.contexts[1].last_error_type)
+
+    def test_hook_sees_connection_error_type_on_next_attempt(self) -> None:
+        service = self._build_service()
+        hook = ContextRecordingHook()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            hook=hook,
+            max_retries=2,
+        )
+        calls = {"count": 0}
+
+        def stub_open_upstream_response(*args, **kwargs):
+            del args, kwargs
+            if calls["count"] == 0:
+                calls["count"] += 1
+                raise requests.exceptions.ConnectionError("connection lost")
+            return self._success_response()
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        response, status_code, failure_info = service.proxy_request(
+            provider,
+            {"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            {},
+        )
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual(2, len(hook.contexts))
+        self.assertIsNone(hook.contexts[1].last_status_code)
+        self.assertEqual(HookErrorType.CONNECTION_ERROR, hook.contexts[1].last_error_type)
+
+    def test_hook_sees_websocket_error_type_on_next_attempt(self) -> None:
+        service = self._build_service()
+        hook = ContextRecordingHook()
+        provider = LLMProvider(
+            name="demo",
+            api="wss://example.com/v1/chat/completions",
+            transport="websocket",
+            model_list=("gpt-4.1",),
+            hook=hook,
+            max_retries=2,
+        )
+        calls = {"count": 0}
+
+        def stub_open_upstream_response(*args, **kwargs):
+            del args, kwargs
+            if calls["count"] == 0:
+                calls["count"] += 1
+                raise websocket.WebSocketException("socket closed")
+            return self._success_response()
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        response, status_code, failure_info = service.proxy_request(
+            provider,
+            {"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            {},
+        )
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual(2, len(hook.contexts))
+        self.assertIsNone(hook.contexts[1].last_status_code)
+        self.assertEqual(HookErrorType.WEBSOCKET_ERROR, hook.contexts[1].last_error_type)
+
+    def test_non_retryable_status_does_not_trigger_second_attempt(self) -> None:
+        service = self._build_service()
+        hook = ContextRecordingHook()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            hook=hook,
+            max_retries=2,
+        )
+        attempts = iter(
+            [
+                self._chat_completion_response(
+                    401,
+                    b'{"error":{"message":"Unauthorized","type":"invalid_request_error","code":"invalid_api_key"}}',
+                )
+            ]
+        )
+        service._open_upstream_response = lambda *args, **kwargs: next(attempts)  # type: ignore[method-assign]
+
+        response, status_code, failure_info = service.proxy_request(
+            provider,
+            {"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            {},
+        )
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(401, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual(1, len(hook.contexts))
+        self.assertIsNone(hook.contexts[0].last_status_code)
+        self.assertIsNone(hook.contexts[0].last_error_type)
 
 
 if __name__ == "__main__":
