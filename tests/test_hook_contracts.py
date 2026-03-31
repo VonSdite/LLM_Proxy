@@ -67,6 +67,12 @@ class HookContractsTests(unittest.TestCase):
             upstream_model="model",
         )
 
+    def test_hook_context_previous_failure_fields_default_to_none(self) -> None:
+        ctx = self._ctx()
+
+        self.assertIsNone(ctx.last_status_code)
+        self.assertIsNone(ctx.last_error_type)
+
     def test_base_hook_default_guards_are_noop(self) -> None:
         hook = BaseHook()
         ctx = self._ctx()

@@ -149,6 +149,36 @@ providers:
 
 ## Hook
 
+补充：当前 hook 还可以感知“上一轮 retry 的失败摘要”，适合做最基础的多 key 轮换判断。
+
+`header_hook` 里可以直接读取：
+
+- `ctx.retry`
+- `ctx.last_status_code`
+- `ctx.last_error_type`
+
+`last_error_type` 的类型是 `HookErrorType`，当前可用值：
+
+- `HookErrorType.TIMEOUT`
+- `HookErrorType.CONNECTION_ERROR`
+- `HookErrorType.WEBSOCKET_ERROR`
+- `HookErrorType.TRANSPORT_ERROR`
+
+最小示例：
+
+```python
+from src.hooks import BaseHook, HookErrorType
+
+
+class Hook(BaseHook):
+    def header_hook(self, ctx, headers):
+        if ctx.last_status_code == 429:
+            headers["X-Retry-Reason"] = "rate_limit"
+        elif ctx.last_error_type == HookErrorType.TIMEOUT:
+            headers["X-Retry-Reason"] = "timeout"
+        return headers
+```
+
 Hook 示例见 [hooks/example_hook.py](/d:/001Code/008llm/003LLM_Proxy/hooks/example_hook.py)。
 
 支持的接口：
@@ -174,6 +204,15 @@ class Hook(BaseHook):
 - `provider_target_format`
 - `transport`
 - `stream`
+- `last_status_code`
+- `last_error_type`
+
+补充的重试语义：
+
+- 第一次 attempt 时，`last_status_code` 和 `last_error_type` 都是 `None`
+- 只有当上一轮失败后真的进入了下一次 retry，hook 才会在新的 `ctx` 里看到上一轮失败摘要
+- `last_status_code` 表示上一轮拿到了 HTTP 状态码，例如 `429`、`500`
+- `last_error_type` 表示上一轮没有 HTTP 状态码，而是本地传输异常
 
 推荐分工：
 

@@ -1,6 +1,6 @@
 from typing import Any
 
-from src.hooks import BaseHook, HookContext
+from src.hooks import BaseHook, HookContext, HookErrorType
 
 
 class Hook(BaseHook):
@@ -8,11 +8,15 @@ class Hook(BaseHook):
 
     def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
         ctx.logger.info(
-            "header_hook invoked: provider=%s model=%s stream=%s",
+            "header_hook invoked: provider=%s model=%s stream=%s last_status=%s last_error=%s",
             ctx.provider_name,
             ctx.request_model,
             ctx.stream,
+            ctx.last_status_code,
+            ctx.last_error_type,
         )
+        if ctx.last_error_type == HookErrorType.TIMEOUT:
+            ctx.logger.warning("Previous attempt timed out for provider=%s", ctx.provider_name)
         headers["X-Custom-Header"] = "custom-value"
         return headers
 

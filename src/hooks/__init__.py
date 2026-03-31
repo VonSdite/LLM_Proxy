@@ -2,6 +2,6 @@
 # -*- coding: utf-8 -*-
 """Hook public exports."""
 
-from .contracts import BaseHook, HookAbortError, HookContext, HookModule
+from .contracts import BaseHook, HookAbortError, HookContext, HookErrorType, HookModule
 
-__all__ = ['BaseHook', 'HookAbortError', 'HookContext', 'HookModule']
+__all__ = ['BaseHook', 'HookAbortError', 'HookContext', 'HookErrorType', 'HookModule']

@@ -39,6 +39,11 @@ downstream request
   -> downstream response
 ```
 
+补充：hook 在 retry 场景下还可以读取上一轮失败摘要，用于做轻量级重试决策：
+
+- `last_status_code`
+- `last_error_type`
+
 ### 2.2 Major Components
 
 - `ProxyController`
@@ -59,6 +64,12 @@ downstream request
   - 将统一 chunk 编码成下游协议
 - `Hook`
   - 只负责 header 和 guard
+
+Hook 组件除了 header / guard，还会收到最小重试上下文：
+
+- `retry`
+- `last_status_code`
+- `last_error_type`
 
 ### 2.3 Protocol Families
 
@@ -122,6 +133,19 @@ Provider 公共运行时字段只有：
   - HTTP 或 WebSocket
 
 没有公共 `stream_format` 字段。
+
+Hook 运行时上下文还会暴露最小重试状态：
+
+- `retry`
+- `last_status_code`
+- `last_error_type`
+
+其中 `last_error_type` 使用 `HookErrorType` 枚举，当前值为：
+
+- `TIMEOUT`
+- `CONNECTION_ERROR`
+- `WEBSOCKET_ERROR`
+- `TRANSPORT_ERROR`
 
 ### 3.3 Internal Stream Detection
 

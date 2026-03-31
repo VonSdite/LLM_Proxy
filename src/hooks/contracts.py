@@ -3,6 +3,7 @@
 """Hook type contracts."""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict, Optional, Protocol
 
@@ -19,6 +20,15 @@ class HookAbortError(Exception):
         self.error_type = error_type
 
 
+class HookErrorType(StrEnum):
+    """Normalized transport-level failures exposed to hooks."""
+
+    TIMEOUT = "timeout"
+    CONNECTION_ERROR = "connection_error"
+    WEBSOCKET_ERROR = "websocket_error"
+    TRANSPORT_ERROR = "transport_error"
+
+
 @dataclass(frozen=True)
 class HookContext:
     """Context passed into hooks."""
@@ -33,6 +43,8 @@ class HookContext:
     provider_target_format: str = "openai_chat"
     transport: str = "http"
     stream: bool = False
+    last_status_code: Optional[int] = None
+    last_error_type: Optional[HookErrorType] = None
 
 
 class HookModule(Protocol):
