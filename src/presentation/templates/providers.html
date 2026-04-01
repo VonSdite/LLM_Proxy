@@ -477,6 +477,7 @@
         let activeProviderHelpTrigger = null;
         let activeProviderTab = 'providers';
         let authEntryCardSequence = 0;
+        let providerTransportAutoSyncEnabled = true;
         const providerHelpTopics = {
             transport: {
                 title: '上游传输怎么选',
@@ -1304,17 +1305,54 @@
             setSelectValueOrFallback('providerVerifySsl', provider?.verify_ssl === true ? 'true' : 'false', 'false');
             document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? buildModelListValue(provider.model_list) : '';
             document.getElementById('providerHook').value = provider?.hook || '';
+            resetProviderTransportAutoSync(provider);
             updateProviderAuthModeFields();
             updateModelListCount();
             updateFetchModelsButtonState();
         }
 
-        function inferTransportFromApi(apiValue) {
+        function inferExplicitTransportFromApi(apiValue) {
             const normalized = String(apiValue ?? '').trim().toLowerCase();
             if (normalized.startsWith('ws://') || normalized.startsWith('wss://')) {
                 return 'websocket';
             }
-            return 'http';
+            if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+                return 'http';
+            }
+            return null;
+        }
+
+        function inferTransportFromApi(apiValue) {
+            return inferExplicitTransportFromApi(apiValue) || 'http';
+        }
+
+        function resetProviderTransportAutoSync(provider) {
+            const explicitTransport = inferExplicitTransportFromApi(provider?.api || '');
+            if (!provider) {
+                providerTransportAutoSyncEnabled = true;
+                return;
+            }
+            providerTransportAutoSyncEnabled = !explicitTransport || provider?.transport === explicitTransport;
+        }
+
+        function syncProviderTransportWithApi(force = false) {
+            const explicitTransport = inferExplicitTransportFromApi(document.getElementById('providerApi')?.value || '');
+            if (!explicitTransport || (!force && !providerTransportAutoSyncEnabled)) {
+                return;
+            }
+            setSelectValueOrFallback('providerTransport', explicitTransport, explicitTransport);
+        }
+
+        function handleProviderApiInput() {
+            syncProviderTransportWithApi();
+            updateFetchModelsButtonState();
+        }
+
+        function handleProviderTransportChange() {
+            const explicitTransport = inferExplicitTransportFromApi(document.getElementById('providerApi')?.value || '');
+            const selectedTransport = document.getElementById('providerTransport')?.value || '';
+            providerTransportAutoSyncEnabled = !explicitTransport || selectedTransport === explicitTransport;
+            updateFetchModelsButtonState();
         }
 
         function getEffectiveTransport() {
@@ -2599,9 +2637,9 @@
                 document.getElementById('modelDetailList').innerHTML = '';
             });
             document.getElementById('providerName').addEventListener('input', updateFetchModelsButtonState);
-            document.getElementById('providerApi').addEventListener('input', updateFetchModelsButtonState);
+            document.getElementById('providerApi').addEventListener('input', handleProviderApiInput);
             document.getElementById('providerAuthMode').addEventListener('change', updateFetchModelsButtonState);
-            document.getElementById('providerTransport').addEventListener('change', updateFetchModelsButtonState);
+            document.getElementById('providerTransport').addEventListener('change', handleProviderTransportChange);
             document.getElementById('providerModelList').addEventListener('input', updateModelListCount);
             document.getElementById('fetchModelSearchInput').addEventListener('input', renderFetchModelPicker);
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
