@@ -13,3 +13,12 @@ providers:
   verify_ssl: false
   model_list:
   - kimi-k2.5
+auth_groups:
+- name: a
+  strategy: least_inflight
+  cooldown_seconds_on_429: 60
+  entries:
+  - id: a
+    enabled: true
+    headers:
+      a: a

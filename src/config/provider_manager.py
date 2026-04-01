@@ -6,21 +6,24 @@ import hashlib
 import importlib.util
 import inspect
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 from ..application.app_context import AppContext, Logger
 from ..external import LLMProvider
 from ..hooks import HookModule
+from .auth_group_manager import AuthGroupManager
 from .provider_config import ProviderConfigSchema, ProviderRuntimeView, RuntimeProviderSpec
 
 
 class ProviderManager:
     """管理模型到 provider 的运行时映射关系。"""
 
-    def __init__(self, ctx: AppContext):
+    def __init__(self, ctx: AppContext, auth_group_manager: AuthGroupManager):
         self._base_dir = ctx.root_path.resolve()
         self._logger: Logger = ctx.logger
+        self._auth_group_manager = auth_group_manager
         self._provider_by_model: Dict[str, LLMProvider] = {}
         self._provider_by_name: Dict[str, LLMProvider] = {}
         self._provider_views_by_name: Dict[str, ProviderRuntimeView] = {}
@@ -69,31 +72,50 @@ class ProviderManager:
             self._logger.warning("Provider '%s' skipped: model_list is empty", spec.name)
             return
 
+        legacy_auth_group_name: Optional[str] = None
+        resolved_auth_group = spec.auth_group
+        if resolved_auth_group is None and spec.api_key:
+            legacy_auth_group_name = self._auth_group_manager.register_legacy_provider_group(
+                spec.name,
+                spec.api_key,
+            )
+            resolved_auth_group = legacy_auth_group_name
+        runtime_spec = replace(spec, auth_group=resolved_auth_group)
+
         provider = LLMProvider(
-            name=spec.name,
-            api=spec.api,
-            transport=spec.transport,
-            source_format=spec.source_format,
-            target_format=spec.target_format,
+            name=runtime_spec.name,
+            api=runtime_spec.api,
+            transport=runtime_spec.transport,
+            source_format=runtime_spec.source_format,
+            target_format=runtime_spec.target_format,
             api_key=spec.api_key,
-            model_list=spec.model_list,
-            proxy=spec.proxy,
-            timeout_seconds=spec.timeout_seconds,
-            max_retries=spec.max_retries,
-            verify_ssl=spec.verify_ssl,
-            hook=self._load_hook(spec.hook),
+            auth_group=runtime_spec.auth_group,
+            model_list=runtime_spec.model_list,
+            proxy=runtime_spec.proxy,
+            timeout_seconds=runtime_spec.timeout_seconds,
+            max_retries=runtime_spec.max_retries,
+            verify_ssl=runtime_spec.verify_ssl,
+            hook=self._load_hook(runtime_spec.hook),
         )
 
-        self._provider_by_name[spec.name] = provider
-        self._provider_views_by_name[spec.name] = ProviderRuntimeView.from_spec(spec)
+        self._provider_by_name[runtime_spec.name] = provider
+        self._provider_views_by_name[runtime_spec.name] = ProviderRuntimeView.from_spec(
+            runtime_spec,
+            legacy_api_key=legacy_auth_group_name is not None,
+        )
 
-        for model in spec.model_list:
-            model_key = f"{spec.name}/{model}"
+        for model in runtime_spec.model_list:
+            model_key = f"{runtime_spec.name}/{model}"
             if model_key in self._provider_by_model:
                 raise ValueError(f"Duplicate provider model mapping detected: {model_key}")
             self._provider_by_model[model_key] = provider
 
-        self._logger.info("Loaded provider: %s, models: %s", spec.name, list(spec.model_list))
+        self._logger.info(
+            "Loaded provider: %s, models: %s, auth_group=%s",
+            runtime_spec.name,
+            list(runtime_spec.model_list),
+            runtime_spec.auth_group or "<none>",
+        )
 
     def _load_hook(self, hook_path: Optional[str]) -> Optional[HookModule]:
         """按路径加载 hook 模块，并做缓存复用。"""

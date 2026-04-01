@@ -8,7 +8,12 @@ from pathlib import Path
 from flask import request
 
 from .app_context import AppContext
-from ..config import ConfigManager, ProviderManager, build_provider_schemas
+from ..config import (
+    ConfigManager,
+    ProviderManager,
+    build_auth_group_schemas,
+    build_provider_schemas,
+)
 from ..presentation import (
     AuthenticationController,
     ProviderController,
@@ -17,8 +22,9 @@ from ..presentation import (
     WebController,
     create_flask_app,
 )
-from ..repositories import LogRepository, UserRepository
+from ..repositories import AuthGroupRepository, LogRepository, UserRepository
 from ..services import (
+    AuthGroupService,
     AuthenticationService,
     LogService,
     ModelDiscoveryService,
@@ -147,10 +153,14 @@ class Application:
         self._db_connection_factory = create_connection_factory(db_path)
         self._user_repository = UserRepository(self._db_connection_factory)
         self._log_repository = LogRepository(self._db_connection_factory)
+        self._auth_group_repository = AuthGroupRepository(self._db_connection_factory)
 
     def _setup_provider_manager(self) -> None:
         """加载 provider 配置并注册可用模型。"""
-        self._provider_manager = ProviderManager(self._ctx)
+        from ..config import AuthGroupManager
+
+        self._auth_group_manager = AuthGroupManager(self._ctx, self._auth_group_repository)
+        self._provider_manager = ProviderManager(self._ctx, self._auth_group_manager)
         self.reload_providers()
 
     def _setup_controllers(self) -> None:
@@ -158,9 +168,14 @@ class Application:
         auth_service = AuthenticationService(self._ctx)
         user_service = UserService(self._ctx, self._user_repository)
         self._user_service = user_service
-        proxy_service = ProxyService(self._ctx)
+        proxy_service = ProxyService(self._ctx, self._auth_group_manager)
         log_service = LogService(self._ctx, self._log_repository)
         provider_service = ProviderService(self._ctx, self.reload_providers)
+        auth_group_service = AuthGroupService(
+            self._ctx,
+            self.reload_providers,
+            self._auth_group_manager,
+        )
         model_discovery_service = ModelDiscoveryService(self._ctx)
         settings_service = SettingsService(self._ctx)
 
@@ -169,6 +184,7 @@ class Application:
         self._provider_controller = ProviderController(
             self._ctx,
             provider_service,
+            auth_group_service,
             model_discovery_service,
             settings_service,
             auth_service,
@@ -187,10 +203,18 @@ class Application:
     def reload_providers(self) -> None:
         self._config_manager.reload()
         config_dict = self._config_manager.get_raw_config()
+        auth_groups_config = config_dict.get("auth_groups", [])
+        if auth_groups_config is None:
+            auth_groups_config = []
         providers_config = config_dict.get("providers", [])
         if providers_config is None:
             providers_config = []
-        provider_schemas = build_provider_schemas(providers_config)
+        auth_group_schemas = build_auth_group_schemas(auth_groups_config)
+        provider_schemas = build_provider_schemas(
+            providers_config,
+            available_auth_group_names={schema.name for schema in auth_group_schemas},
+        )
+        self._auth_group_manager.load_auth_groups(auth_group_schemas)
         self._provider_manager.load_providers(provider_schemas)
 
     def run(self) -> None:

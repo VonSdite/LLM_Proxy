@@ -43,6 +43,8 @@ class HookContext:
     provider_target_format: str = "openai_chat"
     transport: str = "http"
     stream: bool = False
+    auth_group_name: Optional[str] = None
+    auth_entry_id: Optional[str] = None
     last_status_code: Optional[int] = None
     last_error_type: Optional[HookErrorType] = None
 

@@ -52,6 +52,10 @@ downstream request
 - `ProviderManager`
   - 加载 provider 配置
   - 维护 `provider/model -> provider` 映射
+- `AuthGroupManager`
+  - 加载 `auth_groups`
+  - 选择 `auth_entry`
+  - 持久化冷却、禁用与配额运行态
 - `ProxyService`
   - 组装整条代理链路
 - `ExecutorRegistry`
@@ -68,6 +72,8 @@ downstream request
 Hook 组件除了 header / guard，还会收到最小重试上下文：
 
 - `retry`
+- `auth_group_name`
+- `auth_entry_id`
 - `last_status_code`
 - `last_error_type`
 
@@ -116,6 +122,7 @@ Provider 公共运行时字段只有：
 - `source_format`
 - `target_format`
 - `api_key`
+- `auth_group`
 - `proxy`
 - `timeout_seconds`
 - `max_retries`
@@ -137,6 +144,8 @@ Provider 公共运行时字段只有：
 Hook 运行时上下文还会暴露最小重试状态：
 
 - `retry`
+- `auth_group_name`
+- `auth_entry_id`
 - `last_status_code`
 - `last_error_type`
 

@@ -9,13 +9,34 @@ admin:
   username: admin
   password: admin
 
+auth_groups:
+  - name: openai-shared
+    strategy: least_inflight
+    cooldown_seconds_on_429: 60
+    entries:
+      - id: openai-key-a
+        enabled: true
+        headers:
+          Authorization: Bearer sk-your-openai-key-a
+        max_concurrency: 3
+        cooldown_seconds_on_429: 120
+        request_quota_per_minute: 60
+        request_quota_per_day: 3000
+        token_quota_per_minute: 120000
+        token_quota_per_day: 5000000
+      - id: openai-key-b
+        enabled: true
+        headers:
+          Authorization: Bearer sk-your-openai-key-b
+        max_concurrency: 2
+
 providers:
   - name: openai-chat
     api: https://api.openai.com/v1/chat/completions
     transport: http
     source_format: openai_chat
     target_format: openai_chat
-    api_key: sk-your-openai-key
+    auth_group: openai-shared
     verify_ssl: true
     timeout_seconds: 1200
     max_retries: 3
@@ -29,7 +50,7 @@ providers:
     transport: http
     source_format: openai_responses
     target_format: openai_chat
-    api_key: sk-your-openai-key
+    auth_group: openai-shared
     verify_ssl: true
     timeout_seconds: 1200
     max_retries: 3

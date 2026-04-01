@@ -18,6 +18,7 @@ class LLMProvider:
     source_format: str = "openai_chat"
     target_format: str = "openai_chat"
     api_key: Optional[str] = None
+    auth_group: Optional[str] = None
     model_list: tuple[str, ...] = ()
     proxy: Optional[str] = None
     timeout_seconds: int = 1200

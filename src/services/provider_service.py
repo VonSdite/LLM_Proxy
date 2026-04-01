@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 from ..application.app_context import AppContext
 from ..config.provider_config import (
     ProviderConfigSchema,
-    validate_provider_definitions,
+    validate_auth_group_provider_definitions,
 )
 
 
@@ -78,7 +78,7 @@ class ProviderService:
         self._save_providers(config, providers)
 
     def _save_providers(self, config: Dict[str, Any], providers: List[Dict[str, Any]]) -> None:
-        self._validate_providers(providers)
+        self._validate_providers(config, providers)
         config['providers'] = providers
         self._config_manager.write_raw_config(config)
         self._reload_callback()
@@ -104,5 +104,20 @@ class ProviderService:
         return None
 
     @staticmethod
-    def _validate_providers(providers: List[Dict[str, Any]]) -> None:
-        validate_provider_definitions(providers)
+    def _extract_auth_groups(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        auth_groups = config.get('auth_groups', [])
+        if auth_groups is None:
+            auth_groups = []
+        if not isinstance(auth_groups, list):
+            raise ValueError("Config field 'auth_groups' must be a list")
+        for index, auth_group in enumerate(auth_groups):
+            if not isinstance(auth_group, dict):
+                raise ValueError(f'Auth group entry at index {index} must be an object')
+        return list(auth_groups)
+
+    @staticmethod
+    def _validate_providers(config: Dict[str, Any], providers: List[Dict[str, Any]]) -> None:
+        validate_auth_group_provider_definitions(
+            ProviderService._extract_auth_groups(config),
+            providers,
+        )

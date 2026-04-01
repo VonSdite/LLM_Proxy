@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260329-3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260401-5">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
@@ -9,17 +9,78 @@
 {% block content %}
         <section class="providers-toolbar-section">
             <div class="toolbar-card">
-                <div class="toolbar-summary">
-                    <span class="toolbar-pill toolbar-pill-primary">共 <strong id="providerCount">0</strong> 个 Provider</span>
+                <div class="toolbar-meta">
+                    <div class="toolbar-summary">
+                        <span class="toolbar-pill toolbar-pill-primary">共 <strong id="providerCount">0</strong> 个 Provider</span>
+                        <span class="toolbar-pill toolbar-pill-primary">共 <strong id="authGroupCount">0</strong> 个 Auth Group</span>
+                    </div>
+                    <div class="provider-tabs" role="tablist" aria-label="Provider 视图">
+                        <button
+                            type="button"
+                            class="provider-tab-btn is-active"
+                            id="providerTabBtn_providers"
+                            onclick="switchProviderTab('providers')"
+                            aria-selected="true"
+                            aria-controls="providerTabPanel_providers"
+                        >Providers</button>
+                        <button
+                            type="button"
+                            class="provider-tab-btn"
+                            id="providerTabBtn_auth_groups"
+                            onclick="switchProviderTab('auth_groups')"
+                            aria-selected="false"
+                            aria-controls="providerTabPanel_auth_groups"
+                        >Auth Groups</button>
+                    </div>
                 </div>
-                <button type="button" class="btn btn-primary" onclick="openCreateModal()">新增 Provider</button>
             </div>
 
         </section>
 
-        <section class="providers-section">
-            <div class="providers-table-shell" id="providersContainer">
-                <div class="loading">正在加载 provider 配置...</div>
+        <section class="providers-section providers-tab-panel" id="providerTabPanel_providers" role="tabpanel" aria-labelledby="providerTabBtn_providers">
+            <div class="section-card section-card-spaced">
+                <div class="section-header">
+                    <div>
+                        <h3 class="section-title">Providers</h3>
+                    </div>
+                    <div class="section-header-actions">
+                        <button type="button" class="btn btn-primary" onclick="openCreateModal()">新增 Provider</button>
+                    </div>
+                </div>
+                <div class="providers-table-shell" id="providersContainer">
+                    <div class="loading">正在加载 provider 配置...</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="providers-section providers-tab-panel" id="providerTabPanel_auth_groups" role="tabpanel" aria-labelledby="providerTabBtn_auth_groups" hidden>
+            <div class="section-card section-card-spaced">
+                <div class="section-header">
+                    <div>
+                        <div class="section-title-with-help">
+                            <h3 class="section-title">Auth Groups</h3>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-provider-help-topic="auth_groups_overview"
+                                onclick="toggleProviderHelp('auth_groups_overview', event)"
+                                aria-label="查看 Auth Groups 说明"
+                            >?</button>
+                        </div>
+                    </div>
+                    <div class="section-header-actions">
+                        <button type="button" class="btn btn-primary" onclick="openCreateAuthGroupModal()">新增 Auth Group</button>
+                    </div>
+                </div>
+                <div class="toolbar-summary auth-group-summary">
+                    <span class="toolbar-pill">Entries <strong id="authEntryCount">0</strong></span>
+                    <span class="toolbar-pill">Available <strong id="authGroupAvailableCount">0</strong></span>
+                    <span class="toolbar-pill">Cooldown <strong id="authGroupCooldownCount">0</strong></span>
+                    <span class="toolbar-pill">Disabled <strong id="authGroupDisabledCount">0</strong></span>
+                </div>
+                <div class="providers-table-shell auth-groups-table-shell" id="authGroupsContainer">
+                    <div class="loading">正在加载 auth group 配置...</div>
+                </div>
             </div>
         </section>
 {% endblock %}
@@ -79,7 +140,27 @@
                             </select>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">API Key</label>
+                            <label class="form-label">Auth 方式</label>
+                            <select class="form-control" id="providerAuthMode" onchange="updateProviderAuthModeFields()">
+                                <option value="legacy_api_key">Legacy API Key</option>
+                                <option value="auth_group">Auth Group</option>
+                            </select>
+                        </div>
+                        <div class="mb-3" id="providerAuthGroupField">
+                            <label class="form-label field-label-with-help">
+                                <span>Auth Group</span>
+                                <button
+                                    type="button"
+                                    class="field-help-button"
+                                    data-provider-help-topic="auth_group_field"
+                                    onclick="toggleProviderHelp('auth_group_field', event)"
+                                    aria-label="查看 Auth Group 字段说明"
+                                >?</button>
+                            </label>
+                            <select class="form-control" id="providerAuthGroup"></select>
+                        </div>
+                        <div class="mb-3" id="providerLegacyApiKeyField">
+                            <label class="form-label">Legacy API Key</label>
                             <input type="text" class="form-control" id="providerApiKey" placeholder="留空则不写入配置">
                         </div>
                         <div class="mb-3">
@@ -136,7 +217,7 @@
     </div>
 
     <div class="modal fade" id="fetchModelPickerModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-dialog modal-lg modal-dialog-centered auth-entry-yaml-modal-dialog">
             <div class="modal-content border-0 shadow">
                 <div class="modal-header border-bottom-0">
                     <div>
@@ -193,6 +274,166 @@
             </div>
         </div>
     </div>
+    <div class="modal fade" id="authGroupModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <div>
+                        <h5 class="modal-title fw-semibold" id="authGroupModalLabel">新增 Auth Group</h5>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <div class="auth-group-base-grid">
+                        <div class="mb-3">
+                            <label class="form-label">Group 名称 *</label>
+                            <input type="text" class="form-control" id="authGroupName" placeholder="例如 openai-shared，供 Provider 绑定引用">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label field-label-with-help">
+                                <span>策略</span>
+                                <button
+                                    type="button"
+                                    class="field-help-button"
+                                    data-provider-help-topic="auth_group_strategy"
+                                    onclick="toggleProviderHelp('auth_group_strategy', event)"
+                                    aria-label="查看 Auth Group 策略说明"
+                                >?</button>
+                            </label>
+                            <select class="form-control" id="authGroupStrategy">
+                                <option value="least_inflight">least_inflight</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">默认 429 冷却秒数</label>
+                            <input type="number" class="form-control" id="authGroupCooldownSeconds" min="1" placeholder="例如 60，表示该组默认遇到 429 冷却 60 秒">
+                        </div>
+                    </div>
+                    <div class="entry-editor-header">
+                        <div>
+                            <label class="form-label field-label-with-help">
+                                <span>Auth Entries</span>
+                                <button
+                                    type="button"
+                                    class="field-help-button"
+                                    data-provider-help-topic="auth_entries_editor"
+                                    onclick="toggleProviderHelp('auth_entries_editor', event)"
+                                    aria-label="查看 Auth Entries 说明"
+                                >?</button>
+                            </label>
+                        </div>
+                        <div class="field-header-actions">
+                            <button type="button" class="btn btn-secondary btn-field-secondary" onclick="openAuthEntryImportModal()">YAML 编辑</button>
+                            <button type="button" class="btn btn-secondary btn-field-secondary" onclick="addAuthEntryCard()">新增 Entry</button>
+                        </div>
+                    </div>
+                    <div class="auth-entry-table">
+                        <div class="auth-entry-table-header">
+                            <span class="auth-entry-table-toggle-column"></span>
+                            <span>Entry ID</span>
+                            <span>Enabled</span>
+                            <span>Header 数</span>
+                            <span>限制概览</span>
+                            <span>操作</span>
+                        </div>
+                        <div id="authEntriesContainer" class="auth-entry-list"></div>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveAuthGroup()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="authEntryImportModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <div>
+                        <h5 class="modal-title fw-semibold">编辑 Auth Entries YAML</h5>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <div class="mb-0">
+                        <div class="field-header">
+                            <div class="field-header-meta">
+                                <label class="form-label">YAML 内容</label>
+                                <div class="field-header-description">这里编辑的是当前 Auth Entries 的完整 YAML；保存后会整体替换当前列表，并校验重复 ID。</div>
+                            </div>
+                            <div class="field-header-actions">
+                                <button type="button" class="btn btn-secondary btn-field-secondary" onclick="insertAuthEntryYamlTemplate()">插入 Entry 模板</button>
+                            </div>
+                        </div>
+                        <textarea
+                            class="form-control entry-import-textarea"
+                            id="authEntryImportYaml"
+                            rows="14"
+                        >entries:
+  - id: key-a  # 必填：Entry 唯一 ID，组内不能重复
+    enabled: true  # 可选：默认 true；设为 false 时该 Entry 不参与调度
+    headers:  # 必填：至少提供 1 个请求头
+      Authorization: "Bearer sk-xxx"  # 示例：Bearer Token
+      # x-api-key: "your-api-key"  # 可选：如果上游用 x-api-key，可改成这个
+    max_concurrency: 3  # 可选：最大并发；留空表示不限制
+    cooldown_seconds_on_429: 120  # 可选：429 冷却秒数；留空则继承 Group 默认值
+    request_quota_per_minute: 60  # 可选：每分钟请求数上限；留空表示不限制
+    request_quota_per_day: 3000  # 可选：每天请求数上限；留空表示不限制
+    token_quota_per_minute: 120000  # 可选：每分钟 Token 上限；留空表示不限制
+    token_quota_per_day: 5000000  # 可选：每天 Token 上限；留空表示不限制
+</textarea>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveAuthEntriesFromYaml()">YAML 保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="authGroupRuntimeModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <div>
+                        <h5 class="modal-title fw-semibold" id="authGroupRuntimeTitle">Auth Group 运行态</h5>
+                        <div class="modal-subtitle" id="authGroupRuntimeSubtitle">查看 entry 的并发、冷却、配额与最近错误。</div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <div class="toolbar-summary auth-group-summary" id="authGroupRuntimeSummary"></div>
+                    <div class="providers-table-shell auth-group-runtime-shell" id="authGroupRuntimeContainer">
+                        <div class="loading">正在加载运行态...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="authEntryErrorModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <div>
+                        <h5 class="modal-title fw-semibold" id="authEntryErrorTitle">最近错误详情</h5>
+                        <div class="modal-subtitle" id="authEntryErrorSubtitle">查看 entry 的最近失败摘要和运行态原因。</div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <div class="runtime-error-detail-grid" id="authEntryErrorContent"></div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="inline-confirm-popover floating-delete-popover" id="providerDeletePopover" data-placement="bottom" hidden>
         <div class="inline-confirm-text">确认删除？</div>
         <div class="inline-confirm-actions">
@@ -213,11 +454,19 @@
     <script src="/static/js/ui-message.js?v=20260319-1"></script>
     <script>
         let providers = [];
+        let authGroups = [];
         let editingProviderName = null;
+        let editingAuthGroupName = null;
         let providerModalInstance = null;
+        let authGroupModalInstance = null;
+        let authEntryImportModalInstance = null;
+        let authGroupRuntimeModalInstance = null;
+        let authEntryErrorModalInstance = null;
         let fetchModelPickerModalInstance = null;
         let modelDetailModalInstance = null;
         let activeModelProvider = null;
+        let activeRuntimeAuthGroupName = null;
+        let activeAuthGroupRuntime = null;
         let pendingDeleteProviderName = null;
         let deletingProviderName = null;
         let fetchedModelCandidates = [];
@@ -226,6 +475,8 @@
         let activeCustomSelect = null;
         let activeProviderHelpTopic = null;
         let activeProviderHelpTrigger = null;
+        let activeProviderTab = 'providers';
+        let authEntryCardSequence = 0;
         const providerHelpTopics = {
             transport: {
                 title: '上游传输怎么选',
@@ -262,6 +513,51 @@
                         <li><strong>claude_chat</strong>：下游走 <code>/v1/messages</code>。适合 Claude Code 和 Anthropic 兼容客户端。</li>
                     </ul>
                     <p>一个 provider 配好后只能被对应的 route family 使用，不能让下游随意混用。</p>
+                `,
+            },
+            auth_group_field: {
+                title: 'Auth Group 怎么用',
+                html: `
+                    <p><code>Auth Group</code> 是一组可复用凭证的名字，provider 绑定后，请求会从这组凭证里选择可用 entry。</p>
+                    <ul>
+                        <li><strong>适合</strong>：同一个上游需要多个 key / token 做轮换、并发控制、429 冷却或配额管理。</li>
+                        <li><strong>和 Legacy API Key 的关系</strong>：二选一。选了 <code>Auth Group</code> 就不要再填 <code>Legacy API Key</code>。</li>
+                    </ul>
+                    <p>如果只是单个 key，继续用 <code>Legacy API Key</code> 就够了。</p>
+                `,
+            },
+            auth_groups_overview: {
+                title: 'Auth Groups 是什么',
+                html: `
+                    <p><code>Auth Group</code> 用来管理一组可复用的认证凭证，每个 entry 都可以有自己的 header、并发限制和配额。</p>
+                    <ul>
+                        <li><strong>并发控制</strong>：限制单个 entry 同时承载的请求数。</li>
+                        <li><strong>429 冷却</strong>：某个 entry 被限流后，仅冷却这一条，不影响组内其他 entry。</li>
+                        <li><strong>请求数 / Token 配额</strong>：按分钟和天维度统计与拦截。</li>
+                    </ul>
+                    <p>provider 只需要绑定 group 名称，具体选哪条凭证由运行时调度层负责。</p>
+                `,
+            },
+            auth_group_strategy: {
+                title: '策略怎么选',
+                html: `
+                    <p>当前只支持 <code>least_inflight</code>。</p>
+                    <ul>
+                        <li><strong>least_inflight</strong>：优先选择当前进行中请求数最少的 entry。</li>
+                        <li><strong>适合场景</strong>：有长流式请求、多个 key 并发能力不同，想让流量更均匀地落在空闲 entry 上。</li>
+                    </ul>
+                    <p>如果多个 entry 当前 inflight 一样，系统还会按轮转游标继续打散，避免持续偏向同一条凭证。</p>
+                `,
+            },
+            auth_entries_editor: {
+                title: 'Auth Entries 怎么理解',
+                html: `
+                    <p>一个 <code>Auth Entry</code> 就是一条具体可用的认证凭证，通常是一组请求头。</p>
+                    <ul>
+                        <li><strong>headers</strong>：真正发给上游的认证信息，比如 <code>Authorization</code> 或 <code>x-api-key</code>。</li>
+                        <li><strong>并发 / 冷却 / 配额</strong>：都按 entry 粒度生效，不会影响同组其他 entry。</li>
+                        <li><strong>YAML 编辑</strong>：适合批量新增、删除、修改 entry，保存时会整体替换当前列表。</li>
+                    </ul>
                 `,
             },
             fetch_models: {
@@ -303,6 +599,39 @@
 
         function decodeProviderName(encodedName) {
             return decodeURIComponent(encodedName);
+        }
+
+        function getProviderTabButton(tabName) {
+            return document.getElementById(`providerTabBtn_${tabName}`);
+        }
+
+        function getProviderTabPanel(tabName) {
+            return document.getElementById(`providerTabPanel_${tabName}`);
+        }
+
+        function syncProviderTabUi() {
+            ['providers', 'auth_groups'].forEach(tabName => {
+                const isActive = tabName === activeProviderTab;
+                const button = getProviderTabButton(tabName);
+                const panel = getProviderTabPanel(tabName);
+
+                if (button) {
+                    button.classList.toggle('is-active', isActive);
+                    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                }
+
+                if (panel) {
+                    panel.hidden = !isActive;
+                }
+            });
+        }
+
+        function switchProviderTab(tabName) {
+            if (!['providers', 'auth_groups'].includes(tabName)) {
+                return;
+            }
+            activeProviderTab = tabName;
+            syncProviderTabUi();
         }
 
         function getProviderHelpPopoverElement() {
@@ -518,6 +847,7 @@
             const provider = providers.find(item => item.name === name);
             if (!provider) return;
 
+            switchProviderTab('providers');
             activeModelProvider = provider;
             document.getElementById('modelDetailTitle').textContent = `${provider.name} - 模型列表`;
             document.getElementById('modelDetailSubtitle').textContent = provider.api || '未配置 API 地址';
@@ -780,18 +1110,59 @@
             applyNormalizedModelListValue(true, true);
         }
 
+        function renderProviderAuthGroupOptions(selectedValue = '') {
+            const select = document.getElementById('providerAuthGroup');
+            if (!select) return;
+
+            const previousValue = selectedValue || select.value || '';
+            const options = ['<option value="">请选择 Auth Group</option>']
+                .concat(
+                    authGroups
+                        .slice()
+                        .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')))
+                        .map(group => `<option value="${escapeHtml(group.name)}">${escapeHtml(group.name)}</option>`)
+                );
+            select.innerHTML = options.join('');
+            select.value = previousValue;
+            if (select.value !== previousValue) {
+                select.value = '';
+            }
+            renderCustomSelectOptions('providerAuthGroup');
+        }
+
+        function updateProviderAuthModeFields() {
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authGroupField = document.getElementById('providerAuthGroupField');
+            const legacyApiKeyField = document.getElementById('providerLegacyApiKeyField');
+            if (authGroupField) {
+                authGroupField.hidden = authMode !== 'auth_group';
+            }
+            if (legacyApiKeyField) {
+                legacyApiKeyField.hidden = authMode !== 'legacy_api_key';
+            }
+            updateFetchModelsButtonState();
+        }
+
         function collectFormData() {
             const targetFormatInput = document.getElementById('providerTargetFormat');
             const normalizedModelList = buildModelListValue(
                 normalizeModelListItems(document.getElementById('providerModelList').value)
             );
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authGroup = authMode === 'auth_group'
+                ? document.getElementById('providerAuthGroup')?.value?.trim() || ''
+                : '';
+            const apiKey = authMode === 'legacy_api_key'
+                ? document.getElementById('providerApiKey').value.trim()
+                : '';
             return {
                 name: document.getElementById('providerName').value.trim(),
                 api: document.getElementById('providerApi').value.trim(),
                 transport: document.getElementById('providerTransport').value,
                 source_format: document.getElementById('providerSourceFormat').value.trim() || 'openai_chat',
                 target_format: targetFormatInput?.value?.trim() || 'openai_chat',
-                api_key: document.getElementById('providerApiKey').value.trim(),
+                auth_group: authGroup,
+                api_key: apiKey,
                 proxy: document.getElementById('providerProxy').value.trim(),
                 timeout_seconds: document.getElementById('providerTimeout').value.trim(),
                 max_retries: document.getElementById('providerRetries').value.trim(),
@@ -916,11 +1287,16 @@
         function fillForm(provider) {
             const inferredTransport = inferTransportFromApi(provider?.api || '');
             const resolvedTransport = provider?.transport || inferredTransport;
+            const authMode = provider
+                ? (provider.auth_group ? 'auth_group' : 'legacy_api_key')
+                : 'legacy_api_key';
             document.getElementById('providerName').value = provider?.name || '';
             document.getElementById('providerApi').value = provider?.api || '';
             setSelectValueOrFallback('providerTransport', resolvedTransport, inferredTransport);
             setSelectValueOrFallback('providerSourceFormat', provider?.source_format, 'openai_chat');
             setSelectValueOrFallback('providerTargetFormat', provider?.target_format, 'openai_chat');
+            setSelectValueOrFallback('providerAuthMode', authMode, 'legacy_api_key');
+            renderProviderAuthGroupOptions(provider?.auth_group || '');
             document.getElementById('providerApiKey').value = provider?.api_key || '';
             document.getElementById('providerProxy').value = provider?.proxy || '';
             document.getElementById('providerTimeout').value = provider?.timeout_seconds || '';
@@ -928,6 +1304,7 @@
             setSelectValueOrFallback('providerVerifySsl', provider?.verify_ssl === true ? 'true' : 'false', 'false');
             document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? buildModelListValue(provider.model_list) : '';
             document.getElementById('providerHook').value = provider?.hook || '';
+            updateProviderAuthModeFields();
             updateModelListCount();
             updateFetchModelsButtonState();
         }
@@ -955,6 +1332,7 @@
         }
 
         function openCreateModal() {
+            switchProviderTab('providers');
             editingProviderName = null;
             document.getElementById('providerModalLabel').textContent = '新增 Provider';
             fillForm(null);
@@ -964,10 +1342,49 @@
         function openEditModal(name) {
             const provider = providers.find(item => item.name === name);
             if (!provider) return;
+            switchProviderTab('providers');
             editingProviderName = name;
             document.getElementById('providerModalLabel').textContent = '编辑 Provider';
             fillForm(provider);
             providerModalInstance.show();
+        }
+
+        function openCreateAuthGroupModal() {
+            switchProviderTab('auth_groups');
+            editingAuthGroupName = null;
+            document.getElementById('authGroupModalLabel').textContent = '新增 Auth Group';
+            fillAuthGroupForm(null);
+            authGroupModalInstance.show();
+        }
+
+        function openEditAuthGroupModal(name) {
+            const authGroup = authGroups.find(item => item.name === name);
+            if (!authGroup) return;
+            switchProviderTab('auth_groups');
+            editingAuthGroupName = name;
+            document.getElementById('authGroupModalLabel').textContent = '编辑 Auth Group';
+            fillAuthGroupForm(authGroup);
+            authGroupModalInstance.show();
+        }
+
+        async function loadPageData() {
+            await Promise.all([loadAuthGroups(), loadProviders()]);
+        }
+
+        async function loadAuthGroups() {
+            try {
+                const response = await fetch('/api/auth-groups');
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || '加载 auth group 失败');
+                }
+                authGroups = Array.isArray(data) ? data : [];
+                renderProviderAuthGroupOptions(document.getElementById('providerAuthGroup')?.value || '');
+                renderAuthGroups();
+            } catch (error) {
+                console.error('加载 auth group 失败:', error);
+                document.getElementById('authGroupsContainer').innerHTML = '<div class="error">加载 auth group 失败</div>';
+            }
         }
 
         async function loadProviders() {
@@ -981,11 +1398,101 @@
                     throw new Error(data.error || '加载 provider 失败');
                 }
                 providers = Array.isArray(data) ? data : [];
+                renderProviderAuthGroupOptions(document.getElementById('providerAuthGroup')?.value || '');
                 renderProviders();
             } catch (error) {
                 console.error('加载 provider 失败:', error);
                 document.getElementById('providersContainer').innerHTML = '<div class="error">加载 provider 失败</div>';
             }
+        }
+
+        function renderAuthGroups() {
+            const container = document.getElementById('authGroupsContainer');
+            const authGroupCountElement = document.getElementById('authGroupCount');
+            const authEntryCountElement = document.getElementById('authEntryCount');
+            const availableCountElement = document.getElementById('authGroupAvailableCount');
+            const cooldownCountElement = document.getElementById('authGroupCooldownCount');
+            const disabledCountElement = document.getElementById('authGroupDisabledCount');
+
+            const summary = authGroups.reduce((acc, group) => {
+                const groupSummary = group?.summary || {};
+                acc.authGroupCount += 1;
+                acc.entryCount += Number(groupSummary.entry_count || (Array.isArray(group?.entries) ? group.entries.length : 0));
+                acc.availableCount += Number(groupSummary.available_count || 0);
+                acc.cooldownCount += Number(groupSummary.cooldown_count || 0);
+                acc.disabledCount += Number(groupSummary.disabled_count || 0);
+                return acc;
+            }, {
+                authGroupCount: 0,
+                entryCount: 0,
+                availableCount: 0,
+                cooldownCount: 0,
+                disabledCount: 0,
+            });
+
+            if (authGroupCountElement) authGroupCountElement.textContent = summary.authGroupCount;
+            if (authEntryCountElement) authEntryCountElement.textContent = summary.entryCount;
+            if (availableCountElement) availableCountElement.textContent = summary.availableCount;
+            if (cooldownCountElement) cooldownCountElement.textContent = summary.cooldownCount;
+            if (disabledCountElement) disabledCountElement.textContent = summary.disabledCount;
+
+            if (!authGroups.length) {
+                container.innerHTML = '<div class="empty-state">当前没有 auth group 配置</div>';
+                return;
+            }
+
+            let html = `
+                <table class="providers-table">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>策略</th>
+                            <th>Entry 数</th>
+                            <th>关联 Provider 数</th>
+                            <th>运行态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            authGroups.forEach(group => {
+                const entries = Array.isArray(group.entries) ? group.entries : [];
+                const summary = group.summary || {};
+                const entryCount = Number(summary.entry_count || entries.length || 0);
+                html += `
+                    <tr>
+                        <td class="provider-name-cell">
+                            <span class="provider-name-text">${escapeHtml(group.name)}</span>
+                        </td>
+                        <td class="provider-api-cell">
+                            <div class="provider-meta-line">
+                                <span class="provider-chip">${escapeHtml(group.strategy || 'least_inflight')}</span>
+                                <span class="provider-chip provider-chip-target">429 ${escapeHtml(group.cooldown_seconds_on_429 ?? '')}s</span>
+                            </div>
+                        </td>
+                        <td class="provider-model-cell">${escapeHtml(entryCount)}</td>
+                        <td>${escapeHtml(group.provider_count ?? 0)}</td>
+                        <td>
+                            <div class="provider-meta-line">
+                                <span class="provider-chip">available ${escapeHtml(summary.available_count ?? 0)}</span>
+                                <span class="provider-chip provider-chip-target">cooldown ${escapeHtml(summary.cooldown_count ?? 0)}</span>
+                                <span class="provider-chip provider-chip-hook">disabled ${escapeHtml(summary.disabled_count ?? 0)}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="action-buttons">
+                                <button class="btn-action btn-edit" onclick="openEditAuthGroupModal(decodeProviderName('${encodeURIComponent(group.name)}'))">编辑</button>
+                                <button class="btn-action btn-edit" onclick="openAuthGroupRuntimeModal(decodeProviderName('${encodeURIComponent(group.name)}'))">运行态</button>
+                                <button class="btn-action btn-delete" onclick="deleteAuthGroup(decodeProviderName('${encodeURIComponent(group.name)}'))">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
         }
 
         function renderProviders() {
@@ -1040,6 +1547,8 @@
                                 <span class="provider-chip">${escapeHtml(provider.transport || 'http')}</span>
                                 <span class="provider-chip">${escapeHtml(provider.source_format || 'openai_chat')}</span>
                                 <span class="provider-chip provider-chip-target">${escapeHtml(provider.target_format || 'openai_chat')}</span>
+                                ${provider.auth_group ? `<span class="provider-chip provider-chip-hook">auth_group:${escapeHtml(provider.auth_group)}</span>` : ''}
+                                ${provider.api_key ? '<span class="provider-chip provider-chip-muted">legacy api_key</span>' : ''}
                                 ${provider.hook ? `<span class="provider-chip provider-chip-hook">${escapeHtml(provider.hook)}</span>` : ''}
                             </div>
                         </td>
@@ -1069,14 +1578,796 @@
             syncDeleteProviderPopover();
         }
 
+        function buildAuthEntryLimitSummary(card) {
+            if (!card) return '未配置限制';
+
+            const maxConcurrency = card.querySelector('.auth-entry-max-concurrency')?.value?.trim() || '';
+            const cooldown = card.querySelector('.auth-entry-cooldown')?.value?.trim() || '';
+            const reqMinute = card.querySelector('.auth-entry-req-minute')?.value?.trim() || '';
+            const reqDay = card.querySelector('.auth-entry-req-day')?.value?.trim() || '';
+            const tokenMinute = card.querySelector('.auth-entry-token-minute')?.value?.trim() || '';
+            const tokenDay = card.querySelector('.auth-entry-token-day')?.value?.trim() || '';
+            const parts = [];
+
+            if (maxConcurrency) parts.push(`并发 ${maxConcurrency}`);
+            if (cooldown) parts.push(`429 ${cooldown}s`);
+            if (reqMinute || reqDay) {
+                parts.push(`请求 ${reqMinute || '-'} /m ${reqDay || '-'} /d`);
+            }
+            if (tokenMinute || tokenDay) {
+                parts.push(`Token ${tokenMinute || '-'} /m ${tokenDay || '-'} /d`);
+            }
+
+            return parts.length ? parts.join(' · ') : '未配置限制';
+        }
+
+        function syncAuthEntryCardSummary(card) {
+            if (!card) return;
+
+            const entryId = card.querySelector('.auth-entry-id')?.value?.trim() || '';
+            const enabled = card.querySelector('.auth-entry-enabled')?.value !== 'false';
+            const headerCount = Array.from(card.querySelectorAll('.auth-header-row')).filter(row => {
+                const key = row.querySelector('.auth-header-key')?.value?.trim() || '';
+                return key !== '';
+            }).length;
+            const expanded = card.dataset.expanded === 'true';
+
+            const idElement = card.querySelector('.auth-entry-summary-id');
+            const enabledElement = card.querySelector('.auth-entry-summary-enabled');
+            const headerElement = card.querySelector('.auth-entry-summary-headers');
+            const limitsElement = card.querySelector('.auth-entry-summary-limits');
+            const toggleButton = card.querySelector('.auth-entry-toggle-btn');
+
+            if (idElement) idElement.textContent = entryId || '未命名';
+            if (enabledElement) enabledElement.textContent = enabled ? 'true' : 'false';
+            if (headerElement) headerElement.textContent = String(headerCount);
+            if (limitsElement) limitsElement.textContent = buildAuthEntryLimitSummary(card);
+            if (toggleButton) {
+                toggleButton.textContent = expanded ? '-' : '+';
+                toggleButton.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                toggleButton.setAttribute('aria-label', expanded ? '收起 Entry' : '展开 Entry');
+                toggleButton.setAttribute('title', expanded ? '收起' : '展开');
+            }
+        }
+
+        function collapseAuthEntryCard(card) {
+            if (!card) return;
+            card.dataset.expanded = 'false';
+            const detail = card.querySelector('.auth-entry-detail');
+            if (detail) {
+                detail.hidden = true;
+            }
+            syncAuthEntryCardSummary(card);
+        }
+
+        function expandAuthEntryCard(card) {
+            if (!card) return;
+            document.querySelectorAll('#authEntriesContainer .auth-entry-card[data-expanded="true"]').forEach(item => {
+                if (item !== card) {
+                    collapseAuthEntryCard(item);
+                }
+            });
+            card.dataset.expanded = 'true';
+            const detail = card.querySelector('.auth-entry-detail');
+            if (detail) {
+                detail.hidden = false;
+            }
+            syncAuthEntryCardSummary(card);
+        }
+
+        function toggleAuthEntryCard(source) {
+            const card = source?.closest('.auth-entry-card');
+            if (!card) return;
+            if (card.dataset.expanded === 'true') {
+                collapseAuthEntryCard(card);
+                return;
+            }
+            expandAuthEntryCard(card);
+        }
+
+        function handleAuthEntrySummaryKeydown(event, element) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            toggleAuthEntryCard(element);
+        }
+
+        function createAuthEntryCardElement(entry = null) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'auth-entry-card';
+            wrapper.dataset.entryKey = `entry-${++authEntryCardSequence}`;
+            wrapper.dataset.expanded = 'false';
+            wrapper.innerHTML = `
+                <div
+                    class="auth-entry-summary"
+                    role="button"
+                    tabindex="0"
+                    onclick="toggleAuthEntryCard(this)"
+                    onkeydown="handleAuthEntrySummaryKeydown(event, this)"
+                >
+                    <div class="auth-entry-summary-toggle">
+                        <button type="button" class="btn-action btn-edit auth-entry-toggle-btn" onclick="event.stopPropagation(); toggleAuthEntryCard(this)">+</button>
+                    </div>
+                    <div class="auth-entry-summary-cell auth-entry-summary-id">未命名</div>
+                    <div class="auth-entry-summary-cell auth-entry-summary-enabled">true</div>
+                    <div class="auth-entry-summary-cell auth-entry-summary-headers">0</div>
+                    <div class="auth-entry-summary-cell auth-entry-summary-limits">未配置限制</div>
+                    <div class="auth-entry-summary-actions">
+                        <button type="button" class="btn-action btn-delete" onclick="event.stopPropagation(); removeAuthEntryCard(this)">删除</button>
+                    </div>
+                </div>
+                <div class="auth-entry-detail" hidden>
+                    <div class="provider-form-grid">
+                        <div class="mb-3">
+                            <label class="form-label">Entry ID *</label>
+                            <input type="text" class="form-control auth-entry-id" value="${escapeHtml(entry?.id || '')}" placeholder="例如 key-a、project-cn-1">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Enabled</label>
+                            <select class="form-control auth-entry-enabled">
+                                <option value="true" ${(entry?.enabled ?? true) !== false ? 'selected' : ''}>true</option>
+                                <option value="false" ${(entry?.enabled ?? true) === false ? 'selected' : ''}>false</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Max Concurrency</label>
+                            <input type="number" class="form-control auth-entry-max-concurrency" min="1" value="${escapeHtml(entry?.max_concurrency ?? '')}" placeholder="留空表示不限制，例如 3">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">429 冷却秒数</label>
+                            <input type="number" class="form-control auth-entry-cooldown" min="1" value="${escapeHtml(entry?.cooldown_seconds_on_429 ?? '')}" placeholder="留空则继承 Group 默认值，例如 120">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">请求数/分钟</label>
+                            <input type="number" class="form-control auth-entry-req-minute" min="1" value="${escapeHtml(entry?.request_quota_per_minute ?? '')}" placeholder="留空表示不限制，例如 60">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">请求数/天</label>
+                            <input type="number" class="form-control auth-entry-req-day" min="1" value="${escapeHtml(entry?.request_quota_per_day ?? '')}" placeholder="留空表示不限制，例如 3000">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Token/分钟</label>
+                            <input type="number" class="form-control auth-entry-token-minute" min="1" value="${escapeHtml(entry?.token_quota_per_minute ?? '')}" placeholder="留空表示不限制，例如 120000">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Token/天</label>
+                            <input type="number" class="form-control auth-entry-token-day" min="1" value="${escapeHtml(entry?.token_quota_per_day ?? '')}" placeholder="留空表示不限制，例如 5000000">
+                        </div>
+                    </div>
+                    <div class="entry-header-editor">
+                        <div class="field-header">
+                            <div class="field-header-meta">
+                                <label class="form-label">Headers</label>
+                            </div>
+                            <div class="field-header-actions">
+                                <button type="button" class="btn btn-secondary btn-field-secondary" onclick="addAuthHeaderRow(this)">新增 Header</button>
+                            </div>
+                        </div>
+                        <div class="auth-header-list"></div>
+                    </div>
+                </div>
+            `;
+
+            const headerList = wrapper.querySelector('.auth-header-list');
+            const headers = entry?.headers && typeof entry.headers === 'object' ? entry.headers : {};
+            const headerEntries = Object.entries(headers);
+            if (!headerEntries.length) {
+                addAuthHeaderRow(wrapper.querySelector('.btn-field-secondary'));
+            } else {
+                headerEntries.forEach(([key, value]) => {
+                    addAuthHeaderRow(wrapper.querySelector('.btn-field-secondary'), { key, value });
+                });
+            }
+
+            syncAuthEntryCardSummary(wrapper);
+            return wrapper;
+        }
+
+        function addAuthEntryCard(entry = null, options = {}) {
+            const { expand = true } = options || {};
+            const container = document.getElementById('authEntriesContainer');
+            if (!container) return;
+            const card = createAuthEntryCardElement(entry);
+            container.appendChild(card);
+            if (expand) {
+                expandAuthEntryCard(card);
+            }
+        }
+
+        function removeAuthEntryCard(button) {
+            const card = button?.closest('.auth-entry-card');
+            const nextCard = card?.nextElementSibling?.classList?.contains('auth-entry-card')
+                ? card.nextElementSibling
+                : card?.previousElementSibling?.classList?.contains('auth-entry-card')
+                    ? card.previousElementSibling
+                    : null;
+            card?.remove();
+            if (nextCard instanceof HTMLElement) {
+                expandAuthEntryCard(nextCard);
+            }
+        }
+
+        function addAuthHeaderRow(trigger, header = null) {
+            const card = trigger?.closest('.auth-entry-card');
+            const headerList = card?.querySelector('.auth-header-list');
+            if (!headerList) return;
+
+            const row = document.createElement('div');
+            row.className = 'auth-header-row';
+            row.innerHTML = `
+                <input type="text" class="form-control auth-header-key" placeholder="例如 Authorization" value="${escapeHtml(header?.key || '')}">
+                <input type="text" class="form-control auth-header-value" placeholder="例如 Bearer sk-xxx" value="${escapeHtml(header?.value || '')}">
+                <button type="button" class="btn-action btn-delete" onclick="removeAuthHeaderRow(this)">删除</button>
+            `;
+            headerList.appendChild(row);
+            syncAuthEntryCardSummary(card);
+        }
+
+        function removeAuthHeaderRow(button) {
+            const row = button?.closest('.auth-header-row');
+            const headerList = row?.parentElement;
+            row?.remove();
+            if (headerList && headerList.children.length === 0) {
+                const trigger = headerList.closest('.auth-entry-card')?.querySelector('.btn-field-secondary');
+                if (trigger) {
+                    addAuthHeaderRow(trigger);
+                }
+            }
+            const card = headerList?.closest('.auth-entry-card');
+            syncAuthEntryCardSummary(card);
+        }
+
+        function fillAuthGroupForm(authGroup) {
+            document.getElementById('authGroupName').value = authGroup?.name || '';
+            setSelectValueOrFallback('authGroupStrategy', authGroup?.strategy, 'least_inflight');
+            document.getElementById('authGroupCooldownSeconds').value = authGroup?.cooldown_seconds_on_429 || '';
+            const importTextarea = document.getElementById('authEntryImportYaml');
+            if (importTextarea) {
+                importTextarea.value = '';
+            }
+            const container = document.getElementById('authEntriesContainer');
+            container.innerHTML = '';
+            authEntryCardSequence = 0;
+            const entries = Array.isArray(authGroup?.entries) ? authGroup.entries : [];
+            if (!entries.length) {
+                addAuthEntryCard();
+                return;
+            }
+            entries.forEach((entry, index) => addAuthEntryCard(entry, { expand: index === 0 }));
+        }
+
+        function collectAuthGroupFormData() {
+            const entries = Array.from(document.querySelectorAll('#authEntriesContainer .auth-entry-card')).map(card => {
+                const headers = {};
+                card.querySelectorAll('.auth-header-row').forEach(row => {
+                    const key = row.querySelector('.auth-header-key')?.value?.trim() || '';
+                    const value = row.querySelector('.auth-header-value')?.value?.trim() || '';
+                    if (key) {
+                        headers[key] = value;
+                    }
+                });
+                return {
+                    id: card.querySelector('.auth-entry-id')?.value?.trim() || '',
+                    enabled: card.querySelector('.auth-entry-enabled')?.value !== 'false',
+                    headers: headers,
+                    max_concurrency: card.querySelector('.auth-entry-max-concurrency')?.value?.trim() || '',
+                    cooldown_seconds_on_429: card.querySelector('.auth-entry-cooldown')?.value?.trim() || '',
+                    request_quota_per_minute: card.querySelector('.auth-entry-req-minute')?.value?.trim() || '',
+                    request_quota_per_day: card.querySelector('.auth-entry-req-day')?.value?.trim() || '',
+                    token_quota_per_minute: card.querySelector('.auth-entry-token-minute')?.value?.trim() || '',
+                    token_quota_per_day: card.querySelector('.auth-entry-token-day')?.value?.trim() || '',
+                };
+            });
+
+            return {
+                name: document.getElementById('authGroupName').value.trim(),
+                strategy: document.getElementById('authGroupStrategy').value,
+                cooldown_seconds_on_429: document.getElementById('authGroupCooldownSeconds').value.trim(),
+                entries: entries,
+            };
+        }
+
+        function getAuthEntryYamlTemplate() {
+            const textarea = document.getElementById('authEntryImportYaml');
+            return textarea?.defaultValue || '';
+        }
+
+        function getSingleAuthEntryYamlTemplate() {
+            return [
+                '  - id: key-a  # 必填：Entry 唯一 ID，组内不能重复',
+                '    enabled: true  # 可选：默认 true；设为 false 时该 Entry 不参与调度',
+                '    headers:  # 必填：至少提供 1 个请求头',
+                '      Authorization: "Bearer sk-xxx"  # 示例：Bearer Token',
+                '      # x-api-key: "your-api-key"  # 可选：如果上游用 x-api-key，可改成这个',
+                '    max_concurrency: 3  # 可选：最大并发；留空表示不限制',
+                '    cooldown_seconds_on_429: 120  # 可选：429 冷却秒数；留空则继承 Group 默认值',
+                '    request_quota_per_minute: 60  # 可选：每分钟请求数上限；留空表示不限制',
+                '    request_quota_per_day: 3000  # 可选：每天请求数上限；留空表示不限制',
+                '    token_quota_per_minute: 120000  # 可选：每分钟 Token 上限；留空表示不限制',
+                '    token_quota_per_day: 5000000  # 可选：每天 Token 上限；留空表示不限制',
+            ].join('\n');
+        }
+
+        function needsYamlQuoting(text) {
+            return (
+                text === '' ||
+                /^\s|\s$/.test(text) ||
+                /^[\-?:]/.test(text) ||
+                /[:#[\]{}&,*!|>'"%@`]/.test(text) ||
+                /^(true|false|null|yes|no|on|off)$/i.test(text)
+            );
+        }
+
+        function formatYamlString(value, options = {}) {
+            const { forceQuote = false } = options;
+            const text = String(value ?? '');
+            if (!forceQuote && !needsYamlQuoting(text)) {
+                return text;
+            }
+            return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+        }
+
+        function buildAuthEntriesYamlText(entries) {
+            const lines = ['entries:'];
+            entries.forEach(entry => {
+                lines.push(`  - id: ${formatYamlString(entry.id || '', { forceQuote: !entry.id })}`);
+                lines.push(`    enabled: ${entry.enabled === false ? 'false' : 'true'}`);
+
+                const headers = entry.headers && typeof entry.headers === 'object' ? Object.entries(entry.headers) : [];
+                if (headers.length) {
+                    lines.push('    headers:');
+                    headers.forEach(([key, value]) => {
+                        lines.push(`      ${formatYamlString(key)}: ${formatYamlString(value, { forceQuote: true })}`);
+                    });
+                } else {
+                    lines.push('    headers: {}');
+                }
+
+                const optionalFields = [
+                    ['max_concurrency', entry.max_concurrency],
+                    ['cooldown_seconds_on_429', entry.cooldown_seconds_on_429],
+                    ['request_quota_per_minute', entry.request_quota_per_minute],
+                    ['request_quota_per_day', entry.request_quota_per_day],
+                    ['token_quota_per_minute', entry.token_quota_per_minute],
+                    ['token_quota_per_day', entry.token_quota_per_day],
+                ];
+
+                optionalFields.forEach(([fieldName, fieldValue]) => {
+                    const text = String(fieldValue ?? '').trim();
+                    if (text !== '') {
+                        lines.push(`    ${fieldName}: ${text}`);
+                    }
+                });
+            });
+            return lines.join('\n');
+        }
+
+        function getCurrentAuthEntriesForYamlEditor() {
+            const cards = Array.from(document.querySelectorAll('#authEntriesContainer .auth-entry-card'));
+            const entries = cards
+                .filter(card => !isAuthEntryCardBlank(card))
+                .map(card => {
+                    const headers = {};
+                    card.querySelectorAll('.auth-header-row').forEach(row => {
+                        const key = row.querySelector('.auth-header-key')?.value?.trim() || '';
+                        if (!key) return;
+                        const value = row.querySelector('.auth-header-value')?.value ?? '';
+                        headers[key] = value.trim();
+                    });
+
+                    return {
+                        id: card.querySelector('.auth-entry-id')?.value?.trim() || '',
+                        enabled: card.querySelector('.auth-entry-enabled')?.value !== 'false',
+                        headers,
+                        max_concurrency: card.querySelector('.auth-entry-max-concurrency')?.value?.trim() || '',
+                        cooldown_seconds_on_429: card.querySelector('.auth-entry-cooldown')?.value?.trim() || '',
+                        request_quota_per_minute: card.querySelector('.auth-entry-req-minute')?.value?.trim() || '',
+                        request_quota_per_day: card.querySelector('.auth-entry-req-day')?.value?.trim() || '',
+                        token_quota_per_minute: card.querySelector('.auth-entry-token-minute')?.value?.trim() || '',
+                        token_quota_per_day: card.querySelector('.auth-entry-token-day')?.value?.trim() || '',
+                    };
+                });
+
+            return entries;
+        }
+
+        function replaceAuthEntryCards(entries) {
+            const container = document.getElementById('authEntriesContainer');
+            if (!container) {
+                throw new Error('Auth Entries 容器不存在');
+            }
+
+            container.innerHTML = '';
+            authEntryCardSequence = 0;
+            entries.forEach((entry, index) => addAuthEntryCard(entry, { expand: index === 0 }));
+        }
+
+        function insertTextAtTextareaCursor(textarea, insertText) {
+            if (!(textarea instanceof HTMLTextAreaElement)) return;
+
+            const start = textarea.selectionStart ?? textarea.value.length;
+            const end = textarea.selectionEnd ?? textarea.value.length;
+            const currentValue = textarea.value;
+            textarea.value = `${currentValue.slice(0, start)}${insertText}${currentValue.slice(end)}`;
+            const nextCursor = start + insertText.length;
+            textarea.focus();
+            textarea.setSelectionRange(nextCursor, nextCursor);
+        }
+
+        function insertAuthEntryYamlTemplate() {
+            const textarea = document.getElementById('authEntryImportYaml');
+            if (!(textarea instanceof HTMLTextAreaElement)) return;
+
+            const currentValue = textarea.value.trim();
+            if (!currentValue) {
+                textarea.value = `${getAuthEntryYamlTemplate()}\n`;
+                textarea.focus();
+                textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+                return;
+            }
+
+            const entryTemplate = getSingleAuthEntryYamlTemplate();
+            const prefix = textarea.selectionStart > 0 && !textarea.value.endsWith('\n')
+                ? '\n\n'
+                : '\n';
+            insertTextAtTextareaCursor(textarea, `${prefix}${entryTemplate}`);
+        }
+
+        function isAuthEntryCardBlank(card) {
+            if (!card) {
+                return false;
+            }
+            const scalarSelectors = [
+                '.auth-entry-id',
+                '.auth-entry-max-concurrency',
+                '.auth-entry-cooldown',
+                '.auth-entry-req-minute',
+                '.auth-entry-req-day',
+                '.auth-entry-token-minute',
+                '.auth-entry-token-day',
+            ];
+            const hasScalarValue = scalarSelectors.some(selector => {
+                const value = card.querySelector(selector)?.value?.trim() || '';
+                return value !== '';
+            });
+            if (hasScalarValue) {
+                return false;
+            }
+
+            const headerRows = Array.from(card.querySelectorAll('.auth-header-row'));
+            const hasHeaderValue = headerRows.some(row => {
+                const key = row.querySelector('.auth-header-key')?.value?.trim() || '';
+                const value = row.querySelector('.auth-header-value')?.value?.trim() || '';
+                return key !== '' || value !== '';
+            });
+            return !hasHeaderValue;
+        }
+
+        function openAuthEntryImportModal() {
+            const textarea = document.getElementById('authEntryImportYaml');
+            if (textarea) {
+                const entries = getCurrentAuthEntriesForYamlEditor();
+                textarea.value = entries.length ? buildAuthEntriesYamlText(entries) : getAuthEntryYamlTemplate();
+            }
+            resizeAuthEntryYamlEditor(true);
+            authEntryImportModalInstance?.show();
+        }
+
+        function blurActiveElement() {
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+        }
+
+        function focusElementSafely(element) {
+            if (!(element instanceof HTMLElement)) return;
+            window.requestAnimationFrame(() => {
+                try {
+                    element.focus({ preventScroll: true });
+                } catch (error) {
+                    element.focus();
+                }
+            });
+        }
+
+        function resizeAuthEntryYamlEditor(force = false) {
+            const textarea = document.getElementById('authEntryImportYaml');
+            const modal = document.getElementById('authEntryImportModal');
+            if (!(textarea instanceof HTMLTextAreaElement)) {
+                return;
+            }
+            if (!force && !modal?.classList.contains('show')) {
+                return;
+            }
+
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 900;
+            const targetHeight = Math.max(380, Math.min(Math.floor(viewportHeight * 0.54), 560));
+            textarea.style.height = `${targetHeight}px`;
+        }
+
+        function deactivateModalFocusTrap(modalInstance) {
+            modalInstance?._focustrap?.deactivate?.();
+        }
+
+        function activateModalFocusTrap(modalInstance) {
+            modalInstance?._focustrap?.activate?.();
+        }
+
+        async function saveAuthEntriesFromYaml() {
+            const textarea = document.getElementById('authEntryImportYaml');
+            const yamlText = textarea?.value || '';
+            if (!yamlText.trim()) {
+                showMessage('请输入要保存的 YAML 内容', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth-groups/import-entries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ yaml: yamlText }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '保存 Auth Entries YAML 失败');
+                }
+
+                const normalizedEntries = Array.isArray(result.entries) ? result.entries : [];
+                replaceAuthEntryCards(normalizedEntries);
+
+                authEntryImportModalInstance?.hide();
+                showMessage(`已更新 ${normalizedEntries.length} 个 Auth Entry`, 'success');
+            } catch (error) {
+                console.error('保存 auth entries yaml 失败:', error);
+                showActionError('保存 Auth Entries YAML', error, { fallback: '保存 Auth Entries YAML 失败' });
+            }
+        }
+
+        async function saveAuthGroup() {
+            const payload = collectAuthGroupFormData();
+            if (!payload.name) {
+                showMessage('请输入 Auth Group 名称', 'error');
+                return;
+            }
+            if (!Array.isArray(payload.entries) || payload.entries.length === 0) {
+                showMessage('请至少配置一个 Auth Entry', 'error');
+                return;
+            }
+
+            const isEdit = !!editingAuthGroupName;
+            const url = isEdit ? `/api/auth-groups/${encodeURIComponent(editingAuthGroupName)}` : '/api/auth-groups';
+            const method = isEdit ? 'PUT' : 'POST';
+
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '保存 Auth Group 失败');
+                }
+                authGroupModalInstance?.hide();
+                showMessage('Auth Group 保存成功，配置已重载', 'success');
+                await loadPageData();
+            } catch (error) {
+                console.error('保存 auth group 失败:', error);
+                showActionError('保存 Auth Group', error, { fallback: '保存 Auth Group 失败' });
+            }
+        }
+
+        async function deleteAuthGroup(name) {
+            if (!window.confirm(`确认删除 Auth Group “${name}”？`)) {
+                return;
+            }
+            try {
+                const response = await fetch(`/api/auth-groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '删除 Auth Group 失败');
+                }
+                showMessage('Auth Group 删除成功，配置已重载', 'success');
+                await loadPageData();
+            } catch (error) {
+                console.error('删除 auth group 失败:', error);
+                showActionError('删除 Auth Group', error, { fallback: '删除 Auth Group 失败' });
+            }
+        }
+
+        function renderAuthGroupRuntime(runtime) {
+            const summaryElement = document.getElementById('authGroupRuntimeSummary');
+            const container = document.getElementById('authGroupRuntimeContainer');
+            const summary = runtime?.summary || {};
+            activeAuthGroupRuntime = runtime || null;
+            summaryElement.innerHTML = `
+                <span class="toolbar-pill">Entries <strong>${escapeHtml(summary.entry_count ?? 0)}</strong></span>
+                <span class="toolbar-pill">Available <strong>${escapeHtml(summary.available_count ?? 0)}</strong></span>
+                <span class="toolbar-pill">Cooldown <strong>${escapeHtml(summary.cooldown_count ?? 0)}</strong></span>
+                <span class="toolbar-pill">Disabled <strong>${escapeHtml(summary.disabled_count ?? 0)}</strong></span>
+            `;
+
+            const entries = Array.isArray(runtime?.entries) ? runtime.entries : [];
+            if (!entries.length) {
+                container.innerHTML = '<div class="empty-state">当前没有运行态数据</div>';
+                return;
+            }
+
+            let html = `
+                <table class="providers-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>状态</th>
+                            <th>并发 / 冷却</th>
+                            <th>请求数</th>
+                            <th>Token</th>
+                            <th>最后错误</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            entries.forEach(entry => {
+                const lastError = entry.last_error_message || entry.last_error_type || entry.last_status_code || '-';
+                const hasErrorDetail = !!(
+                    entry.last_error_message
+                    || entry.last_error_type
+                    || entry.last_status_code
+                    || entry.disabled_reason
+                    || entry.cooldown_until
+                );
+                const canToggleRuntimeDisabled = entry.enabled !== false;
+                html += `
+                    <tr>
+                        <td class="provider-name-cell"><span class="provider-name-text">${escapeHtml(entry.id)}</span></td>
+                        <td>${escapeHtml(entry.status || '-')}</td>
+                        <td>
+                            <div>inflight: ${escapeHtml(entry.inflight ?? 0)}</div>
+                            <div>cooldown: ${escapeHtml(entry.cooldown_until || '-')}</div>
+                        </td>
+                        <td>
+                            <div>minute: ${escapeHtml(entry.minute_request_count ?? 0)}</div>
+                            <div>day: ${escapeHtml(entry.day_request_count ?? 0)}</div>
+                        </td>
+                        <td>
+                            <div>minute: ${escapeHtml(entry.minute_total_tokens ?? 0)}</div>
+                            <div>day: ${escapeHtml(entry.day_total_tokens ?? 0)}</div>
+                        </td>
+                        <td title="${escapeHtml(lastError)}" class="runtime-last-error-cell">${escapeHtml(lastError)}</td>
+                        <td class="runtime-actions-cell">
+                            <div class="action-buttons runtime-action-buttons">
+                                ${canToggleRuntimeDisabled ? (
+                                    entry.disabled
+                                        ? `<button class="btn-action btn-edit" onclick="enableAuthGroupEntry('${encodeURIComponent(runtime.name)}', '${encodeURIComponent(entry.id)}')">启用</button>`
+                                        : `<button class="btn-action btn-delete" onclick="disableAuthGroupEntry('${encodeURIComponent(runtime.name)}', '${encodeURIComponent(entry.id)}')">禁用</button>`
+                                ) : ''}
+                                <button class="btn-action btn-edit" onclick="resetAuthGroupEntryRuntime('${encodeURIComponent(runtime.name)}', '${encodeURIComponent(entry.id)}')">重置</button>
+                                ${hasErrorDetail ? `<button class="btn-action btn-edit" onclick="openAuthEntryErrorModal('${encodeURIComponent(runtime.name)}', '${encodeURIComponent(entry.id)}')">详情</button>` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        async function openAuthGroupRuntimeModal(name) {
+            try {
+                switchProviderTab('auth_groups');
+                activeRuntimeAuthGroupName = name;
+                activeAuthGroupRuntime = null;
+                document.getElementById('authGroupRuntimeTitle').textContent = `${name} 运行态`;
+                document.getElementById('authGroupRuntimeContainer').innerHTML = '<div class="loading">正在加载运行态...</div>';
+                const response = await fetch(`/api/auth-groups/${encodeURIComponent(name)}/runtime`);
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '加载运行态失败');
+                }
+                renderAuthGroupRuntime(result);
+                authGroupRuntimeModalInstance.show();
+            } catch (error) {
+                console.error('加载 auth group 运行态失败:', error);
+                showActionError('加载 Auth Group 运行态', error, { fallback: '加载 Auth Group 运行态失败' });
+            }
+        }
+
+        function findRuntimeEntry(groupName, entryId) {
+            if (!activeAuthGroupRuntime || activeAuthGroupRuntime.name !== groupName) {
+                return null;
+            }
+            const entries = Array.isArray(activeAuthGroupRuntime.entries) ? activeAuthGroupRuntime.entries : [];
+            return entries.find(item => item.id === entryId) || null;
+        }
+
+        function renderRuntimeDetailRows(rows) {
+            return rows.map(row => `
+                <div class="runtime-error-detail-item">
+                    <div class="runtime-error-detail-label">${escapeHtml(row.label)}</div>
+                    <div class="runtime-error-detail-value">${escapeHtml(row.value ?? '-')}</div>
+                </div>
+            `).join('');
+        }
+
+        function openAuthEntryErrorModal(groupNameEncoded, entryIdEncoded) {
+            const groupName = decodeProviderName(groupNameEncoded);
+            const entryId = decodeProviderName(entryIdEncoded);
+            const entry = findRuntimeEntry(groupName, entryId);
+            if (!entry) {
+                showMessage('未找到该 Auth Entry 的运行态详情', 'error');
+                return;
+            }
+
+            document.getElementById('authEntryErrorTitle').textContent = `${entryId} 最近错误详情`;
+            document.getElementById('authEntryErrorSubtitle').textContent = `${groupName} / ${entry.status || '-'}`;
+            document.getElementById('authEntryErrorContent').innerHTML = renderRuntimeDetailRows([
+                { label: '状态', value: entry.status || '-' },
+                { label: 'HTTP 状态码', value: entry.last_status_code ?? '-' },
+                { label: '错误类型', value: entry.last_error_type || '-' },
+                { label: '错误消息', value: entry.last_error_message || '-' },
+                { label: '禁用原因', value: entry.disabled_reason || '-' },
+                { label: '冷却截止', value: entry.cooldown_until || '-' },
+                { label: '最后更新时间', value: entry.updated_at || '-' },
+            ]);
+            authEntryErrorModalInstance?.show();
+        }
+
+        async function runAuthGroupEntryRuntimeAction(groupName, entryId, path, successMessage, actionLabel) {
+            try {
+                const response = await fetch(
+                    `/api/auth-groups/${encodeURIComponent(groupName)}/entries/${encodeURIComponent(entryId)}/${path}`,
+                    { method: 'POST' }
+                );
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || `${actionLabel} Auth Entry 失败`);
+                }
+                showMessage(successMessage, 'success');
+                await loadPageData();
+                await openAuthGroupRuntimeModal(groupName);
+            } catch (error) {
+                console.error(`${actionLabel} auth entry 失败:`, error);
+                showActionError(`${actionLabel} Auth Entry`, error, { fallback: `${actionLabel} Auth Entry 失败` });
+            }
+        }
+
+        async function disableAuthGroupEntry(groupNameEncoded, entryIdEncoded) {
+            const groupName = decodeProviderName(groupNameEncoded);
+            const entryId = decodeProviderName(entryIdEncoded);
+            await runAuthGroupEntryRuntimeAction(groupName, entryId, 'disable', 'Auth Entry 已禁用', '禁用');
+        }
+
+        async function enableAuthGroupEntry(groupNameEncoded, entryIdEncoded) {
+            const groupName = decodeProviderName(groupNameEncoded);
+            const entryId = decodeProviderName(entryIdEncoded);
+            await runAuthGroupEntryRuntimeAction(groupName, entryId, 'enable', 'Auth Entry 已启用', '启用');
+        }
+
+        async function resetAuthGroupEntryRuntime(groupNameEncoded, entryIdEncoded) {
+            const groupName = decodeProviderName(groupNameEncoded);
+            const entryId = decodeProviderName(entryIdEncoded);
+            await runAuthGroupEntryRuntimeAction(groupName, entryId, 'reset', 'Auth Entry 运行态已重置', '重置');
+        }
+
         async function saveProvider() {
             const payload = collectFormData();
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
             if (!payload.name) {
                 showMessage('请输入 provider 名称', 'error');
                 return;
             }
             if (!payload.api) {
                 showMessage('请输入 API 地址', 'error');
+                return;
+            }
+            if (authMode === 'auth_group' && !payload.auth_group) {
+                showMessage('请选择 Auth Group', 'error');
+                return;
+            }
+            if (payload.auth_group && payload.api_key) {
+                showMessage('Auth Group 与 Legacy API Key 只能二选一', 'error');
                 return;
             }
 
@@ -1097,7 +2388,7 @@
                 editingProviderName = result.name;
                 providerModalInstance?.hide();
                 showMessage('Provider 保存成功，配置已重载', 'success');
-                await loadProviders();
+                await loadPageData();
             } catch (error) {
                 console.error('保存 provider 失败:', error);
                 showActionError('保存 Provider', error, { fallback: '保存 Provider 失败' });
@@ -1157,7 +2448,7 @@
                 deletingProviderName = null;
                 hideProviderDeletePopover();
                 showMessage('Provider 删除成功，配置已重载', 'success');
-                await loadProviders();
+                await loadPageData();
             } catch (error) {
                 console.error('删除 provider 失败:', error);
                 deletingProviderName = null;
@@ -1206,10 +2497,13 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             initThemeToggle();
+            setupCustomSelect('providerAuthMode');
+            setupCustomSelect('providerAuthGroup');
             setupCustomSelect('providerTransport');
             setupCustomSelect('providerSourceFormat');
             setupCustomSelect('providerTargetFormat');
             setupCustomSelect('providerVerifySsl');
+            setupCustomSelect('authGroupStrategy');
             const modalElement = document.getElementById('providerModal');
             providerModalInstance = new bootstrap.Modal(modalElement);
             modalElement.addEventListener('hidden.bs.modal', function() {
@@ -1222,17 +2516,79 @@
                 editingProviderName = null;
                 fillForm(null);
             });
+            const authGroupModalElement = document.getElementById('authGroupModal');
+            authGroupModalInstance = new bootstrap.Modal(authGroupModalElement);
+            authGroupModalElement.addEventListener('hidden.bs.modal', function() {
+                editingAuthGroupName = null;
+                fillAuthGroupForm(null);
+                authEntryImportModalInstance?.hide();
+            });
+            const authEntryImportModalElement = document.getElementById('authEntryImportModal');
+            authEntryImportModalInstance = new bootstrap.Modal(authEntryImportModalElement);
+            authEntryImportModalElement.addEventListener('shown.bs.modal', function() {
+                if (authGroupModalElement.classList.contains('show')) {
+                    deactivateModalFocusTrap(authGroupModalInstance);
+                    document.body.classList.add('modal-open');
+                }
+                resizeAuthEntryYamlEditor();
+                blurActiveElement();
+                focusElementSafely(document.getElementById('authEntryImportYaml') || authEntryImportModalElement);
+            });
+            authEntryImportModalElement.addEventListener('hidden.bs.modal', function() {
+                const textarea = document.getElementById('authEntryImportYaml');
+                if (textarea) {
+                    textarea.value = textarea.defaultValue || '';
+                    textarea.style.removeProperty('height');
+                }
+                if (authGroupModalElement.classList.contains('show')) {
+                    activateModalFocusTrap(authGroupModalInstance);
+                    document.body.classList.add('modal-open');
+                    focusElementSafely(authGroupModalElement);
+                }
+            });
+            const authGroupRuntimeModalElement = document.getElementById('authGroupRuntimeModal');
+            authGroupRuntimeModalInstance = new bootstrap.Modal(authGroupRuntimeModalElement);
+            authGroupRuntimeModalElement.addEventListener('hidden.bs.modal', function() {
+                activeRuntimeAuthGroupName = null;
+                activeAuthGroupRuntime = null;
+                authEntryErrorModalInstance?.hide();
+                document.getElementById('authGroupRuntimeSummary').innerHTML = '';
+                document.getElementById('authGroupRuntimeContainer').innerHTML = '';
+            });
+            const authEntryErrorModalElement = document.getElementById('authEntryErrorModal');
+            authEntryErrorModalInstance = new bootstrap.Modal(authEntryErrorModalElement);
+            authEntryErrorModalElement.addEventListener('shown.bs.modal', function() {
+                if (authGroupRuntimeModalElement.classList.contains('show')) {
+                    deactivateModalFocusTrap(authGroupRuntimeModalInstance);
+                    document.body.classList.add('modal-open');
+                }
+                blurActiveElement();
+                focusElementSafely(authEntryErrorModalElement.querySelector('.btn-close') || authEntryErrorModalElement);
+            });
+            authEntryErrorModalElement.addEventListener('hidden.bs.modal', function() {
+                document.getElementById('authEntryErrorContent').innerHTML = '';
+                if (authGroupRuntimeModalElement.classList.contains('show')) {
+                    activateModalFocusTrap(authGroupRuntimeModalInstance);
+                    document.body.classList.add('modal-open');
+                    focusElementSafely(authGroupRuntimeModalElement);
+                }
+            });
             const fetchModelPickerModalElement = document.getElementById('fetchModelPickerModal');
             fetchModelPickerModalInstance = new bootstrap.Modal(fetchModelPickerModalElement);
             fetchModelPickerModalElement.addEventListener('shown.bs.modal', function() {
                 if (modalElement.classList.contains('show')) {
+                    deactivateModalFocusTrap(providerModalInstance);
                     document.body.classList.add('modal-open');
                 }
+                blurActiveElement();
+                focusElementSafely(document.getElementById('fetchModelSearchInput') || fetchModelPickerModalElement);
             });
             fetchModelPickerModalElement.addEventListener('hidden.bs.modal', function() {
                 resetFetchModelPickerState();
                 if (modalElement.classList.contains('show')) {
+                    activateModalFocusTrap(providerModalInstance);
                     document.body.classList.add('modal-open');
+                    focusElementSafely(modalElement);
                 }
             });
             const modelDetailModalElement = document.getElementById('modelDetailModal');
@@ -1244,13 +2600,26 @@
             });
             document.getElementById('providerName').addEventListener('input', updateFetchModelsButtonState);
             document.getElementById('providerApi').addEventListener('input', updateFetchModelsButtonState);
+            document.getElementById('providerAuthMode').addEventListener('change', updateFetchModelsButtonState);
             document.getElementById('providerTransport').addEventListener('change', updateFetchModelsButtonState);
             document.getElementById('providerModelList').addEventListener('input', updateModelListCount);
             document.getElementById('fetchModelSearchInput').addEventListener('input', renderFetchModelPicker);
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
+            window.addEventListener('resize', resizeAuthEntryYamlEditor);
+            document.getElementById('authEntriesContainer').addEventListener('input', function(event) {
+                const card = event.target instanceof HTMLElement ? event.target.closest('.auth-entry-card') : null;
+                syncAuthEntryCardSummary(card);
+            });
+            document.getElementById('authEntriesContainer').addEventListener('change', function(event) {
+                const card = event.target instanceof HTMLElement ? event.target.closest('.auth-entry-card') : null;
+                syncAuthEntryCardSummary(card);
+            });
+            fillAuthGroupForm(null);
+            syncProviderTabUi();
             updateModelListCount();
+            updateProviderAuthModeFields();
             updateFetchModelsButtonState();
-            loadProviders();
+            loadPageData();
         });
     </script>
 {% endblock %}
