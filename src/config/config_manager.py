@@ -29,10 +29,10 @@ class ConfigManager:
         return value
 
     def get_server_port(self) -> int:
-        return int(self.get('server.port', 22026))
+        return int(self.get('server.port', 8080))
 
     def get_server_host(self) -> str:
-        return str(self.get('server.host', '0.0.0.0'))
+        return str(self.get('server.host', '127.0.0.1'))
 
     def get_admin_config(self) -> Optional[Dict[str, str]]:
         admin = self.get('admin')
