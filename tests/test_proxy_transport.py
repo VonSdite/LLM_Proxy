@@ -43,6 +43,7 @@ class ProviderTransportTests(unittest.TestCase):
             {
                 "name": "codex",
                 "api": "wss://example.com/v1/chat/completions",
+                "api_key": "demo-key",
                 "model_list": ["gpt-4.1"],
             }
         )
@@ -54,6 +55,7 @@ class ProviderTransportTests(unittest.TestCase):
             {
                 "name": "codex",
                 "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
                 "model_list": ["gpt-4.1"],
             }
         )
@@ -67,6 +69,7 @@ class ProviderTransportTests(unittest.TestCase):
             {
                 "name": "codex",
                 "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
                 "transport": "websocket",
                 "model_list": ["gpt-4.1"],
             }
@@ -80,6 +83,7 @@ class ProviderTransportTests(unittest.TestCase):
                 {
                     "name": "bad-provider",
                     "api": "wss://example.com/v1/chat/completions",
+                    "api_key": "demo-key",
                     "transport": "http",
                     "model_list": ["demo"],
                 }
@@ -90,6 +94,7 @@ class ProviderTransportTests(unittest.TestCase):
             {
                 "name": "demo",
                 "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
                 "model_list": ["gpt-4.1"],
             }
         )
@@ -106,6 +111,7 @@ class ProviderTransportTests(unittest.TestCase):
                 {
                     "name": "demo",
                     "api": "https://example.com/v1/chat/completions",
+                    "api_key": "demo-key",
                     "format": "openai_chat",
                     "model_list": ["gpt-4.1"],
                 }
@@ -116,6 +122,7 @@ class ProviderTransportTests(unittest.TestCase):
                 {
                     "name": "demo",
                     "api": "https://example.com/v1/chat/completions",
+                    "api_key": "demo-key",
                     "stream_format": "sse_json",
                     "model_list": ["gpt-4.1"],
                 }
@@ -256,6 +263,12 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="providerTransport"', html)
         self.assertIn('id="providerSourceFormat"', html)
         self.assertIn('id="providerTargetFormat"', html)
+        self.assertIn('id="providerAuthMode"', html)
+        self.assertIn('id="providerAuthGroup"', html)
+        self.assertIn('id="authGroupsContainer"', html)
+        self.assertIn('id="authGroupModal"', html)
+        self.assertIn('id="authEntryImportModal"', html)
+        self.assertIn('id="authGroupRuntimeModal"', html)
         self.assertNotIn('id="providerFormat"', html)
         self.assertNotIn('id="providerStreamFormat"', html)
 
@@ -267,10 +280,31 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('data-provider-help-topic="transport"', html)
         self.assertIn('data-provider-help-topic="source_format"', html)
         self.assertIn('data-provider-help-topic="target_format"', html)
+        self.assertIn('data-provider-help-topic="auth_group_field"', html)
+        self.assertIn('data-provider-help-topic="auth_groups_overview"', html)
+        self.assertIn('data-provider-help-topic="auth_group_strategy"', html)
+        self.assertIn('data-provider-help-topic="auth_entries_editor"', html)
         self.assertIn('data-provider-help-topic="fetch_models"', html)
         self.assertIn('id="providerHelpPopover"', html)
         self.assertIn("function toggleProviderHelp(", html)
         self.assertIn("function syncProviderHelpPopover()", html)
+        self.assertIn("function renderAuthGroups()", html)
+        self.assertIn("function saveAuthGroup()", html)
+        self.assertIn("function saveAuthEntriesFromYaml()", html)
+        self.assertIn("function disableAuthGroupEntry(", html)
+        self.assertIn("function enableAuthGroupEntry(", html)
+        self.assertIn("function resetAuthGroupEntryRuntime(", html)
+        self.assertIn("function openAuthEntryErrorModal(", html)
+        self.assertIn("function updateProviderAuthModeFields()", html)
+        self.assertIn("/api/auth-groups", html)
+        self.assertIn("/api/auth-groups/import-entries", html)
+        self.assertIn("'disable'", html)
+        self.assertIn("'enable'", html)
+        self.assertIn("'reset'", html)
+        self.assertIn("setupCustomSelect('providerAuthMode');", html)
+        self.assertIn("setupCustomSelect('providerAuthGroup');", html)
+        self.assertIn("renderCustomSelectOptions('providerAuthGroup');", html)
+        self.assertIn("setupCustomSelect('authGroupStrategy');", html)
         self.assertIn("setupCustomSelect('providerTransport');", html)
         self.assertIn("setupCustomSelect('providerSourceFormat');", html)
         self.assertIn("setupCustomSelect('providerTargetFormat');", html)
@@ -285,6 +319,33 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('toggleFilteredFetchedModels(this.checked)', html)
         self.assertIn('class="provider-model-cell"', html)
         self.assertIn('class="provider-meta-line"', html)
+        self.assertIn('class="providers-table-shell auth-groups-table-shell"', html)
+        self.assertIn('<th>Entry 数</th>', html)
+        self.assertIn('placeholder="例如 openai-shared，供 Provider 绑定引用"', html)
+        self.assertIn('placeholder="例如 60，表示该组默认遇到 429 冷却 60 秒"', html)
+        self.assertIn('YAML 编辑', html)
+        self.assertIn('id="authEntryImportYaml"', html)
+        self.assertIn('这里编辑的是当前 Auth Entries 的完整 YAML', html)
+        self.assertIn('插入 Entry 模板', html)
+        self.assertIn('必填：Entry 唯一 ID', html)
+        self.assertIn('可选：每分钟请求数上限', html)
+        self.assertIn('新增 Entry', html)
+        self.assertNotIn("新 Entry", html)
+        self.assertIn('<span>Header 数</span>', html)
+        self.assertIn('<span>限制概览</span>', html)
+        self.assertIn('class="auth-entry-table-toggle-column"', html)
+        self.assertIn("function toggleAuthEntryCard(", html)
+        self.assertIn('class="btn-action btn-edit auth-entry-toggle-btn"', html)
+        self.assertIn("function handleAuthEntrySummaryKeydown(", html)
+        self.assertIn('onclick="toggleAuthEntryCard(this)"', html)
+        self.assertNotIn('id="authEntryImportTemplate"', html)
+        self.assertNotIn('复制模板', html)
+        self.assertNotIn('填入模板', html)
+        self.assertIn("function buildAuthEntriesYamlText(", html)
+        self.assertIn("function insertAuthEntryYamlTemplate(", html)
+        self.assertIn("function getSingleAuthEntryYamlTemplate(", html)
+        self.assertIn("function saveAuthEntriesFromYaml(", html)
+        self.assertIn('id="authEntryErrorModal"', html)
         self.assertIn("showActionError('保存 Provider'", html)
         self.assertIn("showActionError('删除 Provider'", html)
         self.assertIn("showActionError('拉取模型'", html)
@@ -324,6 +385,8 @@ const sandbox = {{
       providerModelCount: {{ textContent: "" }},
       providerName: {{ value: " demo " }},
       providerApi: {{ value: " https://example.com/v1/chat/completions " }},
+      providerAuthMode: {{ value: "auth_group" }},
+      providerAuthGroup: {{ value: " shared-pool " }},
       providerTransport: {{ value: "http" }},
       providerSourceFormat: {{ value: "openai_chat" }},
       providerTargetFormat: {{ value: "openai_chat" }},
@@ -348,8 +411,12 @@ const collectedAfter = sandbox.collectFormData();
 
 process.stdout.write(JSON.stringify({{
   beforeModelList: collectedBefore.model_list,
+  beforeAuthGroup: collectedBefore.auth_group,
+  beforeApiKey: collectedBefore.api_key,
   afterTextarea: sandbox.document.elements.providerModelList.value,
   afterModelList: collectedAfter.model_list,
+  afterAuthGroup: collectedAfter.auth_group,
+  afterApiKey: collectedAfter.api_key,
   countText: sandbox.document.elements.providerModelCount.textContent,
   message: sandbox.messages[0]?.message || "",
 }}));
@@ -363,8 +430,12 @@ process.stdout.write(JSON.stringify({{
         payload = json.loads(completed.stdout.decode("utf-8"))
 
         self.assertEqual("beta\nAlpha\nalpha\nBeta", payload["beforeModelList"])
+        self.assertEqual("shared-pool", payload["beforeAuthGroup"])
+        self.assertEqual("", payload["beforeApiKey"])
         self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterTextarea"])
         self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterModelList"])
+        self.assertEqual("shared-pool", payload["afterAuthGroup"])
+        self.assertEqual("", payload["afterApiKey"])
         self.assertIn("4", payload["countText"])
         self.assertTrue(payload["message"])
 

@@ -6,6 +6,7 @@ from flask import Response, jsonify, request
 
 from ..application.app_context import AppContext
 from ..services import (
+    AuthGroupService,
     AuthenticationService,
     ModelDiscoveryService,
     ProviderService,
@@ -21,6 +22,7 @@ class ProviderController:
         self,
         ctx: AppContext,
         provider_service: ProviderService,
+        auth_group_service: AuthGroupService,
         model_discovery_service: ModelDiscoveryService,
         settings_service: SettingsService,
         auth_service: AuthenticationService,
@@ -28,6 +30,7 @@ class ProviderController:
         self._app = ctx.flask_app
         self._logger = ctx.logger
         self._provider_service = provider_service
+        self._auth_group_service = auth_group_service
         self._model_discovery_service = model_discovery_service
         self._settings_service = settings_service
         self._auth_service = auth_service
@@ -43,6 +46,31 @@ class ProviderController:
         self._app.route('/api/providers/<string:name>', methods=['GET'])(auth(self.get_provider))
         self._app.route('/api/providers/<string:name>', methods=['PUT'])(auth(self.update_provider))
         self._app.route('/api/providers/<string:name>', methods=['DELETE'])(auth(self.delete_provider))
+        self._app.route('/api/auth-groups', methods=['GET'])(auth(self.get_auth_groups))
+        self._app.route('/api/auth-groups', methods=['POST'])(auth(self.create_auth_group))
+        self._app.route('/api/auth-groups/import-entries', methods=['POST'])(auth(self.import_auth_group_entries))
+        self._app.route('/api/auth-groups/<string:name>', methods=['GET'])(auth(self.get_auth_group))
+        self._app.route('/api/auth-groups/<string:name>', methods=['PUT'])(auth(self.update_auth_group))
+        self._app.route('/api/auth-groups/<string:name>', methods=['DELETE'])(auth(self.delete_auth_group))
+        self._app.route('/api/auth-groups/<string:name>/runtime', methods=['GET'])(auth(self.get_auth_group_runtime))
+        self._app.route('/api/auth-groups/<string:name>/entries/<string:entry_id>/clear-cooldown', methods=['POST'])(
+            auth(self.clear_auth_group_entry_cooldown)
+        )
+        self._app.route('/api/auth-groups/<string:name>/entries/<string:entry_id>/disable', methods=['POST'])(
+            auth(self.disable_auth_group_entry)
+        )
+        self._app.route('/api/auth-groups/<string:name>/entries/<string:entry_id>/enable', methods=['POST'])(
+            auth(self.enable_auth_group_entry)
+        )
+        self._app.route('/api/auth-groups/<string:name>/entries/<string:entry_id>/reset-minute-usage', methods=['POST'])(
+            auth(self.reset_auth_group_entry_minute_usage)
+        )
+        self._app.route('/api/auth-groups/<string:name>/entries/<string:entry_id>/reset', methods=['POST'])(
+            auth(self.reset_auth_group_entry_runtime)
+        )
+        self._app.route('/api/auth-groups/<string:name>/entries/<string:entry_id>/restore', methods=['POST'])(
+            auth(self.restore_auth_group_entry)
+        )
 
     def get_providers(self) -> Response:
         try:
@@ -98,6 +126,160 @@ class ProviderController:
             return jsonify({'error': message}), status_code
         except Exception as exc:
             self._logger.error('Error deleting provider: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def get_auth_groups(self) -> Response:
+        try:
+            return jsonify(self._auth_group_service.list_auth_groups())
+        except Exception as exc:
+            self._logger.error('Error getting auth groups: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def get_auth_group(self, name: str) -> Response:
+        try:
+            auth_group = self._auth_group_service.get_auth_group(name)
+            if auth_group is None:
+                return jsonify({'error': 'Auth group not found'}), 404
+            return jsonify(auth_group)
+        except Exception as exc:
+            self._logger.error('Error getting auth group: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def create_auth_group(self) -> Response:
+        try:
+            payload = request.get_json(silent=True) or {}
+            auth_group = self._auth_group_service.create_auth_group(payload)
+            self._logger.info('Auth group created: %s', auth_group.get('name'))
+            return jsonify(auth_group), 201
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+        except Exception as exc:
+            self._logger.error('Error creating auth group: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def import_auth_group_entries(self) -> Response:
+        try:
+            payload = request.get_json(silent=True) or {}
+            entries = self._auth_group_service.import_auth_entries(payload.get('yaml', ''))
+            return jsonify({'entries': entries})
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+        except Exception as exc:
+            self._logger.error('Error importing auth group entries: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def update_auth_group(self, name: str) -> Response:
+        try:
+            payload = request.get_json(silent=True) or {}
+            auth_group = self._auth_group_service.update_auth_group(name, payload)
+            self._logger.info('Auth group updated: %s -> %s', name, auth_group.get('name'))
+            return jsonify(auth_group)
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error updating auth group: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def delete_auth_group(self, name: str) -> Response:
+        try:
+            self._auth_group_service.delete_auth_group(name)
+            self._logger.info('Auth group deleted: %s', name)
+            return jsonify({'message': 'Auth group deleted successfully'})
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error deleting auth group: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def get_auth_group_runtime(self, name: str) -> Response:
+        try:
+            return jsonify(self._auth_group_service.get_auth_group_runtime(name))
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 404
+        except Exception as exc:
+            self._logger.error('Error getting auth group runtime: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def clear_auth_group_entry_cooldown(self, name: str, entry_id: str) -> Response:
+        try:
+            self._auth_group_service.clear_entry_cooldown(name, entry_id)
+            self._logger.info('Auth group entry cooldown cleared: %s/%s', name, entry_id)
+            return jsonify({'message': 'Auth entry cooldown cleared successfully'})
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error clearing auth group entry cooldown: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def disable_auth_group_entry(self, name: str, entry_id: str) -> Response:
+        try:
+            self._auth_group_service.set_entry_disabled(name, entry_id, disabled=True)
+            self._logger.info('Auth group entry disabled: %s/%s', name, entry_id)
+            return jsonify({'message': 'Auth entry disabled successfully'})
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error disabling auth group entry: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def enable_auth_group_entry(self, name: str, entry_id: str) -> Response:
+        try:
+            self._auth_group_service.set_entry_disabled(name, entry_id, disabled=False)
+            self._logger.info('Auth group entry enabled: %s/%s', name, entry_id)
+            return jsonify({'message': 'Auth entry enabled successfully'})
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error enabling auth group entry: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def reset_auth_group_entry_minute_usage(self, name: str, entry_id: str) -> Response:
+        try:
+            self._auth_group_service.reset_entry_minute_usage(name, entry_id)
+            self._logger.info('Auth group entry minute usage reset: %s/%s', name, entry_id)
+            return jsonify({'message': 'Auth entry minute usage reset successfully'})
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error resetting auth group entry minute usage: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def reset_auth_group_entry_runtime(self, name: str, entry_id: str) -> Response:
+        try:
+            self._auth_group_service.reset_entry_runtime(name, entry_id)
+            self._logger.info('Auth group entry runtime reset: %s/%s', name, entry_id)
+            return jsonify({'message': 'Auth entry runtime reset successfully'})
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error resetting auth group entry runtime: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def restore_auth_group_entry(self, name: str, entry_id: str) -> Response:
+        try:
+            self._auth_group_service.restore_entry(name, entry_id)
+            self._logger.info('Auth group entry restored: %s/%s', name, entry_id)
+            return jsonify({'message': 'Auth entry restored successfully'})
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error restoring auth group entry: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
     def fetch_models(self) -> Response:

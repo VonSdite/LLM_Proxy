@@ -13,6 +13,7 @@ import websocket
 from flask import Response, stream_with_context
 
 from ..application.app_context import AppContext
+from ..config.auth_group_manager import AuthGroupManager, AuthGroupSelectionError, SelectedAuthEntry
 from ..executors import OpenedUpstreamResponse, build_default_executor_registry
 from ..external import LLMProvider
 from ..hooks import HookContext, HookErrorType
@@ -41,9 +42,10 @@ class ProxyErrorInfo:
 class ProxyService:
     """处理上游 LLM 代理请求。"""
 
-    def __init__(self, ctx: AppContext):
+    def __init__(self, ctx: AppContext, auth_group_manager: Optional[AuthGroupManager] = None):
         self._logger = ctx.logger
         self._root_path = ctx.root_path
+        self._auth_group_manager = auth_group_manager
         self._executor_registry = build_default_executor_registry(self._logger)
         self._translator_registry = build_default_translator_registry()
 
@@ -71,6 +73,7 @@ class ProxyService:
 
         def build_request(
             attempt: int,
+            selected_auth: Optional[SelectedAuthEntry],
         ) -> Tuple[Dict[str, str], Dict[str, Any], Dict[str, Any], HookContext]:
             initial_stream = bool(request_data.get("stream", False))
             request_ctx = HookContext(
@@ -84,13 +87,21 @@ class ProxyService:
                 provider_target_format=provider.target_format,
                 transport=provider.transport,
                 stream=initial_stream,
+                auth_group_name=(
+                    selected_auth.auth_group_name
+                    if selected_auth is not None
+                    else provider.auth_group
+                ),
+                auth_entry_id=(selected_auth.entry_id if selected_auth is not None else None),
                 last_status_code=previous_status_code,
                 last_error_type=previous_error_type,
             )
 
             headers = dict(request_headers)
             headers["content-type"] = "application/json"
-            if provider.api_key:
+            if selected_auth is not None:
+                headers.update(selected_auth.headers_mapping())
+            elif provider.api_key:
                 headers["authorization"] = f"Bearer {provider.api_key}"
             headers = provider.apply_header_hook(request_ctx, headers)
 
@@ -103,21 +114,54 @@ class ProxyService:
             return headers, guarded_body, translated_body, request_ctx
 
         for attempt in range(max_retries):
-            headers, guarded_body, translated_body, request_ctx = build_request(attempt)
-            requested_stream = request_ctx.stream
-            self._logger.info(
-                "Proxying upstream request: provider=%s transport=%s source=%s target=%s model=%s attempt=%s/%s stream=%s",
-                provider.name,
-                provider.transport,
-                provider.source_format,
-                provider.target_format,
-                translated_body.get("model"),
-                attempt + 1,
-                max_retries,
-                requested_stream,
-            )
+            selected_auth: Optional[SelectedAuthEntry] = None
+            attempt_finalized = False
+
+            def finalize_attempt(
+                *,
+                status_code: Optional[int] = None,
+                error_type: Optional[HookErrorType] = None,
+                error_message: Optional[str] = None,
+                response_headers: Optional[Dict[str, Any]] = None,
+                usage: Optional[Dict[str, Any]] = None,
+            ) -> None:
+                nonlocal attempt_finalized
+                if attempt_finalized:
+                    return
+                attempt_finalized = True
+                if self._auth_group_manager is None:
+                    return
+                self._auth_group_manager.finish(
+                    selected_auth,
+                    status_code=status_code,
+                    error_type=error_type,
+                    error_message=error_message,
+                    response_headers=response_headers,
+                    usage=usage,
+                )
 
             try:
+                if self._auth_group_manager is not None and provider.auth_group:
+                    selected_auth = self._auth_group_manager.acquire(provider.auth_group)
+
+                headers, guarded_body, translated_body, request_ctx = build_request(attempt, selected_auth)
+                requested_stream = request_ctx.stream
+                self._logger.info(
+                    "Proxying upstream request: provider=%s transport=%s source=%s target=%s model=%s attempt=%s/%s stream=%s auth_group=%s auth_entry=%s",
+                    provider.name,
+                    provider.transport,
+                    provider.source_format,
+                    provider.target_format,
+                    translated_body.get("model"),
+                    attempt + 1,
+                    max_retries,
+                    requested_stream,
+                    request_ctx.auth_group_name or "<none>",
+                    request_ctx.auth_entry_id or "<none>",
+                )
+                if self._auth_group_manager is not None:
+                    self._auth_group_manager.mark_request_dispatched(selected_auth)
+
                 opened = self._coerce_opened_response(
                     self._open_upstream_response(
                         provider,
@@ -125,15 +169,22 @@ class ProxyService:
                         translated_body,
                         requested_stream,
                         target_url,
-                    request_proxies,
-                    timeout_seconds,
-                    verify_ssl,
+                        request_proxies,
+                        timeout_seconds,
+                        verify_ssl,
                     )
                 )
 
                 if self._should_retry_status_code(opened.status_code) and attempt < max_retries - 1:
                     previous_status_code = opened.status_code
                     previous_error_type = None
+                    raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
+                    _, _, retry_summary = self._consume_upstream_error(provider, opened)
+                    finalize_attempt(
+                        status_code=opened.status_code,
+                        error_message=retry_summary,
+                        response_headers=raw_response_headers,
+                    )
                     self._logger.warning(
                         "Retryable upstream status (attempt %s/%s): provider=%s status=%s stream=%s, retrying",
                         attempt + 1,
@@ -142,7 +193,6 @@ class ProxyService:
                         opened.status_code,
                         opened.is_stream,
                     )
-                    opened.response.close()
                     continue
 
                 if requested_stream != opened.is_stream:
@@ -156,11 +206,14 @@ class ProxyService:
                     )
 
                 if opened.status_code >= 400:
-                    return (
-                        self._build_error_response(provider, opened),
-                        opened.status_code,
-                        None,
+                    raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
+                    response, error_summary = self._build_error_response(provider, opened)
+                    finalize_attempt(
+                        status_code=opened.status_code,
+                        error_message=error_summary,
+                        response_headers=raw_response_headers,
                     )
+                    return response, opened.status_code, None
 
                 if opened.is_stream:
                     response = self._build_stream_response(
@@ -172,6 +225,7 @@ class ProxyService:
                         opened=opened,
                         on_complete=on_complete,
                         forward_stream_usage=forward_stream_usage,
+                        finalize_attempt=finalize_attempt,
                     )
                 else:
                     response = self._build_nonstream_response(
@@ -182,6 +236,7 @@ class ProxyService:
                         translated_request=translated_body,
                         opened=opened,
                         on_complete=on_complete,
+                        finalize_attempt=finalize_attempt,
                     )
 
                 self._logger.info(
@@ -194,6 +249,21 @@ class ProxyService:
                     opened.is_stream,
                 )
                 return response, opened.status_code, None
+            except AuthGroupSelectionError as exc:
+                last_error = ProxyErrorInfo(
+                    message=exc.message,
+                    status_code=exc.status_code,
+                    error_type=exc.error_type,
+                    error_code=exc.error_code,
+                )
+                self._logger.warning(
+                    "Auth group unavailable: provider=%s auth_group=%s status=%s error=%s",
+                    provider.name,
+                    provider.auth_group or "<none>",
+                    exc.status_code,
+                    exc.message,
+                )
+                return None, exc.status_code, last_error
             except requests.exceptions.RequestException as exc:
                 previous_status_code = None
                 previous_error_type = self._classify_request_error(exc)
@@ -204,6 +274,10 @@ class ProxyService:
                     max_retries,
                     provider.name,
                     exc,
+                )
+                finalize_attempt(
+                    error_type=previous_error_type,
+                    error_message=str(exc),
                 )
                 if attempt < max_retries - 1:
                     continue
@@ -218,8 +292,15 @@ class ProxyService:
                     provider.name,
                     exc,
                 )
+                finalize_attempt(
+                    error_type=previous_error_type,
+                    error_message=str(exc),
+                )
                 if attempt < max_retries - 1:
                     continue
+            except Exception:
+                finalize_attempt()
+                raise
 
         if last_error is None:
             last_error = ProxyErrorInfo(
@@ -241,18 +322,30 @@ class ProxyService:
         opened: OpenedUpstreamResponse,
         on_complete: Optional[Callable[[Dict[str, Any]], None]],
         forward_stream_usage: bool,
+        finalize_attempt: Optional[Callable[..., None]] = None,
     ) -> Response:
         response = opened.response
         meta = self._create_empty_meta()
         completed = False
         terminal_sent = False
 
-        def safe_on_complete() -> None:
+        def safe_on_complete(
+            *,
+            error_type: Optional[HookErrorType] = None,
+            error_message: Optional[str] = None,
+        ) -> None:
             nonlocal completed
             if completed:
                 return
             completed = True
-            if on_complete:
+            if finalize_attempt is not None:
+                finalize_attempt(
+                    status_code=(opened.status_code if error_type is None else None),
+                    error_type=error_type,
+                    error_message=error_message,
+                    usage=(meta if error_type is None else None),
+                )
+            if on_complete and error_type is None:
                 try:
                     on_complete(meta)
                 except Exception as exc:
@@ -261,6 +354,8 @@ class ProxyService:
         def generate() -> Iterator[bytes]:
             nonlocal terminal_sent
             state: Dict[str, Any] = {}
+            completion_error_type: Optional[HookErrorType] = None
+            completion_error_message: Optional[str] = None
             try:
                 upstream_chunks = response.iter_content(chunk_size=None)
                 for event in decode_stream_events(upstream_chunks, opened.stream_format):
@@ -302,11 +397,29 @@ class ProxyService:
                     )
                     if encoded_terminal:
                         yield encoded_terminal
+            except requests.exceptions.RequestException as exc:
+                completion_error_type = self._classify_request_error(exc)
+                completion_error_message = str(exc)
+                self._logger.error("Streamed HTTP upstream error: provider=%s error=%s", provider.name, exc)
+                raise
+            except (websocket.WebSocketException, OSError) as exc:
+                completion_error_type = self._classify_websocket_error(exc)
+                completion_error_message = str(exc)
+                self._logger.error("Streamed WebSocket upstream error: provider=%s error=%s", provider.name, exc)
+                raise
+            except Exception as exc:
+                completion_error_type = HookErrorType.TRANSPORT_ERROR
+                completion_error_message = str(exc)
+                self._logger.error("Streamed upstream processing error: provider=%s error=%s", provider.name, exc)
+                raise
             finally:
                 try:
                     response.close()
                 finally:
-                    safe_on_complete()
+                    safe_on_complete(
+                        error_type=completion_error_type,
+                        error_message=completion_error_message,
+                    )
 
         headers = self._filter_response_headers(getattr(response, "headers", {}))
         headers["Content-Type"] = "text/event-stream; charset=utf-8"
@@ -327,6 +440,7 @@ class ProxyService:
         translated_request: Dict[str, Any],
         opened: OpenedUpstreamResponse,
         on_complete: Optional[Callable[[Dict[str, Any]], None]],
+        finalize_attempt: Optional[Callable[..., None]] = None,
     ) -> Response:
         response = opened.response
         try:
@@ -349,6 +463,8 @@ class ProxyService:
                     on_complete(meta)
                 except Exception as exc:
                     self._logger.error("Error in on_complete callback: %s", exc)
+            if finalize_attempt is not None:
+                finalize_attempt(status_code=opened.status_code, usage=meta)
 
             response_body = encode_downstream_response_body(body_to_send, provider.target_format)
             headers = self._filter_response_headers(getattr(response, "headers", {}))
@@ -361,7 +477,11 @@ class ProxyService:
         finally:
             response.close()
 
-    def _build_error_response(self, provider: LLMProvider, opened: OpenedUpstreamResponse) -> Response:
+    def _consume_upstream_error(
+        self,
+        provider: LLMProvider,
+        opened: OpenedUpstreamResponse,
+    ) -> tuple[bytes, Dict[str, str], Optional[str]]:
         response = opened.response
         try:
             body = self._read_response_body(response)
@@ -379,9 +499,17 @@ class ProxyService:
             headers = self._filter_response_headers(getattr(response, "headers", {}))
             if opened.content_type:
                 headers["Content-Type"] = opened.content_type
-            return Response(body, status=opened.status_code, headers=headers)
+            return body, headers, summary
         finally:
             response.close()
+
+    def _build_error_response(
+        self,
+        provider: LLMProvider,
+        opened: OpenedUpstreamResponse,
+    ) -> tuple[Response, Optional[str]]:
+        body, headers, summary = self._consume_upstream_error(provider, opened)
+        return Response(body, status=opened.status_code, headers=headers), summary
 
     def _guard_stream_chunk(
         self,

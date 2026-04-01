@@ -89,6 +89,32 @@
 
 ## Provider 配置
 
+### Auth Groups
+
+```yaml
+auth_groups:
+  - name: openai-shared
+    strategy: least_inflight
+    cooldown_seconds_on_429: 60
+    entries:
+      - id: key-a
+        headers:
+          Authorization: Bearer sk-your-openai-key-a
+        max_concurrency: 3
+      - id: key-b
+        headers:
+          Authorization: Bearer sk-your-openai-key-b
+        max_concurrency: 2
+```
+
+规则：
+
+- provider 可以引用 `auth_group`，也可以继续用 legacy `api_key`
+- `auth_group` 和 `api_key` 不能同时填写；也可以都不填，交给 hook 或无鉴权上游处理
+- `api_key` 仍然保留为 legacy 单 key 快捷写法
+- `auth_group` 支持并发控制、`429` 冷却、请求数配额、Token 配额
+- `401/403` 会禁用当前 entry，直到在管理页手动恢复
+
 ### 样例
 
 见 [config.sample.yaml](/d:/001Code/008llm/003LLM_Proxy/config.sample.yaml)。
@@ -102,7 +128,7 @@ providers:
     transport: http
     source_format: openai_chat
     target_format: openai_chat
-    api_key: sk-your-openai-key
+    auth_group: openai-shared
     verify_ssl: true
     model_list:
       - gpt-4.1
@@ -120,6 +146,10 @@ providers:
   - 上游真实协议
 - `target_format`
   - 下游看到的协议
+- `auth_group`
+  - 引用顶层 `auth_groups` 里的凭证池
+- `api_key`
+  - legacy 单 key 快捷写法；不能和 `auth_group` 同时填写，也可以两者都留空
 - `model_list`
   - 这个 provider 暴露给下游的模型名列表
 - `hook`
@@ -204,6 +234,8 @@ class Hook(BaseHook):
 - `provider_target_format`
 - `transport`
 - `stream`
+- `auth_group_name`
+- `auth_entry_id`
 - `last_status_code`
 - `last_error_type`
 
@@ -223,9 +255,15 @@ class Hook(BaseHook):
 
 ## Provider 页面
 
-Provider 管理页不再展示兼容矩阵，也不再让用户选择流格式。
+Provider 管理页现在拆成两块：
 
-页面上会提供 3 个帮助入口：
+- `Auth Groups`
+  - 维护 auth_group / auth_entry
+  - 查看运行态、冷却、禁用和配额
+- `Providers`
+  - 维护 provider 与它绑定的 `auth_group`、legacy `api_key`，或留空交给 hook
+
+页面上会继续提供 3 个帮助入口：
 
 - `transport`
 - `source_format`
