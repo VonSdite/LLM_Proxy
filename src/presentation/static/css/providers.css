@@ -1078,6 +1078,44 @@
     line-height: 1.5;
 }
 
+.providers-page .entry-import-editor-shell {
+    position: relative;
+}
+
+.providers-page .entry-import-editor {
+    display: none;
+    min-height: 260px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--surface);
+}
+
+.providers-page .entry-import-editor.ace_editor {
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.providers-page .entry-import-editor .ace_gutter-cell,
+.providers-page .entry-import-editor .ace_gutter-cell_svg-icons {
+    padding-left: 3px;
+    padding-right: 3px;
+}
+
+.providers-page .entry-import-editor .ace_invisible.ace_invisible_eol {
+    display: none;
+}
+
+.providers-page .entry-import-editor-shell.is-editor-ready .entry-import-editor {
+    display: block;
+}
+
+.providers-page .entry-import-editor-shell.is-editor-ready .entry-import-textarea {
+    display: none;
+}
+
+.providers-page .auth-entry-yaml-modal-dialog .entry-import-editor,
 .providers-page .auth-entry-yaml-modal-dialog .entry-import-textarea {
     height: min(58vh, 560px);
     min-height: 420px;

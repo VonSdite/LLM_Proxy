@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260401-5">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260402-5">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
@@ -86,7 +86,7 @@
 {% endblock %}
 
 {% block after_container %}
-    <div class="modal fade" id="providerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal fade" id="providerModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-dialog-centered">
             <div class="modal-content border-0 shadow">
                 <div class="modal-header border-bottom-0">
@@ -274,7 +274,7 @@
             </div>
         </div>
     </div>
-    <div class="modal fade" id="authGroupModal" tabindex="-1" aria-hidden="true">
+    <div class="modal fade" id="authGroupModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-dialog-centered">
             <div class="modal-content border-0 shadow">
                 <div class="modal-header border-bottom-0">
@@ -347,8 +347,8 @@
         </div>
     </div>
 
-    <div class="modal fade" id="authEntryImportModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal fade" id="authEntryImportModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered auth-entry-yaml-modal-dialog">
             <div class="modal-content border-0 shadow">
                 <div class="modal-header border-bottom-0">
                     <div>
@@ -367,12 +367,15 @@
                                 <button type="button" class="btn btn-secondary btn-field-secondary" onclick="insertAuthEntryYamlTemplate()">插入 Entry 模板</button>
                             </div>
                         </div>
-                        <textarea
-                            class="form-control entry-import-textarea"
-                            id="authEntryImportYaml"
-                            rows="14"
-                        >entries:
-  - id: key-a  # 必填：Entry 唯一 ID，组内不能重复
+                        <div class="entry-import-editor-shell" id="authEntryImportEditorShell">
+                            <div class="entry-import-editor" id="authEntryImportYamlEditor" aria-label="Auth Entry YAML editor"></div>
+                            <textarea
+                                class="form-control entry-import-textarea"
+                                id="authEntryImportYaml"
+                                rows="14"
+                                spellcheck="false"
+                            >entries:
+  - id: key-1  # 必填：Entry 唯一 ID，组内不能重复
     enabled: true  # 可选：默认 true；设为 false 时该 Entry 不参与调度
     headers:  # 必填：至少提供 1 个请求头
       Authorization: "Bearer sk-xxx"  # 示例：Bearer Token
@@ -383,7 +386,8 @@
     request_quota_per_day: 3000  # 可选：每天请求数上限；留空表示不限制
     token_quota_per_minute: 120000  # 可选：每分钟 Token 上限；留空表示不限制
     token_quota_per_day: 5000000  # 可选：每天 Token 上限；留空表示不限制
-</textarea>
+                            </textarea>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer border-top-0">
@@ -441,6 +445,13 @@
             <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteProviderBtn" onclick="confirmDeleteProvider(event)">确认</button>
         </div>
     </div>
+    <div class="inline-confirm-popover floating-delete-popover" id="authEntryDeletePopover" data-placement="bottom" hidden>
+        <div class="inline-confirm-text">确认删除这个 Entry？</div>
+        <div class="inline-confirm-actions">
+            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelDeleteAuthEntryConfirm(event)">取消</button>
+            <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteAuthEntryBtn" onclick="confirmDeleteAuthEntry(event)">确认</button>
+        </div>
+    </div>
     <div class="provider-help-popover" id="providerHelpPopover" data-placement="bottom" hidden>
         <div class="provider-help-popover-header">
             <div class="provider-help-popover-title" id="providerHelpTitle"></div>
@@ -452,6 +463,10 @@
 
 {% block page_scripts %}
     <script src="/static/js/ui-message.js?v=20260319-1"></script>
+    <script src="/static/vendor/ace/ace.js?v=1.43.6"></script>
+    <script src="/static/vendor/ace/mode-yaml.js?v=1.43.6"></script>
+    <script src="/static/vendor/ace/theme-textmate.js?v=1.43.6"></script>
+    <script src="/static/vendor/ace/theme-tomorrow_night.js?v=1.43.6"></script>
     <script>
         let providers = [];
         let authGroups = [];
@@ -476,8 +491,11 @@
         let activeProviderHelpTopic = null;
         let activeProviderHelpTrigger = null;
         let activeProviderTab = 'providers';
+        let pendingDeleteAuthEntryKey = null;
         let authEntryCardSequence = 0;
         let providerTransportAutoSyncEnabled = true;
+        let authEntryYamlEditor = null;
+        let authEntryYamlThemeObserver = null;
         const providerHelpTopics = {
             transport: {
                 title: '上游传输怎么选',
@@ -712,6 +730,9 @@
             if (!event.target.closest('.inline-confirm-wrap') && !event.target.closest('#providerDeletePopover')) {
                 closeDeleteProviderConfirm();
             }
+            if (!event.target.closest('[data-auth-entry-delete-trigger]') && !event.target.closest('#authEntryDeletePopover')) {
+                closeDeleteAuthEntryConfirm();
+            }
             if (!event.target.closest('[data-provider-help-topic]') && !event.target.closest('#providerHelpPopover')) {
                 hideProviderHelpPopover();
             }
@@ -721,6 +742,7 @@
             if (event.key === 'Escape') {
                 closeAllCustomSelects();
                 closeDeleteProviderConfirm();
+                closeDeleteAuthEntryConfirm();
                 hideProviderHelpPopover();
             }
         });
@@ -728,6 +750,7 @@
         window.addEventListener('resize', function() {
             closeAllCustomSelects();
             closeDeleteProviderConfirm(false);
+            closeDeleteAuthEntryConfirm(false);
             syncProviderHelpPopover();
         });
 
@@ -737,6 +760,7 @@
             }
             closeAllCustomSelects();
             closeDeleteProviderConfirm(false);
+            closeDeleteAuthEntryConfirm(false);
             syncProviderHelpPopover();
         }, true);
 
@@ -806,6 +830,114 @@
             popover.style.top = `${top}px`;
             popover.style.left = `${left}px`;
             popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
+        }
+
+        function getAuthEntryDeletePopoverElement() {
+            return document.getElementById('authEntryDeletePopover');
+        }
+
+        function getAuthEntryDeleteTrigger(entryKey) {
+            return Array.from(document.querySelectorAll('[data-auth-entry-delete-trigger]'))
+                .find(element => element.dataset.authEntryDeleteTrigger === entryKey) || null;
+        }
+
+        function getAuthEntryCardByKey(entryKey) {
+            return Array.from(document.querySelectorAll('#authEntriesContainer .auth-entry-card'))
+                .find(element => element.dataset.entryKey === entryKey) || null;
+        }
+
+        function clearActiveAuthEntryDeleteTriggers() {
+            document.querySelectorAll('[data-auth-entry-delete-trigger].is-active').forEach(element => {
+                element.classList.remove('is-active');
+            });
+        }
+
+        function hideAuthEntryDeletePopover() {
+            const popover = getAuthEntryDeletePopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty('top');
+            popover.style.removeProperty('left');
+            popover.style.removeProperty('--popover-arrow-left');
+            popover.dataset.placement = 'bottom';
+        }
+
+        function syncDeleteAuthEntryPopover() {
+            const popover = getAuthEntryDeletePopoverElement();
+            if (!popover) return;
+
+            clearActiveAuthEntryDeleteTriggers();
+            if (pendingDeleteAuthEntryKey === null) {
+                hideAuthEntryDeletePopover();
+                return;
+            }
+
+            const trigger = getAuthEntryDeleteTrigger(pendingDeleteAuthEntryKey);
+            if (!trigger || !document.body.contains(trigger)) {
+                pendingDeleteAuthEntryKey = null;
+                hideAuthEntryDeletePopover();
+                return;
+            }
+
+            trigger.classList.add('is-active');
+            popover.hidden = false;
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 10;
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const left = Math.min(
+                window.innerWidth - popoverRect.width - viewportPadding,
+                Math.max(viewportPadding, triggerRect.left + ((triggerRect.width - popoverRect.width) / 2))
+            );
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? 'bottom' : 'top';
+            popover.style.top = `${top}px`;
+            popover.style.left = `${left}px`;
+            popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
+        }
+
+        function toggleDeleteAuthEntryConfirm(entryKey, event) {
+            event?.preventDefault();
+            event?.stopPropagation();
+
+            pendingDeleteAuthEntryKey = pendingDeleteAuthEntryKey === entryKey ? null : entryKey;
+            closeDeleteProviderConfirm(false);
+            syncDeleteAuthEntryPopover();
+        }
+
+        function cancelDeleteAuthEntryConfirm(event) {
+            event?.stopPropagation();
+            closeDeleteAuthEntryConfirm();
+        }
+
+        function closeDeleteAuthEntryConfirm(shouldSync = true) {
+            if (pendingDeleteAuthEntryKey === null) return;
+            pendingDeleteAuthEntryKey = null;
+            hideAuthEntryDeletePopover();
+            if (shouldSync) {
+                syncDeleteAuthEntryPopover();
+            } else {
+                clearActiveAuthEntryDeleteTriggers();
+            }
+        }
+
+        function confirmDeleteAuthEntry(event) {
+            event?.stopPropagation();
+            const entryKey = pendingDeleteAuthEntryKey;
+            if (!entryKey) return;
+
+            closeDeleteAuthEntryConfirm(false);
+            removeAuthEntryCard(entryKey);
         }
 
         function getModelPreview(models, limit = 6) {
@@ -1711,8 +1843,9 @@
 
         function createAuthEntryCardElement(entry = null) {
             const wrapper = document.createElement('div');
+            const entryKey = `entry-${++authEntryCardSequence}`;
             wrapper.className = 'auth-entry-card';
-            wrapper.dataset.entryKey = `entry-${++authEntryCardSequence}`;
+            wrapper.dataset.entryKey = entryKey;
             wrapper.dataset.expanded = 'false';
             wrapper.innerHTML = `
                 <div
@@ -1730,14 +1863,21 @@
                     <div class="auth-entry-summary-cell auth-entry-summary-headers">0</div>
                     <div class="auth-entry-summary-cell auth-entry-summary-limits">未配置限制</div>
                     <div class="auth-entry-summary-actions">
-                        <button type="button" class="btn-action btn-delete" onclick="event.stopPropagation(); removeAuthEntryCard(this)">删除</button>
+                        <div class="inline-confirm-wrap">
+                            <button
+                                type="button"
+                                class="btn-action btn-delete"
+                                data-auth-entry-delete-trigger="${entryKey}"
+                                onclick="toggleDeleteAuthEntryConfirm('${entryKey}', event)"
+                            >删除</button>
+                        </div>
                     </div>
                 </div>
                 <div class="auth-entry-detail" hidden>
                     <div class="provider-form-grid">
                         <div class="mb-3">
                             <label class="form-label">Entry ID *</label>
-                            <input type="text" class="form-control auth-entry-id" value="${escapeHtml(entry?.id || '')}" placeholder="例如 key-a、project-cn-1">
+                            <input type="text" class="form-control auth-entry-id" value="${escapeHtml(entry?.id || '')}" placeholder="例如 key-1、project-cn-1">
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Enabled</label>
@@ -1811,17 +1951,12 @@
             }
         }
 
-        function removeAuthEntryCard(button) {
-            const card = button?.closest('.auth-entry-card');
-            const nextCard = card?.nextElementSibling?.classList?.contains('auth-entry-card')
-                ? card.nextElementSibling
-                : card?.previousElementSibling?.classList?.contains('auth-entry-card')
-                    ? card.previousElementSibling
-                    : null;
+        function removeAuthEntryCard(source) {
+            const card = typeof source === 'string'
+                ? getAuthEntryCardByKey(source)
+                : source?.closest('.auth-entry-card');
+            closeDeleteAuthEntryConfirm(false);
             card?.remove();
-            if (nextCard instanceof HTMLElement) {
-                expandAuthEntryCard(nextCard);
-            }
         }
 
         function addAuthHeaderRow(trigger, header = null) {
@@ -1858,19 +1993,12 @@
             document.getElementById('authGroupName').value = authGroup?.name || '';
             setSelectValueOrFallback('authGroupStrategy', authGroup?.strategy, 'least_inflight');
             document.getElementById('authGroupCooldownSeconds').value = authGroup?.cooldown_seconds_on_429 || '';
-            const importTextarea = document.getElementById('authEntryImportYaml');
-            if (importTextarea) {
-                importTextarea.value = '';
-            }
-            const container = document.getElementById('authEntriesContainer');
-            container.innerHTML = '';
-            authEntryCardSequence = 0;
+            setAuthEntryYamlValue('');
             const entries = Array.isArray(authGroup?.entries) ? authGroup.entries : [];
+            replaceAuthEntryCards(entries);
             if (!entries.length) {
                 addAuthEntryCard();
-                return;
             }
-            entries.forEach((entry, index) => addAuthEntryCard(entry, { expand: index === 0 }));
         }
 
         function collectAuthGroupFormData() {
@@ -1904,25 +2032,353 @@
             };
         }
 
-        function getAuthEntryYamlTemplate() {
-            const textarea = document.getElementById('authEntryImportYaml');
-            return textarea?.defaultValue || '';
+        function getAuthEntryYamlTemplate(entryId = 'key-1') {
+            const textarea = getAuthEntryYamlTextarea();
+            const templateText = String(textarea?.defaultValue || '').trimEnd();
+            if (!entryId) {
+                return templateText;
+            }
+            return templateText.replace('id: key-1', `id: ${entryId}`);
         }
 
-        function getSingleAuthEntryYamlTemplate() {
-            return [
-                '  - id: key-a  # 必填：Entry 唯一 ID，组内不能重复',
-                '    enabled: true  # 可选：默认 true；设为 false 时该 Entry 不参与调度',
-                '    headers:  # 必填：至少提供 1 个请求头',
-                '      Authorization: "Bearer sk-xxx"  # 示例：Bearer Token',
-                '      # x-api-key: "your-api-key"  # 可选：如果上游用 x-api-key，可改成这个',
-                '    max_concurrency: 3  # 可选：最大并发；留空表示不限制',
-                '    cooldown_seconds_on_429: 120  # 可选：429 冷却秒数；留空则继承 Group 默认值',
-                '    request_quota_per_minute: 60  # 可选：每分钟请求数上限；留空表示不限制',
-                '    request_quota_per_day: 3000  # 可选：每天请求数上限；留空表示不限制',
-                '    token_quota_per_minute: 120000  # 可选：每分钟 Token 上限；留空表示不限制',
-                '    token_quota_per_day: 5000000  # 可选：每天 Token 上限；留空表示不限制',
-            ].join('\n');
+        function getAuthEntryYamlTextarea() {
+            return document.getElementById('authEntryImportYaml');
+        }
+
+        function getAuthEntryYamlEditorContainer() {
+            return document.getElementById('authEntryImportYamlEditor');
+        }
+
+        function getAuthEntryYamlEditorShell() {
+            return document.getElementById('authEntryImportEditorShell');
+        }
+
+        function isAuthEntryYamlEditorReady() {
+            return !!authEntryYamlEditor;
+        }
+
+        function setAuthEntryYamlEditorReadyState(isReady) {
+            const shell = getAuthEntryYamlEditorShell();
+            if (shell) {
+                shell.classList.toggle('is-editor-ready', isReady);
+            }
+        }
+
+        function syncAuthEntryYamlTextareaValue(value) {
+            const textarea = getAuthEntryYamlTextarea();
+            if (textarea instanceof HTMLTextAreaElement) {
+                textarea.value = String(value ?? '');
+            }
+        }
+
+        function getAuthEntryYamlEditorTheme() {
+            return document.documentElement.getAttribute('data-theme') === 'light'
+                ? 'ace/theme/textmate'
+                : 'ace/theme/tomorrow_night';
+        }
+
+        function syncAuthEntryYamlEditorTheme() {
+            if (!isAuthEntryYamlEditorReady()) {
+                return;
+            }
+            authEntryYamlEditor.setTheme(getAuthEntryYamlEditorTheme());
+            window.requestAnimationFrame(() => authEntryYamlEditor.resize(true));
+        }
+
+        function observeAuthEntryYamlEditorTheme() {
+            if (authEntryYamlThemeObserver || typeof MutationObserver === 'undefined') {
+                return;
+            }
+            authEntryYamlThemeObserver = new MutationObserver(mutations => {
+                if (mutations.some(mutation => mutation.attributeName === 'data-theme')) {
+                    syncAuthEntryYamlEditorTheme();
+                }
+            });
+            authEntryYamlThemeObserver.observe(document.documentElement, {
+                attributes: true,
+                attributeFilter: ['data-theme'],
+            });
+        }
+
+        function initializeAuthEntryYamlEditor() {
+            const textarea = getAuthEntryYamlTextarea();
+            const editorContainer = getAuthEntryYamlEditorContainer();
+            if (!(textarea instanceof HTMLTextAreaElement) || !(editorContainer instanceof HTMLDivElement)) {
+                return;
+            }
+            if (typeof window.ace === 'undefined') {
+                setAuthEntryYamlEditorReadyState(false);
+                return;
+            }
+            if (isAuthEntryYamlEditorReady()) {
+                syncAuthEntryYamlEditorTheme();
+                return;
+            }
+
+            ace.config.set('basePath', '/static/vendor/ace');
+            authEntryYamlEditor = ace.edit(editorContainer);
+            authEntryYamlEditor.$blockScrolling = Infinity;
+            authEntryYamlEditor.session.setMode('ace/mode/yaml');
+            authEntryYamlEditor.session.setUseSoftTabs(true);
+            authEntryYamlEditor.session.setTabSize(2);
+            authEntryYamlEditor.session.setUseWorker(false);
+            authEntryYamlEditor.session.setUseWrapMode(false);
+            authEntryYamlEditor.renderer.setShowGutter(true);
+            authEntryYamlEditor.renderer.setShowInvisibles('tab space');
+            authEntryYamlEditor.setFontSize(13);
+            authEntryYamlEditor.setOptions({
+                showPrintMargin: false,
+                highlightActiveLine: true,
+                displayIndentGuides: true,
+                wrap: false,
+            });
+            authEntryYamlEditor.commands.addCommand({
+                name: 'toggleAuthEntryYamlComment',
+                bindKey: { win: 'Ctrl-/', mac: 'Command-/' },
+                exec(editor) {
+                    editor.execCommand('togglecomment');
+                },
+                readOnly: true,
+            });
+            authEntryYamlEditor.session.on('change', function() {
+                syncAuthEntryYamlTextareaValue(authEntryYamlEditor.session.getValue());
+            });
+
+            setAuthEntryYamlValue(textarea.value || textarea.defaultValue || '');
+            setAuthEntryYamlEditorReadyState(true);
+            syncAuthEntryYamlEditorTheme();
+            observeAuthEntryYamlEditorTheme();
+        }
+
+        function getAuthEntryYamlValue() {
+            if (isAuthEntryYamlEditorReady()) {
+                return authEntryYamlEditor.session.getValue();
+            }
+            return getAuthEntryYamlTextarea()?.value || '';
+        }
+
+        function setAuthEntryYamlValue(value) {
+            const nextValue = String(value ?? '');
+            if (isAuthEntryYamlEditorReady() && authEntryYamlEditor.session.getValue() !== nextValue) {
+                authEntryYamlEditor.session.setValue(nextValue);
+                authEntryYamlEditor.clearSelection();
+            }
+            syncAuthEntryYamlTextareaValue(nextValue);
+        }
+
+        function replaceAuthEntryYamlRange(startOffset, endOffset, replacementText) {
+            const start = Math.max(0, Number(startOffset) || 0);
+            const end = Math.max(start, Number(endOffset) || start);
+            const nextText = String(replacementText ?? '');
+
+            if (isAuthEntryYamlEditorReady() && typeof window.ace !== 'undefined') {
+                const documentRef = authEntryYamlEditor.session.doc;
+                const startPosition = documentRef.indexToPosition(start, 0);
+                const endPosition = documentRef.indexToPosition(end, 0);
+                const AceRange = ace.require('ace/range').Range;
+                authEntryYamlEditor.session.replace(AceRange.fromPoints(startPosition, endPosition), nextText);
+                authEntryYamlEditor.focus();
+                return {
+                    start,
+                    end: start + nextText.length,
+                };
+            }
+
+            const textarea = getAuthEntryYamlTextarea();
+            if (!(textarea instanceof HTMLTextAreaElement)) {
+                return {
+                    start,
+                    end: start + nextText.length,
+                };
+            }
+
+            textarea.focus();
+            if (typeof textarea.setRangeText === 'function') {
+                textarea.setSelectionRange(start, end);
+                textarea.setRangeText(nextText, start, end, 'end');
+            } else {
+                const currentValue = textarea.value;
+                textarea.value = `${currentValue.slice(0, start)}${nextText}${currentValue.slice(end)}`;
+                const nextCursor = start + nextText.length;
+                textarea.setSelectionRange(nextCursor, nextCursor);
+            }
+            syncAuthEntryYamlTextareaValue(textarea.value);
+            return {
+                start,
+                end: start + nextText.length,
+            };
+        }
+
+        function focusAuthEntryYamlEditor() {
+            if (isAuthEntryYamlEditorReady()) {
+                window.requestAnimationFrame(() => {
+                    authEntryYamlEditor.resize(true);
+                    authEntryYamlEditor.focus();
+                });
+                return true;
+            }
+
+            const textarea = getAuthEntryYamlTextarea();
+            if (textarea instanceof HTMLTextAreaElement) {
+                focusElementSafely(textarea);
+                return true;
+            }
+            return false;
+        }
+
+        function moveAuthEntryYamlCursorToEnd() {
+            if (isAuthEntryYamlEditorReady()) {
+                window.requestAnimationFrame(() => {
+                    const lastRow = Math.max(authEntryYamlEditor.session.getLength() - 1, 0);
+                    const lastColumn = authEntryYamlEditor.session.getLine(lastRow).length;
+                    authEntryYamlEditor.gotoLine(lastRow + 1, lastColumn, false);
+                    authEntryYamlEditor.focus();
+                });
+                return;
+            }
+
+            const textarea = getAuthEntryYamlTextarea();
+            if (!(textarea instanceof HTMLTextAreaElement)) return;
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+
+        function selectAuthEntryYamlRange(startOffset, endOffset = startOffset) {
+            const start = Math.max(0, Number(startOffset) || 0);
+            const end = Math.max(start, Number(endOffset) || start);
+
+            if (isAuthEntryYamlEditorReady() && typeof window.ace !== 'undefined') {
+                const documentRef = authEntryYamlEditor.session.doc;
+                const startPosition = documentRef.indexToPosition(start, 0);
+                const endPosition = documentRef.indexToPosition(end, 0);
+                const AceRange = ace.require('ace/range').Range;
+                authEntryYamlEditor.selection.setRange(AceRange.fromPoints(startPosition, endPosition), false);
+                authEntryYamlEditor.renderer.scrollCursorIntoView();
+                authEntryYamlEditor.focus();
+                return;
+            }
+
+            const textarea = getAuthEntryYamlTextarea();
+            if (!(textarea instanceof HTMLTextAreaElement)) return;
+            textarea.focus();
+            textarea.setSelectionRange(start, end);
+        }
+
+        function focusInsertedAuthEntryTemplateId(insertedId = 'key-1', searchStart = 0) {
+            const yamlText = getAuthEntryYamlValue();
+            const placeholder = String(insertedId || 'key-1');
+            const marker = `id: ${placeholder}`;
+            const markerOffset = yamlText.indexOf(marker, Math.max(0, Number(searchStart) || 0));
+            const fallbackOffset = markerOffset >= 0 ? markerOffset : yamlText.lastIndexOf(marker);
+            if (fallbackOffset < 0) {
+                moveAuthEntryYamlCursorToEnd();
+                return;
+            }
+
+            const selectionStart = fallbackOffset + 'id: '.length;
+            selectAuthEntryYamlRange(selectionStart, selectionStart + placeholder.length);
+        }
+
+        function stripAuthEntryYamlInlineComment(text) {
+            const value = String(text ?? '');
+            let inSingleQuote = false;
+            let inDoubleQuote = false;
+            let isEscaped = false;
+
+            for (let index = 0; index < value.length; index += 1) {
+                const char = value[index];
+                if (inDoubleQuote && isEscaped) {
+                    isEscaped = false;
+                    continue;
+                }
+                if (inDoubleQuote && char === '\\') {
+                    isEscaped = true;
+                    continue;
+                }
+                if (!inDoubleQuote && char === "'") {
+                    inSingleQuote = !inSingleQuote;
+                    continue;
+                }
+                if (!inSingleQuote && char === '"') {
+                    inDoubleQuote = !inDoubleQuote;
+                    continue;
+                }
+                if (!inSingleQuote && !inDoubleQuote && char === '#') {
+                    return value.slice(0, index).trimEnd();
+                }
+                isEscaped = false;
+            }
+
+            return value.trimEnd();
+        }
+
+        function normalizeAuthEntryYamlId(rawId) {
+            const value = stripAuthEntryYamlInlineComment(rawId).trim();
+            if (!value) {
+                return '';
+            }
+            if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                return value.slice(1, -1);
+            }
+            return value;
+        }
+
+        function extractAuthEntryYamlIds(yamlText) {
+            return String(yamlText ?? '')
+                .split(/\r?\n/)
+                .map(line => {
+                    const match = line.match(/^\s*-\s+id:\s*(.+)$/);
+                    return match ? normalizeAuthEntryYamlId(match[1]) : '';
+                })
+                .filter(Boolean);
+        }
+
+        function suggestNextAuthEntryTemplateId(yamlText) {
+            const usedIds = new Set(extractAuthEntryYamlIds(yamlText));
+            const numericIds = Array.from(usedIds)
+                .map(id => {
+                    const match = id.match(/^key-(\d+)$/);
+                    return match ? Number(match[1]) : Number.NaN;
+                })
+                .filter(Number.isFinite);
+            let nextNumber = numericIds.length ? Math.max(...numericIds) + 1 : 1;
+            while (usedIds.has(`key-${nextNumber}`)) {
+                nextNumber += 1;
+            }
+            return `key-${nextNumber}`;
+        }
+
+        function buildAuthEntryYamlWithInsertedTemplate(currentValue) {
+            const existingValue = String(currentValue ?? '');
+            const insertedId = suggestNextAuthEntryTemplateId(existingValue);
+            const trimmedValue = existingValue.trim();
+            if (!trimmedValue) {
+                return {
+                    replaceStart: 0,
+                    replaceEnd: existingValue.length,
+                    insertedText: `${getAuthEntryYamlTemplate(insertedId)}\n`,
+                    insertedId,
+                    templateOffset: 0,
+                };
+            }
+
+            const entryTemplate = getSingleAuthEntryYamlTemplate(insertedId);
+            const normalizedValue = existingValue.replace(/\s+$/, '');
+            const separator = /(^|\n)entries:\s*$/.test(normalizedValue) ? '\n' : '\n\n';
+            return {
+                replaceStart: normalizedValue.length,
+                replaceEnd: existingValue.length,
+                insertedText: `${separator}${entryTemplate}`,
+                insertedId,
+                templateOffset: normalizedValue.length + separator.length,
+            };
+        }
+
+        function getSingleAuthEntryYamlTemplate(entryId = 'key-1') {
+            return getAuthEntryYamlTemplate(entryId)
+                .split(/\r?\n/)
+                .slice(1)
+                .join('\n');
         }
 
         function needsYamlQuoting(text) {
@@ -2008,15 +2464,17 @@
             return entries;
         }
 
-        function replaceAuthEntryCards(entries) {
+        function replaceAuthEntryCards(entries, options = {}) {
+            const { expandFirst = false } = options || {};
             const container = document.getElementById('authEntriesContainer');
             if (!container) {
                 throw new Error('Auth Entries 容器不存在');
             }
 
+            closeDeleteAuthEntryConfirm(false);
             container.innerHTML = '';
             authEntryCardSequence = 0;
-            entries.forEach((entry, index) => addAuthEntryCard(entry, { expand: index === 0 }));
+            entries.forEach((entry, index) => addAuthEntryCard(entry, { expand: expandFirst && index === 0 }));
         }
 
         function insertTextAtTextareaCursor(textarea, insertText) {
@@ -2031,23 +2489,25 @@
             textarea.setSelectionRange(nextCursor, nextCursor);
         }
 
-        function insertAuthEntryYamlTemplate() {
-            const textarea = document.getElementById('authEntryImportYaml');
-            if (!(textarea instanceof HTMLTextAreaElement)) return;
+        function insertTextAtAuthEntryYamlCursor(insertText) {
+            const text = String(insertText ?? '');
+            if (!text) return;
 
-            const currentValue = textarea.value.trim();
-            if (!currentValue) {
-                textarea.value = `${getAuthEntryYamlTemplate()}\n`;
-                textarea.focus();
-                textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+            if (isAuthEntryYamlEditorReady()) {
+                authEntryYamlEditor.insert(text);
+                syncAuthEntryYamlTextareaValue(authEntryYamlEditor.session.getValue());
+                authEntryYamlEditor.focus();
                 return;
             }
 
-            const entryTemplate = getSingleAuthEntryYamlTemplate();
-            const prefix = textarea.selectionStart > 0 && !textarea.value.endsWith('\n')
-                ? '\n\n'
-                : '\n';
-            insertTextAtTextareaCursor(textarea, `${prefix}${entryTemplate}`);
+            insertTextAtTextareaCursor(getAuthEntryYamlTextarea(), text);
+        }
+
+        function insertAuthEntryYamlTemplate() {
+            const currentValue = getAuthEntryYamlValue();
+            const payload = buildAuthEntryYamlWithInsertedTemplate(currentValue);
+            replaceAuthEntryYamlRange(payload.replaceStart, payload.replaceEnd, payload.insertedText);
+            focusInsertedAuthEntryTemplateId(payload.insertedId, payload.templateOffset);
         }
 
         function isAuthEntryCardBlank(card) {
@@ -2081,11 +2541,9 @@
         }
 
         function openAuthEntryImportModal() {
-            const textarea = document.getElementById('authEntryImportYaml');
-            if (textarea) {
-                const entries = getCurrentAuthEntriesForYamlEditor();
-                textarea.value = entries.length ? buildAuthEntriesYamlText(entries) : getAuthEntryYamlTemplate();
-            }
+            initializeAuthEntryYamlEditor();
+            const entries = getCurrentAuthEntriesForYamlEditor();
+            setAuthEntryYamlValue(entries.length ? buildAuthEntriesYamlText(entries) : getAuthEntryYamlTemplate());
             resizeAuthEntryYamlEditor(true);
             authEntryImportModalInstance?.show();
         }
@@ -2108,9 +2566,10 @@
         }
 
         function resizeAuthEntryYamlEditor(force = false) {
-            const textarea = document.getElementById('authEntryImportYaml');
+            const textarea = getAuthEntryYamlTextarea();
+            const editorContainer = getAuthEntryYamlEditorContainer();
             const modal = document.getElementById('authEntryImportModal');
-            if (!(textarea instanceof HTMLTextAreaElement)) {
+            if (!(textarea instanceof HTMLTextAreaElement) && !(editorContainer instanceof HTMLDivElement)) {
                 return;
             }
             if (!force && !modal?.classList.contains('show')) {
@@ -2119,7 +2578,15 @@
 
             const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 900;
             const targetHeight = Math.max(380, Math.min(Math.floor(viewportHeight * 0.54), 560));
-            textarea.style.height = `${targetHeight}px`;
+            if (textarea instanceof HTMLTextAreaElement) {
+                textarea.style.height = `${targetHeight}px`;
+            }
+            if (editorContainer instanceof HTMLDivElement) {
+                editorContainer.style.height = `${targetHeight}px`;
+            }
+            if (isAuthEntryYamlEditorReady()) {
+                window.requestAnimationFrame(() => authEntryYamlEditor.resize(true));
+            }
         }
 
         function deactivateModalFocusTrap(modalInstance) {
@@ -2131,8 +2598,7 @@
         }
 
         async function saveAuthEntriesFromYaml() {
-            const textarea = document.getElementById('authEntryImportYaml');
-            const yamlText = textarea?.value || '';
+            const yamlText = getAuthEntryYamlValue();
             if (!yamlText.trim()) {
                 showMessage('请输入要保存的 YAML 内容', 'error');
                 return;
@@ -2438,6 +2904,7 @@
             if (deletingProviderName !== null) return;
 
             pendingDeleteProviderName = pendingDeleteProviderName === name ? null : name;
+            closeDeleteAuthEntryConfirm(false);
             if (pendingDeleteProviderName !== name) {
                 deletingProviderName = null;
             }
@@ -2558,6 +3025,7 @@
             authGroupModalInstance = new bootstrap.Modal(authGroupModalElement);
             authGroupModalElement.addEventListener('hidden.bs.modal', function() {
                 editingAuthGroupName = null;
+                closeDeleteAuthEntryConfirm(false);
                 fillAuthGroupForm(null);
                 authEntryImportModalInstance?.hide();
             });
@@ -2568,15 +3036,23 @@
                     deactivateModalFocusTrap(authGroupModalInstance);
                     document.body.classList.add('modal-open');
                 }
+                initializeAuthEntryYamlEditor();
                 resizeAuthEntryYamlEditor();
                 blurActiveElement();
-                focusElementSafely(document.getElementById('authEntryImportYaml') || authEntryImportModalElement);
+                if (!focusAuthEntryYamlEditor()) {
+                    focusElementSafely(authEntryImportModalElement);
+                }
             });
             authEntryImportModalElement.addEventListener('hidden.bs.modal', function() {
-                const textarea = document.getElementById('authEntryImportYaml');
+                const textarea = getAuthEntryYamlTextarea();
+                const editorContainer = getAuthEntryYamlEditorContainer();
+                const defaultYaml = textarea?.defaultValue || '';
+                setAuthEntryYamlValue(defaultYaml);
                 if (textarea) {
-                    textarea.value = textarea.defaultValue || '';
                     textarea.style.removeProperty('height');
+                }
+                if (editorContainer) {
+                    editorContainer.style.removeProperty('height');
                 }
                 if (authGroupModalElement.classList.contains('show')) {
                     activateModalFocusTrap(authGroupModalInstance);
@@ -2644,6 +3120,7 @@
             document.getElementById('fetchModelSearchInput').addEventListener('input', renderFetchModelPicker);
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
             window.addEventListener('resize', resizeAuthEntryYamlEditor);
+            initializeAuthEntryYamlEditor();
             document.getElementById('authEntriesContainer').addEventListener('input', function(event) {
                 const card = event.target instanceof HTMLElement ? event.target.closest('.auth-entry-card') : null;
                 syncAuthEntryCardSummary(card);
