@@ -41,11 +41,14 @@ class ProviderController:
 
         self._app.route('/api/providers', methods=['GET'])(auth(self.get_providers))
         self._app.route('/api/providers', methods=['POST'])(auth(self.create_provider))
+        self._app.route('/api/providers/batch', methods=['POST'])(auth(self.batch_providers))
         self._app.route('/api/providers/fetch-models', methods=['GET'])(auth(self.fetch_models))
         self._app.route('/api/providers/chat-whitelist', methods=['PUT'])(auth(self.update_chat_whitelist))
         self._app.route('/api/providers/<string:name>', methods=['GET'])(auth(self.get_provider))
         self._app.route('/api/providers/<string:name>', methods=['PUT'])(auth(self.update_provider))
         self._app.route('/api/providers/<string:name>', methods=['DELETE'])(auth(self.delete_provider))
+        self._app.route('/api/providers/<string:name>/disable', methods=['POST'])(auth(self.disable_provider))
+        self._app.route('/api/providers/<string:name>/enable', methods=['POST'])(auth(self.enable_provider))
         self._app.route('/api/auth-groups', methods=['GET'])(auth(self.get_auth_groups))
         self._app.route('/api/auth-groups', methods=['POST'])(auth(self.create_auth_group))
         self._app.route('/api/auth-groups/import-entries', methods=['POST'])(auth(self.import_auth_group_entries))
@@ -126,6 +129,56 @@ class ProviderController:
             return jsonify({'error': message}), status_code
         except Exception as exc:
             self._logger.error('Error deleting provider: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def disable_provider(self, name: str) -> Response:
+        try:
+            provider = self._provider_service.set_provider_enabled(name, enabled=False)
+            self._logger.info('Provider disabled: %s', name)
+            return jsonify(provider)
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error disabling provider: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def enable_provider(self, name: str) -> Response:
+        try:
+            provider = self._provider_service.set_provider_enabled(name, enabled=True)
+            self._logger.info('Provider enabled: %s', name)
+            return jsonify(provider)
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error enabling provider: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def batch_providers(self) -> Response:
+        try:
+            payload = request.get_json(silent=True) or {}
+            action = str(payload.get('action') or '').strip().lower()
+            names = payload.get('names')
+            if action == 'enable':
+                result = self._provider_service.batch_set_provider_enabled(names, enabled=True)
+            elif action == 'disable':
+                result = self._provider_service.batch_set_provider_enabled(names, enabled=False)
+            elif action == 'delete':
+                result = self._provider_service.batch_delete_providers(names)
+            else:
+                raise ValueError(f'Unsupported provider batch action: {action or "<empty>"}')
+
+            self._logger.info('Provider batch action completed: action=%s count=%s', action, result.get('count', 0))
+            return jsonify(result)
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error('Error applying provider batch action: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
     def get_auth_groups(self) -> Response:

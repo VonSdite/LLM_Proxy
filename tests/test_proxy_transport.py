@@ -5,10 +5,13 @@ import sys
 import unittest
 from pathlib import Path
 
+from flask import Flask
 from websocket import ABNF
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.application.app_context import AppContext
+from src.config.provider_manager import ProviderManager
 from src.config.provider_config import ProviderConfigSchema, RuntimeProviderSpec
 from src.external.stream_probe import probe_stream_response
 from src.external.upstream_websocket import (
@@ -37,7 +40,51 @@ class FakeWebSocketConnection:
         self.closed = True
 
 
+class FakeLogger:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def _log(self, level: str, msg: str, *args) -> None:
+        rendered = msg % args if args else msg
+        self.records.append((level, rendered))
+
+    def info(self, msg: str, *args) -> None:
+        self._log("info", msg, *args)
+
+    def warning(self, msg: str, *args) -> None:
+        self._log("warning", msg, *args)
+
+    def error(self, msg: str, *args) -> None:
+        self._log("error", msg, *args)
+
+    def debug(self, msg: str, *args) -> None:
+        self._log("debug", msg, *args)
+
+
+class FakeAuthGroupManager:
+    def __init__(self) -> None:
+        self.registered: list[tuple[str, str]] = []
+
+    def register_legacy_provider_group(self, provider_name: str, api_key: str) -> str:
+        self.registered.append((provider_name, api_key))
+        return f"__legacy_provider__/{provider_name}"
+
+
 class ProviderTransportTests(unittest.TestCase):
+    def test_provider_enabled_defaults_to_true(self) -> None:
+        schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "codex",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "model_list": ["gpt-4.1"],
+            }
+        )
+
+        self.assertTrue(schema.enabled)
+        runtime = RuntimeProviderSpec.from_schema(schema)
+        self.assertTrue(runtime.enabled)
+
     def test_provider_transport_defaults_to_websocket_for_ws_scheme(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
             {
@@ -160,6 +207,49 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual(
             [b"data: {\"ok\":true}\n\n", b"data: [DONE]\n\n"],
             list(response.iter_content()),
+        )
+
+
+class ProviderManagerEnabledTests(unittest.TestCase):
+    def test_disabled_provider_is_not_registered_at_runtime(self) -> None:
+        logger = FakeLogger()
+        auth_group_manager = FakeAuthGroupManager()
+        ctx = AppContext(
+            logger=logger,
+            config_manager=None,  # type: ignore[arg-type]
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=Flask(__name__),
+        )
+        manager = ProviderManager(ctx, auth_group_manager)
+
+        manager.load_providers(
+            (
+                ProviderConfigSchema.from_mapping(
+                    {
+                        "name": "disabled-provider",
+                        "enabled": False,
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "disabled-key",
+                        "model_list": ["gpt-4.1"],
+                    }
+                ),
+                ProviderConfigSchema.from_mapping(
+                    {
+                        "name": "enabled-provider",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "enabled-key",
+                        "model_list": ["gpt-4.1-mini"],
+                    }
+                ),
+            )
+        )
+
+        self.assertEqual(("enabled-provider/gpt-4.1-mini",), manager.list_model_names())
+        self.assertIsNone(manager.get_provider_view("disabled-provider"))
+        self.assertIsNotNone(manager.get_provider_view("enabled-provider"))
+        self.assertEqual([("enabled-provider", "enabled-key")], auth_group_manager.registered)
+        self.assertTrue(
+            any("disabled-provider" in message and "skipped runtime registration" in message for _, message in logger.records)
         )
 
 
@@ -316,6 +406,32 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("setupCustomSelect('providerSourceFormat');", html)
         self.assertIn("setupCustomSelect('providerTargetFormat');", html)
         self.assertIn("setupCustomSelect('providerVerifySsl');", html)
+        self.assertIn("id=\"selectedProviderCount\"", html)
+        self.assertIn("id=\"enableSelectedProvidersBtn\"", html)
+        self.assertIn("id=\"disableSelectedProvidersBtn\"", html)
+        self.assertIn("id=\"deleteSelectedProvidersBtn\"", html)
+        self.assertIn("id=\"clearSelectedProvidersBtn\"", html)
+        self.assertIn("function updateProviderSelectionUi()", html)
+        self.assertIn("function toggleProviderSelection(name, checked)", html)
+        self.assertIn("function toggleAllProvidersSelection(checked)", html)
+        self.assertIn("function clearSelectedProviders()", html)
+        self.assertIn("function setProviderEnabled(name, enabled)", html)
+        self.assertIn("function runProviderBatchAction(action)", html)
+        self.assertIn("function openProviderBatchDeleteModal(names)", html)
+        self.assertIn("function confirmProviderBatchDelete()", html)
+        self.assertIn("function syncProviderBatchDeleteModal()", html)
+        self.assertIn("/api/providers/batch", html)
+        self.assertIn("/api/providers/${encodeURIComponent(normalizedName)}/${enabled ? 'enable' : 'disable'}", html)
+        self.assertIn('id="providerSelectAllCheckbox"', html)
+        self.assertIn('id="providerBatchDeleteModal"', html)
+        self.assertIn('id="providerBatchDeleteMessage"', html)
+        self.assertIn('id="confirmProviderBatchDeleteBtn"', html)
+        self.assertIn('class="modal-dialog modal-dialog-centered provider-batch-delete-modal-dialog"', html)
+        self.assertIn('data-provider-row-checkbox="${encodedProviderName}"', html)
+        self.assertIn("class=\"btn-action ${isEnabled ? 'btn-delete' : 'btn-edit'}\"", html)
+        self.assertIn("providerBatchDeleteModalInstance = new bootstrap.Modal(providerBatchDeleteModalElement);", html)
+        self.assertNotIn('id="providerBatchDeleteModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"', html)
+        self.assertNotIn("window.confirm(`确认批量删除已选中的 ${selectedNames.length} 个 Provider？`)", html)
         self.assertNotIn("setupCustomSelect('providerFormat');", html)
         self.assertNotIn("setupCustomSelect('providerStreamFormat');", html)
         self.assertNotIn('id="providerFormatMatrix"', html)
@@ -394,6 +510,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("showActionError('拉取模型'", html)
 
         self.assertIn(".providers-page .provider-help-popover {", css)
+        self.assertIn(".providers-page .provider-batch-summary {", css)
+        self.assertIn(".providers-page .provider-batch-delete-modal-dialog {", css)
+        self.assertIn(".providers-page .provider-table-checkbox {", css)
         self.assertIn(".providers-page .field-label-with-help {", css)
         self.assertIn(".providers-page .entry-import-editor {", css)
         self.assertIn(".providers-page .entry-import-editor .ace_gutter-cell,", css)

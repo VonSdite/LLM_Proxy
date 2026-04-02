@@ -8,6 +8,7 @@ admin:
   password: admin
 providers:
 - name: volcengine
+  enabled: true
   api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
   transport: http
   source_format: openai_chat

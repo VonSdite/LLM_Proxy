@@ -68,6 +68,10 @@ class ProviderManager:
         if spec.name in self._provider_by_name:
             raise ValueError(f"Duplicate provider name detected: {spec.name}")
 
+        if not spec.enabled:
+            self._logger.info("Provider '%s' disabled: skipped runtime registration", spec.name)
+            return
+
         if not spec.model_list:
             self._logger.warning("Provider '%s' skipped: model_list is empty", spec.name)
             return

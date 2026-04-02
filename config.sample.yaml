@@ -32,6 +32,7 @@ auth_groups:
 
 providers:
   - name: openai-chat
+    # enabled: true  # optional, defaults to true; disabled providers are hidden from /v1/models
     api: https://api.openai.com/v1/chat/completions
     transport: http
     source_format: openai_chat

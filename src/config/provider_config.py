@@ -29,6 +29,7 @@ SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https", "ws", "wss"}
 SUPPORTED_AUTH_GROUP_STRATEGIES = {DEFAULT_AUTH_GROUP_STRATEGY}
 SUPPORTED_PROVIDER_FIELDS = {
     "name",
+    "enabled",
     "api",
     "transport",
     "source_format",
@@ -367,6 +368,7 @@ class ProviderConfigSchema:
 
     name: str
     api: str
+    enabled: bool = True
     transport: str = DEFAULT_PROVIDER_TRANSPORT
     source_format: str = DEFAULT_PROVIDER_SOURCE_FORMAT
     target_format: str = DEFAULT_PROVIDER_TARGET_FORMAT
@@ -407,6 +409,12 @@ class ProviderConfigSchema:
 
         return cls(
             name=name,
+            enabled=parse_optional_bool(
+                config.get("enabled"),
+                default=True,
+                error_message="Provider enabled must be a boolean value",
+            )
+            is not False,
             api=api,
             transport=resolve_provider_transport(api, config.get("transport")),
             source_format=resolve_provider_protocol(
@@ -432,6 +440,7 @@ class ProviderConfigSchema:
     def to_mapping(self) -> Dict[str, Any]:
         config: Dict[str, Any] = {
             "name": self.name,
+            "enabled": bool(self.enabled),
             "api": self.api,
             "transport": self.transport,
             "source_format": self.source_format,
@@ -463,6 +472,7 @@ class RuntimeProviderSpec:
     """Provider runtime specification."""
 
     name: str
+    enabled: bool
     api: str
     transport: str
     source_format: str
@@ -484,6 +494,7 @@ class RuntimeProviderSpec:
     def from_schema(cls, config: ProviderConfigSchema) -> "RuntimeProviderSpec":
         return cls(
             name=config.name,
+            enabled=bool(config.enabled),
             api=config.api,
             transport=config.transport,
             source_format=config.source_format,
@@ -508,6 +519,7 @@ class ProviderRuntimeView:
     """Read-only runtime view exposed by ProviderManager."""
 
     name: str
+    enabled: bool
     api: str
     transport: str
     source_format: str
@@ -525,6 +537,7 @@ class ProviderRuntimeView:
     def from_spec(cls, spec: RuntimeProviderSpec, *, legacy_api_key: bool = False) -> "ProviderRuntimeView":
         return cls(
             name=spec.name,
+            enabled=bool(spec.enabled),
             api=spec.api,
             transport=spec.transport,
             source_format=spec.source_format,
