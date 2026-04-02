@@ -43,6 +43,7 @@ server:
 
 providers:
   - name: openai-chat
+    # enabled: false  # 可选；默认 true；禁用后不会出现在 /v1/models
     api: https://api.openai.com/v1/chat/completions
     transport: http
     source_format: openai_chat
@@ -56,6 +57,7 @@ providers:
 
 也可以直接从 [config.sample.yaml](config.sample.yaml) 开始裁剪。
 注意：下游调用时的模型名不是裸模型名，而是 `provider/model`，例如 `openai-chat/gpt-4.1`。
+如果未配置 `providers[].enabled`，默认就是启用状态。
 
 ### 3. 启动服务
 
@@ -152,6 +154,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 ### `providers[]` 字段说明
 
 - `name`：Provider 名称，必须唯一；下游模型名会以它作为前缀
+- `enabled`：是否启用；默认 `true`。设为 `false` 后该 Provider 不参与运行时注册，也不会出现在 `GET /v1/models`
 - `api`：上游接口地址，支持 `http://`、`https://`、`ws://`、`wss://`
 - `transport`：上游传输方式，支持 `http` 和 `websocket`
 - `source_format`：上游真实协议格式
@@ -292,11 +295,12 @@ providers:
 - 按 `target_format` 校验当前路由是否匹配，避免请求打错入口
 - 支持流式和非流式响应
 - 自动识别 SSE、NDJSON、WebSocket JSON 等上游返回形态
-- `GET /v1/models` 会返回模型列表及 `provider_name`、`source_format`、`target_format`、`transport` 等元信息
+- `GET /v1/models` 会返回当前已启用 Provider 的模型列表，以及 `provider_name`、`source_format`、`target_format`、`transport` 等元信息
 
 ### 2. Provider 与 Auth Group 管理
 
 - Provider 增删改查
+- 支持行内启用 / 禁用，以及批量启用 / 禁用 / 删除
 - 拉取上游模型列表并辅助填充 `model_list`
 - Auth Group 增删改查
 - YAML 批量导入 Auth Entries

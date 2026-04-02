@@ -177,6 +177,10 @@
     margin-bottom: 14px;
 }
 
+.providers-page .provider-batch-summary {
+    margin-bottom: 14px;
+}
+
 .providers-page .providers-table-shell {
     overflow: auto;
     border: 1px solid var(--line);
@@ -327,6 +331,25 @@
 
 .providers-page .providers-table tbody tr:hover td {
     background: var(--surface-hover);
+}
+
+.providers-page .providers-table th.provider-select-column,
+.providers-page .providers-table td.provider-select-cell {
+    width: 48px;
+    min-width: 48px;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.providers-page .provider-table-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.providers-page .provider-table-checkbox:disabled {
+    cursor: wait;
 }
 
 .providers-page .providers-table td.provider-name-cell {
@@ -764,8 +787,10 @@
     transition: background-color var(--transition), border-color var(--transition), color var(--transition);
 }
 
-.providers-page .providers-table td:last-child {
-    width: 124px;
+.providers-page .providers-table td.provider-actions-cell,
+.providers-page .providers-table th:last-child {
+    width: 1%;
+    white-space: nowrap;
     vertical-align: middle;
 }
 
@@ -1027,6 +1052,10 @@
 
 .providers-page .modal-dialog {
     max-width: min(1120px, calc(100vw - 32px));
+}
+
+.providers-page .provider-batch-delete-modal-dialog {
+    max-width: min(420px, calc(100vw - 32px));
 }
 
 .providers-page .auth-entry-yaml-modal-dialog {

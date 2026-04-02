@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260402-5">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260402-6">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
@@ -46,6 +46,13 @@
                     <div class="section-header-actions">
                         <button type="button" class="btn btn-primary" onclick="openCreateModal()">新增 Provider</button>
                     </div>
+                </div>
+                <div class="toolbar-summary provider-batch-summary">
+                    <span class="toolbar-pill">已选 <strong id="selectedProviderCount">0</strong> 个</span>
+                    <button type="button" class="btn btn-toolbar-secondary" id="enableSelectedProvidersBtn" onclick="runProviderBatchAction('enable')" disabled>批量启用</button>
+                    <button type="button" class="btn btn-toolbar-secondary" id="disableSelectedProvidersBtn" onclick="runProviderBatchAction('disable')" disabled>批量禁用</button>
+                    <button type="button" class="btn btn-toolbar-secondary" id="clearSelectedProvidersBtn" onclick="clearSelectedProviders()" disabled>清空选择</button>
+                    <button type="button" class="btn btn-toolbar-secondary" id="deleteSelectedProvidersBtn" onclick="runProviderBatchAction('delete')" disabled>批量删除</button>
                 </div>
                 <div class="providers-table-shell" id="providersContainer">
                     <div class="loading">正在加载 provider 配置...</div>
@@ -437,6 +444,24 @@
             </div>
         </div>
     </div>
+    <div class="modal fade" id="providerBatchDeleteModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered provider-batch-delete-modal-dialog">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <div>
+                        <h5 class="modal-title fw-semibold">确认批量删除</h5>
+                    </div>
+                </div>
+                <div class="modal-body pt-0">
+                    <p class="mb-0 fw-semibold" id="providerBatchDeleteMessage">是否批量删除 0 个 Provider？</p>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" id="cancelProviderBatchDeleteBtn" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-danger" id="confirmProviderBatchDeleteBtn" onclick="confirmProviderBatchDelete()">确认删除</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div class="inline-confirm-popover floating-delete-popover" id="providerDeletePopover" data-placement="bottom" hidden>
         <div class="inline-confirm-text">确认删除？</div>
@@ -473,6 +498,7 @@
         let editingProviderName = null;
         let editingAuthGroupName = null;
         let providerModalInstance = null;
+        let providerBatchDeleteModalInstance = null;
         let authGroupModalInstance = null;
         let authEntryImportModalInstance = null;
         let authGroupRuntimeModalInstance = null;
@@ -484,6 +510,10 @@
         let activeAuthGroupRuntime = null;
         let pendingDeleteProviderName = null;
         let deletingProviderName = null;
+        let pendingProviderBatchDeleteNames = [];
+        let selectedProviderNames = new Set();
+        let togglingProviderNames = new Set();
+        let providerBatchActionInFlight = false;
         let fetchedModelCandidates = [];
         let fetchedModelSelection = new Set();
         let fetchedModelExistingSelection = new Set();
@@ -830,6 +860,177 @@
             popover.style.top = `${top}px`;
             popover.style.left = `${left}px`;
             popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
+        }
+
+        function getNormalizedSelectedProviderNames() {
+            const availableNames = new Set(
+                providers
+                    .map(provider => String(provider?.name || '').trim())
+                    .filter(name => name !== '')
+            );
+            selectedProviderNames = new Set(
+                Array.from(selectedProviderNames).filter(name => availableNames.has(name))
+            );
+            return providers
+                .map(provider => String(provider?.name || '').trim())
+                .filter(name => name !== '' && selectedProviderNames.has(name));
+        }
+
+        function updateProviderSelectionUi() {
+            const selectedNames = getNormalizedSelectedProviderNames();
+            const selectedCount = selectedNames.length;
+            const totalCount = providers.length;
+            const selectedCountElement = document.getElementById('selectedProviderCount');
+            if (selectedCountElement) {
+                selectedCountElement.textContent = String(selectedCount);
+            }
+
+            const selectAllCheckbox = document.getElementById('providerSelectAllCheckbox');
+            if (selectAllCheckbox) {
+                selectAllCheckbox.checked = totalCount > 0 && selectedCount === totalCount;
+                selectAllCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalCount;
+                selectAllCheckbox.disabled = providerBatchActionInFlight || totalCount === 0;
+            }
+
+            document.querySelectorAll('[data-provider-row-checkbox]').forEach(element => {
+                if (!(element instanceof HTMLInputElement)) return;
+                element.disabled = providerBatchActionInFlight;
+            });
+
+            const shouldDisableBatchButtons = providerBatchActionInFlight || selectedCount === 0;
+            [
+                'enableSelectedProvidersBtn',
+                'disableSelectedProvidersBtn',
+                'deleteSelectedProvidersBtn',
+                'clearSelectedProvidersBtn',
+            ].forEach(id => {
+                const button = document.getElementById(id);
+                if (!button) return;
+                button.disabled = shouldDisableBatchButtons;
+            });
+        }
+
+        function toggleProviderSelection(name, checked) {
+            const normalizedName = String(name || '').trim();
+            if (!normalizedName) return;
+            if (checked) {
+                selectedProviderNames.add(normalizedName);
+            } else {
+                selectedProviderNames.delete(normalizedName);
+            }
+            updateProviderSelectionUi();
+        }
+
+        function toggleAllProvidersSelection(checked) {
+            if (checked) {
+                selectedProviderNames = new Set(
+                    providers
+                        .map(provider => String(provider?.name || '').trim())
+                        .filter(name => name !== '')
+                );
+            } else {
+                selectedProviderNames = new Set();
+            }
+            renderProviders();
+        }
+
+        function clearSelectedProviders() {
+            selectedProviderNames = new Set();
+            renderProviders();
+        }
+
+        function syncProviderBatchDeleteModal() {
+            const count = pendingProviderBatchDeleteNames.length;
+            const messageElement = document.getElementById('providerBatchDeleteMessage');
+            const cancelButton = document.getElementById('cancelProviderBatchDeleteBtn');
+            const confirmButton = document.getElementById('confirmProviderBatchDeleteBtn');
+
+            if (messageElement) {
+                messageElement.textContent = `是否批量删除 ${count} 个 Provider？`;
+            }
+            if (cancelButton) {
+                cancelButton.disabled = providerBatchActionInFlight;
+            }
+            if (confirmButton) {
+                confirmButton.disabled = providerBatchActionInFlight || count === 0;
+                confirmButton.textContent = providerBatchActionInFlight ? '删除中...' : '确认删除';
+            }
+        }
+
+        function openProviderBatchDeleteModal(names) {
+            const normalizedNames = Array.isArray(names)
+                ? names.map(name => String(name || '').trim()).filter(name => name !== '')
+                : [];
+            if (!normalizedNames.length) {
+                showMessage('请先选择至少一个 Provider', 'error');
+                return;
+            }
+
+            pendingProviderBatchDeleteNames = normalizedNames;
+            syncProviderBatchDeleteModal();
+            providerBatchDeleteModalInstance?.show();
+        }
+
+        function getProviderBatchActionMeta(action) {
+            return {
+                enable: { label: '启用', past: '启用', fallback: '批量启用 Provider 失败' },
+                disable: { label: '禁用', past: '禁用', fallback: '批量禁用 Provider 失败' },
+                delete: { label: '删除', past: '删除', fallback: '批量删除 Provider 失败' },
+            }[action] || null;
+        }
+
+        async function executeProviderBatchAction(action, selectedNames, meta, options = {}) {
+            const { closeDeleteModal = false } = options || {};
+
+            closeDeleteProviderConfirm(false);
+            providerBatchActionInFlight = true;
+            syncProviderBatchDeleteModal();
+            renderProviders();
+
+            try {
+                const response = await fetch('/api/providers/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: action,
+                        names: selectedNames,
+                    }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || meta.fallback);
+                }
+
+                selectedProviderNames = action === 'delete' ? new Set() : new Set(selectedNames);
+                if (action === 'delete') {
+                    pendingProviderBatchDeleteNames = [];
+                }
+                if (closeDeleteModal) {
+                    providerBatchDeleteModalInstance?.hide();
+                }
+                showMessage(`已批量${meta.past} ${result.count || selectedNames.length} 个 Provider，配置已重载`, 'success');
+                await loadProviders();
+            } catch (error) {
+                console.error(`批量${meta.label} provider 失败:`, error);
+                showActionError(`批量${meta.label} Provider`, error, { fallback: meta.fallback });
+            } finally {
+                providerBatchActionInFlight = false;
+                syncProviderBatchDeleteModal();
+                renderProviders();
+            }
+        }
+
+        async function confirmProviderBatchDelete() {
+            const selectedNames = pendingProviderBatchDeleteNames.slice();
+            if (!selectedNames.length || providerBatchActionInFlight) {
+                return;
+            }
+
+            const meta = getProviderBatchActionMeta('delete');
+            if (!meta) {
+                return;
+            }
+            await executeProviderBatchAction('delete', selectedNames, meta, { closeDeleteModal: true });
         }
 
         function getAuthEntryDeletePopoverElement() {
@@ -1568,11 +1769,13 @@
                     throw new Error(data.error || '加载 provider 失败');
                 }
                 providers = Array.isArray(data) ? data : [];
+                getNormalizedSelectedProviderNames();
                 renderProviderAuthGroupOptions(document.getElementById('providerAuthGroup')?.value || '');
                 renderProviders();
             } catch (error) {
                 console.error('加载 provider 失败:', error);
                 document.getElementById('providersContainer').innerHTML = '<div class="error">加载 provider 失败</div>';
+                updateProviderSelectionUi();
             }
         }
 
@@ -1673,6 +1876,7 @@
             }
             if (!providers.length) {
                 container.innerHTML = '<div class="empty-state">当前没有 provider 配置</div>';
+                updateProviderSelectionUi();
                 return;
             }
 
@@ -1680,6 +1884,14 @@
                 <table class="providers-table">
                     <thead>
                         <tr>
+                            <th class="provider-select-column">
+                                <input
+                                    type="checkbox"
+                                    class="provider-table-checkbox"
+                                    id="providerSelectAllCheckbox"
+                                    onchange="toggleAllProvidersSelection(this.checked)"
+                                >
+                            </th>
                             <th>名称</th>
                             <th>API 地址</th>
                             <th>模型</th>
@@ -1690,9 +1902,13 @@
             `;
 
             providers.forEach(provider => {
+                const isEnabled = provider?.enabled !== false;
+                const encodedProviderName = encodeURIComponent(provider.name);
+                const isSelected = selectedProviderNames.has(provider.name);
                 const models = Array.isArray(provider.model_list) ? provider.model_list : [];
                 const preview = getModelPreview(models);
                 const isDeletePending = pendingDeleteProviderName === provider.name;
+                const isTogglePending = togglingProviderNames.has(provider.name);
                 const modelTags = preview.visible.length
                     ? preview.visible.map(model => `<span class="model-tag">${escapeHtml(model)}</span>`).join('')
                     : '<span class="muted-text">未配置</span>';
@@ -1701,19 +1917,30 @@
                             <div class="model-summary-bar">
                                 <span class="model-count">共 ${preview.total} 个</span>
                                 ${preview.hiddenCount ? `<span class="model-more">+${preview.hiddenCount}</span>` : ''}
-                                <button class="btn-inline" type="button" onclick="openModelDetail(decodeProviderName('${encodeURIComponent(provider.name)}'))">查看全部</button>
+                                <button class="btn-inline" type="button" onclick="openModelDetail(decodeProviderName('${encodedProviderName}'))">查看全部</button>
                             </div>
                       `
                     : '';
 
                 html += `
                     <tr>
+                        <td class="provider-select-cell">
+                            <input
+                                type="checkbox"
+                                class="provider-table-checkbox"
+                                data-provider-row-checkbox="${encodedProviderName}"
+                                onchange="toggleProviderSelection(decodeProviderName('${encodedProviderName}'), this.checked)"
+                                ${isSelected ? 'checked' : ''}
+                                ${providerBatchActionInFlight ? 'disabled' : ''}
+                            >
+                        </td>
                         <td class="provider-name-cell">
                             <span class="provider-name-text">${escapeHtml(provider.name)}</span>
                         </td>
                         <td class="provider-api-cell" title="${escapeHtml(provider.api)}">
                             <span class="provider-api-text">${escapeHtml(provider.api)}</span>
                             <div class="provider-meta-line">
+                                <span class="provider-chip ${isEnabled ? 'provider-chip-hook' : 'provider-chip-muted'}">${isEnabled ? 'enabled' : 'disabled'}</span>
                                 <span class="provider-chip">${escapeHtml(provider.transport || 'http')}</span>
                                 <span class="provider-chip">${escapeHtml(provider.source_format || 'openai_chat')}</span>
                                 <span class="provider-chip provider-chip-target">${escapeHtml(provider.target_format || 'openai_chat')}</span>
@@ -1726,15 +1953,21 @@
                             <div class="model-tags model-tags-preview">${modelTags}</div>
                             ${modelSummary}
                         </td>
-                        <td>
+                        <td class="provider-actions-cell">
                             <div class="action-buttons">
-                                <button class="btn-action btn-edit" onclick="openEditModal(decodeProviderName('${encodeURIComponent(provider.name)}'))">编辑</button>
+                                <button class="btn-action btn-edit" onclick="openEditModal(decodeProviderName('${encodedProviderName}'))">编辑</button>
+                                <button
+                                    class="btn-action ${isEnabled ? 'btn-delete' : 'btn-edit'}"
+                                    onclick="setProviderEnabled(decodeProviderName('${encodedProviderName}'), ${isEnabled ? 'false' : 'true'})"
+                                    ${isTogglePending || providerBatchActionInFlight ? 'disabled' : ''}
+                                >${isTogglePending ? '处理中...' : (isEnabled ? '禁用' : '启用')}</button>
                                 <div class="inline-confirm-wrap">
                                     <button
                                         type="button"
                                         class="btn-action btn-delete ${isDeletePending ? 'is-active' : ''}"
-                                        data-provider-delete-trigger="${encodeURIComponent(provider.name)}"
-                                        onclick="toggleDeleteProviderConfirm(decodeProviderName('${encodeURIComponent(provider.name)}'), event)"
+                                        data-provider-delete-trigger="${encodedProviderName}"
+                                        onclick="toggleDeleteProviderConfirm(decodeProviderName('${encodedProviderName}'), event)"
+                                        ${providerBatchActionInFlight ? 'disabled' : ''}
                                     >删除</button>
                                 </div>
                             </div>
@@ -1745,6 +1978,7 @@
 
             html += '</tbody></table>';
             container.innerHTML = html;
+            updateProviderSelectionUi();
             syncDeleteProviderPopover();
         }
 
@@ -2899,9 +3133,64 @@
             }
         }
 
+        async function setProviderEnabled(name, enabled) {
+            const normalizedName = String(name || '').trim();
+            if (!normalizedName || providerBatchActionInFlight || togglingProviderNames.has(normalizedName)) {
+                return;
+            }
+
+            closeDeleteProviderConfirm(false);
+            togglingProviderNames.add(normalizedName);
+            renderProviders();
+
+            try {
+                const response = await fetch(
+                    `/api/providers/${encodeURIComponent(normalizedName)}/${enabled ? 'enable' : 'disable'}`,
+                    { method: 'POST' }
+                );
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || `${enabled ? '启用' : '禁用'} provider 失败`);
+                }
+                showMessage(`Provider 已${enabled ? '启用' : '禁用'}，配置已重载`, 'success');
+                await loadProviders();
+            } catch (error) {
+                console.error(`${enabled ? '启用' : '禁用'} provider 失败:`, error);
+                showActionError(`${enabled ? '启用' : '禁用'} Provider`, error, {
+                    fallback: `${enabled ? '启用' : '禁用'} Provider 失败`,
+                });
+            } finally {
+                togglingProviderNames.delete(normalizedName);
+                renderProviders();
+            }
+        }
+
+        async function runProviderBatchAction(action) {
+            const selectedNames = getNormalizedSelectedProviderNames();
+            if (!selectedNames.length || providerBatchActionInFlight) {
+                if (!selectedNames.length) {
+                    showMessage('请先选择至少一个 Provider', 'error');
+                }
+                return;
+            }
+
+            const meta = getProviderBatchActionMeta(action);
+            if (!meta) {
+                showMessage(`不支持的批量操作: ${action}`, 'error');
+                return;
+            }
+
+            if (action === 'delete') {
+                openProviderBatchDeleteModal(selectedNames);
+                return;
+            }
+
+            await executeProviderBatchAction(action, selectedNames, meta);
+        }
+
         function toggleDeleteProviderConfirm(name, event) {
             event?.stopPropagation();
-            if (deletingProviderName !== null) return;
+            if (deletingProviderName !== null || providerBatchActionInFlight) return;
 
             pendingDeleteProviderName = pendingDeleteProviderName === name ? null : name;
             closeDeleteAuthEntryConfirm(false);
@@ -2949,6 +3238,7 @@
                 if (!response.ok) {
                     throw new Error(result.error || '删除 provider 失败');
                 }
+                selectedProviderNames.delete(name);
                 pendingDeleteProviderName = null;
                 deletingProviderName = null;
                 hideProviderDeletePopover();
@@ -3020,6 +3310,14 @@
                 resetFetchModelPickerState();
                 editingProviderName = null;
                 fillForm(null);
+            });
+            const providerBatchDeleteModalElement = document.getElementById('providerBatchDeleteModal');
+            providerBatchDeleteModalInstance = new bootstrap.Modal(providerBatchDeleteModalElement);
+            providerBatchDeleteModalElement.addEventListener('hidden.bs.modal', function() {
+                if (!providerBatchActionInFlight) {
+                    pendingProviderBatchDeleteNames = [];
+                    syncProviderBatchDeleteModal();
+                }
             });
             const authGroupModalElement = document.getElementById('authGroupModal');
             authGroupModalInstance = new bootstrap.Modal(authGroupModalElement);
@@ -3134,6 +3432,7 @@
             updateModelListCount();
             updateProviderAuthModeFields();
             updateFetchModelsButtonState();
+            updateProviderSelectionUi();
             loadPageData();
         });
     </script>
