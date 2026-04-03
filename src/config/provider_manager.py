@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """Provider 管理器：负责加载配置、构建运行时对象并暴露只读注册表接口。"""
 
+from __future__ import annotations
+
 import hashlib
 import importlib.util
 import inspect

@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 """LLM provider 运行时对象。"""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
 from typing import Any, Dict, Optional
 
 from ..hooks import HookContext, HookModule
+from ..utils.compat import dataclass
 
 
 @dataclass(frozen=True, slots=True)

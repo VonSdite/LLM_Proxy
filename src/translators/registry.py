@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Optional
 
 from ..proxy_core.contracts import DownstreamChunk, StreamEvent
+from ..utils.compat import Protocol, dataclass
 from .claude_bridge import (
     convert_claude_request_to_openai_chat_request as _convert_claude_request_to_openai_chat_request,
     convert_openai_chat_response_to_claude as _convert_openai_chat_response_to_claude,
@@ -175,8 +175,11 @@ class OpenAIResponsesTranslator:
             if isinstance(item, dict) and str(item.get("type") or "").strip().lower() == "function_call":
                 item_id = str(item.get("id") or payload.get("item_id") or "").strip()
                 if item_id:
+                    call_id = str(item.get("call_id") or "").strip()
+                    if not call_id:
+                        call_id = item_id[3:] if item_id.startswith("fc_") else item_id
                     items[item_id] = {
-                        "id": str(item.get("call_id") or item_id.removeprefix("fc_") or item_id),
+                        "id": call_id,
                         "name": str(item.get("name") or ""),
                         "index": int(payload.get("output_index") or 0),
                         "delta_emitted": False,

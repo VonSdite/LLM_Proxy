@@ -29,8 +29,12 @@ def is_valid_ip(ip_value: Optional[str]) -> bool:
     if not ip_value:
         return False
 
+    value = ip_value.strip()
+    if value.startswith('::ffff:'):
+        value = value[7:]
+
     try:
-        ipaddress.ip_address(ip_value.strip().removeprefix('::ffff:'))
+        ipaddress.ip_address(value)
         return True
     except ValueError:
         return False

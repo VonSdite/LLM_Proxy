@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Optional
+
+from ..utils.compat import Literal, dataclass
 
 
 @dataclass(frozen=True, slots=True)

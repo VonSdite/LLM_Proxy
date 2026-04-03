@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 import requests
@@ -26,6 +26,7 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..translators import Translator, build_default_translator_registry
+from ..utils.compat import dataclass
 from ..utils.net import build_requests_proxies
 
 

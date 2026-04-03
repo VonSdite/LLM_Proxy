@@ -3,11 +3,11 @@
 """Hook type contracts."""
 
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Optional
 
 from ..application.app_context import Logger
+from ..utils.compat import Protocol, StrEnum
 
 
 class HookAbortError(Exception):
