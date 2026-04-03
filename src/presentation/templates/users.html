@@ -1,73 +1,93 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}用户管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260313-8">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260403-19">{% endblock %}
 {% block body_class %}users-page{% endblock %}
 {% block header_title %}用户管理{% endblock %}
-{% block header_subtitle %}统一管理白名单用户与 IP{% endblock %}
+{% block header_subtitle %}统一管理白名单用户、IP 与模型访问权限{% endblock %}
 
 {% block content %}
-        <section class="users-whitelist-section">
-                <div class="whitelist-setting-card" id="chatWhitelistCard">
-                    <div class="whitelist-setting-copy">
-                        <span class="whitelist-setting-label">Chat 白名单</span>
-                        <span class="whitelist-setting-hint">控制 Provider Chat 接口是否启用白名单限制，启用后仅允许白名单访问的用户可访问 Chat</span>
-                    </div>
-                    <div class="whitelist-setting-action">
-                        <span class="whitelist-setting-status" id="chatWhitelistStatus">已禁用</span>
-                        <label class="switch" aria-label="切换 Chat 白名单">
-                            <input type="checkbox" id="chatWhitelistToggle" onchange="toggleChatWhitelist(this.checked)">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                </div>
-        </section>
-
         <section class="add-user-section">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>用户名 *</label>
-                        <input type="text" id="newUsername" placeholder="请输入用户名">
+                <div class="add-user-card">
+                    <div class="section-title-group add-user-heading">
+                        <h2>添加用户</h2>
                     </div>
-                    <div class="form-group">
-                        <label>IP 地址 *</label>
-                        <input type="text" id="newIpAddress" placeholder="仅支持 IPv4，例如 192.168.1.1">
-                    </div>
-                    <div class="form-group form-submit">
-                        <button class="btn btn-primary" onclick="createUser()">添加</button>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>用户名 *</label>
+                            <input type="text" id="newUsername" placeholder="请输入用户名">
+                        </div>
+                        <div class="form-group">
+                            <label>IP 地址 *</label>
+                            <input type="text" id="newIpAddress" placeholder="仅支持 IPv4，例如 192.168.1.1">
+                        </div>
+                        <div class="form-group form-submit">
+                            <button class="btn btn-primary" onclick="createUser()">添加</button>
+                        </div>
                     </div>
                 </div>
         </section>
 
         <section class="users-section">
-                <div class="section-toolbar">
-                    <div class="section-title-group">
-                        <h2>用户列表</h2>
-                    </div>
-                    <div class="section-search" role="search" aria-label="搜索用户">
-                        <div class="section-search-field">
-                            <input
-                                type="text"
-                                id="userSearchInput"
-                                class="form-control"
-                                placeholder="用户名 / IP"
-                                autocomplete="off"
-                                spellcheck="false"
-                            >
-                            <button
-                                type="button"
-                                class="search-clear-button"
-                                id="clearUserSearchBtn"
-                                onclick="clearUserSearch()"
-                                aria-label="清空搜索"
-                                title="清空搜索"
-                                hidden
-                            >&times;</button>
-                        </div>
-                        <button type="button" class="btn btn-primary search-submit-button" onclick="applyUserSearch()">搜索</button>
-                    </div>
-                </div>
                 <div class="users-data-shell">
+                    <div class="section-toolbar">
+                        <div class="section-heading-inline">
+                            <div class="section-title-group">
+                                <h2>用户列表</h2>
+                            </div>
+                            <div class="section-toolbar-actions">
+                                <div class="chat-whitelist-inline-control" id="chatWhitelistCard">
+                                    <div class="chat-whitelist-inline-meta">
+                                        <span class="chat-whitelist-inline-label">Chat 白名单</span>
+                                    </div>
+                                    <label class="switch" aria-label="切换 Chat 白名单">
+                                        <input type="checkbox" id="chatWhitelistToggle" onchange="toggleChatWhitelist(this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                    <button
+                                            type="button"
+                                            class="field-help-button users-help-button"
+                                            id="chatWhitelistHelpBtn"
+                                            data-users-help-topic="whitelist"
+                                            onclick="toggleUsersHelp('whitelist', event)"
+                                            aria-label="查看 Chat 白名单说明"
+                                        >?</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="users-batch-toolbar">
+                        <div class="users-batch-controls" id="usersBatchControls" hidden>
+                            <div class="users-batch-summary">
+                                已选 <strong id="selectedUsersSummary">0</strong> 个
+                            </div>
+                            <div class="users-batch-actions">
+                                <button type="button" class="btn btn-toolbar-secondary" id="batchSetModelPermissionsBtn" onclick="openPermissionModalForBatch()" disabled>设置模型权限</button>
+                            </div>
+                        </div>
+                        <div class="section-search users-table-search" role="search" aria-label="搜索用户">
+                            <div class="section-search-field">
+                                <input
+                                    type="text"
+                                    id="userSearchInput"
+                                    class="form-control"
+                                    placeholder="用户名 / IP"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                >
+                                <button
+                                    type="button"
+                                    class="search-clear-button"
+                                    id="clearUserSearchBtn"
+                                    onclick="clearUserSearch()"
+                                    aria-label="清空搜索"
+                                    title="清空搜索"
+                                    hidden
+                                >&times;</button>
+                            </div>
+                            <button type="button" class="btn btn-primary search-submit-button" onclick="applyUserSearch()">搜索</button>
+                        </div>
+                    </div>
                     <div class="users-table-shell" id="usersTableContainer">
                         <div class="loading">加载用户数据...</div>
                     </div>
@@ -98,7 +118,6 @@
 {% endblock %}
 
 {% block after_container %}
-    <!-- 编辑用户模态框 -->
     <div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-0 shadow">
@@ -123,6 +142,57 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="permissionModal" tabindex="-1" aria-labelledby="permissionModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg permission-modal-dialog">
+            <div class="modal-content border-0 shadow permission-modal-content">
+                <div class="modal-header border-bottom-0">
+                    <div>
+                        <h5 class="modal-title fw-semibold" id="permissionModalLabel">模型权限</h5>
+                        <p class="modal-subtitle mb-0" id="permissionModalSubtitle">为用户设置可访问的模型。</p>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0 permission-modal-body" id="permissionModalBody"></div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="savePermissionBtn" onclick="savePermissionSettings()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="permissionDetailModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <h5 class="modal-title fw-semibold" id="permissionDetailTitle">模型列表</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <input
+                        type="text"
+                        class="form-control permission-detail-search"
+                        id="permissionDetailSearchInput"
+                        placeholder="搜索模型"
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <div class="permission-detail-summary" id="permissionDetailSummary">共 0 个模型</div>
+                    <div class="permission-detail-list" id="permissionDetailList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="users-help-popover" id="usersHelpPopover" data-placement="bottom" hidden>
+        <div class="users-help-popover-header">
+            <div class="users-help-popover-title" id="usersHelpPopoverTitle">说明</div>
+            <button type="button" class="users-help-popover-close" onclick="hideUsersHelpPopover()" aria-label="关闭说明">×</button>
+        </div>
+        <div class="users-help-popover-body" id="usersHelpPopoverBody"></div>
+    </div>
+
     <div class="inline-confirm-popover floating-delete-popover" id="userDeletePopover" data-placement="bottom" hidden>
         <div class="inline-confirm-text">确认删除？</div>
         <div class="inline-confirm-actions">
@@ -139,6 +209,8 @@
         let whitelistControlEnabled = initialWhitelistControlEnabled;
         let chatWhitelistSaving = false;
         let users = [];
+        let availableModels = [];
+        let selectedUserIds = new Set();
         let editingUserId = null;
         let currentPage = 1;
         let pageSize = 50;
@@ -148,13 +220,49 @@
         let currentSearchKeyword = '';
         let activeCustomSelect = null;
         let editModalInstance = null;
+        let permissionModalInstance = null;
+        let permissionDetailModalInstance = null;
         let pendingDeleteUserId = null;
         let deletingUserId = null;
+        let permissionTargetUserIds = [];
+        let permissionModalMode = 'single';
+        let permissionDraftMode = 'all';
+        let permissionDraftSelectedModels = new Set();
+        let permissionDraftMixedSource = false;
+        let permissionSaving = false;
+        let activePermissionDetailUser = null;
+        let activeUsersHelpTrigger = null;
+        let activeUsersHelpTopic = null;
         let usersSortState = {
             key: 'total_tokens',
             direction: 'desc',
             type: 'number'
         };
+        const usersHelpTopics = {
+            whitelist: {
+                title: 'Chat 白名单',
+                html: `
+                    <p>启用后会按 IP 校验白名单，只允许已登记用户访问 Chat。</p>
+                    <p>同时会继续按用户模型权限控制 Chat 请求和 <code>/v1/models</code> 返回结果。</p>
+                `
+            },
+            permission_allow_all: {
+                title: '允许全部模型',
+                html: `
+                    <p>启用后会用 <code>*</code> 表示当前用户可访问全部模型。</p>
+                    <p>同时会自动继承当前和后续新增的模型，不需要逐个勾选。</p>
+                `
+            }
+        };
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
 
         function closeAllCustomSelects() {
             document.querySelectorAll('.custom-select.open').forEach(select => {
@@ -175,8 +283,7 @@
         }
 
         function formatNumberDisplay(value) {
-            const n = normalizeNumber(value);
-            return n.toLocaleString();
+            return normalizeNumber(value).toLocaleString();
         }
 
         function renderNumber(value) {
@@ -185,19 +292,186 @@
             return `<span class="numeric-value" title="${full}">${display}</span>`;
         }
 
+        function getAvailableModelCount() {
+            return Array.isArray(availableModels) ? availableModels.length : 0;
+        }
+
+        function normalizeUserPermissionState(user) {
+            if (!user || user.model_permissions === '*' || user.model_permissions_mode === 'all') {
+                return { mode: 'all', models: [] };
+            }
+            const models = Array.isArray(user.model_permissions)
+                ? user.model_permissions.filter(item => typeof item === 'string' && item.trim())
+                : [];
+            return { mode: 'selected', models: Array.from(new Set(models)) };
+        }
+
+        function getPermissionSignature(user) {
+            const state = normalizeUserPermissionState(user);
+            return state.mode === 'all'
+                ? 'all:*'
+                : `selected:${state.models.slice().sort().join('|')}`;
+        }
+
+        function getSortedSelectedPermissionModels() {
+            const selection = permissionDraftSelectedModels;
+            return availableModels.filter(modelName => selection.has(modelName));
+        }
+
+        function getPermissionPreview(models, limit = 2) {
+            const items = Array.isArray(models) ? models : [];
+            const visible = items.slice(0, limit);
+            return {
+                visible: visible,
+                hiddenCount: Math.max(items.length - visible.length, 0),
+                total: items.length
+            };
+        }
+
+        function updateBatchToolbar() {
+            const controls = document.getElementById('usersBatchControls');
+            const summary = document.getElementById('selectedUsersSummary');
+            const batchButton = document.getElementById('batchSetModelPermissionsBtn');
+            if (!controls || !summary || !batchButton) return;
+
+            const selectedCount = selectedUserIds.size;
+            controls.hidden = !whitelistControlEnabled;
+            summary.textContent = String(selectedCount);
+            batchButton.disabled = selectedCount === 0;
+        }
+
+        function clearUserSelections(shouldRender = true) {
+            selectedUserIds = new Set();
+            if (shouldRender) {
+                renderUsers();
+            } else {
+                updateBatchToolbar();
+            }
+        }
+
+        function syncUserSelectionsToCurrentPage() {
+            const currentUserIds = new Set(users.map(user => Number(user.id)));
+            selectedUserIds = new Set(
+                Array.from(selectedUserIds).filter(userId => currentUserIds.has(Number(userId)))
+            );
+        }
+
+        function areAllCurrentUsersSelected() {
+            if (!users.length) return false;
+            return users.every(user => selectedUserIds.has(Number(user.id)));
+        }
+
+        function toggleSelectAllUsers(checked) {
+            if (!whitelistControlEnabled) return;
+            if (checked) {
+                selectedUserIds = new Set(users.map(user => Number(user.id)));
+            } else {
+                selectedUserIds = new Set();
+            }
+            renderUsers();
+        }
+
+        function toggleUserSelection(userId, checked) {
+            const normalizedUserId = Number(userId);
+            if (!whitelistControlEnabled || !Number.isFinite(normalizedUserId)) return;
+
+            const nextSelection = new Set(selectedUserIds);
+            if (checked) {
+                nextSelection.add(normalizedUserId);
+            } else {
+                nextSelection.delete(normalizedUserId);
+            }
+            selectedUserIds = nextSelection;
+            updateBatchToolbar();
+            const selectAllToggle = document.getElementById('selectAllUsersToggle');
+            if (selectAllToggle) {
+                selectAllToggle.checked = areAllCurrentUsersSelected();
+            }
+        }
+
         function updateChatWhitelistUi() {
             const card = document.getElementById('chatWhitelistCard');
-            const status = document.getElementById('chatWhitelistStatus');
             const toggle = document.getElementById('chatWhitelistToggle');
-            if (!card || !status || !toggle) return;
+            if (!card || !toggle) return;
 
             card.dataset.enabled = whitelistControlEnabled ? 'true' : 'false';
             card.dataset.saving = chatWhitelistSaving ? 'true' : 'false';
             toggle.checked = !!whitelistControlEnabled;
             toggle.disabled = !!chatWhitelistSaving;
-            status.textContent = chatWhitelistSaving
+            toggle.title = chatWhitelistSaving
                 ? '保存中...'
-                : (whitelistControlEnabled ? '已启用' : '已禁用');
+                : (whitelistControlEnabled ? 'Chat 白名单已启用' : 'Chat 白名单已禁用');
+            updateBatchToolbar();
+        }
+
+        function getUsersHelpPopoverElement() {
+            return document.getElementById('usersHelpPopover');
+        }
+
+        function hideUsersHelpPopover() {
+            const popover = getUsersHelpPopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty('top');
+            popover.style.removeProperty('left');
+            popover.style.removeProperty('--popover-arrow-left');
+            popover.dataset.placement = 'bottom';
+            activeUsersHelpTrigger = null;
+            activeUsersHelpTopic = null;
+        }
+
+        function syncUsersHelpPopover() {
+            const popover = getUsersHelpPopoverElement();
+            const titleElement = document.getElementById('usersHelpPopoverTitle');
+            const bodyElement = document.getElementById('usersHelpPopoverBody');
+            const topic = activeUsersHelpTopic ? usersHelpTopics[activeUsersHelpTopic] : null;
+            if (!popover || !titleElement || !bodyElement || !activeUsersHelpTrigger || !topic) return;
+
+            titleElement.textContent = topic.title;
+            bodyElement.innerHTML = topic.html;
+
+            popover.hidden = false;
+
+            const triggerRect = activeUsersHelpTrigger.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            const offset = 12;
+            const viewportPadding = 12;
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const left = Math.min(
+                window.innerWidth - popoverRect.width - viewportPadding,
+                Math.max(viewportPadding, triggerRect.left + ((triggerRect.width - popoverRect.width) / 2))
+            );
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, (triggerRect.left + (triggerRect.width / 2)) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? 'bottom' : 'top';
+            popover.style.top = `${top}px`;
+            popover.style.left = `${left}px`;
+            popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
+        }
+
+        function toggleUsersHelp(topic, event) {
+            event?.preventDefault();
+            event?.stopPropagation();
+
+            const normalizedTopic = String(topic || '').trim();
+            const trigger = event?.currentTarget || document.querySelector(`[data-users-help-topic="${normalizedTopic}"]`);
+            if (!trigger || !usersHelpTopics[normalizedTopic]) return;
+
+            if (activeUsersHelpTrigger === trigger && activeUsersHelpTopic === normalizedTopic) {
+                hideUsersHelpPopover();
+                return;
+            }
+
+            activeUsersHelpTrigger = trigger;
+            activeUsersHelpTopic = normalizedTopic;
+            syncUsersHelpPopover();
         }
 
         async function toggleChatWhitelist(enabled) {
@@ -205,6 +479,10 @@
             whitelistControlEnabled = !!enabled;
             chatWhitelistSaving = true;
             updateChatWhitelistUi();
+            if (!whitelistControlEnabled) {
+                clearUserSelections(false);
+                closePermissionModal();
+            }
             renderUsers();
 
             try {
@@ -218,6 +496,10 @@
                     throw new Error(result.error || '更新 Chat 白名单失败');
                 }
                 whitelistControlEnabled = !!result.enabled;
+                if (!whitelistControlEnabled) {
+                    clearUserSelections(false);
+                    closePermissionModal();
+                }
                 showMessage(`Chat 白名单已${whitelistControlEnabled ? '启用' : '禁用'}`, 'success');
             } catch (error) {
                 console.error('更新 Chat 白名单失败:', error);
@@ -321,7 +603,6 @@
             renderCustomSelectOptions(selectId);
         }
 
-        // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', function() {
             initThemeToggle();
             updateChatWhitelistUi();
@@ -330,6 +611,7 @@
             loadUsers();
             document.getElementById('pageSizeSelect').value = pageSize;
             syncCustomSelectValue('pageSizeSelect');
+
             const editModalElement = document.getElementById('editModal');
             if (editModalElement && window.bootstrap) {
                 editModalInstance = new bootstrap.Modal(editModalElement);
@@ -337,6 +619,37 @@
                     editingUserId = null;
                 });
             }
+
+            const permissionModalElement = document.getElementById('permissionModal');
+            if (permissionModalElement && window.bootstrap) {
+                permissionModalInstance = new bootstrap.Modal(permissionModalElement);
+                permissionModalElement.addEventListener('hidden.bs.modal', function() {
+                    permissionTargetUserIds = [];
+                    permissionModalMode = 'single';
+                    permissionDraftMode = 'all';
+                    permissionDraftSelectedModels = new Set();
+                    permissionDraftMixedSource = false;
+                    permissionSaving = false;
+                    hideUsersHelpPopover();
+                });
+            }
+
+            const permissionDetailModalElement = document.getElementById('permissionDetailModal');
+            if (permissionDetailModalElement && window.bootstrap) {
+                permissionDetailModalInstance = new bootstrap.Modal(permissionDetailModalElement);
+                permissionDetailModalElement.addEventListener('hidden.bs.modal', function() {
+                    activePermissionDetailUser = null;
+                    const searchInput = document.getElementById('permissionDetailSearchInput');
+                    if (searchInput) {
+                        searchInput.value = '';
+                    }
+                    const listElement = document.getElementById('permissionDetailList');
+                    if (listElement) {
+                        listElement.innerHTML = '';
+                    }
+                });
+            }
+
             const pageJumpInput = document.getElementById('pageJumpInput');
             pageJumpInput.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
@@ -349,9 +662,16 @@
             pageJumpInput.addEventListener('input', function() {
                 clearTimeout(jumpDebounceTimer);
                 jumpDebounceTimer = setTimeout(function() {
-                jumpToPage(false);
+                    jumpToPage(false);
                 }, 450);
             });
+
+            const permissionDetailSearchInput = document.getElementById('permissionDetailSearchInput');
+            if (permissionDetailSearchInput) {
+                permissionDetailSearchInput.addEventListener('input', function() {
+                    renderPermissionDetailList();
+                });
+            }
         });
 
         function initUserSearch() {
@@ -415,21 +735,27 @@
             if (!event.target.closest('.inline-confirm-wrap') && !event.target.closest('#userDeletePopover')) {
                 closeDeleteUserConfirm();
             }
+            if (!event.target.closest('[data-users-help-topic]') && !event.target.closest('#usersHelpPopover')) {
+                hideUsersHelpPopover();
+            }
         });
 
         document.addEventListener('keydown', function(event) {
             if (event.key === 'Escape') {
                 closeAllCustomSelects();
                 closeDeleteUserConfirm();
+                hideUsersHelpPopover();
             }
         });
 
         window.addEventListener('resize', function() {
             closeDeleteUserConfirm(false);
+            hideUsersHelpPopover();
         });
 
         window.addEventListener('scroll', function() {
             closeDeleteUserConfirm(false);
+            hideUsersHelpPopover();
         }, true);
 
         function getUserDeletePopoverElement() {
@@ -498,12 +824,12 @@
             popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
         }
 
-        // 加载用户列表
         async function loadUsers() {
             try {
                 pendingDeleteUserId = null;
                 deletingUserId = null;
                 hideUserDeletePopover();
+
                 const params = new URLSearchParams({
                     page: currentPage,
                     page_size: pageSize
@@ -520,7 +846,10 @@
                 } else {
                     users = data.users || [];
                     totalUsers = data.total || users.length;
+                    availableModels = Array.isArray(data.available_models) ? data.available_models : [];
                 }
+
+                syncUserSelectionsToCurrentPage();
                 applyUsersSort();
                 updateUserSearchUi();
                 renderUsers();
@@ -530,6 +859,7 @@
                 document.getElementById('usersTableContainer').innerHTML =
                     '<div class="error">加载用户数据失败</div>';
                 document.getElementById('tableFooter').style.display = 'none';
+                updateBatchToolbar();
             }
         }
 
@@ -633,12 +963,89 @@
             renderUsers();
         }
 
+        function renderModelPermissionSummary(user) {
+            const permissionState = normalizeUserPermissionState(user);
+            if (permissionState.mode === 'all') {
+                return `
+                    <div class="model-permission-summary">
+                        <span class="permission-chip permission-chip-all" title="全部模型">*</span>
+                    </div>
+                `;
+            }
+
+            if (!permissionState.models.length) {
+                return `
+                    <div class="model-permission-summary">
+                        <span class="permission-chip permission-chip-empty" title="当前未授权任何模型">未授权模型</span>
+                    </div>
+                `;
+            }
+
+            const preview = getPermissionPreview(permissionState.models, 2);
+            const chips = preview.visible
+                .map(modelName => `<span class="permission-chip" title="${escapeHtml(modelName)}">${escapeHtml(modelName)}</span>`)
+                .join('');
+            const encodedUserId = Number(user.id);
+            const summaryBar = preview.hiddenCount > 0
+                ? `
+                    <div class="permission-summary-bar">
+                        <button class="permission-more" type="button" onclick="openPermissionDetail(${encodedUserId})">+${preview.hiddenCount}</button>
+                        <button class="btn-inline" type="button" onclick="openPermissionDetail(${encodedUserId})">查看全部</button>
+                    </div>
+                `
+                : '';
+            return `<div class="model-permission-summary">${chips}${summaryBar}</div>`;
+        }
+
+        function renderPermissionDetailList() {
+            const listElement = document.getElementById('permissionDetailList');
+            const summaryElement = document.getElementById('permissionDetailSummary');
+            const searchInput = document.getElementById('permissionDetailSearchInput');
+            if (!listElement || !summaryElement) return;
+
+            const permissionState = normalizeUserPermissionState(activePermissionDetailUser);
+            const allModels = permissionState.mode === 'all'
+                ? availableModels.slice()
+                : permissionState.models.slice();
+            const query = (searchInput?.value || '').trim().toLowerCase();
+            const filteredModels = query
+                ? allModels.filter(modelName => String(modelName).toLowerCase().includes(query))
+                : allModels;
+
+            summaryElement.textContent = query
+                ? `共 ${allModels.length} 个模型，筛选后 ${filteredModels.length} 个`
+                : `共 ${allModels.length} 个模型`;
+
+            if (!filteredModels.length) {
+                listElement.innerHTML = '<div class="permission-list-empty">没有匹配的模型</div>';
+                return;
+            }
+
+            listElement.innerHTML = filteredModels
+                .map(modelName => `<span class="permission-chip permission-chip-detail" title="${escapeHtml(modelName)}">${escapeHtml(modelName)}</span>`)
+                .join('');
+        }
+
+        function openPermissionDetail(userId) {
+            const user = users.find(item => Number(item.id) === Number(userId));
+            if (!user || !permissionDetailModalInstance) return;
+
+            activePermissionDetailUser = user;
+            const identity = [user.username, user.ip_address].filter(Boolean).join(' · ');
+            document.getElementById('permissionDetailTitle').textContent = `${identity} - 模型列表`;
+            document.getElementById('permissionDetailSearchInput').value = '';
+            renderPermissionDetailList();
+            permissionDetailModalInstance.show();
+        }
+
         function renderUsers() {
             const container = document.getElementById('usersTableContainer');
+            const showPermissionControls = whitelistControlEnabled;
 
             if (users.length === 0) {
                 container.innerHTML = `<div class="empty-state">${currentSearchKeyword ? '未找到匹配的用户' : '暂无用户数据'}</div>`;
                 document.getElementById('tableFooter').style.display = 'none';
+                updateBatchToolbar();
                 return;
             }
 
@@ -646,6 +1053,17 @@
                 <table class="users-table">
                     <thead>
                         <tr>
+                            ${showPermissionControls ? `
+                            <th class="select-col">
+                                <input
+                                    type="checkbox"
+                                    class="user-table-checkbox"
+                                    id="selectAllUsersToggle"
+                                    ${areAllCurrentUsersSelected() ? 'checked' : ''}
+                                    onchange="toggleSelectAllUsers(this.checked)"
+                                    aria-label="选择当前页全部用户"
+                                >
+                            </th>` : ''}
                             <th class="sortable-th" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'username')}">
                                 <button type="button" class="sort-button" onclick="toggleUsersSort('username', 'string')">
                                     用户名 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'username')}</span>
@@ -656,6 +1074,12 @@
                                     IP 地址 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'ip_address')}</span>
                                 </button>
                             </th>
+                            ${showPermissionControls ? `
+                            <th class="sortable-th permission-col" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'allowed_models_count')}">
+                                <button type="button" class="sort-button" onclick="toggleUsersSort('allowed_models_count', 'number')">
+                                    模型权限 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'allowed_models_count')}</span>
+                                </button>
+                            </th>` : ''}
                             <th class="sortable-th num-col" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'prompt_tokens')}">
                                 <button type="button" class="sort-button" onclick="toggleUsersSort('prompt_tokens', 'number')">
                                     输入token <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'prompt_tokens')}</span>
@@ -676,7 +1100,8 @@
                                     总请求数 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'total_request_count')}</span>
                                 </button>
                             </th>
-                            ${whitelistControlEnabled ? `<th class="sortable-th" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'whitelist_access_enabled')}">
+                            ${showPermissionControls ? `
+                            <th class="sortable-th" aria-sort="${getAriaSort(usersSortState.key, usersSortState.direction, 'whitelist_access_enabled')}">
                                 <button type="button" class="sort-button" onclick="toggleUsersSort('whitelist_access_enabled', 'number')">
                                     白名单访问 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'whitelist_access_enabled')}</span>
                                 </button>
@@ -686,7 +1111,7 @@
                                     创建时间 <span class="sort-indicator">${getSortIndicator(usersSortState.key, usersSortState.direction, 'created_at')}</span>
                                 </button>
                             </th>
-                            <th>操作</th>
+                            <th class="actions-col">操作</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -695,32 +1120,45 @@
             users.forEach(user => {
                 const whitelistEnabled = !!user.whitelist_access_enabled;
                 const isDeletePending = pendingDeleteUserId === user.id;
+                const isSelected = selectedUserIds.has(Number(user.id));
 
                 html += `
                     <tr>
-                        <td>${user.username}</td>
-                        <td><span class="ip-address">${user.ip_address}</span></td>
+                        ${showPermissionControls ? `
+                        <td class="select-col">
+                            <input
+                                type="checkbox"
+                                class="user-table-checkbox"
+                                ${isSelected ? 'checked' : ''}
+                                onchange="toggleUserSelection(${Number(user.id)}, this.checked)"
+                                aria-label="选择用户 ${escapeHtml(user.username)}"
+                            >
+                        </td>` : ''}
+                        <td>${escapeHtml(user.username)}</td>
+                        <td><span class="ip-address">${escapeHtml(user.ip_address)}</span></td>
+                        ${showPermissionControls ? `<td class="permission-col">${renderModelPermissionSummary(user)}</td>` : ''}
                         <td class="num-col">${renderNumber(user.prompt_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(user.completion_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(user.total_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(user.total_request_count || 0)}</td>
-                        ${whitelistControlEnabled ? `
+                        ${showPermissionControls ? `
                         <td>
                             <label class="switch">
-                                <input type="checkbox" ${whitelistEnabled ? 'checked' : ''} onchange="toggleUser(${user.id})">
+                                <input type="checkbox" ${whitelistEnabled ? 'checked' : ''} onchange="toggleUser(${Number(user.id)})">
                                 <span class="slider"></span>
                             </label>
                         </td>` : ''}
                         <td>${formatDateTime(user.created_at)}</td>
-                        <td>
+                        <td class="actions-col">
                             <div class="action-buttons">
-                                <button class="btn-action btn-edit" onclick="openEditModal(${user.id})">编辑</button>
+                                <button class="btn-action btn-edit" onclick="openEditModal(${Number(user.id)})">编辑</button>
+                                ${showPermissionControls ? `<button class="btn-action btn-model" onclick="openPermissionModalForUser(${Number(user.id)})">模型权限</button>` : ''}
                                 <div class="inline-confirm-wrap">
                                     <button
                                         type="button"
                                         class="btn-action btn-delete ${isDeletePending ? 'is-active' : ''}"
-                                        data-user-delete-trigger="${user.id}"
-                                        onclick="toggleDeleteUserConfirm(${user.id}, event)"
+                                        data-user-delete-trigger="${Number(user.id)}"
+                                        onclick="toggleDeleteUserConfirm(${Number(user.id)}, event)"
                                     >删除</button>
                                 </div>
                             </div>
@@ -732,9 +1170,9 @@
             html += '</tbody></table>';
             container.innerHTML = html;
             syncDeleteUserPopover();
+            updateBatchToolbar();
         }
 
-        // 更新分页
         function updatePagination() {
             const totalPages = Math.ceil(totalUsers / pageSize) || 1;
             currentTotalPages = totalPages;
@@ -767,23 +1205,20 @@
             loadUsers();
         }
 
-        // 上一页
         function prevPage() {
             if (currentPage <= 1) return;
             currentPage--;
             loadUsers();
         }
 
-        // 下一页
         function nextPage() {
             if (currentPage >= currentTotalPages) return;
             currentPage++;
             loadUsers();
         }
 
-        // 更改每页大小
         function changePageSize() {
-            const newPageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            const newPageSize = parseInt(document.getElementById('pageSizeSelect').value, 10);
             if (newPageSize !== pageSize) {
                 pageSize = newPageSize;
                 currentPage = 1;
@@ -791,7 +1226,6 @@
             }
         }
 
-        // 创建用户
         async function createUser() {
             const username = document.getElementById('newUsername').value.trim();
             const ipAddress = document.getElementById('newIpAddress').value.trim();
@@ -832,12 +1266,11 @@
             }
         }
 
-        // 打开编辑模态框
         function openEditModal(userId) {
-            const user = users.find(u => u.id === userId);
+            const user = users.find(item => Number(item.id) === Number(userId));
             if (!user) return;
 
-            editingUserId = userId;
+            editingUserId = Number(userId);
             document.getElementById('editUsername').value = user.username;
             document.getElementById('editIpAddress').value = user.ip_address;
 
@@ -846,7 +1279,6 @@
             }
         }
 
-        // 关闭编辑模态框
         function closeEditModal() {
             if (editModalInstance) {
                 editModalInstance.hide();
@@ -854,7 +1286,6 @@
             editingUserId = null;
         }
 
-        // 保存用户修改
         async function saveUser() {
             if (!editingUserId) return;
 
@@ -896,7 +1327,6 @@
             }
         }
 
-        // 切换用户状态
         async function toggleUser(userId) {
             try {
                 const response = await fetch(`/api/users/${userId}/toggle`, {
@@ -916,7 +1346,318 @@
             }
         }
 
-        // 删除用户
+        function renderPermissionModalBody() {
+            const body = document.getElementById('permissionModalBody');
+            if (!body) return;
+
+            const selectedCount = permissionDraftMode === 'all'
+                ? getAvailableModelCount()
+                : permissionDraftSelectedModels.size;
+            const bodyHtml = `
+                <div class="permission-mode-card" id="permissionModeCard">
+                    <div class="permission-mode-copy">
+                        <div class="permission-mode-heading">
+                            <span class="permission-mode-label permission-mode-label-row">
+                                <span>允许全部模型</span>
+                                <button
+                                    type="button"
+                                    class="field-help-button"
+                                    data-users-help-topic="permission_allow_all"
+                                    onclick="toggleUsersHelp('permission_allow_all', event)"
+                                    aria-label="查看允许全部模型说明"
+                                >?</button>
+                            </span>
+                        </div>
+                        <p class="permission-mode-description">
+                            ${permissionDraftMode === 'all'
+                                ? '开启后自动继承当前与后续新增模型，无需单独维护。'
+                                : '关闭后，仅允许访问下方勾选的模型，可通过搜索与快捷操作快速调整。'}
+                        </p>
+                    </div>
+                    <label class="switch permission-mode-switch" aria-label="切换全部模型权限">
+                        <input type="checkbox" id="permissionAllowAllToggle" ${permissionDraftMode === 'all' ? 'checked' : ''} ${permissionSaving ? 'disabled' : ''} onchange="togglePermissionMode(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="permission-picker" id="permissionPicker" ${permissionDraftMode === 'all' ? 'hidden data-disabled="true"' : ''}>
+                    <div class="permission-picker-header">
+                        <div class="permission-picker-title-group">
+                            <span class="permission-picker-title">选择可访问模型</span>
+                            <span class="permission-picker-note" id="permissionModelCatalogMeta">模型变化后，刷新时会自动清理已删除项。</span>
+                        </div>
+                        <div class="permission-picker-stats" aria-live="polite">
+                            <span class="permission-picker-stats-label">已选</span>
+                            <strong id="permissionSelectedCount">${selectedCount}</strong>
+                            <span class="permission-picker-stats-total">/ ${getAvailableModelCount()}</span>
+                        </div>
+                    </div>
+                    <div class="permission-picker-toolbar">
+                        <div class="permission-picker-search">
+                            <input
+                                type="text"
+                                class="form-control"
+                                id="permissionModelSearchInput"
+                                placeholder="搜索模型，例如 demo/gpt-4.1"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                        </div>
+                        <div class="permission-picker-actions">
+                            <button type="button" class="btn btn-toolbar-secondary" id="selectPermissionModelsBtn" onclick="selectVisiblePermissionModels(true)">全部选中</button>
+                            <button type="button" class="btn btn-toolbar-secondary" id="clearPermissionModelsBtn" onclick="selectVisiblePermissionModels(false)">全部取消</button>
+                        </div>
+                    </div>
+                    <div class="permission-model-list" id="permissionModelList"></div>
+                </div>
+                <div class="permission-empty-state" id="permissionEmptyState" ${getAvailableModelCount() > 0 ? 'hidden' : ''}>当前还没有可配置模型，请先到 Provider 管理里配置模型列表。</div>
+            `;
+            body.innerHTML = bodyHtml;
+            const searchInput = document.getElementById('permissionModelSearchInput');
+            if (searchInput) {
+                searchInput.addEventListener('input', function() {
+                    renderPermissionModelOptions();
+                });
+            }
+            updatePermissionPickerActionLabels();
+            renderPermissionModelOptions();
+        }
+
+        function closePermissionModal() {
+            if (permissionModalInstance) {
+                permissionModalInstance.hide();
+            }
+        }
+
+        function openPermissionModalForUser(userId) {
+            if (!whitelistControlEnabled) {
+                showMessage('请先启用 Chat 白名单，再设置模型权限', 'error');
+                return;
+            }
+
+            const user = users.find(item => Number(item.id) === Number(userId));
+            if (!user) return;
+
+            permissionModalMode = 'single';
+            permissionTargetUserIds = [Number(userId)];
+            permissionDraftMixedSource = false;
+            const currentState = normalizeUserPermissionState(user);
+            permissionDraftMode = currentState.mode;
+            permissionDraftSelectedModels = new Set(currentState.models);
+            updatePermissionModalUi();
+            if (permissionModalInstance) {
+                permissionModalInstance.show();
+            }
+        }
+
+        function openPermissionModalForBatch() {
+            if (!whitelistControlEnabled) {
+                showMessage('请先启用 Chat 白名单，再设置模型权限', 'error');
+                return;
+            }
+
+            const selectedIds = Array.from(selectedUserIds);
+            if (!selectedIds.length) {
+                showMessage('请先选择需要批量设置的用户', 'error');
+                return;
+            }
+
+            const selectedUsers = users.filter(user => selectedUserIds.has(Number(user.id)));
+            const signatures = selectedUsers.map(getPermissionSignature);
+            const allSame = signatures.length > 0 && signatures.every(signature => signature === signatures[0]);
+            const seedState = allSame
+                ? normalizeUserPermissionState(selectedUsers[0])
+                : { mode: 'all', models: [] };
+
+            permissionModalMode = 'batch';
+            permissionTargetUserIds = selectedIds;
+            permissionDraftMixedSource = !allSame;
+            permissionDraftMode = seedState.mode;
+            permissionDraftSelectedModels = new Set(seedState.models);
+            updatePermissionModalUi();
+            if (permissionModalInstance) {
+                permissionModalInstance.show();
+            }
+        }
+
+        function togglePermissionMode(allowAll) {
+            permissionDraftMode = allowAll ? 'all' : 'selected';
+            updatePermissionModalUi();
+        }
+
+        function getFilteredPermissionModels() {
+            const searchInput = document.getElementById('permissionModelSearchInput');
+            const keyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
+            if (!keyword) return availableModels.slice();
+            return availableModels.filter(modelName => modelName.toLowerCase().includes(keyword));
+        }
+
+        function renderPermissionModelOptions() {
+            const listElement = document.getElementById('permissionModelList');
+            const selectedCountLabel = document.getElementById('permissionSelectedCount');
+            if (!listElement) return;
+
+            const visibleModels = getFilteredPermissionModels();
+            const selectedCount = permissionDraftMode === 'all'
+                ? getAvailableModelCount()
+                : permissionDraftSelectedModels.size;
+            if (selectedCountLabel) {
+                selectedCountLabel.textContent = String(selectedCount);
+            }
+            updatePermissionPickerActionLabels();
+
+            if (!visibleModels.length) {
+                listElement.innerHTML = '<div class="permission-list-empty">没有匹配的模型</div>';
+                return;
+            }
+
+            listElement.innerHTML = visibleModels.map(modelName => {
+                const isSelected = permissionDraftSelectedModels.has(modelName);
+                const optionClassName = [
+                    'permission-model-option',
+                    isSelected ? 'is-selected' : '',
+                    permissionDraftMode === 'all' ? 'is-disabled' : ''
+                ].filter(Boolean).join(' ');
+                return `
+                <label class="${optionClassName}">
+                    <input
+                        type="checkbox"
+                        class="permission-model-checkbox"
+                        value="${escapeHtml(modelName)}"
+                        ${isSelected ? 'checked' : ''}
+                        ${permissionDraftMode === 'all' ? 'disabled' : ''}
+                        onchange='togglePermissionModelSelection(${JSON.stringify(modelName)}, this.checked)'
+                    >
+                    <span class="permission-model-text">${escapeHtml(modelName)}</span>
+                </label>
+            `;
+            }).join('');
+        }
+
+        function updatePermissionPickerActionLabels() {
+            const searchInput = document.getElementById('permissionModelSearchInput');
+            const selectButton = document.getElementById('selectPermissionModelsBtn');
+            const clearButton = document.getElementById('clearPermissionModelsBtn');
+            if (!selectButton || !clearButton) return;
+
+            const hasKeyword = Boolean(searchInput && searchInput.value.trim());
+            selectButton.textContent = hasKeyword ? '选中搜索结果' : '全部选中';
+            clearButton.textContent = hasKeyword ? '取消结果选中' : '全部取消';
+        }
+
+        function updatePermissionModalUi() {
+            const title = document.getElementById('permissionModalLabel');
+            const subtitle = document.getElementById('permissionModalSubtitle');
+            const saveButton = document.getElementById('savePermissionBtn');
+
+            if (title) {
+                title.textContent = permissionModalMode === 'batch' ? '批量设置模型权限' : '模型权限';
+            }
+            if (subtitle) {
+                if (permissionModalMode === 'batch') {
+                    subtitle.textContent = permissionDraftMixedSource
+                        ? `已选择 ${permissionTargetUserIds.length} 个用户，当前权限不一致，保存后将统一覆盖。`
+                        : `已选择 ${permissionTargetUserIds.length} 个用户，将统一应用下方权限。`;
+                } else {
+                    subtitle.textContent = '设置该用户可访问的模型。';
+                }
+            }
+            if (saveButton) {
+                saveButton.disabled = permissionSaving;
+                saveButton.textContent = permissionSaving ? '保存中...' : '保存';
+            }
+
+            renderPermissionModalBody();
+        }
+
+        function togglePermissionModelSelection(modelName, checked) {
+            const normalizedModelName = String(modelName || '').trim();
+            if (!normalizedModelName) return;
+
+            if (checked) {
+                permissionDraftSelectedModels.add(normalizedModelName);
+            } else {
+                permissionDraftSelectedModels.delete(normalizedModelName);
+            }
+            renderPermissionModelOptions();
+        }
+
+        function selectVisiblePermissionModels(checked) {
+            if (permissionDraftMode === 'all') {
+                return;
+            }
+
+            const visibleModels = getFilteredPermissionModels();
+            visibleModels.forEach(modelName => {
+                if (checked) {
+                    permissionDraftSelectedModels.add(modelName);
+                } else {
+                    permissionDraftSelectedModels.delete(modelName);
+                }
+            });
+            renderPermissionModelOptions();
+        }
+
+        async function savePermissionSettings() {
+            if (!permissionTargetUserIds.length || permissionSaving) return;
+
+            const payload = permissionDraftMode === 'all'
+                ? '*'
+                : getSortedSelectedPermissionModels();
+
+            permissionSaving = true;
+            updatePermissionModalUi();
+
+            try {
+                let response;
+                if (permissionModalMode === 'batch') {
+                    response = await fetch('/api/users/batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'set_model_permissions',
+                            user_ids: permissionTargetUserIds,
+                            model_permissions: payload
+                        })
+                    });
+                } else {
+                    response = await fetch(`/api/users/${permissionTargetUserIds[0]}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model_permissions: payload
+                        })
+                    });
+                }
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '保存模型权限失败');
+                }
+
+                showMessage(
+                    permissionModalMode === 'batch'
+                        ? `已批量更新 ${permissionTargetUserIds.length} 个用户的模型权限`
+                        : '模型权限更新成功',
+                    'success'
+                );
+                if (permissionModalMode === 'batch') {
+                    clearUserSelections(false);
+                }
+                closePermissionModal();
+                await loadUsers();
+            } catch (error) {
+                console.error('保存模型权限失败:', error);
+                showActionError(
+                    permissionModalMode === 'batch' ? '批量设置模型权限' : '更新模型权限',
+                    error,
+                    { fallback: permissionModalMode === 'batch' ? '批量设置模型权限失败' : '更新模型权限失败' }
+                );
+            } finally {
+                permissionSaving = false;
+                updatePermissionModalUi();
+            }
+        }
+
         function toggleDeleteUserConfirm(userId, event) {
             event?.stopPropagation();
             if (deletingUserId !== null) return;
@@ -969,6 +1710,7 @@
                     pendingDeleteUserId = null;
                     deletingUserId = null;
                     hideUserDeletePopover();
+                    selectedUserIds.delete(Number(userId));
                     showMessage('用户删除成功', 'success');
                     await loadUsers();
                 } else {
@@ -1000,6 +1742,5 @@
                 second: '2-digit'
             });
         }
-
     </script>
 {% endblock %}

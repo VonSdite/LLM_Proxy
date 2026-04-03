@@ -168,6 +168,7 @@ class Application:
         auth_service = AuthenticationService(self._ctx)
         user_service = UserService(self._ctx, self._user_repository)
         self._user_service = user_service
+        self._user_service.sync_model_permissions()
         proxy_service = ProxyService(self._ctx, self._auth_group_manager)
         log_service = LogService(self._ctx, self._log_repository)
         provider_service = ProviderService(self._ctx, self.reload_providers)
@@ -216,6 +217,8 @@ class Application:
         )
         self._auth_group_manager.load_auth_groups(auth_group_schemas)
         self._provider_manager.load_providers(provider_schemas)
+        if hasattr(self, "_user_service"):
+            self._user_service.sync_model_permissions()
 
     def run(self) -> None:
         """启动 WSGI 服务。"""

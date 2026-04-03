@@ -50,6 +50,29 @@ class ProxyController:
     def _is_whitelist_required(self) -> bool:
         return self._config_manager.is_chat_whitelist_enabled()
 
+    def _get_authorized_user_for_request(
+        self,
+        client_ip: str,
+        *,
+        error_format: str,
+    ) -> tuple[Optional[Dict[str, Any]], Optional[tuple[Response, int]]]:
+        """在开启白名单时解析当前请求对应用户。"""
+        if not self._is_whitelist_required():
+            return None, None
+
+        user = self._get_user_by_ip(client_ip)
+        if user:
+            return user, None
+
+        self._logger.warning("Proxy denied: ip=%s is not in whitelist", client_ip)
+        return None, self._error_response(
+            f"IP address {client_ip} is not in whitelist",
+            403,
+            error_type="permission_error",
+            code="ip_not_whitelisted",
+            error_format=error_format,
+        )
+
     @staticmethod
     def _build_error_payload(
         message: str,
@@ -137,17 +160,12 @@ class ProxyController:
         try:
             client_ip = normalize_ip(request.remote_addr)
             self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
-            whitelist_required = self._is_whitelist_required()
-            user = self._get_user_by_ip(client_ip) if whitelist_required else None
-            if whitelist_required and not user:
-                self._logger.warning("Proxy denied: ip=%s is not in whitelist", client_ip)
-                return self._error_response(
-                    f"IP address {client_ip} is not in whitelist",
-                    403,
-                    error_type="permission_error",
-                    code="ip_not_whitelisted",
-                    error_format=resolved_error_format,
-                )
+            user, denial_response = self._get_authorized_user_for_request(
+                client_ip,
+                error_format=resolved_error_format,
+            )
+            if denial_response is not None:
+                return denial_response
 
             request_data = request.get_json(silent=True)
             if request_data is None:
@@ -182,6 +200,25 @@ class ProxyController:
                     400,
                     error_type="invalid_request_error",
                     code="unknown_model",
+                    error_format=resolved_error_format,
+                )
+
+            if self._is_whitelist_required() and not self._user_service.can_user_access_model(
+                user,
+                model_name,
+                available_models=self._provider_manager.list_model_names(),
+            ):
+                self._logger.warning(
+                    "Proxy denied: ip=%s is not allowed to access model=%s route=%s",
+                    client_ip,
+                    model_name,
+                    route_name,
+                )
+                return self._error_response(
+                    f"IP address {client_ip} is not allowed to access model {model_name}",
+                    403,
+                    error_type="permission_error",
+                    code="model_not_allowed",
                     error_format=resolved_error_format,
                 )
 
@@ -302,8 +339,26 @@ class ProxyController:
 
     def list_models(self) -> Response:
         try:
+            client_ip = normalize_ip(request.remote_addr)
+            user, denial_response = self._get_authorized_user_for_request(
+                client_ip,
+                error_format="openai_chat",
+            )
+            if denial_response is not None:
+                return denial_response
+
+            model_names = list(self._provider_manager.list_model_names())
+            if self._is_whitelist_required():
+                allowed_models = set(
+                    self._user_service.get_accessible_models_for_user(
+                        user,
+                        available_models=model_names,
+                    )
+                )
+                model_names = [model_name for model_name in model_names if model_name in allowed_models]
+
             data = []
-            for model_key in self._provider_manager.list_model_names():
+            for model_key in model_names:
                 provider_name, _, _ = str(model_key).partition("/")
                 provider_view = self._provider_manager.get_provider_view(provider_name)
                 source_format = getattr(provider_view, "source_format", None)

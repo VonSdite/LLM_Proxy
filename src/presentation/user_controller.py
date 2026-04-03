@@ -28,6 +28,7 @@ class UserController:
 
         self._app.route('/api/users', methods=['GET'])(auth(self.get_users))
         self._app.route('/api/users', methods=['POST'])(auth(self.create_user))
+        self._app.route('/api/users/batch', methods=['POST'])(auth(self.batch_users))
         self._app.route('/api/users/<int:user_id>', methods=['GET'])(auth(self.get_user))
         self._app.route('/api/users/<int:user_id>', methods=['PUT'])(auth(self.update_user))
         self._app.route('/api/users/<int:user_id>', methods=['DELETE'])(auth(self.delete_user))
@@ -56,6 +57,7 @@ class UserController:
                 'page_size': page_size,
                 'total_pages': (total + page_size - 1) // page_size,
                 'keyword': keyword,
+                'available_models': self._user_service.get_available_models(),
             })
         except Exception as exc:
             self._logger.error(f'Error getting users: {exc}')
@@ -114,6 +116,8 @@ class UserController:
             username = data.get('username')
             ip_address = data.get('ip_address')
             whitelist_access_enabled = data.get('whitelist_access_enabled')
+            model_permissions_provided = 'model_permissions' in data
+            model_permissions = data.get('model_permissions')
 
             normalized_ip = None
             if ip_address is not None:
@@ -127,6 +131,8 @@ class UserController:
                 username,
                 normalized_ip,
                 whitelist_access_enabled,
+                model_permissions_provided=model_permissions_provided,
+                model_permissions=model_permissions,
             )
             if not success:
                 self._logger.warning(f"Update user failed: user_id={user_id}")
@@ -134,8 +140,36 @@ class UserController:
 
             self._logger.info(f"Update user succeeded: user_id={user_id}")
             return jsonify({'message': 'User updated successfully'})
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
         except Exception as exc:
             self._logger.error(f'Error updating user: {exc}')
+            return jsonify({'error': str(exc)}), 500
+
+    def batch_users(self) -> Response:
+        """执行用户批量操作。"""
+        try:
+            payload = request.get_json(silent=True) or {}
+            action = str(payload.get('action') or '').strip().lower()
+            if action != 'set_model_permissions':
+                raise ValueError(f'Unsupported user batch action: {action or "<empty>"}')
+
+            result = self._user_service.batch_update_model_permissions(
+                payload.get('user_ids'),
+                payload.get('model_permissions'),
+            )
+            self._logger.info(
+                'User batch action completed: action=%s count=%s',
+                action,
+                result.get('count', 0),
+            )
+            return jsonify(result)
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 404 if 'not found' in message.lower() else 400
+            return jsonify({'error': message}), status_code
+        except Exception as exc:
+            self._logger.error(f'Error applying user batch action: {exc}')
             return jsonify({'error': str(exc)}), 500
 
     def delete_user(self, user_id: int) -> Response:
