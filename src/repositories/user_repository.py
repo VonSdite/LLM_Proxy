@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """用户仓储。"""
 
+from __future__ import annotations
+
 from typing import Any, Dict, List, Optional
 
 from ..utils.database import ConnectionFactory

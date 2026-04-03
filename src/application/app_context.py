@@ -4,7 +4,9 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
+
+from ..utils.compat import Protocol
 
 if TYPE_CHECKING:
     from ..config import ConfigManager

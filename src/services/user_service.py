@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """用户服务。"""
 
+from __future__ import annotations
+
 import json
 import threading
 from typing import Any, Dict, Iterable, List, Optional, Sequence

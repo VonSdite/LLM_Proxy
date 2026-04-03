@@ -4,10 +4,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from urllib.parse import urlparse
 
+from ..utils.compat import dataclass
 from ..utils.net import normalize_proxy_url
 
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 1200

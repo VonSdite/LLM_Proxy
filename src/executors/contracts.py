@@ -4,10 +4,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Optional
 
 from ..external import LLMProvider
+from ..utils.compat import Protocol, dataclass
 
 
 @dataclass(frozen=True, slots=True)

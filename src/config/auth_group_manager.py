@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -12,6 +11,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 from ..application.app_context import AppContext, Logger
 from ..hooks import HookErrorType
 from ..repositories import AuthGroupRepository
+from ..utils.compat import dataclass
 from ..utils.local_time import format_local_datetime, now_local_datetime, parse_local_datetime
 from .provider_config import (
     AuthEntrySchema,
