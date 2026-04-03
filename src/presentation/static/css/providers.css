@@ -1148,6 +1148,26 @@
     justify-content: flex-end;
 }
 
+.providers-page .provider-editor-modal .modal-header {
+    padding: 18px 22px 6px;
+}
+
+.providers-page .provider-editor-modal .modal-body {
+    padding: 0 22px 14px;
+}
+
+.providers-page .provider-editor-modal .modal-footer {
+    padding: 0 22px 18px;
+}
+
+.providers-page .provider-editor-modal .provider-form-grid > .mb-3 {
+    margin-bottom: 12px !important;
+}
+
+.providers-page .provider-editor-modal .provider-model-list-section {
+    margin-bottom: 8px !important;
+}
+
 .providers-page .modal-title {
     color: var(--text-primary);
 }
@@ -1275,6 +1295,10 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 10px;
+}
+
+.providers-page .provider-editor-modal .field-header {
+    margin-bottom: 8px;
 }
 
 .providers-page .field-header-meta {
@@ -1817,6 +1841,11 @@
     line-height: 1.55;
     scrollbar-width: thin;
     scrollbar-color: rgba(126, 148, 176, 0.7) transparent;
+}
+
+.providers-page .provider-editor-modal .provider-models-textarea {
+    min-height: 148px;
+    padding: 10px 14px;
 }
 
 .providers-page .provider-models-textarea::-webkit-scrollbar {
