@@ -11,6 +11,8 @@ from ..utils.local_time import now_local_datetime_text
 class UserRepository:
     """负责 users 表的数据访问。"""
 
+    MODEL_PERMISSIONS_ALL = "*"
+
     def __init__(self, get_connection: ConnectionFactory):
         self._get_connection = get_connection
         self._ensure_table()
@@ -26,15 +28,29 @@ class UserRepository:
                     username TEXT NOT NULL,
                     ip_address TEXT NOT NULL UNIQUE,
                     whitelist_access_enabled INTEGER DEFAULT 1,
+                    model_permissions TEXT NOT NULL DEFAULT '*',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """
             )
+            columns = {
+                str(row["name"]).strip()
+                for row in cursor.execute("PRAGMA table_info(users)").fetchall()
+            }
+            if "model_permissions" not in columns:
+                cursor.execute(
+                    "ALTER TABLE users ADD COLUMN model_permissions TEXT NOT NULL DEFAULT '*'"
+                )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_ip ON users(ip_address)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
 
-    def create(self, username: str, ip_address: str) -> Optional[int]:
+    def create(
+        self,
+        username: str,
+        ip_address: str,
+        model_permissions: str = MODEL_PERMISSIONS_ALL,
+    ) -> Optional[int]:
         """创建用户记录。"""
         now_text = now_local_datetime_text()
         with self._get_connection() as conn:
@@ -42,11 +58,11 @@ class UserRepository:
             cursor.execute(
                 """
                 INSERT INTO users (
-                    username, ip_address, whitelist_access_enabled, created_at, updated_at
+                    username, ip_address, whitelist_access_enabled, model_permissions, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (username, ip_address, 1, now_text, now_text),
+                (username, ip_address, 1, model_permissions, now_text, now_text),
             )
             return cursor.lastrowid
 
@@ -56,7 +72,7 @@ class UserRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, username, ip_address, whitelist_access_enabled, created_at, updated_at
+                SELECT id, username, ip_address, whitelist_access_enabled, model_permissions, created_at, updated_at
                 FROM users
                 WHERE id = ?
                 """,
@@ -90,6 +106,7 @@ class UserRepository:
                     u.username,
                     u.ip_address,
                     u.whitelist_access_enabled,
+                    u.model_permissions,
                     u.created_at,
                     u.updated_at,
                     COALESCE(s.total_request_count, 0) AS total_request_count,
@@ -136,6 +153,7 @@ class UserRepository:
         username: Optional[str] = None,
         ip_address: Optional[str] = None,
         whitelist_access_enabled: Optional[bool] = None,
+        model_permissions: Optional[str] = None,
     ) -> bool:
         """更新用户记录。"""
         updates = []
@@ -150,6 +168,9 @@ class UserRepository:
         if whitelist_access_enabled is not None:
             updates.append("whitelist_access_enabled = ?")
             params.append(1 if whitelist_access_enabled else 0)
+        if model_permissions is not None:
+            updates.append("model_permissions = ?")
+            params.append(model_permissions)
 
         if not updates:
             return False
@@ -176,7 +197,7 @@ class UserRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, username, ip_address, whitelist_access_enabled, created_at, updated_at
+                SELECT id, username, ip_address, whitelist_access_enabled, model_permissions, created_at, updated_at
                 FROM users
                 WHERE ip_address = ?
                 """,
@@ -184,3 +205,54 @@ class UserRepository:
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+
+    def get_by_ids(self, user_ids: List[int]) -> List[Dict[str, Any]]:
+        """按 ID 列表查询用户。"""
+        normalized_user_ids = [int(user_id) for user_id in user_ids]
+        if not normalized_user_ids:
+            return []
+
+        placeholders = ", ".join("?" for _ in normalized_user_ids)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT id, username, ip_address, whitelist_access_enabled, model_permissions, created_at, updated_at
+                FROM users
+                WHERE id IN ({placeholders})
+                """,
+                normalized_user_ids,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def list_all(self) -> List[Dict[str, Any]]:
+        """查询全部用户，用于权限同步与批量设置。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, username, ip_address, whitelist_access_enabled, model_permissions, created_at, updated_at
+                FROM users
+                ORDER BY id ASC
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def batch_update_model_permissions(self, user_ids: List[int], model_permissions: str) -> int:
+        """批量更新用户模型权限。"""
+        normalized_user_ids = [int(user_id) for user_id in user_ids]
+        if not normalized_user_ids:
+            return 0
+
+        placeholders = ", ".join("?" for _ in normalized_user_ids)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                UPDATE users
+                SET model_permissions = ?, updated_at = ?
+                WHERE id IN ({placeholders})
+                """,
+                [model_permissions, now_local_datetime_text(), *normalized_user_ids],
+            )
+            return cursor.rowcount

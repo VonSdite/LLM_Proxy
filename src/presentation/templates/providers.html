@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260402-6">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260403-11">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
@@ -49,10 +49,8 @@
                 </div>
                 <div class="toolbar-summary provider-batch-summary">
                     <span class="toolbar-pill">已选 <strong id="selectedProviderCount">0</strong> 个</span>
-                    <button type="button" class="btn btn-toolbar-secondary" id="enableSelectedProvidersBtn" onclick="runProviderBatchAction('enable')" disabled>批量启用</button>
-                    <button type="button" class="btn btn-toolbar-secondary" id="disableSelectedProvidersBtn" onclick="runProviderBatchAction('disable')" disabled>批量禁用</button>
-                    <button type="button" class="btn btn-toolbar-secondary" id="clearSelectedProvidersBtn" onclick="clearSelectedProviders()" disabled>清空选择</button>
-                    <button type="button" class="btn btn-toolbar-secondary" id="deleteSelectedProvidersBtn" onclick="runProviderBatchAction('delete')" disabled>批量删除</button>
+                    <button type="button" class="btn btn-toolbar-secondary" id="enableSelectedProvidersBtn" onclick="runProviderBatchAction('enable')" disabled>启用</button>
+                    <button type="button" class="btn btn-toolbar-secondary" id="disableSelectedProvidersBtn" onclick="runProviderBatchAction('disable')" disabled>禁用</button>
                 </div>
                 <div class="providers-table-shell" id="providersContainer">
                     <div class="loading">正在加载 provider 配置...</div>
@@ -444,24 +442,6 @@
             </div>
         </div>
     </div>
-    <div class="modal fade" id="providerBatchDeleteModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered provider-batch-delete-modal-dialog">
-            <div class="modal-content border-0 shadow">
-                <div class="modal-header border-bottom-0">
-                    <div>
-                        <h5 class="modal-title fw-semibold">确认批量删除</h5>
-                    </div>
-                </div>
-                <div class="modal-body pt-0">
-                    <p class="mb-0 fw-semibold" id="providerBatchDeleteMessage">是否批量删除 0 个 Provider？</p>
-                </div>
-                <div class="modal-footer border-top-0">
-                    <button type="button" class="btn btn-secondary" id="cancelProviderBatchDeleteBtn" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-danger" id="confirmProviderBatchDeleteBtn" onclick="confirmProviderBatchDelete()">确认删除</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <div class="inline-confirm-popover floating-delete-popover" id="providerDeletePopover" data-placement="bottom" hidden>
         <div class="inline-confirm-text">确认删除？</div>
@@ -498,7 +478,6 @@
         let editingProviderName = null;
         let editingAuthGroupName = null;
         let providerModalInstance = null;
-        let providerBatchDeleteModalInstance = null;
         let authGroupModalInstance = null;
         let authEntryImportModalInstance = null;
         let authGroupRuntimeModalInstance = null;
@@ -510,7 +489,6 @@
         let activeAuthGroupRuntime = null;
         let pendingDeleteProviderName = null;
         let deletingProviderName = null;
-        let pendingProviderBatchDeleteNames = [];
         let selectedProviderNames = new Set();
         let togglingProviderNames = new Set();
         let providerBatchActionInFlight = false;
@@ -901,8 +879,6 @@
             [
                 'enableSelectedProvidersBtn',
                 'disableSelectedProvidersBtn',
-                'deleteSelectedProvidersBtn',
-                'clearSelectedProvidersBtn',
             ].forEach(id => {
                 const button = document.getElementById(id);
                 if (!button) return;
@@ -939,52 +915,16 @@
             renderProviders();
         }
 
-        function syncProviderBatchDeleteModal() {
-            const count = pendingProviderBatchDeleteNames.length;
-            const messageElement = document.getElementById('providerBatchDeleteMessage');
-            const cancelButton = document.getElementById('cancelProviderBatchDeleteBtn');
-            const confirmButton = document.getElementById('confirmProviderBatchDeleteBtn');
-
-            if (messageElement) {
-                messageElement.textContent = `是否批量删除 ${count} 个 Provider？`;
-            }
-            if (cancelButton) {
-                cancelButton.disabled = providerBatchActionInFlight;
-            }
-            if (confirmButton) {
-                confirmButton.disabled = providerBatchActionInFlight || count === 0;
-                confirmButton.textContent = providerBatchActionInFlight ? '删除中...' : '确认删除';
-            }
-        }
-
-        function openProviderBatchDeleteModal(names) {
-            const normalizedNames = Array.isArray(names)
-                ? names.map(name => String(name || '').trim()).filter(name => name !== '')
-                : [];
-            if (!normalizedNames.length) {
-                showMessage('请先选择至少一个 Provider', 'error');
-                return;
-            }
-
-            pendingProviderBatchDeleteNames = normalizedNames;
-            syncProviderBatchDeleteModal();
-            providerBatchDeleteModalInstance?.show();
-        }
-
         function getProviderBatchActionMeta(action) {
             return {
                 enable: { label: '启用', past: '启用', fallback: '批量启用 Provider 失败' },
                 disable: { label: '禁用', past: '禁用', fallback: '批量禁用 Provider 失败' },
-                delete: { label: '删除', past: '删除', fallback: '批量删除 Provider 失败' },
             }[action] || null;
         }
 
-        async function executeProviderBatchAction(action, selectedNames, meta, options = {}) {
-            const { closeDeleteModal = false } = options || {};
-
+        async function executeProviderBatchAction(action, selectedNames, meta) {
             closeDeleteProviderConfirm(false);
             providerBatchActionInFlight = true;
-            syncProviderBatchDeleteModal();
             renderProviders();
 
             try {
@@ -1001,13 +941,7 @@
                     throw new Error(result.error || meta.fallback);
                 }
 
-                selectedProviderNames = action === 'delete' ? new Set() : new Set(selectedNames);
-                if (action === 'delete') {
-                    pendingProviderBatchDeleteNames = [];
-                }
-                if (closeDeleteModal) {
-                    providerBatchDeleteModalInstance?.hide();
-                }
+                selectedProviderNames = new Set(selectedNames);
                 showMessage(`已批量${meta.past} ${result.count || selectedNames.length} 个 Provider，配置已重载`, 'success');
                 await loadProviders();
             } catch (error) {
@@ -1015,22 +949,8 @@
                 showActionError(`批量${meta.label} Provider`, error, { fallback: meta.fallback });
             } finally {
                 providerBatchActionInFlight = false;
-                syncProviderBatchDeleteModal();
                 renderProviders();
             }
-        }
-
-        async function confirmProviderBatchDelete() {
-            const selectedNames = pendingProviderBatchDeleteNames.slice();
-            if (!selectedNames.length || providerBatchActionInFlight) {
-                return;
-            }
-
-            const meta = getProviderBatchActionMeta('delete');
-            if (!meta) {
-                return;
-            }
-            await executeProviderBatchAction('delete', selectedNames, meta, { closeDeleteModal: true });
         }
 
         function getAuthEntryDeletePopoverElement() {
@@ -1184,7 +1104,7 @@
             switchProviderTab('providers');
             activeModelProvider = provider;
             document.getElementById('modelDetailTitle').textContent = `${provider.name} - 模型列表`;
-            document.getElementById('modelDetailSubtitle').textContent = provider.api || '未配置 API 地址';
+            document.getElementById('modelDetailSubtitle').textContent = `API 地址: ${provider.api}` || '未配置 API 地址';
             document.getElementById('modelSearchInput').value = '';
             renderModelDetailList();
             modelDetailModalInstance.show();
@@ -3180,11 +3100,6 @@
                 return;
             }
 
-            if (action === 'delete') {
-                openProviderBatchDeleteModal(selectedNames);
-                return;
-            }
-
             await executeProviderBatchAction(action, selectedNames, meta);
         }
 
@@ -3310,14 +3225,6 @@
                 resetFetchModelPickerState();
                 editingProviderName = null;
                 fillForm(null);
-            });
-            const providerBatchDeleteModalElement = document.getElementById('providerBatchDeleteModal');
-            providerBatchDeleteModalInstance = new bootstrap.Modal(providerBatchDeleteModalElement);
-            providerBatchDeleteModalElement.addEventListener('hidden.bs.modal', function() {
-                if (!providerBatchActionInFlight) {
-                    pendingProviderBatchDeleteNames = [];
-                    syncProviderBatchDeleteModal();
-                }
             });
             const authGroupModalElement = document.getElementById('authGroupModal');
             authGroupModalInstance = new bootstrap.Modal(authGroupModalElement);

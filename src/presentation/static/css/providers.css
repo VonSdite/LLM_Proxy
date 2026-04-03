@@ -181,6 +181,16 @@
     margin-bottom: 14px;
 }
 
+.providers-page .provider-batch-summary .toolbar-pill {
+    border-color: rgba(58, 127, 237, 0.14);
+    background: rgba(58, 127, 237, 0.06);
+    color: var(--text-secondary);
+}
+
+.providers-page .provider-batch-summary .toolbar-pill strong {
+    color: var(--primary-active);
+}
+
 .providers-page .providers-table-shell {
     overflow: auto;
     border: 1px solid var(--line);
@@ -265,6 +275,16 @@
 
 :root[data-theme="dark"] .providers-page .toolbar-pill strong {
     color: #e6edf3;
+}
+
+:root[data-theme="dark"] .providers-page .provider-batch-summary .toolbar-pill {
+    border-color: rgba(88, 166, 255, 0.2);
+    background: rgba(88, 166, 255, 0.1);
+    color: #a8b3c2;
+}
+
+:root[data-theme="dark"] .providers-page .provider-batch-summary .toolbar-pill strong {
+    color: #cfe0ff;
 }
 
 :root[data-theme="dark"] .providers-page .toolbar-pill-primary {
@@ -576,6 +596,24 @@
 
 .providers-page .model-tag-detail {
     min-height: 30px;
+    border-color: rgba(100, 116, 139, 0.18);
+    background: #f6f8fb;
+    color: #334155;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.providers-page .providers-table .model-tag {
+    min-height: 26px;
+    border-color: rgba(100, 116, 139, 0.18);
+    background: #f6f8fb;
+    color: #334155;
+    font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    box-shadow: none;
 }
 
 :root[data-theme="dark"] .providers-page .model-tag {
@@ -583,6 +621,20 @@
     background: linear-gradient(180deg, rgba(19, 35, 56, 0.96) 0%, rgba(14, 28, 45, 0.96) 100%);
     color: #cfe5ff;
     box-shadow: inset 0 1px 0 rgba(125, 180, 255, 0.08);
+}
+
+:root[data-theme="dark"] .providers-page .providers-table .model-tag {
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.08);
+    color: #d5dde7;
+    box-shadow: none;
+}
+
+:root[data-theme="dark"] .providers-page .model-tag-detail {
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.08);
+    color: #d5dde7;
+    box-shadow: none;
 }
 
 :root[data-theme="dark"] .providers-page .provider-chip {
@@ -748,15 +800,15 @@
 }
 
 .providers-page .model-count {
-    border: 1px solid #d8e5f3;
-    background: rgba(17, 24, 39, 0.04);
-    color: var(--text-secondary);
+    border: 1px solid rgba(100, 116, 139, 0.18);
+    background: #f6f8fb;
+    color: #334155;
 }
 
 .providers-page .model-more {
-    border: 1px solid #bfd6ee;
-    background: linear-gradient(180deg, #f4f9ff 0%, #eaf3ff 100%);
-    color: #29507c;
+    border: 1px solid rgba(100, 116, 139, 0.18);
+    background: #f6f8fb;
+    color: #334155;
 }
 
 .providers-page .btn-inline {
@@ -1001,6 +1053,15 @@
     margin-top: 6px;
 }
 
+.providers-page .provider-help-popover-body code {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #c2185b;
+    font-size: 12px;
+    font-weight: 700;
+}
+
 :root[data-theme="dark"] .providers-page .btn-action {
     background: #0d1117;
 }
@@ -1052,10 +1113,6 @@
 
 .providers-page .modal-dialog {
     max-width: min(1120px, calc(100vw - 32px));
-}
-
-.providers-page .provider-batch-delete-modal-dialog {
-    max-width: min(420px, calc(100vw - 32px));
 }
 
 .providers-page .auth-entry-yaml-modal-dialog {
@@ -1620,6 +1677,11 @@
     color: #ffffff;
 }
 
+:root[data-theme="dark"] .providers-page .provider-help-popover-body code {
+    background: rgba(108, 167, 255, 0.14);
+    color: #ff8ac2;
+}
+
 :root[data-theme="dark"] .providers-page .inline-confirm-action:disabled {
     opacity: 0.78;
 }
@@ -1701,9 +1763,9 @@
 }
 
 :root[data-theme="dark"] .providers-page .model-count {
-    border-color: #313b47;
-    background: rgba(255, 255, 255, 0.04);
-    color: #a8b3c2;
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.08);
+    color: #d5dde7;
 }
 
 :root[data-theme="dark"] .providers-page .fetch-model-list {
@@ -1741,9 +1803,9 @@
 }
 
 :root[data-theme="dark"] .providers-page .model-more {
-    border-color: #2d5a8a;
-    background: linear-gradient(180deg, rgba(19, 35, 56, 0.96) 0%, rgba(14, 28, 45, 0.96) 100%);
-    color: #cfe5ff;
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.08);
+    color: #d5dde7;
 }
 
 .providers-page .provider-models-textarea {

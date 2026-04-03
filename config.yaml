@@ -9,13 +9,30 @@ admin:
 providers:
 - name: volcengine
   enabled: true
-  api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
+  api: http://127.0.0.1:22026
   transport: http
   source_format: openai_chat
   target_format: openai_chat
   verify_ssl: false
   model_list:
   - kimi-k2.5
+  - deepseek/deepseek-chat
+  - deepseek/deepseek-reasoner
+  - glm/glm-4.5
+  - glm/glm-4.5-air
+  - glm/glm-4.6
+  - glm/glm-4.7
+  - glm/glm-5
+  - volc_chat/deepseek-v3-2-251201
+  - volc_chat/doubao-seed-2-0-code-preview-260215
+  - volc_chat/doubao-seed-2-0-pro-260215
+  - volc_chat/doubao-seedance-2-0-260128
+  - volc_code/DeepSeek-V3.2
+  - volc_code/Doubao-Seed-2.0-Code
+  - volc_code/Doubao-Seed-2.0-pro
+  - volc_code/GLM-4.7
+  - volc_code/MiniMax-M2.5
+  - volc_code/kimi-k2.5
 auth_groups:
 - name: a
   strategy: least_inflight

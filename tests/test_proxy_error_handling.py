@@ -42,16 +42,38 @@ class FakeLogger:
 
 
 class FakeConfigManager:
-    @staticmethod
-    def is_chat_whitelist_enabled() -> bool:
-        return False
+    def __init__(self, whitelist_enabled: bool = False) -> None:
+        self._whitelist_enabled = whitelist_enabled
+
+    def is_chat_whitelist_enabled(self) -> bool:
+        return self._whitelist_enabled
 
 
 class FakeUserService:
-    @staticmethod
-    def get_user_by_ip(ip_address: str, require_whitelist_access: bool = True):
+    _UNSET = object()
+
+    def __init__(self, *, user=_UNSET, accessible_models=None) -> None:
+        self._user = {"username": "tester", "model_permissions": "*"} if user is self._UNSET else user
+        self._accessible_models = None if accessible_models is None else list(accessible_models)
+
+    def get_user_by_ip(self, ip_address: str, require_whitelist_access: bool = True):
         del ip_address, require_whitelist_access
-        return {"username": "tester"}
+        return self._user
+
+    def can_user_access_model(self, user, model_name: str, available_models=None) -> bool:
+        del user
+        if self._accessible_models is None:
+            return True
+        return model_name in set(self._accessible_models)
+
+    def get_accessible_models_for_user(self, user, available_models=None):
+        del user
+        if self._accessible_models is None:
+            return list(available_models or [])
+        if available_models is None:
+            return list(self._accessible_models)
+        available_set = set(available_models)
+        return [model_name for model_name in self._accessible_models if model_name in available_set]
 
 
 class FakeLogService:
@@ -152,6 +174,93 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
                 ],
             },
             response.get_json(),
+        )
+
+    def test_list_models_filters_to_models_allowed_for_whitelisted_user(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1", "gpt-4.1-mini"),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(whitelist_enabled=True),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(accessible_models=["demo/gpt-4.1-mini"]),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().get("/v1/models", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(["demo/gpt-4.1-mini"], [item["id"] for item in payload["data"]])
+
+    def test_list_models_rejects_non_whitelisted_ip_when_whitelist_enabled(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(whitelist_enabled=True),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(user=None),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().get("/v1/models", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("ip_not_whitelisted", response.get_json()["error"]["code"])
+
+    def test_chat_completions_rejects_model_not_allowed_for_whitelisted_user(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1", "gpt-4.1-mini"),
+        )
+        logger = FakeLogger()
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=logger,
+            config_manager=FakeConfigManager(whitelist_enabled=True),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(accessible_models=["demo/gpt-4.1-mini"]),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("model_not_allowed", response.get_json()["error"]["code"])
+        self.assertTrue(
+            any("is not allowed to access model=demo/gpt-4.1" in msg for msg in logger.messages("warning"))
         )
 
     def test_chat_completions_returns_openai_style_error_payload_for_upstream_failures(self) -> None:
