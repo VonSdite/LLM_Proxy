@@ -324,7 +324,7 @@ def convert_openai_chat_response_to_claude(
     if not isinstance(payload, dict):
         return payload
 
-    message = {}
+    message: Dict[str, Any] = {}
     finish_reason = None
     for choice in payload.get("choices") or []:
         if not isinstance(choice, dict):
@@ -350,13 +350,14 @@ def convert_openai_chat_response_to_claude(
         "stop_sequence": None,
     }
     if isinstance(payload.get("usage"), dict):
-        response["usage"] = {
+        usage_payload: Dict[str, Any] = {
             "input_tokens": int(payload["usage"].get("prompt_tokens") or 0),
             "output_tokens": int(payload["usage"].get("completion_tokens") or 0),
         }
+        response["usage"] = usage_payload
         cached_tokens = int(((payload["usage"].get("prompt_tokens_details") or {}).get("cached_tokens")) or 0)
         if cached_tokens > 0:
-            response["usage"]["cache_read_input_tokens"] = cached_tokens
+            usage_payload["cache_read_input_tokens"] = cached_tokens
     return response
 
 

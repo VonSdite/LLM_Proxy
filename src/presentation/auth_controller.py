@@ -2,7 +2,11 @@
 # -*- coding: utf-8 -*-
 """认证控制器。"""
 
-from flask import Response, jsonify, make_response, redirect, render_template, request
+from typing import Any
+
+from flask import jsonify, make_response, redirect, render_template, request
+from flask.typing import ResponseReturnValue
+
 from ..application.app_context import AppContext
 from ..services import AuthenticationService
 
@@ -17,15 +21,20 @@ class AuthenticationController:
         self._auth_service = auth_service
         self._register_routes()
 
+    @staticmethod
+    def _get_request_payload() -> dict[str, Any]:
+        payload = request.get_json(silent=True)
+        if isinstance(payload, dict):
+            return dict(payload)
+        return {}
+
     def _register_routes(self) -> None:
-        """注册认证相关路由。"""
         self._app.route('/login')(self.login_page)
         self._app.route('/api/login', methods=['POST'])(self.api_login)
         self._app.route('/logout')(self.logout)
         self._app.route('/api/logout', methods=['POST'])(self.api_logout)
 
-    def login_page(self) -> Response:
-        """返回登录页，已登录用户会被重定向到首页。"""
+    def login_page(self) -> ResponseReturnValue:
         if not self._auth_service.is_auth_enabled():
             return redirect('/')
 
@@ -35,47 +44,44 @@ class AuthenticationController:
 
         return render_template('login.html')
 
-    def api_login(self) -> Response:
-        """处理登录请求并写入 session cookie。"""
+    def api_login(self) -> ResponseReturnValue:
         if not self._auth_service.is_auth_enabled():
             return jsonify({'message': 'Authentication not enabled'}), 200
 
-        data = request.get_json(silent=True) or {}
+        data = self._get_request_payload()
         username = data.get('username')
         password = data.get('password')
 
-        if not username or not password:
-            self._logger.warning("Login rejected: missing username or password")
+        if not isinstance(username, str) or not username or not isinstance(password, str) or not password:
+            self._logger.warning('Login rejected: missing username or password')
             return jsonify({'error': 'Username and password are required'}), 400
 
         if not self._auth_service.authenticate(username, password):
-            self._logger.warning(f"Login failed: invalid credentials for username={username!r}")
+            self._logger.warning('Login failed: invalid credentials for username=%r', username)
             return jsonify({'error': 'Invalid username or password'}), 401
 
         session_token = self._auth_service.create_session(username)
-        self._logger.info(f"Login succeeded: username={username!r}")
+        self._logger.info('Login succeeded: username=%r', username)
         response = make_response(jsonify({'message': 'Login successful', 'username': username}))
         cookie_settings = self._auth_service.get_cookie_settings()
         response.set_cookie('session_token', session_token, **cookie_settings)
         return response
 
-    def logout(self) -> Response:
-        """处理页面登出并清理 cookie。"""
+    def logout(self) -> ResponseReturnValue:
         session_token = request.cookies.get('session_token')
         if session_token:
             self._auth_service.destroy_session(session_token)
-        self._logger.info("Logout succeeded via page route")
+        self._logger.info('Logout succeeded via page route')
 
         response = make_response(redirect('/login'))
         response.delete_cookie('session_token')
         return response
 
-    def api_logout(self) -> Response:
-        """处理 API 登出并清理 cookie。"""
+    def api_logout(self) -> ResponseReturnValue:
         session_token = request.cookies.get('session_token')
         if session_token:
             self._auth_service.destroy_session(session_token)
-        self._logger.info("Logout succeeded via API route")
+        self._logger.info('Logout succeeded via API route')
 
         response = make_response(jsonify({'message': 'Logout successful'}))
         response.delete_cookie('session_token')

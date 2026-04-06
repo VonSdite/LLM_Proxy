@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 """用户控制器。"""
 
-from flask import Response, jsonify, request
+from typing import Any
+
+from flask import jsonify, request
+from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..services import AuthenticationService, UserService
@@ -22,8 +25,14 @@ class UserController:
         self._auth_service = auth_service
         self._register_routes()
 
+    @staticmethod
+    def _get_request_payload() -> dict[str, Any]:
+        payload = request.get_json(silent=True)
+        if isinstance(payload, dict):
+            return dict(payload)
+        return {}
+
     def _register_routes(self) -> None:
-        """注册用户管理路由。"""
         auth = require_authentication(self._auth_service)
 
         self._app.route('/api/users', methods=['GET'])(auth(self.get_users))
@@ -34,14 +43,13 @@ class UserController:
         self._app.route('/api/users/<int:user_id>', methods=['DELETE'])(auth(self.delete_user))
         self._app.route('/api/users/<int:user_id>/toggle', methods=['POST'])(auth(self.toggle_user))
 
-    def get_users(self) -> Response:
-        """分页查询用户列表。"""
+    def get_users(self) -> ResponseReturnValue:
         try:
             page = request.args.get('page', 1, type=int)
             page_size = request.args.get('page_size', 50, type=int)
             keyword = (request.args.get('keyword', '', type=str) or '').strip()
             self._logger.debug(
-                "List users requested: page=%s, page_size=%s, keyword=%r",
+                'List users requested: page=%s, page_size=%s, keyword=%r',
                 page,
                 page_size,
                 keyword,
@@ -50,71 +58,84 @@ class UserController:
             users = self._user_service.get_users(page=page, page_size=page_size, keyword=keyword)
             total = self._user_service.get_total_users_count(keyword=keyword)
 
-            return jsonify({
-                'users': users,
-                'total': total,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': (total + page_size - 1) // page_size,
-                'keyword': keyword,
-                'available_models': self._user_service.get_available_models(),
-            })
+            return jsonify(
+                {
+                    'users': users,
+                    'total': total,
+                    'page': page,
+                    'page_size': page_size,
+                    'total_pages': (total + page_size - 1) // page_size,
+                    'keyword': keyword,
+                    'available_models': self._user_service.get_available_models(),
+                }
+            )
         except Exception as exc:
-            self._logger.error(f'Error getting users: {exc}')
+            self._logger.error('Error getting users: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
-    def get_user(self, user_id: int) -> Response:
-        """查询单个用户。"""
+    def get_user(self, user_id: int) -> ResponseReturnValue:
         try:
             user = self._user_service.get_user_by_id(user_id)
             if not user:
-                self._logger.warning(f"Get user failed: user_id={user_id} not found")
+                self._logger.warning('Get user failed: user_id=%s not found', user_id)
                 return jsonify({'error': 'User not found'}), 404
             return jsonify(user)
         except Exception as exc:
-            self._logger.error(f'Error getting user: {exc}')
+            self._logger.error('Error getting user: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
-    def create_user(self) -> Response:
-        """创建用户。"""
+    def create_user(self) -> ResponseReturnValue:
         try:
-            data = request.get_json(silent=True) or {}
+            data = self._get_request_payload()
             username = data.get('username')
             ip_address = data.get('ip_address')
 
-            if not username:
-                self._logger.warning("Create user rejected: username is empty")
+            if not isinstance(username, str) or not username.strip():
+                self._logger.warning('Create user rejected: username is empty')
                 return jsonify({'error': 'Username is required'}), 400
-            if not ip_address:
-                self._logger.warning("Create user rejected: ip_address is empty")
+            if not isinstance(ip_address, str) or not ip_address.strip():
+                self._logger.warning('Create user rejected: ip_address is empty')
                 return jsonify({'error': 'IP address is required'}), 400
 
+            normalized_username = username.strip()
             normalized_ip = normalize_ip(ip_address)
             if not is_valid_ip(normalized_ip):
-                self._logger.warning(f"Create user rejected: invalid ip_address={ip_address!r}")
+                self._logger.warning('Create user rejected: invalid ip_address=%r', ip_address)
                 return jsonify({'error': 'Invalid IP address'}), 400
 
-            user_id = self._user_service.create_user(username, normalized_ip)
+            user_id = self._user_service.create_user(normalized_username, normalized_ip)
             if not user_id:
-                self._logger.warning(f"Create user failed: username={username!r}, ip={normalized_ip}")
+                self._logger.warning('Create user failed: username=%r, ip=%s', normalized_username, normalized_ip)
                 return jsonify({'error': 'Failed to create user or IP already exists'}), 400
 
-            self._logger.info(f"Create user succeeded: user_id={user_id}, username={username!r}, ip={normalized_ip}")
+            self._logger.info(
+                'Create user succeeded: user_id=%s, username=%r, ip=%s',
+                user_id,
+                normalized_username,
+                normalized_ip,
+            )
             return jsonify({'id': user_id, 'message': 'User created successfully'}), 201
         except Exception as exc:
-            self._logger.error(f'Error creating user: {exc}')
+            self._logger.error('Error creating user: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
-    def update_user(self, user_id: int) -> Response:
-        """更新用户信息。"""
+    def update_user(self, user_id: int) -> ResponseReturnValue:
         try:
-            data = request.get_json(silent=True)
+            data = self._get_request_payload()
             if not data:
-                self._logger.warning(f"Update user rejected: no payload, user_id={user_id}")
+                self._logger.warning('Update user rejected: no payload, user_id=%s', user_id)
                 return jsonify({'error': 'No data provided'}), 400
 
-            username = data.get('username')
-            ip_address = data.get('ip_address')
+            username_value = data.get('username')
+            if username_value is not None and not isinstance(username_value, str):
+                return jsonify({'error': 'Username must be a string'}), 400
+            username = username_value
+
+            ip_address_value = data.get('ip_address')
+            if ip_address_value is not None and not isinstance(ip_address_value, str):
+                return jsonify({'error': 'IP address must be a string'}), 400
+            ip_address = ip_address_value
+
             whitelist_access_enabled = data.get('whitelist_access_enabled')
             model_permissions_provided = 'model_permissions' in data
             model_permissions = data.get('model_permissions')
@@ -123,7 +144,7 @@ class UserController:
             if ip_address is not None:
                 normalized_ip = normalize_ip(ip_address)
                 if not is_valid_ip(normalized_ip):
-                    self._logger.warning(f"Update user rejected: invalid ip={ip_address!r}, user_id={user_id}")
+                    self._logger.warning('Update user rejected: invalid ip=%r, user_id=%s', ip_address, user_id)
                     return jsonify({'error': 'Invalid IP address'}), 400
 
             success = self._user_service.update_user(
@@ -135,21 +156,20 @@ class UserController:
                 model_permissions=model_permissions,
             )
             if not success:
-                self._logger.warning(f"Update user failed: user_id={user_id}")
+                self._logger.warning('Update user failed: user_id=%s', user_id)
                 return jsonify({'error': 'Failed to update user'}), 400
 
-            self._logger.info(f"Update user succeeded: user_id={user_id}")
+            self._logger.info('Update user succeeded: user_id=%s', user_id)
             return jsonify({'message': 'User updated successfully'})
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
         except Exception as exc:
-            self._logger.error(f'Error updating user: {exc}')
+            self._logger.error('Error updating user: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
-    def batch_users(self) -> Response:
-        """执行用户批量操作。"""
+    def batch_users(self) -> ResponseReturnValue:
         try:
-            payload = request.get_json(silent=True) or {}
+            payload = self._get_request_payload()
             action = str(payload.get('action') or '').strip().lower()
             if action != 'set_model_permissions':
                 raise ValueError(f'Unsupported user batch action: {action or "<empty>"}')
@@ -169,31 +189,29 @@ class UserController:
             status_code = 404 if 'not found' in message.lower() else 400
             return jsonify({'error': message}), status_code
         except Exception as exc:
-            self._logger.error(f'Error applying user batch action: {exc}')
+            self._logger.error('Error applying user batch action: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
-    def delete_user(self, user_id: int) -> Response:
-        """删除用户。"""
+    def delete_user(self, user_id: int) -> ResponseReturnValue:
         try:
             if not self._user_service.delete_user(user_id):
-                self._logger.warning(f"Delete user failed: user_id={user_id}")
+                self._logger.warning('Delete user failed: user_id=%s', user_id)
                 return jsonify({'error': 'Failed to delete user'}), 400
-            self._logger.info(f"Delete user succeeded: user_id={user_id}")
+            self._logger.info('Delete user succeeded: user_id=%s', user_id)
             return jsonify({'message': 'User deleted successfully'})
         except Exception as exc:
-            self._logger.error(f'Error deleting user: {exc}')
+            self._logger.error('Error deleting user: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
-    def toggle_user(self, user_id: int) -> Response:
-        """切换用户白名单状态。"""
+    def toggle_user(self, user_id: int) -> ResponseReturnValue:
         try:
             if not self._config_manager.is_chat_whitelist_enabled():
                 return jsonify({'error': 'Whitelist control is disabled'}), 400
             if not self._user_service.toggle_user_status(user_id):
-                self._logger.warning(f"Toggle user whitelist failed: user_id={user_id}")
+                self._logger.warning('Toggle user whitelist failed: user_id=%s', user_id)
                 return jsonify({'error': 'Failed to toggle user status'}), 400
-            self._logger.info(f"Toggle user whitelist succeeded: user_id={user_id}")
+            self._logger.info('Toggle user whitelist succeeded: user_id=%s', user_id)
             return jsonify({'message': 'User status toggled successfully'})
         except Exception as exc:
-            self._logger.error(f'Error toggling user status: {exc}')
+            self._logger.error('Error toggling user status: %s', exc)
             return jsonify({'error': str(exc)}), 500

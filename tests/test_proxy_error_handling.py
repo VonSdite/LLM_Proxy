@@ -127,8 +127,8 @@ class StubProxyService:
 class RecordingProxyService:
     def __init__(self, proxy_result) -> None:
         self._proxy_result = proxy_result
-        self.last_args = None
-        self.last_kwargs = None
+        self.last_args: tuple[object, ...] | None = None
+        self.last_kwargs: dict[str, object] | None = None
 
     def proxy_request(self, *args, **kwargs):
         self.last_args = args
@@ -455,6 +455,8 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         )
 
         self.assertEqual(200, response.status_code)
+        self.assertIsNotNone(proxy_service.last_kwargs)
+        assert proxy_service.last_kwargs is not None
         self.assertEqual("openai_chat", proxy_service.last_kwargs["resolved_target_format"])
 
     def test_responses_route_allows_codex_target(self) -> None:

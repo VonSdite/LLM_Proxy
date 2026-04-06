@@ -142,9 +142,9 @@ class ProviderManager:
             self._hook_cache[cache_key] = None
             return None
 
+        hook_dir = str(hook_file.parent)
+        path_inserted = False
         try:
-            hook_dir = str(hook_file.parent)
-            path_inserted = False
             if hook_dir not in sys.path:
                 sys.path.insert(0, hook_dir)
                 path_inserted = True

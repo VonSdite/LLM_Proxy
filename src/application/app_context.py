@@ -14,13 +14,45 @@ if TYPE_CHECKING:
 
 
 class Logger(Protocol):
-    def info(self, msg: str) -> None: ...
+    def info(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None: ...
 
-    def error(self, msg: str) -> None: ...
+    def error(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None: ...
 
-    def warning(self, msg: str) -> None: ...
+    def warning(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None: ...
 
-    def debug(self, msg: str) -> None: ...
+    def debug(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None: ...
 
 
 @dataclass(frozen=True)

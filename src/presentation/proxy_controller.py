@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Optional
 
 from flask import Response, jsonify, request
+from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..config import ConfigManager, ProviderManager
@@ -56,7 +57,7 @@ class ProxyController:
         *,
         error_format: str,
     ) -> tuple[Optional[Dict[str, Any]], Optional[tuple[Response, int]]]:
-        """在开启白名单时解析当前请求对应用户。"""
+        """在启用白名单时解析当前请求对应的用户。"""
         if not self._is_whitelist_required():
             return None, None
 
@@ -151,21 +152,21 @@ class ProxyController:
             return normalized[0]
         return ", ".join(normalized)
 
-    def chat_completions(self) -> Response:
+    def chat_completions(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
             route_name="chat_completions",
             expected_target_formats=("openai_chat",),
             inspect_stream_usage=True,
         )
 
-    def responses(self) -> Response:
+    def responses(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
             route_name="responses",
             expected_target_formats=("openai_responses", "codex"),
             inspect_stream_usage=False,
         )
 
-    def messages(self) -> Response:
+    def messages(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
             route_name="messages",
             expected_target_formats=("claude_chat",),
@@ -179,7 +180,7 @@ class ProxyController:
         expected_target_formats: Iterable[str],
         inspect_stream_usage: bool,
         error_format: Optional[str] = None,
-    ) -> Response:
+    ) -> ResponseReturnValue:
         normalized_expected_target_formats = tuple(
             str(item or "").strip().lower() for item in expected_target_formats if str(item or "").strip()
         )
@@ -196,10 +197,10 @@ class ProxyController:
             if denial_response is not None:
                 return denial_response
 
-            request_data = request.get_json(silent=True)
-            if request_data is None:
-                request_data = {}
-            if not isinstance(request_data, dict):
+            raw_request_data = request.get_json(silent=True)
+            if raw_request_data is None:
+                request_data: Dict[str, Any] = {}
+            elif not isinstance(raw_request_data, dict):
                 self._logger.warning("Proxy rejected: request body is not a JSON object route=%s", route_name)
                 return self._error_response(
                     "Request body must be a JSON object",
@@ -208,9 +209,11 @@ class ProxyController:
                     code="invalid_request_body",
                     error_format=resolved_error_format,
                 )
+            else:
+                request_data = dict(raw_request_data)
 
-            request_data = dict(request_data)
-            if "model" not in request_data:
+            model_name_value = request_data.get("model")
+            if not isinstance(model_name_value, str) or not model_name_value.strip():
                 self._logger.warning("Proxy rejected: missing model in request body route=%s", route_name)
                 return self._error_response(
                     "Missing 'model' in request body",
@@ -220,7 +223,7 @@ class ProxyController:
                     error_format=resolved_error_format,
                 )
 
-            model_name = request_data["model"]
+            model_name = model_name_value.strip()
             provider = self._provider_manager.get_provider_for_model(model_name)
             if not provider:
                 self._logger.warning("Proxy rejected: unknown model=%r route=%s", model_name, route_name)
@@ -390,7 +393,7 @@ class ProxyController:
                 error_format=resolved_error_format,
             )
 
-    def list_models(self) -> Response:
+    def list_models(self) -> ResponseReturnValue:
         try:
             client_ip = normalize_ip(request.remote_addr)
             user, denial_response = self._get_authorized_user_for_request(
@@ -453,3 +456,6 @@ class ProxyController:
             "upgrade",
         }
         return {k: v for k, v in headers.items() if k.lower() not in excluded}
+
+
+

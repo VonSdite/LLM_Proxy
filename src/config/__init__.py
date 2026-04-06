@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """配置层导出。"""
 
+from typing import TYPE_CHECKING
+
 from .config_manager import ConfigManager
 from .provider_config import (
     AuthEntrySchema,
@@ -14,6 +16,10 @@ from .provider_config import (
     validate_auth_group_definitions,
     validate_auth_group_provider_definitions,
 )
+
+if TYPE_CHECKING:
+    from .auth_group_manager import AuthGroupManager
+    from .provider_manager import ProviderManager
 
 __all__ = [
     "ConfigManager",

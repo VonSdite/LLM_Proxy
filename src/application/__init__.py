@@ -2,7 +2,12 @@
 # -*- coding: utf-8 -*-
 """应用层导出。"""
 
+from typing import TYPE_CHECKING
+
 from .app_context import AppContext, Logger
+
+if TYPE_CHECKING:
+    from .application import Application
 
 __all__ = ["Application", "AppContext", "Logger"]
 
