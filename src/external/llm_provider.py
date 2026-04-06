@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, cast
 
 from ..config.provider_config import (
     DEFAULT_PROVIDER_TARGET_FORMAT,
@@ -66,7 +66,10 @@ class LLMProvider:
         if not self.hook:
             return body
 
-        guard = getattr(self.hook, "request_guard", None)
+        guard = cast(
+            Optional[Callable[[HookContext, Dict[str, Any]], Optional[Dict[str, Any]]]],
+            getattr(self.hook, "request_guard", None),
+        )
         if callable(guard):
             guarded = guard(ctx, body)
             return body if guarded is None else guarded
@@ -76,7 +79,7 @@ class LLMProvider:
         if not self.hook:
             return body
 
-        guard = getattr(self.hook, "response_guard", None)
+        guard = cast(Optional[Callable[[HookContext, Any], Any]], getattr(self.hook, "response_guard", None))
         if callable(guard):
             guarded = guard(ctx, body)
             return body if guarded is None else guarded

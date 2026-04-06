@@ -53,7 +53,7 @@ class HookModule(Protocol):
     def header_hook(self, ctx: HookContext, headers: Dict[str, str]) -> Dict[str, str]:
         ...
 
-    def request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
+    def request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         ...
 
     def response_guard(self, ctx: HookContext, body: Any) -> Any:
@@ -66,7 +66,7 @@ class BaseHook:
     def header_hook(self, ctx: HookContext, headers: Dict[str, str]) -> Dict[str, str]:
         return headers
 
-    def request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
+    def request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return body
 
     def response_guard(self, ctx: HookContext, body: Any) -> Any:

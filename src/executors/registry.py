@@ -157,12 +157,12 @@ class WebSocketExecutor:
 
         connection.send(json.dumps(body, ensure_ascii=False))
         if requested_stream:
-            response = WebSocketUpstreamResponse(connection)
+            stream_response = WebSocketUpstreamResponse(connection)
             stream_format = resolve_stream_format(None, "", provider.transport)
             return OpenedUpstreamResponse(
-                response=response,
-                status_code=response.status_code,
-                content_type=(response.headers.get("Content-Type") or "").lower(),
+                response=stream_response,
+                status_code=stream_response.status_code,
+                content_type=(stream_response.headers.get("Content-Type") or "").lower(),
                 is_stream=True,
                 stream_format=stream_format,
             )

@@ -231,10 +231,11 @@ class UserService:
         try:
             available_models = self._get_available_model_names()
             users = self._repository.get(page=page, page_size=page_size, keyword=keyword)
-            return [
+            decorated_users = [
                 self._decorate_user(user, available_models=available_models)
                 for user in users
             ]
+            return [user for user in decorated_users if user is not None]
         except Exception as exc:
             self._logger.error(f"Failed to get users: {exc}")
             return []

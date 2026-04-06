@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -9,17 +10,17 @@ from src.hooks import BaseHook, HookContext
 
 
 class FakeLogger:
-    def info(self, msg: str, *args) -> None:
-        del msg, args
+    def info(self, msg: object, *args: object, **kwargs: object) -> None:
+        del msg, args, kwargs
 
-    def warning(self, msg: str, *args) -> None:
-        del msg, args
+    def warning(self, msg: object, *args: object, **kwargs: object) -> None:
+        del msg, args, kwargs
 
-    def error(self, msg: str, *args) -> None:
-        del msg, args
+    def error(self, msg: object, *args: object, **kwargs: object) -> None:
+        del msg, args, kwargs
 
-    def debug(self, msg: str, *args) -> None:
-        del msg, args
+    def debug(self, msg: object, *args: object, **kwargs: object) -> None:
+        del msg, args, kwargs
 
 
 class LegacyOnlyHook:
@@ -83,7 +84,7 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual(response_body, hook.response_guard(ctx, response_body))
 
     def test_provider_does_not_call_legacy_hook_methods(self) -> None:
-        provider = LLMProvider(name="demo", api="https://example.com", hook=LegacyOnlyHook())
+        provider = LLMProvider(name="demo", api="https://example.com", hook=cast(Any, LegacyOnlyHook()))
         ctx = self._ctx()
         request_body = {"messages": [{"role": "user", "content": "hello"}]}
         response_body = {"message": "ok"}
@@ -101,7 +102,7 @@ class HookContractsTests(unittest.TestCase):
     def test_none_from_guard_keeps_original_body(self) -> None:
         provider = LLMProvider(name="demo", api="https://example.com", hook=NoneReturningGuard())
         ctx = self._ctx()
-        request_body = {"messages": []}
+        request_body: dict[str, Any] = {"messages": []}
         response_body = {"message": "ok"}
 
         self.assertEqual(request_body, provider.apply_request_guard(ctx, request_body))

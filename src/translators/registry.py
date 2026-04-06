@@ -26,8 +26,11 @@ from .responses_bridge import (
 
 
 class Translator(Protocol):
-    source_format: str
-    target_format: str
+    @property
+    def source_format(self) -> str: ...
+
+    @property
+    def target_format(self) -> str: ...
 
     def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
         ...
@@ -1047,7 +1050,7 @@ def build_default_translator_registry() -> TranslatorRegistry:
     codex_passthrough = CodexPassthroughTranslator()
     openai_chat_codex = OpenAIChatCodexTranslator()
 
-    for translator in (
+    builtin_translators: tuple[Translator, ...] = (
         openai_chat,
         openai_responses,
         openai_responses_passthrough,
@@ -1058,17 +1061,19 @@ def build_default_translator_registry() -> TranslatorRegistry:
         codex_chat,
         codex_passthrough,
         openai_chat_codex,
-    ):
+    )
+    for translator in builtin_translators:
         registry.register(translator)
 
-    for translator in (
+    composed_translators: tuple[Translator, ...] = (
         ComposedTranslator("openai_responses", "claude_chat", openai_responses, openai_chat_claude),
         ComposedTranslator("openai_responses", "codex", openai_responses, openai_chat_codex),
         ComposedTranslator("claude_chat", "openai_responses", claude_chat, openai_chat_responses),
         ComposedTranslator("claude_chat", "codex", claude_chat, openai_chat_codex),
         ComposedTranslator("codex", "openai_responses", codex_chat, openai_chat_responses),
         ComposedTranslator("codex", "claude_chat", codex_chat, openai_chat_claude),
-    ):
+    )
+    for translator in composed_translators:
         registry.register(translator)
 
     return registry
@@ -1486,7 +1491,7 @@ def _extract_claude_usage(payload: Any) -> Dict[str, Any]:
         return {}
     prompt_tokens = int(payload.get("input_tokens") or 0)
     completion_tokens = int(payload.get("output_tokens") or 0)
-    usage = {
+    usage: Dict[str, Any] = {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": prompt_tokens + completion_tokens,

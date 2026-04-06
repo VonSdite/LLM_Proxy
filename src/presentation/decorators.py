@@ -3,19 +3,24 @@
 """认证装饰器。"""
 
 from functools import wraps
-from typing import Callable
+from typing import Callable, ParamSpec
 
 from flask import jsonify, redirect, request
+from flask.typing import ResponseReturnValue
 
 from ..services import AuthenticationService
 
+P = ParamSpec("P")
 
-def require_authentication(auth_service: AuthenticationService):
+
+def require_authentication(
+    auth_service: AuthenticationService,
+) -> Callable[[Callable[P, ResponseReturnValue]], Callable[P, ResponseReturnValue]]:
     """生成认证校验装饰器。"""
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, ResponseReturnValue]) -> Callable[P, ResponseReturnValue]:
         @wraps(func)
-        def decorated_function(*args, **kwargs):
+        def decorated_function(*args: P.args, **kwargs: P.kwargs) -> ResponseReturnValue:
             if not auth_service.is_auth_enabled():
                 return func(*args, **kwargs)
 

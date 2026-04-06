@@ -4,10 +4,11 @@
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any, cast
 
 from flask import request
 
-from .app_context import AppContext
+from .app_context import AppContext, Logger
 from ..config import (
     ConfigManager,
     ProviderManager,
@@ -110,8 +111,8 @@ class Application:
         access_logger.setLevel(level)
 
         self._logger = logger
-        self._flask_app.logger = logger
-        self._flask_app.access_logger = access_logger
+        self._access_logger = access_logger
+        cast(Any, self._flask_app).logger = logger
 
     def _setup_request_access_logging(self) -> None:
         """注册请求访问日志钩子，仅记录 IP、URL 与模型。"""
@@ -136,12 +137,12 @@ class Application:
                 log_message = f'{log_message} username={username}'
             if model is not None:
                 log_message = f'{log_message} model={model}'
-            self._flask_app.access_logger.info(log_message)
+            self._access_logger.info(log_message)
 
     def _setup_context(self) -> None:
         """创建全局运行上下文。"""
         self._ctx = AppContext(
-            logger=self._logger,
+            logger=cast(Logger, self._logger),
             config_manager=self._config_manager,
             root_path=self._root_path,
             flask_app=self._flask_app,

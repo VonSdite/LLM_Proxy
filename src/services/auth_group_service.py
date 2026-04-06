@@ -218,6 +218,7 @@ class AuthGroupService:
 
     @staticmethod
     def _normalize_import_payload(payload: Any) -> List[Mapping[str, Any]]:
+        entries: Any
         if isinstance(payload, list):
             entries = payload
         elif isinstance(payload, Mapping):

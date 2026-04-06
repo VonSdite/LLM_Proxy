@@ -3,17 +3,19 @@
 
 import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from gevent import monkey
 
 monkey.patch_all()
 
-import urllib3
-
-from src.application import Application
+import urllib3  # noqa: E402
 
 # 禁用 HTTPS 证书告警
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+if TYPE_CHECKING:
+    from src.application import Application
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,7 +26,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def app() -> Application:
+def app() -> "Application":
+    from src.application import Application
+
     args = parse_args()
     config_path = args.config
     project_root = Path(__file__).resolve().parent

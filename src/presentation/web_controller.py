@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """页面与统计控制器。"""
 
-from flask import Response, jsonify, render_template, request
+from flask import jsonify, render_template, request
+from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..services import AuthenticationService, LogService
@@ -24,27 +25,27 @@ class WebController:
     def _register_routes(self) -> None:
         auth = require_authentication(self._auth_service)
 
-        self._app.route("/")(auth(self.index))
-        self._app.route("/users")(auth(self.users_page))
-        self._app.route("/providers")(auth(self.providers_page))
+        self._app.route('/')(auth(self.index))
+        self._app.route('/users')(auth(self.users_page))
+        self._app.route('/providers')(auth(self.providers_page))
 
-        self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
-        self._app.route("/api/request-logs", methods=["GET"])(auth(self.get_request_logs))
-        self._app.route("/api/usernames", methods=["GET"])(auth(self.get_usernames))
-        self._app.route("/api/request-models", methods=["GET"])(auth(self.get_request_models))
+        self._app.route('/api/statistics', methods=['GET'])(auth(self.get_statistics))
+        self._app.route('/api/request-logs', methods=['GET'])(auth(self.get_request_logs))
+        self._app.route('/api/usernames', methods=['GET'])(auth(self.get_usernames))
+        self._app.route('/api/request-models', methods=['GET'])(auth(self.get_request_models))
 
     def index(self) -> str:
         return render_template(
-            "index.html",
-            active_page="index",
+            'index.html',
+            active_page='index',
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
         )
 
     def users_page(self) -> str:
         return render_template(
-            "users.html",
-            active_page="users",
+            'users.html',
+            active_page='users',
             chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
@@ -52,8 +53,8 @@ class WebController:
 
     def providers_page(self) -> str:
         return render_template(
-            "providers.html",
-            active_page="providers",
+            'providers.html',
+            active_page='providers',
             chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
@@ -61,66 +62,66 @@ class WebController:
 
     def _get_current_username(self) -> str:
         if not self._auth_service.is_auth_enabled():
-            return ""
+            return ''
 
-        session_token = request.cookies.get("session_token")
-        return self._auth_service.get_session_username(session_token) or ""
+        session_token = request.cookies.get('session_token')
+        return self._auth_service.get_session_username(session_token) or ''
 
-    def get_statistics(self) -> Response:
+    def get_statistics(self) -> ResponseReturnValue:
         try:
             self._logger.debug(
-                "Statistics queried: start_date=%s end_date=%s username=%s request_model=%s",
-                request.args.get("start_date"),
-                request.args.get("end_date"),
-                request.args.get("username"),
-                request.args.get("request_model"),
+                'Statistics queried: start_date=%s end_date=%s username=%s request_model=%s',
+                request.args.get('start_date'),
+                request.args.get('end_date'),
+                request.args.get('username'),
+                request.args.get('request_model'),
             )
             stats = self._log_service.get_statistics(
-                request.args.get("start_date"),
-                request.args.get("end_date"),
-                request.args.get("username"),
-                request.args.get("request_model"),
+                request.args.get('start_date'),
+                request.args.get('end_date'),
+                request.args.get('username'),
+                request.args.get('request_model'),
             )
             return jsonify(stats)
         except Exception as exc:
-            self._logger.error(f"Error getting statistics: {exc}")
-            return jsonify({"error": str(exc)}), 500
+            self._logger.error('Error getting statistics: %s', exc)
+            return jsonify({'error': str(exc)}), 500
 
-    def get_request_logs(self) -> Response:
+    def get_request_logs(self) -> ResponseReturnValue:
         try:
-            page = max(int(request.args.get("page", 1)), 1)
-            page_size = min(max(int(request.args.get("page_size", 50)), 1), 200)
-            self._logger.debug(f"Request logs queried: page={page}, page_size={page_size}")
+            page = max(int(request.args.get('page', 1)), 1)
+            page_size = min(max(int(request.args.get('page_size', 50)), 1), 200)
+            self._logger.debug('Request logs queried: page=%s, page_size=%s', page, page_size)
 
             logs = self._log_service.get_request_logs(
                 page,
                 page_size,
-                request.args.get("start_date"),
-                request.args.get("end_date"),
-                request.args.get("username"),
-                request.args.get("request_model"),
+                request.args.get('start_date'),
+                request.args.get('end_date'),
+                request.args.get('username'),
+                request.args.get('request_model'),
             )
             return jsonify(logs)
         except ValueError:
-            return jsonify({"error": "page and page_size must be integers"}), 400
+            return jsonify({'error': 'page and page_size must be integers'}), 400
         except Exception as exc:
-            self._logger.error(f"Error getting request logs: {exc}")
-            return jsonify({"error": str(exc)}), 500
+            self._logger.error('Error getting request logs: %s', exc)
+            return jsonify({'error': str(exc)}), 500
 
-    def get_usernames(self) -> Response:
+    def get_usernames(self) -> ResponseReturnValue:
         try:
             usernames = self._log_service.get_unique_usernames()
-            self._logger.debug(f"Usernames queried: count={len(usernames)}")
+            self._logger.debug('Usernames queried: count=%s', len(usernames))
             return jsonify(usernames)
         except Exception as exc:
-            self._logger.error(f"Error getting usernames: {exc}")
-            return jsonify({"error": str(exc)}), 500
+            self._logger.error('Error getting usernames: %s', exc)
+            return jsonify({'error': str(exc)}), 500
 
-    def get_request_models(self) -> Response:
+    def get_request_models(self) -> ResponseReturnValue:
         try:
             models = self._log_service.get_unique_request_models()
-            self._logger.debug(f"Request models queried: count={len(models)}")
+            self._logger.debug('Request models queried: count=%s', len(models))
             return jsonify(models)
         except Exception as exc:
-            self._logger.error(f"Error getting request models: {exc}")
-            return jsonify({"error": str(exc)}), 500
+            self._logger.error('Error getting request models: %s', exc)
+            return jsonify({'error': str(exc)}), 500

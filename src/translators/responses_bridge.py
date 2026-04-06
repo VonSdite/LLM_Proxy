@@ -625,7 +625,7 @@ def convert_openai_chat_response_to_responses(
     if not isinstance(payload, dict):
         return payload
 
-    message = {}
+    message: Dict[str, Any] = {}
     finish_reason = None
     for choice in payload.get("choices") or []:
         if not isinstance(choice, dict):

@@ -24,7 +24,8 @@ class OpenedUpstreamResponse:
 class Executor(Protocol):
     """Transport-specific executor that opens an upstream response."""
 
-    transport: str
+    @property
+    def transport(self) -> str: ...
 
     def execute(
         self,

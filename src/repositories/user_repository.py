@@ -158,8 +158,8 @@ class UserRepository:
         model_permissions: Optional[str] = None,
     ) -> bool:
         """更新用户记录。"""
-        updates = []
-        params = []
+        updates: list[str] = []
+        params: list[Any] = []
 
         if username is not None:
             updates.append("username = ?")
