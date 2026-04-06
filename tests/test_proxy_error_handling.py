@@ -105,6 +105,7 @@ class FakeProviderManager:
             transport=self._provider.transport,
             source_format=self._provider.source_format,
             target_format=self._provider.target_format,
+            target_formats=self._provider.target_formats,
             model_list=self._provider.model_list,
             proxy=self._provider.proxy,
             timeout_seconds=self._provider.timeout_seconds,
@@ -120,6 +121,18 @@ class StubProxyService:
 
     def proxy_request(self, *args, **kwargs):
         del args, kwargs
+        return self._proxy_result
+
+
+class RecordingProxyService:
+    def __init__(self, proxy_result) -> None:
+        self._proxy_result = proxy_result
+        self.last_args = None
+        self.last_kwargs = None
+
+    def proxy_request(self, *args, **kwargs):
+        self.last_args = args
+        self.last_kwargs = kwargs
         return self._proxy_result
 
 
@@ -170,7 +183,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
                         "owned_by": "demo",
                         "provider_name": "demo",
                         "source_format": "openai_responses",
-                        "target_format": "codex",
+                        "target_formats": ["codex"],
                         "transport": "http",
                     }
                 ],
@@ -352,7 +365,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         self.assertEqual(
             {
                 "error": {
-                    "message": "Model demo/gpt-4.1 is configured for downstream format openai_chat, not one of openai_responses, codex",
+                    "message": "Model demo/gpt-4.1 is configured for downstream formats openai_chat, not one of openai_responses, codex",
                     "type": "invalid_request_error",
                     "param": None,
                     "code": "target_format_mismatch",
@@ -401,6 +414,48 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertEqual('{"id":"resp_1","object":"response"}', response.get_data(as_text=True))
+
+    def test_chat_route_resolves_target_format_from_multi_target_provider(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            target_formats=("openai_chat", "claude_chat"),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        proxy_service = RecordingProxyService(
+            (
+                app.response_class(
+                    '{"id":"chatcmpl_1","object":"chat.completion"}',
+                    status=200,
+                    mimetype="application/json",
+                ),
+                200,
+                None,
+            )
+        )
+        ProxyController(
+            ctx,
+            proxy_service,
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("openai_chat", proxy_service.last_kwargs["resolved_target_format"])
 
     def test_responses_route_allows_codex_target(self) -> None:
         provider = LLMProvider(
@@ -477,7 +532,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
                 "type": "error",
                 "error": {
                     "type": "invalid_request_error",
-                    "message": "Model demo/gpt-4.1 is configured for downstream format openai_chat, not claude_chat",
+                    "message": "Model demo/gpt-4.1 is configured for downstream formats openai_chat, not claude_chat",
                 },
             },
             response.get_json(),

@@ -93,7 +93,7 @@ class ProviderManager:
             api=runtime_spec.api,
             transport=runtime_spec.transport,
             source_format=runtime_spec.source_format,
-            target_format=runtime_spec.target_format,
+            target_formats=runtime_spec.target_formats,
             api_key=spec.api_key,
             auth_group=runtime_spec.auth_group,
             model_list=runtime_spec.model_list,

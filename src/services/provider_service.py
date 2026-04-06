@@ -41,11 +41,12 @@ class ProviderService:
         providers = self._extract_providers(config)
         provider_config = ProviderConfigSchema.from_payload(payload)
         normalized = provider_config.to_mapping()
+        stored = provider_config.to_storage_mapping()
 
         if self._find_provider(providers, provider_config.name):
             raise ValueError(f"Provider already exists: {provider_config.name}")
 
-        providers.append(normalized)
+        providers.append(stored)
         self._save_providers(config, providers)
         return normalized
 
@@ -62,12 +63,13 @@ class ProviderService:
 
         provider_config = ProviderConfigSchema.from_payload(normalized_payload)
         normalized = provider_config.to_mapping()
+        stored = provider_config.to_storage_mapping()
 
         duplicate = self._find_provider(providers, provider_config.name)
         if duplicate is not None and duplicate is not target:
             raise ValueError(f"Provider already exists: {provider_config.name}")
 
-        providers[providers.index(target)] = normalized
+        providers[providers.index(target)] = stored
         self._save_providers(config, providers)
         return normalized
 
@@ -89,11 +91,12 @@ class ProviderService:
             raise ValueError(f'Provider not found: {name}')
 
         target_index = providers.index(target)
-        normalized = ProviderConfigSchema.from_mapping(target).to_mapping()
+        normalized = ProviderConfigSchema.from_mapping(target).to_storage_mapping()
         normalized['enabled'] = bool(enabled)
-        providers[target_index] = ProviderConfigSchema.from_payload(normalized).to_mapping()
+        provider_config = ProviderConfigSchema.from_payload(normalized)
+        providers[target_index] = provider_config.to_storage_mapping()
         self._save_providers(config, providers)
-        return providers[target_index]
+        return provider_config.to_mapping()
 
     def batch_set_provider_enabled(self, names: List[str], enabled: bool) -> Dict[str, Any]:
         normalized_names = self._normalize_provider_names(names)
@@ -102,9 +105,9 @@ class ProviderService:
         target_indexes = self._find_provider_indexes(providers, normalized_names)
 
         for target_index in target_indexes:
-            normalized = ProviderConfigSchema.from_mapping(providers[target_index]).to_mapping()
+            normalized = ProviderConfigSchema.from_mapping(providers[target_index]).to_storage_mapping()
             normalized['enabled'] = bool(enabled)
-            providers[target_index] = ProviderConfigSchema.from_payload(normalized).to_mapping()
+            providers[target_index] = ProviderConfigSchema.from_payload(normalized).to_storage_mapping()
 
         self._save_providers(config, providers)
         return {

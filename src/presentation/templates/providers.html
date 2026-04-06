@@ -135,9 +135,16 @@
                         <div class="mb-3">
                             <label class="form-label field-label-with-help">
                                 <span>下游格式</span>
+                                <span class="field-mode-badge">多选</span>
                                 <button type="button" class="field-help-button" data-provider-help-topic="target_format" onclick="toggleProviderHelp('target_format', event)" aria-label="查看下游格式说明">?</button>
                             </label>
-                            <select class="form-control" id="providerTargetFormat">
+                            <select
+                                class="form-control"
+                                id="providerTargetFormat"
+                                multiple
+                                data-placeholder="请选择下游格式"
+                                data-multi-select-hint="可多选，点击已选项可取消；互斥项会自动替换"
+                            >
                                 <option value="openai_chat">openai_chat</option>
                                 <option value="openai_responses">openai_responses</option>
                                 <option value="claude_chat">claude_chat</option>
@@ -504,6 +511,11 @@
         let providerTransportAutoSyncEnabled = true;
         let authEntryYamlEditor = null;
         let authEntryYamlThemeObserver = null;
+        const providerTargetFormatOptions = ['openai_chat', 'openai_responses', 'claude_chat', 'codex'];
+        const defaultNewProviderTargetFormats = ['openai_chat', 'codex', 'claude_chat'];
+        const providerTargetFormatConflictGroups = [
+            ['openai_responses', 'codex'],
+        ];
         const providerHelpTopics = {
             transport: {
                 title: '上游传输怎么选',
@@ -532,14 +544,15 @@
             target_format: {
                 title: '下游格式怎么选',
                 html: `
-                    <p>下游 = 调用这个代理的客户端或工具。你要根据客户端支持的协议面来选。</p>
+                    <p>下游 = 调用这个代理的客户端或工具。现在可以多选，同一个 provider 可以同时暴露多个下游协议。</p>
                     <ul>
                         <li><strong>openai_chat</strong>：下游走 <code>/v1/chat/completions</code>。适合 OpenCode、Cherry Studio 的 OpenAI provider。</li>
                         <li><strong>openai_responses</strong>：下游走 <code>/v1/responses</code>。适合 Responses API 客户端。</li>
                         <li><strong>codex</strong>：也走 <code>/v1/responses</code>，但保留 Codex 的请求语义。</li>
                         <li><strong>claude_chat</strong>：下游走 <code>/v1/messages</code>。适合 Claude Code 和 Anthropic 兼容客户端。</li>
                     </ul>
-                    <p>一个 provider 配好后只能被对应的 route family 使用，不能让下游随意混用。</p>
+                    <p>注意：有些下游格式会互斥，因为它们共用同一个 route family 但请求语义不同。目前 <code>openai_responses</code> 和 <code>codex</code> 不能同时启用；以后如果有新的互斥组合，也会在这里说明。</p>
+                    <p>在多选下拉里如果新选了冲突项，旧的冲突项会自动被替换。</p>
                 `,
             },
             auth_group_field: {
@@ -595,7 +608,7 @@
                         <li><strong>HTTP/HTTPS</strong>：直接请求当前配置地址对应的模型接口。</li>
                         <li><strong>WebSocket</strong>：会自动把 <code>ws://</code> / <code>wss://</code> 推导成对应的 <code>http://</code> / <code>https://</code> 后再尝试拉取。</li>
                     </ul>
-                    <p>这一步只是帮你发现可选模型，不会修改上游协议，也不会自动替你决定 <code>source_format</code> 或 <code>target_format</code>。</p>
+                    <p>这一步只是帮你发现可选模型，不会修改上游协议，也不会自动替你决定 <code>source_format</code> 或 <code>target_formats</code>。</p>
                 `,
             },
         };
@@ -1104,7 +1117,7 @@
             switchProviderTab('providers');
             activeModelProvider = provider;
             document.getElementById('modelDetailTitle').textContent = `${provider.name} - 模型列表`;
-            document.getElementById('modelDetailSubtitle').textContent = `API 地址: ${provider.api}` || '未配置 API 地址';
+            document.getElementById('modelDetailSubtitle').textContent = provider?.api ? `API 地址: ${provider.api}` : '未配置 API 地址';
             document.getElementById('modelSearchInput').value = '';
             renderModelDetailList();
             modelDetailModalInstance.show();
@@ -1397,8 +1410,83 @@
             updateFetchModelsButtonState();
         }
 
+        function getSelectedOptionValues(select) {
+            if (!select) {
+                return [];
+            }
+            return Array.from(select.options)
+                .filter(option => option.selected)
+                .map(option => option.value);
+        }
+
+        function normalizeProviderTargetFormatValues(values, preferredValue = '') {
+            const normalizedPreferredValue = String(preferredValue ?? '').trim();
+            const requestedValues = Array.isArray(values) ? values : [values];
+            const selectedValues = new Set();
+
+            requestedValues.forEach(value => {
+                const normalizedValue = String(value ?? '').trim();
+                if (!normalizedValue || !providerTargetFormatOptions.includes(normalizedValue)) {
+                    return;
+                }
+                selectedValues.add(normalizedValue);
+            });
+
+            providerTargetFormatConflictGroups.forEach(group => {
+                const conflictingValues = group.filter(value => selectedValues.has(value));
+                if (conflictingValues.length <= 1) {
+                    return;
+                }
+                const keptValue = conflictingValues.includes(normalizedPreferredValue)
+                    ? normalizedPreferredValue
+                    : conflictingValues[conflictingValues.length - 1];
+                conflictingValues.forEach(value => {
+                    if (value !== keptValue) {
+                        selectedValues.delete(value);
+                    }
+                });
+            });
+
+            if (!selectedValues.size) {
+                selectedValues.add('openai_chat');
+            }
+
+            return providerTargetFormatOptions.filter(value => selectedValues.has(value));
+        }
+
+        function setProviderTargetFormatValues(values, preferredValue = '', options = {}) {
+            const select = document.getElementById('providerTargetFormat');
+            if (!select) {
+                return [];
+            }
+            const { dispatchChange = false } = options || {};
+            const normalizedValues = normalizeProviderTargetFormatValues(values, preferredValue);
+            Array.from(select.options).forEach(option => {
+                option.selected = normalizedValues.includes(option.value);
+            });
+            if (dispatchChange) {
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+                syncCustomSelectValue('providerTargetFormat');
+            }
+            return normalizedValues;
+        }
+
+        function getProviderTargetFormats(provider) {
+            const rawValues = Array.isArray(provider?.target_formats)
+                ? provider.target_formats
+                // DEPRECATED compatibility path for legacy payloads that still
+                // expose `target_format`. New backend responses should only
+                // provide `target_formats`, and this fallback can be removed later.
+                : [provider?.target_format];
+            return normalizeProviderTargetFormatValues(rawValues);
+        }
+
         function collectFormData() {
             const targetFormatInput = document.getElementById('providerTargetFormat');
+            const normalizedTargetFormats = targetFormatInput
+                ? normalizeProviderTargetFormatValues(getSelectedOptionValues(targetFormatInput))
+                : ['openai_chat'];
             const normalizedModelList = buildModelListValue(
                 normalizeModelListItems(document.getElementById('providerModelList').value)
             );
@@ -1414,7 +1502,7 @@
                 api: document.getElementById('providerApi').value.trim(),
                 transport: document.getElementById('providerTransport').value,
                 source_format: document.getElementById('providerSourceFormat').value.trim() || 'openai_chat',
-                target_format: targetFormatInput?.value?.trim() || 'openai_chat',
+                target_formats: normalizedTargetFormats,
                 auth_group: authGroup,
                 api_key: apiKey,
                 proxy: document.getElementById('providerProxy').value.trim(),
@@ -1426,19 +1514,57 @@
             };
         }
 
+        function buildMultiSelectTriggerMarkup(nativeSelect, selectedLabels) {
+            const placeholder = nativeSelect.dataset.placeholder || '请选择';
+            const visibleLabels = selectedLabels.slice(0, 2);
+            const hiddenCount = Math.max(selectedLabels.length - visibleLabels.length, 0);
+            const chipsMarkup = selectedLabels.length
+                ? visibleLabels
+                    .map(label => `<span class="custom-select-trigger-chip">${escapeHtml(label)}</span>`)
+                    .join('')
+                    + (hiddenCount ? `<span class="custom-select-trigger-chip custom-select-trigger-chip-more">+${hiddenCount}</span>` : '')
+                : `<span class="custom-select-trigger-placeholder">${escapeHtml(placeholder)}</span>`;
+
+            return `
+                <span class="custom-select-trigger-main">
+                    <span class="custom-select-trigger-chips${selectedLabels.length ? '' : ' is-placeholder'}">${chipsMarkup}</span>
+                </span>
+            `;
+        }
+
         function syncCustomSelectValue(selectId) {
             const nativeSelect = document.getElementById(selectId);
             const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
             if (!nativeSelect || !customSelect) return;
 
+            const isMultiSelect = nativeSelect.multiple;
             const trigger = customSelect.querySelector('.custom-select-trigger');
-            const selectedOption = nativeSelect.options[nativeSelect.selectedIndex] || nativeSelect.options[0];
+            const selectedOptions = isMultiSelect
+                ? Array.from(nativeSelect.options).filter(option => option.selected)
+                : [nativeSelect.options[nativeSelect.selectedIndex] || nativeSelect.options[0]].filter(Boolean);
+            const selectedLabels = selectedOptions
+                .map(option => option.textContent || '')
+                .filter(Boolean);
             if (trigger) {
-                trigger.textContent = selectedOption ? selectedOption.textContent : '请选择';
+                if (isMultiSelect) {
+                    trigger.innerHTML = buildMultiSelectTriggerMarkup(nativeSelect, selectedLabels);
+                } else {
+                    const triggerText = selectedLabels.length > 2
+                        ? `${selectedLabels.slice(0, 2).join(', ')} +${selectedLabels.length - 2}`
+                        : (selectedLabels.join(', ') || nativeSelect.dataset.placeholder || '请选择');
+                    trigger.textContent = triggerText;
+                }
+                trigger.title = selectedLabels.join(', ');
             }
 
+            const selectedValues = getSelectedOptionValues(nativeSelect);
+            customSelect.classList.toggle('is-multi', isMultiSelect);
             customSelect.querySelectorAll('.custom-select-option').forEach(option => {
-                option.classList.toggle('selected', option.dataset.value === nativeSelect.value);
+                const isSelected = isMultiSelect
+                    ? selectedValues.includes(option.dataset.value || '')
+                    : option.dataset.value === nativeSelect.value;
+                option.classList.toggle('selected', isSelected);
+                option.setAttribute('aria-selected', isSelected ? 'true' : 'false');
             });
         }
 
@@ -1447,17 +1573,46 @@
             const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
             if (!nativeSelect || !customSelect) return;
 
+            const isMultiSelect = nativeSelect.multiple;
             const menu = customSelect.querySelector('.custom-select-menu');
             if (!menu) return;
             menu.innerHTML = '';
+            menu.setAttribute('aria-multiselectable', isMultiSelect ? 'true' : 'false');
 
             Array.from(nativeSelect.options).forEach(option => {
                 const optionButton = document.createElement('button');
                 optionButton.type = 'button';
-                optionButton.className = 'custom-select-option';
-                optionButton.textContent = option.textContent;
+                optionButton.className = isMultiSelect
+                    ? 'custom-select-option custom-select-option-multi'
+                    : 'custom-select-option';
+                if (isMultiSelect) {
+                    optionButton.innerHTML = `
+                        <span class="custom-select-option-check" aria-hidden="true"></span>
+                        <span class="custom-select-option-label">${escapeHtml(option.textContent || '')}</span>
+                    `;
+                } else {
+                    optionButton.textContent = option.textContent;
+                }
                 optionButton.dataset.value = option.value;
-                optionButton.addEventListener('click', function() {
+                optionButton.setAttribute('role', 'option');
+                optionButton.setAttribute('aria-selected', option.selected ? 'true' : 'false');
+                optionButton.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    if (isMultiSelect) {
+                        const currentValues = getSelectedOptionValues(nativeSelect);
+                        const nextValues = currentValues.includes(option.value)
+                            ? currentValues.filter(value => value !== option.value)
+                            : currentValues.concat(option.value);
+                        if (selectId === 'providerTargetFormat') {
+                            setProviderTargetFormatValues(nextValues, option.value, { dispatchChange: true });
+                        } else {
+                            Array.from(nativeSelect.options).forEach(selectOption => {
+                                selectOption.selected = nextValues.includes(selectOption.value);
+                            });
+                            nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        return;
+                    }
                     if (nativeSelect.value !== option.value) {
                         nativeSelect.value = option.value;
                         nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1467,6 +1622,12 @@
                 });
                 menu.appendChild(optionButton);
             });
+            if (isMultiSelect) {
+                const menuHint = document.createElement('div');
+                menuHint.className = 'custom-select-menu-hint';
+                menuHint.textContent = nativeSelect.dataset.multiSelectHint || '可多选，点击已选项可取消';
+                menu.appendChild(menuHint);
+            }
 
             syncCustomSelectValue(selectId);
         }
@@ -1519,12 +1680,28 @@
                 });
             }
 
+            customSelect.classList.toggle('is-multi', nativeSelect.multiple);
             renderCustomSelectOptions(selectId);
         }
 
         function setSelectValueOrFallback(elementId, desiredValue, fallbackValue) {
             const select = document.getElementById(elementId);
             if (!select) {
+                return;
+            }
+            if (select.multiple) {
+                const desiredValues = Array.isArray(desiredValue) ? desiredValue : [desiredValue];
+                const fallbackValues = Array.isArray(fallbackValue) ? fallbackValue : [fallbackValue];
+                const resolvedValues = desiredValues.filter(value => value !== undefined && value !== null && value !== '');
+                if (elementId === 'providerTargetFormat') {
+                    setProviderTargetFormatValues(resolvedValues.length ? resolvedValues : fallbackValues);
+                } else {
+                    const nextValues = resolvedValues.length ? resolvedValues : fallbackValues;
+                    Array.from(select.options).forEach(option => {
+                        option.selected = nextValues.includes(option.value);
+                    });
+                    syncCustomSelectValue(elementId);
+                }
                 return;
             }
             const resolvedFallback = fallbackValue ?? '';
@@ -1548,7 +1725,7 @@
             document.getElementById('providerApi').value = provider?.api || '';
             setSelectValueOrFallback('providerTransport', resolvedTransport, inferredTransport);
             setSelectValueOrFallback('providerSourceFormat', provider?.source_format, 'openai_chat');
-            setSelectValueOrFallback('providerTargetFormat', provider?.target_format, 'openai_chat');
+            setProviderTargetFormatValues(provider ? getProviderTargetFormats(provider) : defaultNewProviderTargetFormats);
             setSelectValueOrFallback('providerAuthMode', authMode, 'legacy_api_key');
             renderProviderAuthGroupOptions(provider?.auth_group || '');
             document.getElementById('providerApiKey').value = provider?.api_key || '';
@@ -1841,6 +2018,10 @@
                             </div>
                       `
                     : '';
+                const providerTargetFormats = getProviderTargetFormats(provider);
+                const targetFormatChips = providerTargetFormats
+                    .map(format => `<span class="provider-chip provider-chip-target">${escapeHtml(format)}</span>`)
+                    .join('');
 
                 html += `
                     <tr>
@@ -1863,7 +2044,7 @@
                                 <span class="provider-chip ${isEnabled ? 'provider-chip-hook' : 'provider-chip-muted'}">${isEnabled ? 'enabled' : 'disabled'}</span>
                                 <span class="provider-chip">${escapeHtml(provider.transport || 'http')}</span>
                                 <span class="provider-chip">${escapeHtml(provider.source_format || 'openai_chat')}</span>
-                                <span class="provider-chip provider-chip-target">${escapeHtml(provider.target_format || 'openai_chat')}</span>
+                                ${targetFormatChips}
                                 ${provider.auth_group ? `<span class="provider-chip provider-chip-hook">auth_group:${escapeHtml(provider.auth_group)}</span>` : ''}
                                 ${provider.api_key ? '<span class="provider-chip provider-chip-muted">legacy api_key</span>' : ''}
                                 ${provider.hook ? `<span class="provider-chip provider-chip-hook">${escapeHtml(provider.hook)}</span>` : ''}
@@ -3344,3 +3525,4 @@
         });
     </script>
 {% endblock %}
+
