@@ -60,6 +60,35 @@ class ProviderServiceTests(unittest.TestCase):
         self.config_manager.reload()
         self.reload_count = 0
 
+    def test_config_manager_migrates_legacy_target_format_on_load(self) -> None:
+        self._write_config(
+            {
+                "auth_groups": [],
+                "providers": [
+                    {
+                        "name": "demo",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "sk-demo",
+                        "target_format": "claude_chat",
+                        "model_list": ["gpt-4.1"],
+                    }
+                ],
+            }
+        )
+
+        migrated_manager = ConfigManager(self.config_path, self.root_path)
+
+        current_config = migrated_manager.get_raw_config()
+        provider = current_config["providers"][0]
+        self.assertNotIn("target_format", provider)
+        self.assertEqual(["claude_chat"], provider["target_formats"])
+
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        persisted_provider = persisted["providers"][0]
+        self.assertNotIn("target_format", persisted_provider)
+        self.assertEqual(["claude_chat"], persisted_provider["target_formats"])
+
     def test_update_provider_preserves_enabled_when_payload_omits_enabled(self) -> None:
         self._seed_providers(
             [
@@ -86,10 +115,14 @@ class ProviderServiceTests(unittest.TestCase):
 
         self.assertFalse(updated["enabled"])
         self.assertEqual("example_hook.py", updated["hook"])
+        self.assertNotIn("target_format", updated)
+        self.assertEqual(["openai_chat"], updated["target_formats"])
         self.assertEqual(1, self.reload_count)
         current_config = self.config_manager.get_raw_config()
         self.assertFalse(current_config["providers"][0]["enabled"])
         self.assertEqual("example_hook.py", current_config["providers"][0]["hook"])
+        self.assertNotIn("target_format", current_config["providers"][0])
+        self.assertEqual(["openai_chat"], current_config["providers"][0]["target_formats"])
 
     def test_set_provider_enabled_updates_config(self) -> None:
         self._seed_providers(
@@ -106,9 +139,12 @@ class ProviderServiceTests(unittest.TestCase):
         updated = self.service.set_provider_enabled("demo", False)
 
         self.assertFalse(updated["enabled"])
+        self.assertNotIn("target_format", updated)
+        self.assertEqual(["openai_chat"], updated["target_formats"])
         self.assertEqual(1, self.reload_count)
         current_config = self.config_manager.get_raw_config()
         self.assertFalse(current_config["providers"][0]["enabled"])
+        self.assertNotIn("target_format", current_config["providers"][0])
 
     def test_batch_set_provider_enabled_updates_multiple_providers(self) -> None:
         self._seed_providers(
@@ -137,6 +173,7 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(1, self.reload_count)
         current_config = self.config_manager.get_raw_config()
         self.assertEqual([True, True], [item["enabled"] for item in current_config["providers"]])
+        self.assertTrue(all("target_format" not in item for item in current_config["providers"]))
 
     def test_batch_delete_providers_removes_selected_entries(self) -> None:
         self._seed_providers(

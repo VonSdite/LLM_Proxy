@@ -122,6 +122,35 @@ class ProxyController:
             status_code,
         )
 
+    @staticmethod
+    def _get_provider_target_formats(provider: Any) -> tuple[str, ...]:
+        candidate_formats = getattr(provider, "target_formats", None)
+        if candidate_formats:
+            normalized = tuple(
+                str(item or "").strip().lower()
+                for item in candidate_formats
+                if str(item or "").strip()
+            )
+            if normalized:
+                return normalized
+
+        # DEPRECATED compatibility path for legacy objects that still expose a
+        # single `target_format` field. New runtime/provider APIs should only
+        # provide `target_formats`, and this fallback can be removed later.
+        target_format = str(getattr(provider, "target_format", "") or "").strip().lower()
+        if target_format:
+            return (target_format,)
+        return ()
+
+    @staticmethod
+    def _format_provider_target_formats(target_formats: Iterable[str]) -> str:
+        normalized = [str(item or "").strip().lower() for item in target_formats if str(item or "").strip()]
+        if not normalized:
+            return "<empty>"
+        if len(normalized) == 1:
+            return normalized[0]
+        return ", ".join(normalized)
+
     def chat_completions(self) -> Response:
         return self._proxy_completion_request(
             route_name="chat_completions",
@@ -222,25 +251,30 @@ class ProxyController:
                     error_format=resolved_error_format,
                 )
 
-            provider_target_format = str(getattr(provider, "target_format", "") or "").strip().lower()
-            if provider_target_format not in normalized_expected_target_formats:
+            provider_target_formats = self._get_provider_target_formats(provider)
+            matched_target_formats = tuple(
+                item
+                for item in provider_target_formats
+                if item in normalized_expected_target_formats
+            )
+            if not matched_target_formats:
                 self._logger.warning(
-                    "Proxy rejected: model=%s configured for target_format=%s route=%s",
+                    "Proxy rejected: model=%s configured for target_formats=%s route=%s",
                     model_name,
-                    provider_target_format or "<empty>",
+                    self._format_provider_target_formats(provider_target_formats),
                     route_name,
                 )
                 if len(normalized_expected_target_formats) == 1:
                     expected_hint = normalized_expected_target_formats[0]
                     mismatch_message = (
-                        f"Model {model_name} is configured for downstream format "
-                        f"{provider_target_format or '<empty>'}, not {expected_hint}"
+                        f"Model {model_name} is configured for downstream formats "
+                        f"{self._format_provider_target_formats(provider_target_formats)}, not {expected_hint}"
                     )
                 else:
                     expected_hint = ", ".join(normalized_expected_target_formats)
                     mismatch_message = (
-                        f"Model {model_name} is configured for downstream format "
-                        f"{provider_target_format or '<empty>'}, not one of {expected_hint}"
+                        f"Model {model_name} is configured for downstream formats "
+                        f"{self._format_provider_target_formats(provider_target_formats)}, not one of {expected_hint}"
                     )
                 return self._error_response(
                     mismatch_message,
@@ -249,6 +283,24 @@ class ProxyController:
                     code="target_format_mismatch",
                     error_format=resolved_error_format,
                 )
+            if len(matched_target_formats) > 1:
+                self._logger.warning(
+                    "Proxy rejected: model=%s matched multiple target_formats=%s route=%s",
+                    model_name,
+                    self._format_provider_target_formats(matched_target_formats),
+                    route_name,
+                )
+                return self._error_response(
+                    (
+                        f"Model {model_name} matches multiple downstream formats on route {route_name}: "
+                        f"{self._format_provider_target_formats(matched_target_formats)}"
+                    ),
+                    400,
+                    error_type="invalid_request_error",
+                    code="ambiguous_target_formats",
+                    error_format=resolved_error_format,
+                )
+            resolved_target_format = matched_target_formats[0]
 
             client_requested_usage_chunk = False
             if inspect_stream_usage:
@@ -286,6 +338,7 @@ class ProxyController:
                 headers,
                 on_complete=on_proxy_complete,
                 forward_stream_usage=client_requested_usage_chunk,
+                resolved_target_format=resolved_target_format,
             )
             if result is None:
                 failure_info = failure_info or ProxyErrorInfo(
@@ -362,7 +415,7 @@ class ProxyController:
                 provider_name, _, _ = str(model_key).partition("/")
                 provider_view = self._provider_manager.get_provider_view(provider_name)
                 source_format = getattr(provider_view, "source_format", None)
-                target_format = getattr(provider_view, "target_format", None)
+                target_formats = self._get_provider_target_formats(provider_view)
                 transport = getattr(provider_view, "transport", None)
                 data.append(
                     {
@@ -371,7 +424,7 @@ class ProxyController:
                         "owned_by": provider_name or "proxy",
                         "provider_name": provider_name or "proxy",
                         "source_format": source_format,
-                        "target_format": target_format,
+                        "target_formats": list(target_formats),
                         "transport": transport,
                     }
                 )

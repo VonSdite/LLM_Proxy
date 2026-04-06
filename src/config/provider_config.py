@@ -16,6 +16,7 @@ DEFAULT_PROVIDER_VERIFY_SSL = False
 DEFAULT_PROVIDER_TRANSPORT = "http"
 DEFAULT_PROVIDER_SOURCE_FORMAT = "openai_chat"
 DEFAULT_PROVIDER_TARGET_FORMAT = "openai_chat"
+DEFAULT_PROVIDER_TARGET_FORMATS = (DEFAULT_PROVIDER_TARGET_FORMAT,)
 DEFAULT_AUTH_GROUP_STRATEGY = "least_inflight"
 DEFAULT_AUTH_GROUP_COOLDOWN_SECONDS_ON_429 = 60
 SUPPORTED_PROVIDER_TRANSPORTS = {"http", "websocket"}
@@ -25,6 +26,9 @@ SUPPORTED_PROVIDER_PROTOCOLS = {
     "claude_chat",
     "codex",
 }
+SUPPORTED_PROVIDER_TARGET_FORMAT_CONFLICT_GROUPS = (
+    ("openai_responses", "codex"),
+)
 SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https", "ws", "wss"}
 SUPPORTED_AUTH_GROUP_STRATEGIES = {DEFAULT_AUTH_GROUP_STRATEGY}
 SUPPORTED_PROVIDER_FIELDS = {
@@ -33,7 +37,7 @@ SUPPORTED_PROVIDER_FIELDS = {
     "api",
     "transport",
     "source_format",
-    "target_format",
+    "target_formats",
     "api_key",
     "auth_group",
     "proxy",
@@ -194,6 +198,61 @@ def resolve_provider_protocol(
         supported = ", ".join(sorted(SUPPORTED_PROVIDER_PROTOCOLS))
         raise ValueError(f"Provider {field_name} must be one of: {supported}")
     return resolved
+
+
+def normalize_provider_target_formats(value: Any, *, field_name: str = "target_formats") -> tuple[str, ...]:
+    raw_items: Sequence[Any]
+    if value is None:
+        raw_items = ()
+    elif isinstance(value, str):
+        raw_items = value.replace(",", "\n").splitlines()
+    elif isinstance(value, Sequence):
+        raw_items = value
+    else:
+        raise ValueError(f"{field_name} must be a list or newline-separated string")
+
+    target_formats: List[str] = []
+    seen_formats: set[str] = set()
+    for item in raw_items:
+        normalized_item = clean_optional_string(item)
+        if normalized_item is None:
+            continue
+        resolved = resolve_provider_protocol(
+            normalized_item,
+            default=DEFAULT_PROVIDER_TARGET_FORMAT,
+            field_name=field_name,
+        )
+        if resolved in seen_formats:
+            continue
+        seen_formats.add(resolved)
+        target_formats.append(resolved)
+    return tuple(target_formats)
+
+
+def validate_provider_target_format_conflicts(target_formats: Sequence[str]) -> None:
+    selected_formats = {
+        str(item or "").strip().lower()
+        for item in target_formats
+        if str(item or "").strip()
+    }
+    for group in SUPPORTED_PROVIDER_TARGET_FORMAT_CONFLICT_GROUPS:
+        conflicting = [item for item in group if item in selected_formats]
+        if len(conflicting) > 1:
+            raise ValueError(
+                "Provider target_formats contains mutually exclusive formats: "
+                + ", ".join(conflicting)
+            )
+
+
+def resolve_provider_target_formats(target_formats_value: Any) -> tuple[str, ...]:
+    resolved_target_formats = list(
+        normalize_provider_target_formats(target_formats_value, field_name="target_formats")
+    )
+    if not resolved_target_formats:
+        resolved_target_formats = list(DEFAULT_PROVIDER_TARGET_FORMATS)
+
+    validate_provider_target_format_conflicts(resolved_target_formats)
+    return tuple(resolved_target_formats)
 
 
 def resolve_auth_group_strategy(value: Any) -> str:
@@ -371,7 +430,7 @@ class ProviderConfigSchema:
     enabled: bool = True
     transport: str = DEFAULT_PROVIDER_TRANSPORT
     source_format: str = DEFAULT_PROVIDER_SOURCE_FORMAT
-    target_format: str = DEFAULT_PROVIDER_TARGET_FORMAT
+    target_formats: tuple[str, ...] = DEFAULT_PROVIDER_TARGET_FORMATS
     api_key: Optional[str] = None
     auth_group: Optional[str] = None
     proxy: Optional[str] = None
@@ -407,6 +466,8 @@ class ProviderConfigSchema:
         if api_key and auth_group:
             raise ValueError("Provider must define either auth_group or api_key, not both")
 
+        target_formats = resolve_provider_target_formats(config.get("target_formats"))
+
         return cls(
             name=name,
             enabled=parse_optional_bool(
@@ -422,11 +483,7 @@ class ProviderConfigSchema:
                 default=DEFAULT_PROVIDER_SOURCE_FORMAT,
                 field_name="source_format",
             ),
-            target_format=resolve_provider_protocol(
-                config.get("target_format"),
-                default=DEFAULT_PROVIDER_TARGET_FORMAT,
-                field_name="target_format",
-            ),
+            target_formats=target_formats,
             api_key=api_key,
             auth_group=auth_group,
             proxy=normalize_proxy_url(config.get("proxy")),
@@ -437,6 +494,17 @@ class ProviderConfigSchema:
             hook=clean_optional_string(config.get("hook")),
         )
 
+    @property
+    def primary_target_format(self) -> str:
+        return self.target_formats[0]
+
+    @property
+    def target_format(self) -> str:
+        # DEPRECATED compatibility property. Public config/API payloads should
+        # only expose `target_formats`, and callers should migrate to
+        # `primary_target_format` or `target_formats` as appropriate.
+        return self.primary_target_format
+
     def to_mapping(self) -> Dict[str, Any]:
         config: Dict[str, Any] = {
             "name": self.name,
@@ -444,7 +512,7 @@ class ProviderConfigSchema:
             "api": self.api,
             "transport": self.transport,
             "source_format": self.source_format,
-            "target_format": self.target_format,
+            "target_formats": list(self.target_formats),
         }
 
         if self.api_key is not None:
@@ -466,6 +534,9 @@ class ProviderConfigSchema:
 
         return config
 
+    def to_storage_mapping(self) -> Dict[str, Any]:
+        return self.to_mapping()
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeProviderSpec:
@@ -476,7 +547,7 @@ class RuntimeProviderSpec:
     api: str
     transport: str
     source_format: str
-    target_format: str
+    target_formats: tuple[str, ...]
     api_key: str
     auth_group: Optional[str]
     model_list: tuple[str, ...]
@@ -498,7 +569,7 @@ class RuntimeProviderSpec:
             api=config.api,
             transport=config.transport,
             source_format=config.source_format,
-            target_format=config.target_format,
+            target_formats=config.target_formats,
             api_key=config.api_key or "",
             auth_group=config.auth_group,
             model_list=config.model_list,
@@ -513,6 +584,12 @@ class RuntimeProviderSpec:
             hook=config.hook,
         )
 
+    @property
+    def target_format(self) -> str:
+        # DEPRECATED compatibility property. Runtime specs should prefer
+        # `target_formats` and derive a primary value explicitly when needed.
+        return self.target_formats[0]
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderRuntimeView:
@@ -523,7 +600,7 @@ class ProviderRuntimeView:
     api: str
     transport: str
     source_format: str
-    target_format: str
+    target_formats: tuple[str, ...]
     auth_group: Optional[str]
     legacy_api_key: bool
     model_list: tuple[str, ...]
@@ -541,7 +618,7 @@ class ProviderRuntimeView:
             api=spec.api,
             transport=spec.transport,
             source_format=spec.source_format,
-            target_format=spec.target_format,
+            target_formats=spec.target_formats,
             auth_group=spec.auth_group,
             legacy_api_key=legacy_api_key,
             model_list=spec.model_list,
@@ -551,6 +628,16 @@ class ProviderRuntimeView:
             verify_ssl=spec.verify_ssl,
             hook=spec.hook,
         )
+
+    @property
+    def primary_target_format(self) -> str:
+        return self.target_formats[0]
+
+    @property
+    def target_format(self) -> str:
+        # DEPRECATED compatibility property. Public runtime metadata should
+        # only expose `target_formats`.
+        return self.primary_target_format
 
 
 def build_auth_group_schemas(

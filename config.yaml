@@ -12,7 +12,6 @@ providers:
   api: http://127.0.0.1:22026
   transport: http
   source_format: openai_chat
-  target_format: openai_chat
   verify_ssl: false
   model_list:
   - kimi-k2.5
@@ -33,6 +32,8 @@ providers:
   - volc_code/GLM-4.7
   - volc_code/MiniMax-M2.5
   - volc_code/kimi-k2.5
+  target_formats:
+  - openai_chat
 auth_groups:
 - name: a
   strategy: least_inflight

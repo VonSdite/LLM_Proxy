@@ -36,7 +36,8 @@ providers:
     api: https://api.openai.com/v1/chat/completions
     transport: http
     source_format: openai_chat
-    target_format: openai_chat
+    target_formats:
+      - openai_chat
     auth_group: openai-shared
     verify_ssl: true
     timeout_seconds: 1200
@@ -50,7 +51,8 @@ providers:
     api: https://api.openai.com/v1/responses
     transport: http
     source_format: openai_responses
-    target_format: openai_chat
+    target_formats:
+      - openai_chat
     auth_group: openai-shared
     verify_ssl: true
     timeout_seconds: 1200
@@ -62,7 +64,8 @@ providers:
     api: https://api.anthropic.com/v1/messages
     transport: http
     source_format: claude_chat
-    target_format: claude_chat
+    target_formats:
+      - claude_chat
     api_key: sk-ant-your-anthropic-key
     verify_ssl: true
     timeout_seconds: 1200
@@ -74,7 +77,8 @@ providers:
     api: https://api.openai.com/v1/responses
     transport: http
     source_format: codex
-    target_format: codex
+    target_formats:
+      - codex
     api_key: sk-your-openai-key
     verify_ssl: true
     timeout_seconds: 1200
@@ -83,13 +87,23 @@ providers:
       - gpt-5-codex
 
   # OpenCode / Cherry Studio (OpenAI provider) commonly use:
-  #   target_format: openai_chat
+  #   target_formats:
+  #     - openai_chat
   #
   # Claude Code / Cherry Studio (Anthropic provider) commonly use:
-  #   target_format: claude_chat
+  #   target_formats:
+  #     - claude_chat
   #
   # Codex commonly uses:
-  #   target_format: codex
+  #   target_formats:
+  #     - codex
+  #
+  # A single provider can expose multiple downstream formats, for example:
+  #   target_formats:
+  #     - openai_chat
+  #     - claude_chat
+  #
+  # openai_responses and codex are mutually exclusive in the same provider.
   #
   # Common upstream choices:
   #   /v1/chat/completions -> source_format: openai_chat

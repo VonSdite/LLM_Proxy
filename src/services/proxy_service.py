@@ -57,6 +57,7 @@ class ProxyService:
         request_headers: Dict[str, str],
         on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
         forward_stream_usage: bool = False,
+        resolved_target_format: Optional[str] = None,
     ) -> Tuple[Optional[Response], int, Optional[ProxyErrorInfo]]:
         """代理请求到目标 provider，并处理重试、格式转换与 guard。"""
         target_url = provider.api
@@ -66,11 +67,15 @@ class ProxyService:
         max_retries = provider.max_retries
         verify_ssl = provider.verify_ssl
         request_proxies = build_requests_proxies(provider.proxy)
-        translator = self._translator_registry.get(provider.source_format, provider.target_format)
+        downstream_target_format = self._resolve_downstream_target_format(
+            provider,
+            resolved_target_format,
+        )
+        translator = self._translator_registry.get(provider.source_format, downstream_target_format)
         last_error: Optional[ProxyErrorInfo] = None
         previous_status_code: Optional[int] = None
         previous_error_type: Optional[HookErrorType] = None
-        self._ensure_supported_target_format(provider.target_format)
+        self._ensure_supported_target_format(downstream_target_format)
 
         def build_request(
             attempt: int,
@@ -85,7 +90,7 @@ class ProxyService:
                 request_model=requested_model,
                 upstream_model=upstream_model,
                 provider_source_format=provider.source_format,
-                provider_target_format=provider.target_format,
+                provider_target_format=downstream_target_format,
                 transport=provider.transport,
                 stream=initial_stream,
                 auth_group_name=(
@@ -152,7 +157,7 @@ class ProxyService:
                     provider.name,
                     provider.transport,
                     provider.source_format,
-                    provider.target_format,
+                    downstream_target_format,
                     translated_body.get("model"),
                     attempt + 1,
                     max_retries,
@@ -180,7 +185,11 @@ class ProxyService:
                     previous_status_code = opened.status_code
                     previous_error_type = None
                     raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
-                    _, _, retry_summary = self._consume_upstream_error(provider, opened)
+                    _, _, retry_summary = self._consume_upstream_error(
+                        provider,
+                        opened,
+                        downstream_target_format,
+                    )
                     finalize_attempt(
                         status_code=opened.status_code,
                         error_message=retry_summary,
@@ -208,7 +217,11 @@ class ProxyService:
 
                 if opened.status_code >= 400:
                     raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
-                    response, error_summary = self._build_error_response(provider, opened)
+                    response, error_summary = self._build_error_response(
+                        provider,
+                        opened,
+                        downstream_target_format,
+                    )
                     finalize_attempt(
                         status_code=opened.status_code,
                         error_message=error_summary,
@@ -221,6 +234,7 @@ class ProxyService:
                         provider=provider,
                         translator=translator,
                         request_ctx=request_ctx,
+                        downstream_target_format=downstream_target_format,
                         original_request=guarded_body,
                         translated_request=translated_body,
                         opened=opened,
@@ -233,6 +247,7 @@ class ProxyService:
                         provider=provider,
                         translator=translator,
                         request_ctx=request_ctx,
+                        downstream_target_format=downstream_target_format,
                         original_request=guarded_body,
                         translated_request=translated_body,
                         opened=opened,
@@ -245,7 +260,7 @@ class ProxyService:
                     provider.name,
                     provider.transport,
                     provider.source_format,
-                    provider.target_format,
+                    downstream_target_format,
                     opened.status_code,
                     opened.is_stream,
                 )
@@ -318,6 +333,7 @@ class ProxyService:
         provider: LLMProvider,
         translator: Translator,
         request_ctx: HookContext,
+        downstream_target_format: str,
         original_request: Dict[str, Any],
         translated_request: Dict[str, Any],
         opened: OpenedUpstreamResponse,
@@ -371,15 +387,15 @@ class ProxyService:
                         guarded_chunk = self._guard_stream_chunk(provider, request_ctx, downstream_chunk)
                         if guarded_chunk is None:
                             continue
-                        if is_terminal_chunk(guarded_chunk, provider.target_format):
+                        if is_terminal_chunk(guarded_chunk, downstream_target_format):
                             terminal_sent = True
                         if guarded_chunk.kind == "done":
-                            encoded_terminal = encode_downstream_chunk(guarded_chunk, provider.target_format)
+                            encoded_terminal = encode_downstream_chunk(guarded_chunk, downstream_target_format)
                             if encoded_terminal:
                                 yield encoded_terminal
                             continue
                         if (
-                            provider.target_format == "openai_chat"
+                            downstream_target_format == "openai_chat"
                             and guarded_chunk.kind == "json"
                             and not forward_stream_usage
                             and self._is_usage_only_stream_chunk(guarded_chunk.payload)
@@ -387,14 +403,14 @@ class ProxyService:
                             continue
                         if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
                             self._update_meta_from_payload(meta, guarded_chunk.payload)
-                        encoded_chunk = encode_downstream_chunk(guarded_chunk, provider.target_format)
+                        encoded_chunk = encode_downstream_chunk(guarded_chunk, downstream_target_format)
                         if encoded_chunk:
                             yield encoded_chunk
 
-                if should_emit_terminal_chunk(provider.target_format) and not terminal_sent:
+                if should_emit_terminal_chunk(downstream_target_format) and not terminal_sent:
                     encoded_terminal = encode_downstream_chunk(
                         DownstreamChunk(kind="done"),
-                        provider.target_format,
+                        downstream_target_format,
                     )
                     if encoded_terminal:
                         yield encoded_terminal
@@ -437,6 +453,7 @@ class ProxyService:
         provider: LLMProvider,
         translator: Translator,
         request_ctx: HookContext,
+        downstream_target_format: str,
         original_request: Dict[str, Any],
         translated_request: Dict[str, Any],
         opened: OpenedUpstreamResponse,
@@ -467,7 +484,7 @@ class ProxyService:
             if finalize_attempt is not None:
                 finalize_attempt(status_code=opened.status_code, usage=meta)
 
-            response_body = encode_downstream_response_body(body_to_send, provider.target_format)
+            response_body = encode_downstream_response_body(body_to_send, downstream_target_format)
             headers = self._filter_response_headers(getattr(response, "headers", {}))
             headers["Content-Type"] = self._resolve_nonstream_content_type(body_to_send, opened.content_type)
             return Response(
@@ -482,6 +499,7 @@ class ProxyService:
         self,
         provider: LLMProvider,
         opened: OpenedUpstreamResponse,
+        target_format: Optional[str] = None,
     ) -> tuple[bytes, Dict[str, str], Optional[str]]:
         response = opened.response
         try:
@@ -492,7 +510,7 @@ class ProxyService:
                 "Upstream returned error: provider=%s transport=%s format=%s status=%s stream=%s error=%s",
                 provider.name,
                 provider.transport,
-                f"{provider.source_format}->{provider.target_format}",
+                f"{provider.source_format}->{self._resolve_downstream_target_format(provider, target_format)}",
                 opened.status_code,
                 opened.is_stream,
                 summary or "<empty>",
@@ -508,8 +526,9 @@ class ProxyService:
         self,
         provider: LLMProvider,
         opened: OpenedUpstreamResponse,
+        target_format: Optional[str] = None,
     ) -> tuple[Response, Optional[str]]:
-        body, headers, summary = self._consume_upstream_error(provider, opened)
+        body, headers, summary = self._consume_upstream_error(provider, opened, target_format)
         return Response(body, status=opened.status_code, headers=headers), summary
 
     def _guard_stream_chunk(
@@ -728,6 +747,28 @@ class ProxyService:
             "codex",
         }:
             raise ValueError(f"Unsupported downstream target_format: {target_format}")
+
+    @staticmethod
+    def _resolve_downstream_target_format(
+        provider: LLMProvider,
+        resolved_target_format: Optional[str] = None,
+    ) -> str:
+        normalized_target_format = str(resolved_target_format or "").strip().lower()
+        if normalized_target_format:
+            return normalized_target_format
+
+        provider_target_formats = tuple(
+            str(item or "").strip().lower()
+            for item in getattr(provider, "target_formats", ())
+            if str(item or "").strip()
+        )
+        if provider_target_formats:
+            return provider_target_formats[0]
+
+        # DEPRECATED compatibility path for legacy provider objects that still
+        # rely on a single `target_format` field. New callers should only pass
+        # `target_formats`, and this fallback can be removed later.
+        return str(getattr(provider, "target_format", "") or "").strip().lower()
 
     @staticmethod
     def _read_response_body(response: Any) -> bytes:

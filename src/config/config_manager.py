@@ -2,13 +2,17 @@
 # -*- coding: utf-8 -*-
 """配置访问层。"""
 
+import logging
 import os
 import tempfile
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import yaml
+
+
+LOGGER = logging.getLogger("app")
 
 
 class ConfigManager:
@@ -68,14 +72,15 @@ class ConfigManager:
         if not isinstance(config, dict):
             raise ValueError('Configuration file must contain a top-level mapping')
 
-        self._write_config(config)
-        self._config = deepcopy(config)
+        normalized, _ = self._normalize_config(config)
+        self._write_config(normalized)
+        self._config = deepcopy(normalized)
 
     def reload(self) -> None:
         self._config = self._load_config(self._config_path)
 
-    @staticmethod
-    def _load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
+    @classmethod
+    def _load_config(cls, config_path: Union[str, Path]) -> Dict[str, Any]:
         path = Path(config_path).resolve()
         if not path.exists():
             raise FileNotFoundError(f'Configuration file not found: {path}')
@@ -87,15 +92,26 @@ class ConfigManager:
             return {}
         if not isinstance(data, dict):
             raise ValueError('Configuration file must contain a top-level mapping')
-        return data
+        normalized, changed = cls._normalize_config(data)
+        if changed:
+            cls._write_config_file(path, normalized)
+            LOGGER.info(
+                "Migrated legacy provider config field 'target_format' to 'target_formats': %s",
+                path,
+            )
+        return normalized
 
     def _write_config(self, config: Dict[str, Any]) -> None:
+        self._write_config_file(self._config_path, config)
+
+    @staticmethod
+    def _write_config_file(config_path: Path, config: Dict[str, Any]) -> None:
         temp_file_path: Optional[str] = None
         try:
             with tempfile.NamedTemporaryFile(
                 'w',
                 encoding='utf-8',
-                dir=self._config_path.parent,
+                dir=config_path.parent,
                 delete=False,
             ) as temp_file:
                 yaml.safe_dump(config, temp_file, allow_unicode=True, sort_keys=False)
@@ -103,7 +119,46 @@ class ConfigManager:
                 os.fsync(temp_file.fileno())
                 temp_file_path = temp_file.name
 
-            os.replace(temp_file_path, self._config_path)
+            os.replace(temp_file_path, config_path)
         finally:
             if temp_file_path and os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
+
+    @classmethod
+    def _normalize_config(cls, config: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+        normalized = deepcopy(config)
+        providers = normalized.get('providers')
+        if not isinstance(providers, list):
+            return normalized, False
+
+        changed = False
+        normalized_providers = []
+        for provider in providers:
+            if not isinstance(provider, dict):
+                normalized_providers.append(provider)
+                continue
+
+            normalized_provider = dict(provider)
+            # DEPRECATED compatibility path for legacy config files that still
+            # use `target_format`. Public config/API support is now limited to
+            # `target_formats`, and this migration block should be removed later.
+            legacy_target_format = normalized_provider.pop('target_format', None)
+            if legacy_target_format is not None:
+                changed = True
+                if not cls._has_target_formats_value(normalized_provider.get('target_formats')):
+                    normalized_provider['target_formats'] = [legacy_target_format]
+            normalized_providers.append(normalized_provider)
+
+        if changed:
+            normalized['providers'] = normalized_providers
+        return normalized, changed
+
+    @staticmethod
+    def _has_target_formats_value(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, tuple)):
+            return any(str(item or '').strip() for item in value)
+        return True
