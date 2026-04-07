@@ -298,6 +298,65 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertIn(b"data: [DONE]", stream_body)
         self.assertTrue(fake_response.closed)
 
+    def test_proxy_service_collects_usage_when_openai_chat_usage_chunk_is_suppressed(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="responses-upstream",
+            api="https://example.com/v1/responses",
+            transport="http",
+            source_format="openai_responses",
+            target_format="openai_chat",
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        captured_meta = {}
+        fake_response = FakeStreamResponse(
+            [
+                b'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","created_at":123,"model":"gpt-4.1"}}\n\n',
+                b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg_resp_1_0","output_index":0,"delta":"Hello from Responses"}\n\n',
+                b'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_1","created_at":123,"model":"gpt-4.1","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, body, args, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "responses-upstream/gpt-4.1",
+                    "messages": [
+                        {"role": "user", "content": "Hello"},
+                    ],
+                    "stream": True,
+                },
+                {},
+                on_complete=captured_meta.update,
+                forward_stream_usage=False,
+            )
+            stream_body = b"".join(response.response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(b"Hello from Responses", stream_body)
+        self.assertNotIn(b'"usage"', stream_body)
+        self.assertEqual("gpt-4.1", captured_meta["response_model"])
+        self.assertEqual(3, captured_meta["prompt_tokens"])
+        self.assertEqual(2, captured_meta["completion_tokens"])
+        self.assertEqual(5, captured_meta["total_tokens"])
+        self.assertTrue(fake_response.closed)
+
     def test_proxy_service_translates_openai_chat_stream_to_openai_responses(self) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
@@ -356,6 +415,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual("system", captured["body"]["messages"][0]["role"])
         self.assertEqual("Be brief", captured["body"]["messages"][0]["content"])
         self.assertEqual("Hello", captured["body"]["messages"][1]["content"][0]["text"])
+        self.assertTrue(captured["body"]["stream_options"]["include_usage"])
         self.assertIn(b"event: response.created", stream_body)
         self.assertIn(b"event: response.output_text.delta", stream_body)
         self.assertIn(b"event: response.completed", stream_body)
@@ -416,6 +476,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(200, status_code)
         self.assertEqual("user", captured["body"]["messages"][0]["role"])
         self.assertEqual("Hello", captured["body"]["messages"][0]["content"])
+        self.assertTrue(captured["body"]["stream_options"]["include_usage"])
         self.assertIn(b"event: message_start", stream_body)
         self.assertIn(b"event: content_block_start", stream_body)
         self.assertIn(b"event: content_block_delta", stream_body)

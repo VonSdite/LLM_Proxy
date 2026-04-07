@@ -117,6 +117,7 @@ class ProxyService:
                 request_ctx = replace(request_ctx, stream=guarded_stream)
 
             translated_body = translator.translate_request(upstream_model, guarded_body, guarded_stream)
+            self._ensure_upstream_usage_capture(provider.source_format, translated_body, guarded_stream)
             return headers, guarded_body, translated_body, request_ctx
 
         for attempt in range(max_retries):
@@ -394,6 +395,8 @@ class ProxyService:
                             if encoded_terminal:
                                 yield encoded_terminal
                             continue
+                        if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
+                            self._update_meta_from_payload(meta, guarded_chunk.payload)
                         if (
                             downstream_target_format == "openai_chat"
                             and guarded_chunk.kind == "json"
@@ -401,8 +404,6 @@ class ProxyService:
                             and self._is_usage_only_stream_chunk(guarded_chunk.payload)
                         ):
                             continue
-                        if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
-                            self._update_meta_from_payload(meta, guarded_chunk.payload)
                         encoded_chunk = encode_downstream_chunk(guarded_chunk, downstream_target_format)
                         if encoded_chunk:
                             yield encoded_chunk
@@ -737,6 +738,23 @@ class ProxyService:
         if requested_model_name.startswith(prefix):
             return requested_model_name[len(prefix):]
         return requested_model_name
+
+    @staticmethod
+    def _ensure_upstream_usage_capture(
+        source_format: str,
+        translated_body: Dict[str, Any],
+        stream: bool,
+    ) -> None:
+        if str(source_format or "").strip().lower() != "openai_chat" or not stream:
+            return
+        stream_options = translated_body.get("stream_options")
+        if not isinstance(stream_options, dict):
+            stream_options = {}
+        else:
+            stream_options = dict(stream_options)
+        if stream_options.get("include_usage") is not True:
+            stream_options["include_usage"] = True
+        translated_body["stream_options"] = stream_options
 
     @staticmethod
     def _ensure_supported_target_format(target_format: str) -> None:
