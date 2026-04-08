@@ -161,7 +161,7 @@ class Application:
         from ..config import AuthGroupManager
 
         self._auth_group_manager = AuthGroupManager(self._ctx, self._auth_group_repository)
-        self._provider_manager = ProviderManager(self._ctx, self._auth_group_manager)
+        self._provider_manager = ProviderManager(self._ctx)
         self.reload_providers()
 
     def _setup_controllers(self) -> None:

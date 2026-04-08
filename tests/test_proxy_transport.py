@@ -6,6 +6,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from uuid import uuid4
 
 from flask import Flask
 from websocket import ABNF
@@ -13,8 +14,9 @@ from websocket import ABNF
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
+from src.config.auth_group_manager import AuthGroupManager
 from src.config.provider_manager import ProviderManager
-from src.config.provider_config import ProviderConfigSchema, RuntimeProviderSpec
+from src.config.provider_config import AuthGroupSchema, ProviderConfigSchema, RuntimeProviderSpec
 from src.external.stream_probe import probe_stream_response
 from src.external.upstream_websocket import (
     WebSocketUpstreamResponse,
@@ -22,7 +24,10 @@ from src.external.upstream_websocket import (
     normalize_websocket_message,
 )
 from src.proxy_core import resolve_stream_format
+from src.repositories import AuthGroupRepository
 from src.services.model_discovery_service import ModelDiscoveryService
+from src.utils.database import create_connection_factory
+from src.utils.local_time import now_local_datetime
 from src.utils.net import build_websocket_connect_options
 
 
@@ -61,15 +66,6 @@ class FakeLogger:
 
     def debug(self, msg: str, *args) -> None:
         self._log("debug", msg, *args)
-
-
-class FakeAuthGroupManager:
-    def __init__(self) -> None:
-        self.registered: list[tuple[str, str]] = []
-
-    def register_legacy_provider_group(self, provider_name: str, api_key: str) -> str:
-        self.registered.append((provider_name, api_key))
-        return f"__legacy_provider__/{provider_name}"
 
 
 class ProviderTransportTests(unittest.TestCase):
@@ -258,14 +254,13 @@ class ProviderTransportTests(unittest.TestCase):
 class ProviderManagerEnabledTests(unittest.TestCase):
     def test_disabled_provider_is_not_registered_at_runtime(self) -> None:
         logger = FakeLogger()
-        auth_group_manager = FakeAuthGroupManager()
         ctx = AppContext(
             logger=logger,
             config_manager=None,  # type: ignore[arg-type]
             root_path=Path(__file__).resolve().parents[1],
             flask_app=Flask(__name__),
         )
-        manager = ProviderManager(ctx, auth_group_manager)
+        manager = ProviderManager(ctx)
 
         manager.load_providers(
             (
@@ -291,11 +286,84 @@ class ProviderManagerEnabledTests(unittest.TestCase):
 
         self.assertEqual(("enabled-provider/gpt-4.1-mini",), manager.list_model_names())
         self.assertIsNone(manager.get_provider_view("disabled-provider"))
-        self.assertIsNotNone(manager.get_provider_view("enabled-provider"))
-        self.assertEqual([("enabled-provider", "enabled-key")], auth_group_manager.registered)
+        provider_view = manager.get_provider_view("enabled-provider")
+        self.assertIsNotNone(provider_view)
+        self.assertTrue(provider_view.legacy_api_key)
+        self.assertIsNone(provider_view.auth_group)
+        runtime_provider = manager.get_provider_for_model("enabled-provider/gpt-4.1-mini")
+        self.assertIsNotNone(runtime_provider)
+        self.assertIsNone(runtime_provider.auth_group)
         self.assertTrue(
             any("disabled-provider" in message and "skipped runtime registration" in message for _, message in logger.records)
         )
+
+
+class AuthGroupLegacyCleanupTests(unittest.TestCase):
+    def test_load_auth_groups_purges_hidden_legacy_runtime_rows(self) -> None:
+        root_path = Path(__file__).resolve().parents[1]
+        runtime_dir = root_path / "data" / "_test_runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        db_path = runtime_dir / f"legacy-cleanup-{uuid4().hex}.db"
+
+        try:
+            logger = FakeLogger()
+            ctx = AppContext(
+                logger=logger,
+                config_manager=None,  # type: ignore[arg-type]
+                root_path=root_path,
+                flask_app=Flask(__name__),
+            )
+            repository = AuthGroupRepository(create_connection_factory(db_path))
+            repository.save_entry_runtime_state(
+                "__legacy_provider__/volc_code",
+                "legacy",
+                disabled=True,
+                disabled_reason="http_401",
+                cooldown_until=None,
+                last_status_code=401,
+                last_error_type=None,
+                last_error_message="bad key",
+            )
+            repository.increment_request_usage(
+                "__legacy_provider__/volc_code",
+                "legacy",
+                now_local_datetime(),
+            )
+
+            manager = AuthGroupManager(ctx, repository)
+            manager.load_auth_groups(
+                (
+                    AuthGroupSchema.from_mapping(
+                        {
+                            "name": "pool-a",
+                            "entries": [
+                                {
+                                    "id": "key-a",
+                                    "headers": {"Authorization": "Bearer sk-a"},
+                                }
+                            ],
+                        }
+                    ),
+                )
+            )
+
+            self.assertEqual({}, repository.list_group_runtime_states("__legacy_provider__/volc_code"))
+            usage = repository.list_current_usage(
+                "__legacy_provider__/volc_code",
+                ("legacy",),
+                now_local_datetime(),
+            )
+            self.assertEqual(0, usage["legacy"]["minute_request_count"])
+            self.assertEqual(0, usage["legacy"]["day_request_count"])
+            self.assertTrue(
+                any(
+                    "Purged legacy provider runtime state rows" in message
+                    for _, message in logger.records
+                )
+            )
+        finally:
+            if db_path.exists():
+                db_path.unlink()
 
 
 class WebSocketProxyBridgeTests(unittest.TestCase):

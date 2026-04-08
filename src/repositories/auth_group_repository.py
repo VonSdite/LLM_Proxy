@@ -130,6 +130,76 @@ class AuthGroupRepository:
             }
         return result
 
+    def purge_legacy_provider_runtime_state(
+        self,
+        active_auth_group_names: Iterable[str] = (),
+    ) -> tuple[int, int]:
+        normalized_active_names = {
+            str(name or "").strip()
+            for name in active_auth_group_names
+            if str(name or "").strip()
+        }
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            rows = cursor.execute(
+                """
+                SELECT DISTINCT auth_group_name
+                FROM auth_entry_runtime_state
+                WHERE auth_group_name GLOB '__legacy_provider__/*'
+                UNION
+                SELECT DISTINCT auth_group_name
+                FROM auth_entry_usage_buckets
+                WHERE auth_group_name GLOB '__legacy_provider__/*'
+                ORDER BY auth_group_name
+                """
+            ).fetchall()
+
+            target_group_names = [
+                str(row[0])
+                for row in rows
+                if str(row[0]) not in normalized_active_names
+            ]
+            if not target_group_names:
+                return 0, 0
+
+            placeholders = ", ".join("?" for _ in target_group_names)
+            runtime_row_count = int(
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM auth_entry_runtime_state
+                    WHERE auth_group_name IN ({placeholders})
+                    """,
+                    target_group_names,
+                ).fetchone()[0]
+            )
+            usage_row_count = int(
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM auth_entry_usage_buckets
+                    WHERE auth_group_name IN ({placeholders})
+                    """,
+                    target_group_names,
+                ).fetchone()[0]
+            )
+            cursor.execute(
+                f"""
+                DELETE FROM auth_entry_runtime_state
+                WHERE auth_group_name IN ({placeholders})
+                """,
+                target_group_names,
+            )
+            cursor.execute(
+                f"""
+                DELETE FROM auth_entry_usage_buckets
+                WHERE auth_group_name IN ({placeholders})
+                """,
+                target_group_names,
+            )
+        return runtime_row_count, usage_row_count
+
     def save_entry_runtime_state(
         self,
         auth_group_name: str,
