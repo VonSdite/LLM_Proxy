@@ -14,10 +14,8 @@ from ..repositories import AuthGroupRepository
 from ..utils.compat import dataclass
 from ..utils.local_time import format_local_datetime, now_local_datetime, parse_local_datetime
 from .provider_config import (
-    AuthEntrySchema,
     AuthGroupSchema,
-    DEFAULT_AUTH_GROUP_COOLDOWN_SECONDS_ON_429,
-    DEFAULT_AUTH_GROUP_STRATEGY,
+    AuthEntrySchema,
 )
 
 
@@ -28,7 +26,6 @@ class SelectedAuthEntry:
     auth_group_name: str
     entry_id: str
     headers: tuple[tuple[str, str], ...]
-    legacy_api_key: bool = False
 
     def headers_mapping(self) -> Dict[str, str]:
         return dict(self.headers)
@@ -59,32 +56,25 @@ class AuthGroupManager:
         self._logger: Logger = ctx.logger
         self._repository = repository
         self._groups_by_name: Dict[str, AuthGroupSchema] = {}
-        self._explicit_group_names: set[str] = set()
         self._inflight_counts: Dict[tuple[str, str], int] = {}
         self._rotation_cursor_by_group: Dict[str, int] = {}
 
     def load_auth_groups(self, auth_groups: Sequence[AuthGroupSchema]) -> None:
         self._groups_by_name = {group.name: group for group in auth_groups}
-        self._explicit_group_names = {group.name for group in auth_groups}
         self._inflight_counts.clear()
         self._rotation_cursor_by_group.clear()
+        # TODO: Remove this migration cleanup in a future release after all
+        # deployments have aged out the hidden __legacy_provider__ auth groups.
+        runtime_rows, usage_rows = self._repository.purge_legacy_provider_runtime_state(
+            self._groups_by_name.keys()
+        )
+        if runtime_rows or usage_rows:
+            self._logger.info(
+                "Purged legacy provider runtime state rows: runtime=%s usage=%s",
+                runtime_rows,
+                usage_rows,
+            )
         self._logger.info("Loaded auth groups: %s", list(sorted(self._groups_by_name.keys())))
-
-    def register_legacy_provider_group(self, provider_name: str, api_key: str) -> str:
-        group_name = f"__legacy_provider__/{provider_name}"
-        if group_name not in self._groups_by_name:
-            entry = AuthEntrySchema(
-                id="legacy",
-                enabled=True,
-                headers=(("Authorization", f"Bearer {api_key}"),),
-            )
-            self._groups_by_name[group_name] = AuthGroupSchema(
-                name=group_name,
-                strategy=DEFAULT_AUTH_GROUP_STRATEGY,
-                cooldown_seconds_on_429=DEFAULT_AUTH_GROUP_COOLDOWN_SECONDS_ON_429,
-                entries=(entry,),
-            )
-        return group_name
 
     def acquire(self, auth_group_name: Optional[str]) -> Optional[SelectedAuthEntry]:
         normalized_group_name = str(auth_group_name or "").strip()
@@ -126,7 +116,6 @@ class AuthGroupManager:
             auth_group_name=group.name,
             entry_id=selected_entry.id,
             headers=selected_entry.headers,
-            legacy_api_key=group.name not in self._explicit_group_names,
         )
 
     def mark_request_dispatched(self, selection: Optional[SelectedAuthEntry]) -> None:
@@ -237,7 +226,7 @@ class AuthGroupManager:
 
     def get_auth_group_runtime(self, auth_group_name: str) -> Dict[str, Any]:
         group = self._groups_by_name.get(str(auth_group_name).strip())
-        if group is None or group.name not in self._explicit_group_names:
+        if group is None:
             raise ValueError(f"Auth group not found: {auth_group_name}")
 
         now = now_local_datetime()
@@ -263,7 +252,7 @@ class AuthGroupManager:
 
     def restore_entry(self, auth_group_name: str, entry_id: str) -> None:
         group = self._groups_by_name.get(str(auth_group_name).strip())
-        if group is None or group.name not in self._explicit_group_names:
+        if group is None:
             raise ValueError(f"Auth group not found: {auth_group_name}")
         if self._find_entry(group, entry_id) is None:
             raise ValueError(f"Auth entry not found: {entry_id}")
@@ -311,8 +300,7 @@ class AuthGroupManager:
     def list_explicit_auth_groups(self) -> tuple[AuthGroupSchema, ...]:
         return tuple(
             self._groups_by_name[name]
-            for name in sorted(self._explicit_group_names)
-            if name in self._groups_by_name
+            for name in sorted(self._groups_by_name)
         )
 
     def _build_group_summary(self, group: AuthGroupSchema) -> Dict[str, Any]:
@@ -498,7 +486,7 @@ class AuthGroupManager:
 
     def _resolve_explicit_entry(self, auth_group_name: str, entry_id: str) -> tuple[AuthGroupSchema, AuthEntrySchema]:
         group = self._groups_by_name.get(str(auth_group_name).strip())
-        if group is None or group.name not in self._explicit_group_names:
+        if group is None:
             raise ValueError(f"Auth group not found: {auth_group_name}")
         entry = self._find_entry(group, entry_id)
         if entry is None:

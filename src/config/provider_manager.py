@@ -8,24 +8,21 @@ import hashlib
 import importlib.util
 import inspect
 import sys
-from dataclasses import replace
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 from ..application.app_context import AppContext, Logger
 from ..external import LLMProvider
 from ..hooks import HookModule
-from .auth_group_manager import AuthGroupManager
 from .provider_config import ProviderConfigSchema, ProviderRuntimeView, RuntimeProviderSpec
 
 
 class ProviderManager:
     """管理模型到 provider 的运行时映射关系。"""
 
-    def __init__(self, ctx: AppContext, auth_group_manager: AuthGroupManager):
+    def __init__(self, ctx: AppContext):
         self._base_dir = ctx.root_path.resolve()
         self._logger: Logger = ctx.logger
-        self._auth_group_manager = auth_group_manager
         self._provider_by_model: Dict[str, LLMProvider] = {}
         self._provider_by_name: Dict[str, LLMProvider] = {}
         self._provider_views_by_name: Dict[str, ProviderRuntimeView] = {}
@@ -78,15 +75,7 @@ class ProviderManager:
             self._logger.warning("Provider '%s' skipped: model_list is empty", spec.name)
             return
 
-        legacy_auth_group_name: Optional[str] = None
-        resolved_auth_group = spec.auth_group
-        if resolved_auth_group is None and spec.api_key:
-            legacy_auth_group_name = self._auth_group_manager.register_legacy_provider_group(
-                spec.name,
-                spec.api_key,
-            )
-            resolved_auth_group = legacy_auth_group_name
-        runtime_spec = replace(spec, auth_group=resolved_auth_group)
+        runtime_spec = spec
 
         provider = LLMProvider(
             name=runtime_spec.name,
@@ -107,7 +96,7 @@ class ProviderManager:
         self._provider_by_name[runtime_spec.name] = provider
         self._provider_views_by_name[runtime_spec.name] = ProviderRuntimeView.from_spec(
             runtime_spec,
-            legacy_api_key=legacy_auth_group_name is not None,
+            legacy_api_key=bool(spec.api_key) and runtime_spec.auth_group is None,
         )
 
         for model in runtime_spec.model_list:
