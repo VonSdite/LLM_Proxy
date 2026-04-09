@@ -1516,7 +1516,9 @@
 
         function buildMultiSelectTriggerMarkup(nativeSelect, selectedLabels) {
             const placeholder = nativeSelect.dataset.placeholder || '请选择';
-            const visibleLabels = selectedLabels.slice(0, 2);
+            const configuredValue = Number.parseInt(nativeSelect?.dataset?.visibleChipCount || '', 10);
+            const visibleChipCount = Number.isFinite(configuredValue) && configuredValue > 0 ? configuredValue : 3;
+            const visibleLabels = selectedLabels.slice(0, visibleChipCount);
             const hiddenCount = Math.max(selectedLabels.length - visibleLabels.length, 0);
             const chipsMarkup = selectedLabels.length
                 ? visibleLabels
@@ -3525,4 +3527,5 @@
         });
     </script>
 {% endblock %}
+
 
