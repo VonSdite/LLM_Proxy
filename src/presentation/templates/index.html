@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260330-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260409-4">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}实时监控 API 请求和 Token 消耗{% endblock %}
@@ -27,14 +27,24 @@
                 </div>
                 <div class="filter-group filter-group-select">
                     <label>用户名</label>
-                    <select id="username">
-                        <option value="">全部</option>
+                    <select
+                        id="username"
+                        multiple
+                        data-placeholder="全部用户"
+                        data-multi-select-hint="可多选；不选则不过滤"
+                        data-visible-chip-count="3"
+                    >
                     </select>
                 </div>
                 <div class="filter-group filter-group-select">
                     <label>请求模型:</label>
-                    <select id="requestModel">
-                        <option value="">全部</option>
+                    <select
+                        id="requestModel"
+                        multiple
+                        data-placeholder="全部模型"
+                        data-multi-select-hint="可多选；不选则不过滤"
+                        data-visible-chip-count="3"
+                    >
                     </select>
                 </div>
                 <button class="btn btn-primary" onclick="applyFilters()">查询</button>
@@ -211,6 +221,9 @@
                 select.classList.remove('open');
                 const trigger = select.querySelector('.custom-select-trigger');
                 if (trigger) trigger.setAttribute('aria-expanded', 'false');
+                if (select.dataset.for) {
+                    resetCustomSelectMenuState(select.dataset.for);
+                }
             });
             activeCustomSelect = null;
         }
@@ -473,18 +486,204 @@
             renderLogs(logsData);
         }
 
+        function getSelectedOptionValues(nativeSelect) {
+            if (!nativeSelect) {
+                return [];
+            }
+            return Array.from(nativeSelect.options)
+                .filter(option => option.selected && String(option.value || '').trim() !== '')
+                .map(option => option.value);
+        }
+
+        function getVisibleChipCount(nativeSelect, fallback = 3) {
+            const configuredValue = Number.parseInt(nativeSelect?.dataset?.visibleChipCount || '', 10);
+            if (Number.isFinite(configuredValue) && configuredValue > 0) {
+                return configuredValue;
+            }
+            return fallback;
+        }
+
+        function buildMultiSelectTriggerMarkup(nativeSelect, selectedLabels) {
+            const placeholder = nativeSelect.dataset.placeholder || '请选择';
+            const visibleChipCount = getVisibleChipCount(nativeSelect, 3);
+            const visibleLabels = selectedLabels.slice(0, visibleChipCount);
+            const hiddenCount = Math.max(selectedLabels.length - visibleLabels.length, 0);
+            const chipsMarkup = selectedLabels.length
+                ? visibleLabels
+                    .map(label => `<span class="custom-select-trigger-chip">${escapeHtml(label)}</span>`)
+                    .join('')
+                    + (hiddenCount ? `<span class="custom-select-trigger-chip custom-select-trigger-chip-more">+${hiddenCount}</span>` : '')
+                : `<span class="custom-select-trigger-placeholder">${escapeHtml(placeholder)}</span>`;
+
+            return `
+                <span class="custom-select-trigger-main">
+                    <span class="custom-select-trigger-chips${selectedLabels.length ? '' : ' is-placeholder'}">${chipsMarkup}</span>
+                </span>
+            `;
+        }
+        function getCustomSelectSearchInput(customSelect) {
+            return customSelect?.querySelector('.custom-select-search-input') || null;
+        }
+
+        function getCustomSelectMenuAction(customSelect) {
+            return customSelect?.querySelector('.custom-select-menu-action') || null;
+        }
+
+        function getCustomSelectEmptyState(customSelect) {
+            return customSelect?.querySelector('.custom-select-empty') || null;
+        }
+
+        function getVisibleCustomSelectOptions(customSelect) {
+            return Array.from(customSelect?.querySelectorAll('.custom-select-option') || [])
+                .filter(option => !option.hidden);
+        }
+        function getVisibleCustomSelectValues(customSelect) {
+            return getVisibleCustomSelectOptions(customSelect)
+                .map(option => option.dataset.value || '')
+                .filter(Boolean);
+        }
+
+        function filterCustomSelectOptions(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect || !nativeSelect.multiple) return;
+
+            const searchInput = getCustomSelectSearchInput(customSelect);
+            const keyword = String(searchInput?.value || '').trim().toLowerCase();
+            const optionButtons = Array.from(customSelect.querySelectorAll('.custom-select-option'));
+            let visibleCount = 0;
+
+            optionButtons.forEach(option => {
+                const label = String(option.dataset.label || option.textContent || '').trim().toLowerCase();
+                const isVisible = !keyword || label.includes(keyword);
+                option.hidden = !isVisible;
+                if (isVisible) {
+                    visibleCount += 1;
+                }
+            });
+
+            const actionButton = getCustomSelectMenuAction(customSelect);
+            if (actionButton) {
+                const scopeText = keyword ? '全选过滤结果' : '全选全部';
+                actionButton.title = visibleCount ? `${scopeText}（${visibleCount}项）` : '当前没有匹配项';
+                actionButton.setAttribute('aria-label', visibleCount ? scopeText : '当前没有匹配项');
+            }
+
+            const emptyState = getCustomSelectEmptyState(customSelect);
+            if (emptyState) {
+                emptyState.hidden = visibleCount !== 0;
+            }
+
+            syncCustomSelectMenuAction(selectId);
+        }
+
+        function syncCustomSelectMenuAction(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect || !nativeSelect.multiple) return;
+
+            const actionButton = getCustomSelectMenuAction(customSelect);
+            if (!actionButton) return;
+
+            const visibleValues = getVisibleCustomSelectValues(customSelect);
+            const selectedValues = new Set(getSelectedOptionValues(nativeSelect));
+            const selectedVisibleCount = visibleValues.filter(value => selectedValues.has(value)).length;
+            const allVisibleSelected = visibleValues.length > 0 && selectedVisibleCount === visibleValues.length;
+            const anyVisibleSelected = selectedVisibleCount > 0;
+            const searchInput = getCustomSelectSearchInput(customSelect);
+            const hasKeyword = Boolean(String(searchInput?.value || '').trim());
+            const selectLabel = hasKeyword ? '全选过滤结果' : '全选全部';
+            const clearLabel = hasKeyword ? '取消过滤结果全选' : '取消全部选中';
+
+            actionButton.disabled = visibleValues.length === 0;
+            actionButton.classList.toggle('is-checked', allVisibleSelected);
+            actionButton.classList.toggle('is-indeterminate', anyVisibleSelected && !allVisibleSelected);
+            actionButton.setAttribute(
+                'aria-checked',
+                allVisibleSelected ? 'true' : (anyVisibleSelected ? 'mixed' : 'false')
+            );
+            actionButton.setAttribute('aria-label', visibleValues.length === 0 ? '当前没有匹配项' : (allVisibleSelected ? clearLabel : selectLabel));
+        }
+
+        function resetCustomSelectMenuState(selectId) {
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!customSelect) return;
+            const searchInput = getCustomSelectSearchInput(customSelect);
+            if (searchInput && searchInput.value) {
+                searchInput.value = '';
+            }
+            filterCustomSelectOptions(selectId);
+        }
+
+        function selectFilteredCustomSelectOptions(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect || !nativeSelect.multiple) return;
+
+            const visibleValues = getVisibleCustomSelectValues(customSelect);
+            if (!visibleValues.length) {
+                return;
+            }
+
+            const nextValues = new Set(getSelectedOptionValues(nativeSelect));
+            const allVisibleSelected = visibleValues.every(value => nextValues.has(value));
+            visibleValues.forEach(value => {
+                if (allVisibleSelected) {
+                    nextValues.delete(value);
+                } else {
+                    nextValues.add(value);
+                }
+            });
+            Array.from(nativeSelect.options).forEach(option => {
+                option.selected = nextValues.has(option.value);
+            });
+            nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        function focusCustomSelectSearchInput(selectId) {
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            const searchInput = getCustomSelectSearchInput(customSelect);
+            if (!searchInput) return;
+            window.requestAnimationFrame(function() {
+                searchInput.focus();
+                searchInput.select();
+            });
+        }
+
         function syncCustomSelectValue(selectId) {
             const nativeSelect = document.getElementById(selectId);
             const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
             if (!nativeSelect || !customSelect) return;
 
+            const isMultiSelect = nativeSelect.multiple;
             const trigger = customSelect.querySelector('.custom-select-trigger');
-            const selectedOption = nativeSelect.options[nativeSelect.selectedIndex] || nativeSelect.options[0];
-            trigger.textContent = selectedOption ? selectedOption.textContent : '请选择';
+            const selectedOptions = isMultiSelect
+                ? Array.from(nativeSelect.options).filter(option => option.selected)
+                : [nativeSelect.options[nativeSelect.selectedIndex] || nativeSelect.options[0]].filter(Boolean);
+            const selectedLabels = selectedOptions
+                .map(option => option.textContent || '')
+                .filter(Boolean);
+            if (trigger) {
+                if (isMultiSelect) {
+                    trigger.innerHTML = buildMultiSelectTriggerMarkup(nativeSelect, selectedLabels);
+                } else {
+                    trigger.textContent = selectedLabels.join(', ') || nativeSelect.dataset.placeholder || '请选择';
+                }
+                trigger.title = selectedLabels.join(', ');
+            }
 
+            const selectedValues = getSelectedOptionValues(nativeSelect);
+            customSelect.classList.toggle('is-multi', isMultiSelect);
             customSelect.querySelectorAll('.custom-select-option').forEach(option => {
-                option.classList.toggle('selected', option.dataset.value === nativeSelect.value);
+                const isSelected = isMultiSelect
+                    ? selectedValues.includes(option.dataset.value || '')
+                    : option.dataset.value === nativeSelect.value;
+                option.classList.toggle('selected', isSelected);
+                option.setAttribute('aria-selected', isSelected ? 'true' : 'false');
             });
+            if (isMultiSelect) {
+                syncCustomSelectMenuAction(selectId);
+            }
         }
 
         function renderCustomSelectOptions(selectId) {
@@ -492,16 +691,88 @@
             const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
             if (!nativeSelect || !customSelect) return;
 
+            const isMultiSelect = nativeSelect.multiple;
             const menu = customSelect.querySelector('.custom-select-menu');
+            if (!menu) return;
             menu.innerHTML = '';
+            menu.setAttribute('aria-multiselectable', isMultiSelect ? 'true' : 'false');
+
+            const optionsContainer = document.createElement('div');
+            optionsContainer.className = 'custom-select-menu-options';
+
+            if (isMultiSelect) {
+                const toolbar = document.createElement('div');
+                toolbar.className = 'custom-select-menu-toolbar';
+
+                const searchInput = document.createElement('input');
+                searchInput.type = 'search';
+                searchInput.className = 'custom-select-search-input';
+                searchInput.placeholder = nativeSelect.dataset.searchPlaceholder || '输入文本过滤';
+                searchInput.setAttribute('aria-label', `${nativeSelect.previousElementSibling?.textContent || '筛选项'} 文本过滤`);
+                searchInput.addEventListener('input', function() {
+                    filterCustomSelectOptions(selectId);
+                });
+                searchInput.addEventListener('keydown', function(event) {
+                    event.stopPropagation();
+                    if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        const firstVisibleOption = customSelect.querySelector('.custom-select-option:not([hidden])');
+                        if (firstVisibleOption) {
+                            firstVisibleOption.focus();
+                        }
+                    }
+                });
+
+                const actionButton = document.createElement('button');
+                actionButton.type = 'button';
+                actionButton.className = 'custom-select-menu-action';
+                actionButton.setAttribute('role', 'checkbox');
+                actionButton.setAttribute('aria-checked', 'false');
+                actionButton.setAttribute('aria-label', '全选全部');
+                actionButton.innerHTML = `
+                    <span class="custom-select-menu-action-box" aria-hidden="true"></span>
+                `;
+                actionButton.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    selectFilteredCustomSelectOptions(selectId);
+                });
+
+                toolbar.appendChild(actionButton);
+                toolbar.appendChild(searchInput);
+                menu.appendChild(toolbar);
+            }
 
             Array.from(nativeSelect.options).forEach(option => {
                 const optionButton = document.createElement('button');
                 optionButton.type = 'button';
-                optionButton.className = 'custom-select-option';
-                optionButton.textContent = option.textContent;
+                optionButton.className = isMultiSelect
+                    ? 'custom-select-option custom-select-option-multi'
+                    : 'custom-select-option';
+                if (isMultiSelect) {
+                    optionButton.innerHTML = `
+                        <span class="custom-select-option-check" aria-hidden="true"></span>
+                        <span class="custom-select-option-label">${escapeHtml(option.textContent || '')}</span>
+                    `;
+                    optionButton.dataset.label = option.textContent || '';
+                } else {
+                    optionButton.textContent = option.textContent;
+                }
                 optionButton.dataset.value = option.value;
-                optionButton.addEventListener('click', function() {
+                optionButton.setAttribute('role', 'option');
+                optionButton.setAttribute('aria-selected', option.selected ? 'true' : 'false');
+                optionButton.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    if (isMultiSelect) {
+                        const currentValues = getSelectedOptionValues(nativeSelect);
+                        const nextValues = currentValues.includes(option.value)
+                            ? currentValues.filter(value => value !== option.value)
+                            : currentValues.concat(option.value);
+                        Array.from(nativeSelect.options).forEach(selectOption => {
+                            selectOption.selected = nextValues.includes(selectOption.value);
+                        });
+                        nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                        return;
+                    }
                     if (nativeSelect.value !== option.value) {
                         nativeSelect.value = option.value;
                         nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -509,10 +780,26 @@
                     syncCustomSelectValue(selectId);
                     closeAllCustomSelects();
                 });
-                menu.appendChild(optionButton);
+                optionsContainer.appendChild(optionButton);
             });
 
+            menu.appendChild(optionsContainer);
+
+            if (isMultiSelect) {
+                const emptyState = document.createElement('div');
+                emptyState.className = 'custom-select-empty';
+                emptyState.textContent = '没有匹配项';
+                emptyState.hidden = true;
+                menu.appendChild(emptyState);
+
+                const menuHint = document.createElement('div');
+                menuHint.className = 'custom-select-menu-hint';
+                menuHint.textContent = nativeSelect.dataset.multiSelectHint || '可多选；不选则不过滤';
+                menu.appendChild(menuHint);
+            }
+
             syncCustomSelectValue(selectId);
+            filterCustomSelectOptions(selectId);
         }
 
         function setupCustomSelect(selectId) {
@@ -561,7 +848,31 @@
                 });
             }
 
+            customSelect.classList.toggle('is-multi', nativeSelect.multiple);
             renderCustomSelectOptions(selectId);
+        }
+
+        function appendSearchParam(params, key, value) {
+            if (Array.isArray(value)) {
+                value
+                    .map(item => String(item || '').trim())
+                    .filter(Boolean)
+                    .forEach(item => params.append(key, item));
+                return;
+            }
+
+            const normalizedValue = String(value ?? '').trim();
+            if (normalizedValue) {
+                params.append(key, normalizedValue);
+            }
+        }
+
+        function buildDashboardSearchParams(extraParams = {}) {
+            const params = new URLSearchParams();
+            Object.entries({ ...currentFilters, ...extraParams }).forEach(([key, value]) => {
+                appendSearchParam(params, key, value);
+            });
+            return params;
         }
 
         // 页面加载时初始化
@@ -620,7 +931,7 @@
             document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="loading">加载统计数据...</td></tr>';
 
             try {
-                const params = new URLSearchParams(currentFilters);
+                const params = buildDashboardSearchParams();
                 const response = await fetch(`/api/statistics?${params}`, { cache: 'no-store' });
                 const data = await response.json();
                 if (requestToken !== statsRequestToken) return;
@@ -735,10 +1046,9 @@
             document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="loading">加载请求数据...</td></tr>';
 
             try {
-                const params = new URLSearchParams({
+                const params = buildDashboardSearchParams({
                     page: currentPage,
                     page_size: pageSize,
-                    ...currentFilters
                 });
 
                 const response = await fetch(`/api/request-logs?${params}`, { cache: 'no-store' });
@@ -866,15 +1176,15 @@
 
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
-            const username = document.getElementById('username').value;
-            const requestModel = document.getElementById('requestModel').value;
+            const usernames = getSelectedOptionValues(document.getElementById('username'));
+            const requestModels = getSelectedOptionValues(document.getElementById('requestModel'));
 
             updateDatePresetUi();
 
             if (startDate) currentFilters.start_date = startDate;
             if (endDate) currentFilters.end_date = endDate;
-            if (username) currentFilters.username = username;
-            if (requestModel) currentFilters.request_model = requestModel;
+            if (usernames.length) currentFilters.username = usernames;
+            if (requestModels.length) currentFilters.request_model = requestModels;
 
             currentPage = 1;
             loadActiveDashboardTabData();
@@ -916,3 +1226,13 @@
         }
     </script>
 {% endblock %}
+
+
+
+
+
+
+
+
+
+

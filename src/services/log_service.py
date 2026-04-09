@@ -3,7 +3,7 @@
 """日志服务。"""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from ..application.app_context import AppContext
 from ..repositories import LogRepository
@@ -22,9 +22,15 @@ class LogService:
     def _normalize_log_timestamps(log: Dict[str, Any]) -> Dict[str, Any]:
         """统一请求日志时间字段格式。"""
         normalized = dict(log)
-        normalized["start_time"] = normalize_local_datetime_text(normalized.get("start_time"))
-        normalized["end_time"] = normalize_local_datetime_text(normalized.get("end_time"))
-        normalized["created_at"] = normalize_local_datetime_text(normalized.get("created_at"))
+        normalized["start_time"] = normalize_local_datetime_text(
+            normalized.get("start_time")
+        )
+        normalized["end_time"] = normalize_local_datetime_text(
+            normalized.get("end_time")
+        )
+        normalized["created_at"] = normalize_local_datetime_text(
+            normalized.get("created_at")
+        )
         return normalized
 
     def log_request(
@@ -67,8 +73,8 @@ class LogService:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        username: Optional[str] = None,
-        request_model: Optional[str] = None,
+        username: Optional[str | Sequence[str]] = None,
+        request_model: Optional[str | Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         """获取统计聚合数据。"""
         try:
@@ -92,10 +98,11 @@ class LogService:
                 for row in rows
             ]
             self._logger.debug(
-                "Statistics queried: start_date=%s end_date=%s username=%s rows=%s",
+                "Statistics queried: start_date=%s end_date=%s username=%s request_model=%s rows=%s",
                 start_date,
                 end_date,
                 username,
+                request_model,
                 len(result),
             )
             return result
@@ -109,8 +116,8 @@ class LogService:
         page_size: int = 50,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        username: Optional[str] = None,
-        request_model: Optional[str] = None,
+        username: Optional[str | Sequence[str]] = None,
+        request_model: Optional[str | Sequence[str]] = None,
     ) -> Dict[str, Any]:
         """获取请求日志分页数据。"""
         try:
@@ -122,7 +129,9 @@ class LogService:
                 username=username,
                 request_model=request_model,
             )
-            result["logs"] = [self._normalize_log_timestamps(log) for log in result.get("logs", [])]
+            result["logs"] = [
+                self._normalize_log_timestamps(log) for log in result.get("logs", [])
+            ]
             return result
         except Exception as exc:
             self._logger.error(f"Failed to get request logs: {exc}")
