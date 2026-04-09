@@ -866,6 +866,12 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
             encoding="utf-8"
         )
         theme_js = (root / "static" / "js" / "theme.js").read_text(encoding="utf-8")
+        base_admin_html = (root / "templates" / "base_admin.html").read_text(
+            encoding="utf-8"
+        )
+        web_controller_py = (root.parent / "presentation" / "web_controller.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("/static/js/ui-message.js?v=20260319-1", login_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", users_html)
@@ -877,6 +883,20 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn("showActionError('更新用户'", users_html)
         self.assertIn("showActionError('删除用户'", users_html)
         self.assertNotIn("Toggle theme", theme_js)
+        self.assertIn('href="/">Provider 管理</a>', base_admin_html)
+        self.assertIn('href="/users">用户管理</a>', base_admin_html)
+        self.assertIn('href="/statistics">统计概览</a>', base_admin_html)
+        self.assertLess(
+            base_admin_html.index('href="/">Provider 管理</a>'),
+            base_admin_html.index('href="/users">用户管理</a>'),
+        )
+        self.assertLess(
+            base_admin_html.index('href="/users">用户管理</a>'),
+            base_admin_html.index('href="/statistics">统计概览</a>'),
+        )
+        self.assertIn('self._app.route("/")(auth(self.home))', web_controller_py)
+        self.assertIn('self._app.route("/statistics")(auth(self.index))', web_controller_py)
+        self.assertIn('def home(self) -> str:', web_controller_py)
 
     def test_ui_message_formatter_appends_upstream_original_error(self) -> None:
         script_path = (
@@ -975,6 +995,8 @@ class DashboardTemplateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
 
 
 

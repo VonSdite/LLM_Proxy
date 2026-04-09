@@ -46,7 +46,9 @@ class ProxyController:
         self._app.route("/v1/models", methods=["GET"])(self.list_models)
 
     def _get_user_by_ip(self, ip_address: str) -> Optional[Dict[str, Any]]:
-        return self._user_service.get_user_by_ip(ip_address, require_whitelist_access=True)
+        return self._user_service.get_user_by_ip(
+            ip_address, require_whitelist_access=True
+        )
 
     def _is_whitelist_required(self) -> bool:
         return self._config_manager.is_chat_whitelist_enabled()
@@ -138,14 +140,20 @@ class ProxyController:
         # DEPRECATED compatibility path for legacy objects that still expose a
         # single `target_format` field. New runtime/provider APIs should only
         # provide `target_formats`, and this fallback can be removed later.
-        target_format = str(getattr(provider, "target_format", "") or "").strip().lower()
+        target_format = (
+            str(getattr(provider, "target_format", "") or "").strip().lower()
+        )
         if target_format:
             return (target_format,)
         return ()
 
     @staticmethod
     def _format_provider_target_formats(target_formats: Iterable[str]) -> str:
-        normalized = [str(item or "").strip().lower() for item in target_formats if str(item or "").strip()]
+        normalized = [
+            str(item or "").strip().lower()
+            for item in target_formats
+            if str(item or "").strip()
+        ]
         if not normalized:
             return "<empty>"
         if len(normalized) == 1:
@@ -182,14 +190,18 @@ class ProxyController:
         error_format: Optional[str] = None,
     ) -> ResponseReturnValue:
         normalized_expected_target_formats = tuple(
-            str(item or "").strip().lower() for item in expected_target_formats if str(item or "").strip()
+            str(item or "").strip().lower()
+            for item in expected_target_formats
+            if str(item or "").strip()
         )
         if not normalized_expected_target_formats:
             raise ValueError("expected_target_formats must not be empty")
         resolved_error_format = error_format or normalized_expected_target_formats[0]
         try:
             client_ip = normalize_ip(request.remote_addr)
-            self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
+            self._logger.info(
+                "Proxy request received: route=%s ip=%s", route_name, client_ip
+            )
             user, denial_response = self._get_authorized_user_for_request(
                 client_ip,
                 error_format=resolved_error_format,
@@ -201,7 +213,10 @@ class ProxyController:
             if raw_request_data is None:
                 request_data: Dict[str, Any] = {}
             elif not isinstance(raw_request_data, dict):
-                self._logger.warning("Proxy rejected: request body is not a JSON object route=%s", route_name)
+                self._logger.warning(
+                    "Proxy rejected: request body is not a JSON object route=%s",
+                    route_name,
+                )
                 return self._error_response(
                     "Request body must be a JSON object",
                     400,
@@ -214,7 +229,9 @@ class ProxyController:
 
             model_name_value = request_data.get("model")
             if not isinstance(model_name_value, str) or not model_name_value.strip():
-                self._logger.warning("Proxy rejected: missing model in request body route=%s", route_name)
+                self._logger.warning(
+                    "Proxy rejected: missing model in request body route=%s", route_name
+                )
                 return self._error_response(
                     "Missing 'model' in request body",
                     400,
@@ -226,7 +243,9 @@ class ProxyController:
             model_name = model_name_value.strip()
             provider = self._provider_manager.get_provider_for_model(model_name)
             if not provider:
-                self._logger.warning("Proxy rejected: unknown model=%r route=%s", model_name, route_name)
+                self._logger.warning(
+                    "Proxy rejected: unknown model=%r route=%s", model_name, route_name
+                )
                 return self._error_response(
                     f"Unknown model: {model_name}",
                     400,
@@ -235,10 +254,13 @@ class ProxyController:
                     error_format=resolved_error_format,
                 )
 
-            if self._is_whitelist_required() and not self._user_service.can_user_access_model(
-                user,
-                model_name,
-                available_models=self._provider_manager.list_model_names(),
+            if (
+                self._is_whitelist_required()
+                and not self._user_service.can_user_access_model(
+                    user,
+                    model_name,
+                    available_models=self._provider_manager.list_model_names(),
+                )
             ):
                 self._logger.warning(
                     "Proxy denied: ip=%s is not allowed to access model=%s route=%s",
@@ -411,7 +433,11 @@ class ProxyController:
                         available_models=model_names,
                     )
                 )
-                model_names = [model_name for model_name in model_names if model_name in allowed_models]
+                model_names = [
+                    model_name
+                    for model_name in model_names
+                    if model_name in allowed_models
+                ]
 
             data = []
             for model_key in model_names:
@@ -456,6 +482,3 @@ class ProxyController:
             "upgrade",
         }
         return {k: v for k, v in headers.items() if k.lower() not in excluded}
-
-
-

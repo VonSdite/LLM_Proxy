@@ -21,9 +21,9 @@
                         </svg>
                     </button>
                     <nav class="header-nav" aria-label="Main navigation">
-                        <a class="header-nav-link{% if active_page == 'index' %} active{% endif %}" href="/">统计概览</a>
+                        <a class="header-nav-link{% if active_page == 'providers' %} active{% endif %}" href="/">Provider 管理</a>
                         <a class="header-nav-link{% if active_page == 'users' %} active{% endif %}" href="/users">用户管理</a>
-                        <a class="header-nav-link{% if active_page == 'providers' %} active{% endif %}" href="/providers">Provider 管理</a>
+                        <a class="header-nav-link{% if active_page == 'index' %} active{% endif %}" href="/statistics">统计概览</a>
                     </nav>
                     {% if auth_enabled %}
                     <span class="header-user">当前用户：{{ current_username or '未知用户' }}</span>
@@ -36,3 +36,4 @@
     </div>
     {% block after_container %}{% endblock %}
 {% endblock %}
+
