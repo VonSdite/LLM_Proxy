@@ -30,9 +30,10 @@ class WebController:
     def _register_routes(self) -> None:
         auth = require_authentication(self._auth_service)
 
-        self._app.route("/")(auth(self.index))
-        self._app.route("/users")(auth(self.users_page))
+        self._app.route("/")(auth(self.home))
         self._app.route("/providers")(auth(self.providers_page))
+        self._app.route("/users")(auth(self.users_page))
+        self._app.route("/statistics")(auth(self.index))
 
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
         self._app.route("/api/request-logs", methods=["GET"])(
@@ -42,6 +43,9 @@ class WebController:
         self._app.route("/api/request-models", methods=["GET"])(
             auth(self.get_request_models)
         )
+
+    def home(self) -> str:
+        return self.providers_page()
 
     def index(self) -> str:
         return render_template(
