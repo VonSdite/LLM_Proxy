@@ -58,6 +58,7 @@ class ProviderController:
         self._app.route('/api/providers', methods=['GET'])(auth(self.get_providers))
         self._app.route('/api/providers', methods=['POST'])(auth(self.create_provider))
         self._app.route('/api/providers/batch', methods=['POST'])(auth(self.batch_providers))
+        self._app.route('/api/providers/order', methods=['PUT'])(auth(self.reorder_providers))
         self._app.route('/api/providers/fetch-models', methods=['GET'])(auth(self.fetch_models))
         self._app.route('/api/providers/chat-whitelist', methods=['PUT'])(auth(self.update_chat_whitelist))
         self._app.route('/api/providers/<string:name>', methods=['GET'])(auth(self.get_provider))
@@ -118,6 +119,22 @@ class ProviderController:
             return jsonify({'error': str(exc)}), 400
         except Exception as exc:
             self._logger.error('Error creating provider: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+
+    def reorder_providers(self) -> ResponseReturnValue:
+        try:
+            payload = self._get_request_payload()
+            result = self._provider_service.reorder_providers(
+                self._coerce_name_list(payload.get('names'))
+            )
+            self._logger.info(
+                'Provider order updated: count=%s', result.get('count', 0)
+            )
+            return jsonify(result)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+        except Exception as exc:
+            self._logger.error('Error reordering providers: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
     def update_provider(self, name: str) -> ResponseReturnValue:
@@ -354,9 +371,19 @@ class ProviderController:
 
     def fetch_models(self) -> ResponseReturnValue:
         try:
+            api_key = request.args.get('api_key')
+            auth_group_name = request.args.get('auth_group')
+            if api_key and auth_group_name:
+                raise ValueError('Model fetch must use either auth_group or api_key, not both')
+
+            request_headers = None
+            if auth_group_name:
+                request_headers = self._auth_group_service.get_first_entry_headers(auth_group_name)
+
             result = self._model_discovery_service.fetch_models_preview(
                 api=request.args.get('api', ''),
-                api_key=request.args.get('api_key'),
+                api_key=api_key,
+                request_headers=request_headers,
                 proxy=request.args.get('proxy'),
                 timeout_seconds=request.args.get('timeout_seconds'),
                 verify_ssl=request.args.get('verify_ssl'),

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -24,6 +24,7 @@ class ModelDiscoveryService:
         self,
         api: str,
         api_key: Optional[str] = None,
+        request_headers: Optional[Mapping[str, str]] = None,
         proxy: Optional[str] = None,
         timeout_seconds: Optional[Any] = None,
         verify_ssl: Optional[Any] = None,
@@ -34,6 +35,7 @@ class ModelDiscoveryService:
         fetched_models = self._fetch_models_from_upstream(
             api=str(api).strip(),
             api_key=clean_optional_string(api_key),
+            request_headers=request_headers,
             proxy=normalize_proxy_url(proxy),
             timeout_seconds=parse_optional_positive_int(timeout_seconds, default=30) or 30,
             verify_ssl=parse_optional_bool(verify_ssl, default=False) or False,
@@ -48,6 +50,7 @@ class ModelDiscoveryService:
         self,
         api: str,
         api_key: Optional[str],
+        request_headers: Optional[Mapping[str, str]],
         proxy: Optional[str],
         timeout_seconds: int,
         verify_ssl: bool,
@@ -55,6 +58,19 @@ class ModelDiscoveryService:
         headers = {'accept': 'application/json'}
         if api_key:
             headers['authorization'] = f'Bearer {api_key}'
+        if request_headers:
+            for raw_key, raw_value in request_headers.items():
+                header_name = str(raw_key or '').strip()
+                if not header_name:
+                    continue
+                duplicated_keys = [
+                    existing_key
+                    for existing_key in headers
+                    if existing_key.lower() == header_name.lower() and existing_key != header_name
+                ]
+                for duplicated_key in duplicated_keys:
+                    headers.pop(duplicated_key, None)
+                headers[header_name] = '' if raw_value is None else str(raw_value).strip()
         proxies = build_requests_proxies(proxy)
 
         candidates = self._build_model_endpoint_candidates(api)
@@ -106,32 +122,35 @@ class ModelDiscoveryService:
             normalized_scheme = 'https'
 
         root = f'{normalized_scheme}://{parsed.netloc}'
-        path = parsed.path.rstrip('/')
-        path_prefixes = ['']
+        base_path = ModelDiscoveryService._build_model_endpoint_base_path(parsed.path.rstrip('/'))
+        base_url = f'{root}{base_path}'
+        return [
+            f'{base_url}/v1/models',
+            f'{base_url}/models',
+        ]
 
-        if path:
-            path_parts = [segment for segment in path.split('/') if segment]
-            for cut in range(len(path_parts), 0, -1):
-                current = '/' + '/'.join(path_parts[:cut])
-                lower_current = current.lower()
-                if lower_current.endswith('/chat/completions'):
-                    current = current[: -len('/chat/completions')]
-                elif lower_current.endswith('/completions'):
-                    current = current[: -len('/completions')]
-                path_prefixes.append(current.rstrip('/'))
-            path_prefixes.append(path)
+    @staticmethod
+    def _build_model_endpoint_base_path(path: str) -> str:
+        normalized_path = path.rstrip('/')
+        if not normalized_path:
+            return ''
 
-        candidates: List[str] = []
-        seen: set[str] = set()
-        for prefix in path_prefixes:
-            normalized_prefix = prefix.rstrip('/')
-            for suffix in ('/v1/models', '/models'):
-                candidate = f'{root}{normalized_prefix}{suffix}'
-                if candidate in seen:
-                    continue
-                seen.add(candidate)
-                candidates.append(candidate)
-        return candidates
+        lower_path = normalized_path.lower()
+        known_suffixes = (
+            '/v1/chat/completions',
+            '/chat/completions',
+            '/v1/completions',
+            '/completions',
+            '/v1/responses',
+            '/responses',
+            '/v1/models',
+            '/models',
+            '/v1',
+        )
+        for suffix in known_suffixes:
+            if lower_path.endswith(suffix):
+                return normalized_path[: -len(suffix)].rstrip('/')
+        return normalized_path
 
     @staticmethod
     def _extract_models_from_payload(payload: Any) -> List[str]:

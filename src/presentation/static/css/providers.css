@@ -199,6 +199,14 @@
     box-shadow: var(--shadow-card);
 }
 
+.providers-page #providersContainer.providers-table-shell {
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
 .providers-page .providers-tab-panel[hidden] {
     display: none !important;
 }
@@ -359,6 +367,144 @@
     min-width: 48px;
     text-align: center;
     vertical-align: middle;
+}
+
+.providers-page .providers-table th.provider-order-column,
+.providers-page .providers-table td.provider-order-cell {
+    width: 76px;
+    min-width: 76px;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.providers-page .provider-order-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.providers-page .provider-order-stepper {
+    display: inline-grid;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    width: 30px;
+    overflow: hidden;
+    border: 1px solid rgba(132, 164, 205, 0.28);
+    border-radius: 11px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 248, 253, 0.94));
+    box-shadow: 0 6px 14px rgba(123, 150, 188, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.providers-page .provider-order-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #617b9f;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color var(--transition), color var(--transition), opacity var(--transition), transform var(--transition);
+}
+
+.providers-page .provider-order-step + .provider-order-step {
+    border-top: 1px solid rgba(132, 164, 205, 0.18);
+}
+
+.providers-page .provider-order-step-icon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+}
+
+.providers-page .provider-order-step:hover:not(:disabled),
+.providers-page .provider-order-step:focus-visible:not(:disabled) {
+    outline: none;
+    background: linear-gradient(180deg, rgba(58, 127, 237, 0.16), rgba(58, 127, 237, 0.08));
+    color: var(--primary-active);
+}
+
+.providers-page .provider-order-step:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.providers-page .provider-order-step:disabled {
+    color: #a4b1c2;
+    cursor: default;
+    opacity: 0.42;
+}
+
+:root[data-theme="dark"] .providers-page .provider-order-stepper {
+    border-color: rgba(104, 138, 180, 0.26);
+    background: linear-gradient(180deg, rgba(28, 38, 50, 0.92), rgba(18, 26, 36, 0.96));
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+}
+
+:root[data-theme="dark"] .providers-page .provider-order-step {
+    color: #92a8c7;
+}
+
+:root[data-theme="dark"] .providers-page .provider-order-step + .provider-order-step {
+    border-top-color: rgba(124, 146, 173, 0.16);
+}
+
+:root[data-theme="dark"] .providers-page .provider-order-step:hover:not(:disabled),
+:root[data-theme="dark"] .providers-page .provider-order-step:focus-visible:not(:disabled) {
+    background: linear-gradient(180deg, rgba(82, 145, 228, 0.2), rgba(58, 127, 237, 0.1));
+    color: #f4f8ff;
+}
+
+:root[data-theme="dark"] .providers-page .provider-order-step:disabled {
+    color: #607085;
+    opacity: 0.44;
+}
+
+.providers-page .provider-group-list {
+    display: grid;
+    gap: 18px;
+}
+
+.providers-page .provider-group-card {
+    display: grid;
+    gap: 12px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+}
+
+.providers-page .provider-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px 0;
+}
+
+.providers-page .provider-group-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.providers-page .provider-group-batch-btn {
+    white-space: nowrap;
+}
+
+.providers-page .provider-group-title {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+:root[data-theme="dark"] .providers-page .provider-group-card {
+    background: #161b22;
+    border-color: #30363d;
 }
 
 .providers-page .provider-table-checkbox {
@@ -837,6 +983,10 @@
     font-weight: 600;
     cursor: pointer;
     transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.providers-page .btn-action:disabled {
+    cursor: not-allowed;
 }
 
 .providers-page .providers-table td.provider-actions-cell,
@@ -1420,6 +1570,74 @@
     box-shadow: 0 0 0 3px var(--focus);
 }
 
+.providers-page .sensitive-input-shell {
+    position: relative;
+}
+
+.providers-page .sensitive-input-control {
+    padding-right: 52px;
+}
+
+.providers-page .sensitive-input-toggle {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: rgba(148, 163, 184, 0.88);
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none;
+    transition: color var(--transition), opacity var(--transition);
+}
+
+.providers-page .sensitive-input-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.providers-page .sensitive-input-icon-eye-off {
+    display: none;
+}
+
+.providers-page .sensitive-input-toggle.is-visible .sensitive-input-icon-eye {
+    display: none;
+}
+
+.providers-page .sensitive-input-toggle.is-visible .sensitive-input-icon-eye-off {
+    display: block;
+}
+
+.providers-page .sensitive-input-toggle:hover {
+    background: transparent;
+    color: var(--primary-active);
+}
+
+.providers-page .sensitive-input-toggle:focus-visible {
+    outline: none;
+    background: transparent;
+    color: var(--primary-active);
+    box-shadow: none;
+}
+
+:root[data-theme="dark"] .providers-page .sensitive-input-toggle {
+    background: transparent;
+    color: rgba(197, 208, 220, 0.82);
+}
+
+:root[data-theme="dark"] .providers-page .sensitive-input-toggle:hover,
+:root[data-theme="dark"] .providers-page .sensitive-input-toggle:focus-visible {
+    background: transparent;
+    color: #e6f0ff;
+}
 .providers-page .modal .form-control {
     background: #fff;
 }
