@@ -6,6 +6,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from flask import Flask
@@ -472,9 +473,97 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
             "wss://example.com/v1/chat/completions"
         )
 
-        self.assertIn("https://example.com/v1/models", candidates)
-        self.assertIn("https://example.com/models", candidates)
-        self.assertNotIn("wss://example.com/v1/models", candidates)
+        self.assertEqual(
+            [
+                "https://example.com/v1/models",
+                "https://example.com/models",
+            ],
+            candidates,
+        )
+
+    def test_model_discovery_uses_only_base_candidates(self) -> None:
+        candidates = ModelDiscoveryService._build_model_endpoint_candidates(
+            "https://example.com/proxy/v1/chat/completions"
+        )
+
+        self.assertEqual(
+            [
+                "https://example.com/proxy/v1/models",
+                "https://example.com/proxy/models",
+            ],
+            candidates,
+        )
+
+    def test_model_discovery_trims_responses_endpoint_to_base_path(self) -> None:
+        candidates = ModelDiscoveryService._build_model_endpoint_candidates(
+            "https://example.com/gateway/v1/responses"
+        )
+
+        self.assertEqual(
+            [
+                "https://example.com/gateway/v1/models",
+                "https://example.com/gateway/models",
+            ],
+            candidates,
+        )
+
+    def test_fetch_models_preview_merges_request_headers(self) -> None:
+        logger = FakeLogger()
+        ctx = AppContext(
+            logger=logger,
+            config_manager=None,  # type: ignore[arg-type]
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=Flask(__name__),
+        )
+        service = ModelDiscoveryService(ctx)
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            status_code = 200
+
+            @staticmethod
+            def json() -> dict[str, object]:
+                return {"data": [{"id": "demo-model"}]}
+
+        class FakeSession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                del exc_type, exc, tb
+                return False
+
+            def get(self, url, headers=None, proxies=None, timeout=None, verify=None):
+                captured["url"] = url
+                captured["headers"] = dict(headers or {})
+                captured["proxies"] = proxies
+                captured["timeout"] = timeout
+                captured["verify"] = verify
+                return FakeResponse()
+
+        with patch("src.services.model_discovery_service.requests.Session", return_value=FakeSession()):
+            result = service.fetch_models_preview(
+                api="https://example.com/v1/chat/completions",
+                request_headers={
+                    "Authorization": "Bearer sk-a",
+                    "x-org": "team-a",
+                },
+                timeout_seconds=12,
+                verify_ssl=True,
+            )
+
+        self.assertEqual(["demo-model"], result["fetched_models"])
+        self.assertEqual("https://example.com/v1/models", captured["url"])
+        self.assertEqual(
+            {
+                "accept": "application/json",
+                "Authorization": "Bearer sk-a",
+                "x-org": "team-a",
+            },
+            captured["headers"],
+        )
+        self.assertEqual(12, captured["timeout"])
+        self.assertTrue(captured["verify"])
 
 
 class ProviderTemplateTransportTests(unittest.TestCase):
@@ -505,6 +594,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         css = css_path.read_text(encoding="utf-8")
 
+        self.assertIn("/static/css/providers.css?v=20260411-9", html)
         self.assertIn('id="providerTransport"', html)
         self.assertIn('id="providerSourceFormat"', html)
         self.assertIn('id="providerTargetFormat"', html)
@@ -533,6 +623,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="authGroupModal"', html)
         self.assertIn('id="authEntryImportModal"', html)
         self.assertIn('id="authGroupRuntimeModal"', html)
+        self.assertIn('id="authGroupDeletePopover"', html)
         self.assertIn(
             'id="providerModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"',
             html,
@@ -561,6 +652,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('data-provider-help-topic="auth_group_strategy"', html)
         self.assertIn('data-provider-help-topic="auth_entries_editor"', html)
         self.assertIn('data-provider-help-topic="fetch_models"', html)
+        self.assertIn("所选 Auth Group 的第一个 entry", html)
         self.assertIn('id="providerHelpPopover"', html)
         self.assertIn("function toggleProviderHelp(", html)
         self.assertIn("function syncProviderHelpPopover()", html)
@@ -572,6 +664,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function resetAuthGroupEntryRuntime(", html)
         self.assertIn("function openAuthEntryErrorModal(", html)
         self.assertIn("function updateProviderAuthModeFields()", html)
+        self.assertIn("function getDefaultAuthEntryHeaders()", html)
         self.assertIn("/api/auth-groups", html)
         self.assertIn("/api/auth-groups/import-entries", html)
         self.assertIn("'disable'", html)
@@ -580,6 +673,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("setupCustomSelect('providerAuthMode');", html)
         self.assertIn("setupCustomSelect('providerAuthGroup');", html)
         self.assertIn("renderCustomSelectOptions('providerAuthGroup');", html)
+        self.assertIn(
+            "document.getElementById('providerAuthGroup').addEventListener('change', updateFetchModelsButtonState);",
+            html,
+        )
         self.assertIn("setupCustomSelect('authGroupStrategy');", html)
         self.assertIn("setupCustomSelect('providerTransport');", html)
         self.assertIn("setupCustomSelect('providerSourceFormat');", html)
@@ -597,24 +694,59 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("const providerTargetFormatConflictGroups = [", html)
         self.assertIn("function setProviderTargetFormatValues(", html)
         self.assertIn("target_formats: normalizedTargetFormats,", html)
-        self.assertIn('id="selectedProviderCount"', html)
-        self.assertIn('id="enableSelectedProvidersBtn"', html)
-        self.assertIn('id="disableSelectedProvidersBtn"', html)
+        self.assertNotIn('id="selectedProviderCount"', html)
+        self.assertNotIn('id="enableSelectedProvidersBtn"', html)
+        self.assertNotIn('id="disableSelectedProvidersBtn"', html)
         self.assertNotIn('id="deleteSelectedProvidersBtn"', html)
         self.assertNotIn('id="clearSelectedProvidersBtn"', html)
+        self.assertIn("let providerOrderActionInFlight = false;", html)
+        self.assertIn("function getProviderGroupNames(groupKey)", html)
+        self.assertIn("function getSelectedProviderNamesForGroup(groupKey)", html)
+        self.assertIn("function toggleProviderGroupSelection(groupKey, checked)", html)
+        self.assertIn("function getProviderMoveState(name)", html)
+        self.assertIn("function buildMovedProviderOrderNames(name, direction)", html)
+        self.assertIn("function hasProviderMutationInFlight()", html)
+        self.assertIn("function buildProviderTable(groupKey, title, providerList, emptyText)", html)
+        self.assertIn("function saveProviderOrder(names)", html)
+        self.assertIn("function moveProvider(name, direction)", html)
         self.assertIn("function updateProviderSelectionUi()", html)
         self.assertIn("function toggleProviderSelection(name, checked)", html)
         self.assertIn("function toggleAllProvidersSelection(checked)", html)
         self.assertIn("function clearSelectedProviders()", html)
         self.assertIn("function setProviderEnabled(name, enabled)", html)
-        self.assertIn("function runProviderBatchAction(action)", html)
+        self.assertIn("function runProviderBatchAction(action, groupKey = '')", html)
         self.assertIn("/api/providers/batch", html)
+        self.assertIn("/api/providers/order", html)
         self.assertIn(
             "/api/providers/${encodeURIComponent(normalizedName)}/${enabled ? 'enable' : 'disable'}",
             html,
         )
-        self.assertIn('id="providerSelectAllCheckbox"', html)
+        self.assertNotIn('id="providerSelectAllCheckbox"', html)
+        self.assertIn('class="provider-order-column">顺序</th>', html)
+        self.assertIn('class="provider-order-cell"', html)
+        self.assertIn('data-provider-group-select-checkbox="${normalizedGroupKey}"', html)
+        self.assertIn('id="${batchActionMeta.buttonId}"', html)
+        self.assertIn("class=\"btn btn-toolbar-secondary provider-group-batch-btn\"", html)
+        self.assertIn("onclick=\"runProviderBatchAction('${batchActionMeta.action}', '${normalizedGroupKey}')\"", html)
+        self.assertIn("buttonId: 'disableEnabledProvidersBtn'", html)
+        self.assertIn("buttonId: 'enableDisabledProvidersBtn'", html)
+        self.assertIn("buttonLabel: '禁用'", html)
+        self.assertIn("buttonLabel: '启用'", html)
+        self.assertIn('class="provider-order-step provider-order-step-up"', html)
+        self.assertIn('class="provider-order-step provider-order-step-down"', html)
+        self.assertIn('class="provider-order-step-icon"', html)
+        self.assertNotIn(">上移</button>", html)
+        self.assertNotIn(">下移</button>", html)
+        self.assertIn("已启用", html)
+        self.assertIn("已禁用", html)
+        self.assertIn('class="provider-order-stepper"', html)
+        self.assertIn("providerActionLocked || !providerMoveState.canMoveUp", html)
+        self.assertIn("providerActionLocked || !providerMoveState.canMoveDown", html)
+        self.assertIn("if (!normalizedName || hasProviderMutationInFlight())", html)
+        self.assertIn("groupLabel = groupKey === 'enabled'", html)
         self.assertIn('data-provider-row-checkbox="${encodedProviderName}"', html)
+        self.assertIn('data-auth-group-delete-trigger="${encodedGroupName}"', html)
+        self.assertNotIn('provider-chip ${isEnabled ? \'provider-chip-hook\' : \'provider-chip-muted\'}', html)
         self.assertIn(
             "class=\"btn-action ${isEnabled ? 'btn-delete' : 'btn-edit'}\"", html
         )
@@ -622,6 +754,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
             "window.confirm(`确认批量删除已选中的 ${selectedNames.length} 个 Provider？`)",
             html,
         )
+        self.assertNotIn("window.confirm(", html)
         self.assertNotIn("setupCustomSelect('providerFormat');", html)
         self.assertNotIn("setupCustomSelect('providerStreamFormat');", html)
         self.assertNotIn('id="providerFormatMatrix"', html)
@@ -630,6 +763,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
 
         self.assertIn('id="fetchModelSelectAllCheckbox"', html)
         self.assertIn("toggleFilteredFetchedModels(this.checked)", html)
+        self.assertIn("if (payload.auth_group) params.set('auth_group', payload.auth_group);", html)
         self.assertIn('class="provider-model-cell"', html)
         self.assertIn('class="provider-meta-line"', html)
         self.assertIn('class="providers-table-shell auth-groups-table-shell"', html)
@@ -638,6 +772,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('placeholder="例如 60，表示该组默认遇到 429 冷却 60 秒"', html)
         self.assertIn("YAML 编辑", html)
         self.assertIn('id="authEntryImportYaml"', html)
+        self.assertIn('Authorization: "Bearer "', html)
         self.assertIn("这里编辑的是当前 Auth Entries 的完整 YAML", html)
         self.assertIn("插入 Entry 模板", html)
         self.assertIn("必填：Entry 唯一 ID", html)
@@ -669,6 +804,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function insertAuthEntryYamlTemplate(", html)
         self.assertIn("function getSingleAuthEntryYamlTemplate(", html)
         self.assertIn("function saveAuthEntriesFromYaml(", html)
+        self.assertIn("function toggleDeleteAuthGroupConfirm(", html)
+        self.assertIn("function confirmDeleteAuthGroup(", html)
+        self.assertIn("function closeDeleteAuthGroupConfirm(", html)
         self.assertIn("function replaceAuthEntryCards(entries, options = {}) {", html)
         self.assertIn("const { expandFirst = false } = options || {};", html)
         self.assertIn(
@@ -710,6 +848,21 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .provider-batch-summary {", css)
         self.assertNotIn(".providers-page .provider-batch-delete-modal-dialog {", css)
         self.assertIn(".providers-page .provider-table-checkbox {", css)
+        self.assertIn(".providers-page .provider-group-list {", css)
+        self.assertIn(".providers-page .provider-group-card {", css)
+        self.assertIn(".providers-page .provider-group-header {", css)
+        self.assertIn(".providers-page .provider-group-heading {", css)
+        self.assertIn(".providers-page .provider-group-batch-btn {", css)
+        self.assertIn(".providers-page .provider-group-title {", css)
+        self.assertIn(".providers-page #providersContainer.providers-table-shell {", css)
+        self.assertIn(':root[data-theme="dark"] .providers-page .provider-group-card {', css)
+        self.assertIn(".providers-page .providers-table th.provider-order-column,", css)
+        self.assertIn(".providers-page .provider-order-actions {", css)
+        self.assertIn(".providers-page .provider-order-stepper {", css)
+        self.assertIn(".providers-page .provider-order-step {", css)
+        self.assertIn(".providers-page .btn-action:disabled {", css)
+        self.assertIn(".providers-page .provider-order-step:disabled {", css)
+        self.assertIn(':root[data-theme="dark"] .providers-page .provider-order-step:disabled {', css)
         self.assertIn(".providers-page .field-label-with-help {", css)
         self.assertIn(".providers-page .field-mode-badge {", css)
         self.assertNotIn(".providers-page .field-inline-note {", css)
@@ -838,6 +991,129 @@ process.stdout.write(JSON.stringify({{
         self.assertEqual("", payload["afterApiKey"])
         self.assertIn("4", payload["countText"])
         self.assertTrue(payload["message"])
+
+    def test_fetch_models_button_supports_auth_group_mode(self) -> None:
+        template_path = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "presentation"
+            / "templates"
+            / "providers.html"
+        )
+        html = template_path.read_text(encoding="utf-8")
+
+        script_start = html.index("function getEffectiveTransport")
+        script_end = html.index("function openCreateModal")
+        script = html[script_start:script_end]
+
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{
+  console,
+  document: {{
+    elements: {{
+      providerApi: {{ value: " https://example.com/v1/chat/completions " }},
+      providerAuthMode: {{ value: "auth_group" }},
+      providerAuthGroup: {{ value: " pool-a " }},
+      fetchModelsBtn: {{ disabled: false, dataset: {{}}, title: "" }},
+    }},
+    getElementById(id) {{
+      return this.elements[id] || null;
+    }},
+  }},
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+sandbox.updateFetchModelsButtonState();
+const authGroupDisabled = sandbox.document.elements.fetchModelsBtn.disabled;
+const authGroupTitle = sandbox.document.elements.fetchModelsBtn.title;
+sandbox.document.elements.providerAuthGroup.value = "";
+sandbox.updateFetchModelsButtonState();
+const missingGroupDisabled = sandbox.document.elements.fetchModelsBtn.disabled;
+sandbox.document.elements.providerAuthGroup.value = " pool-a ";
+sandbox.document.elements.providerAuthMode.value = "legacy_api_key";
+sandbox.updateFetchModelsButtonState();
+const legacyDisabled = sandbox.document.elements.fetchModelsBtn.disabled;
+process.stdout.write(JSON.stringify({{
+  authGroupDisabled,
+  authGroupTitle,
+  missingGroupDisabled,
+  legacyDisabled,
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertFalse(payload["authGroupDisabled"])
+        self.assertEqual("", payload["authGroupTitle"])
+        self.assertTrue(payload["missingGroupDisabled"])
+        self.assertFalse(payload["legacyDisabled"])
+
+    def test_provider_order_helpers_keep_enabled_group_before_disabled_group(
+        self,
+    ) -> None:
+        template_path = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "presentation"
+            / "templates"
+            / "providers.html"
+        )
+        html = template_path.read_text(encoding="utf-8")
+
+        script_start = html.index("function isProviderEnabled")
+        script_end = html.index("function getProviderTabButton")
+        script = html[script_start:script_end]
+
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{
+  console,
+  providers: [
+    {{ name: "enabled-a", enabled: true }},
+    {{ name: "enabled-b", enabled: true }},
+    {{ name: "disabled-a", enabled: false }},
+  ],
+  providerBatchActionInFlight: false,
+  providerOrderActionInFlight: false,
+  togglingProviderNames: new Set(),
+  deletingProviderName: null,
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+process.stdout.write(JSON.stringify({{
+  moveStateFirst: sandbox.getProviderMoveState("enabled-a"),
+  moveStateDisabled: sandbox.getProviderMoveState("disabled-a"),
+  movedUp: sandbox.buildMovedProviderOrderNames("enabled-b", "up"),
+  mutationIdle: sandbox.hasProviderMutationInFlight(),
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual(
+            {"canMoveUp": False, "canMoveDown": True},
+            payload["moveStateFirst"],
+        )
+        self.assertEqual(
+            {"canMoveUp": False, "canMoveDown": False},
+            payload["moveStateDisabled"],
+        )
+        self.assertEqual(
+            ["enabled-b", "enabled-a", "disabled-a"],
+            payload["movedUp"],
+        )
+        self.assertFalse(payload["mutationIdle"])
 
 
 class FrontendMessageLocalizationTests(unittest.TestCase):
@@ -995,13 +1271,6 @@ class DashboardTemplateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
-
-
-
-
 
 
 

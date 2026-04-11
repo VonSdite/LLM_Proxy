@@ -138,6 +138,33 @@ class AuthGroupService:
     def reset_entry_runtime(self, auth_group_name: str, entry_id: str) -> None:
         self._auth_group_manager.reset_entry_runtime(auth_group_name, entry_id)
 
+    def get_first_entry_headers(self, name: str) -> Dict[str, str]:
+        auth_group = self.get_auth_group(name)
+        if auth_group is None:
+            raise ValueError(f"Auth group not found: {name}")
+
+        entries = auth_group.get("entries")
+        if not isinstance(entries, list) or not entries:
+            raise ValueError(f"Auth group '{auth_group['name']}' must define at least one entry")
+
+        first_entry = entries[0]
+        if not isinstance(first_entry, Mapping):
+            raise ValueError(f"Auth group '{auth_group['name']}' first entry is invalid")
+
+        headers = first_entry.get("headers")
+        if not isinstance(headers, Mapping) or not headers:
+            raise ValueError(f"Auth group '{auth_group['name']}' first entry must define headers")
+
+        normalized_headers: Dict[str, str] = {}
+        for raw_key, raw_value in headers.items():
+            header_name = str(raw_key or "").strip()
+            if not header_name:
+                continue
+            normalized_headers[header_name] = "" if raw_value is None else str(raw_value)
+        if not normalized_headers:
+            raise ValueError(f"Auth group '{auth_group['name']}' first entry must define headers")
+        return normalized_headers
+
     def import_auth_entries(self, yaml_text: str) -> List[Dict[str, Any]]:
         raw_text = str(yaml_text or "").strip()
         if not raw_text:

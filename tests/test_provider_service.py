@@ -29,7 +29,9 @@ class FakeLogger:
 
 class ProviderServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
+        runtime_root = Path(__file__).resolve().parents[1] / "data" / "_test_runtime"
+        runtime_root.mkdir(parents=True, exist_ok=True)
+        self.temp_dir = tempfile.TemporaryDirectory(dir=runtime_root)
         self.root_path = Path(self.temp_dir.name)
         self.config_path = self.root_path / "config.yaml"
         self._write_config({"auth_groups": [], "providers": []})
@@ -59,6 +61,10 @@ class ProviderServiceTests(unittest.TestCase):
         self._write_config({"auth_groups": [], "providers": providers})
         self.config_manager.reload()
         self.reload_count = 0
+
+    def _current_provider_names(self) -> list[str]:
+        current_config = self.config_manager.get_raw_config()
+        return [item["name"] for item in current_config["providers"]]
 
     def test_config_manager_migrates_legacy_target_format_on_load(self) -> None:
         self._write_config(
@@ -146,6 +152,112 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(current_config["providers"][0]["enabled"])
         self.assertNotIn("target_format", current_config["providers"][0])
 
+    def test_create_provider_inserts_enabled_provider_before_disabled_group(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+            ]
+        )
+
+        created = self.service.create_provider(
+            {
+                "name": "enabled-b",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "sk-c",
+                "model_list": ["gpt-4.1-nano"],
+            }
+        )
+
+        self.assertEqual("enabled-b", created["name"])
+        self.assertEqual(1, self.reload_count)
+        self.assertEqual(
+            ["enabled-a", "enabled-b", "disabled-a"],
+            self._current_provider_names(),
+        )
+
+    def test_set_provider_enabled_moves_disabled_provider_to_first_disabled_position(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "enabled-b",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-c",
+                    "model_list": ["gpt-4.1-nano"],
+                },
+            ]
+        )
+
+        self.service.set_provider_enabled("enabled-b", False)
+
+        self.assertEqual(
+            ["enabled-a", "enabled-b", "disabled-a"],
+            self._current_provider_names(),
+        )
+
+    def test_set_provider_enabled_moves_enabled_provider_to_last_enabled_position(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "enabled-b",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-c",
+                    "model_list": ["gpt-4.1-nano"],
+                },
+                {
+                    "name": "disabled-b",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-d",
+                    "model_list": ["gpt-4.1-micro"],
+                },
+            ]
+        )
+
+        self.service.set_provider_enabled("disabled-b", True)
+
+        self.assertEqual(
+            ["enabled-a", "enabled-b", "disabled-b", "disabled-a"],
+            self._current_provider_names(),
+        )
+
     def test_batch_set_provider_enabled_updates_multiple_providers(self) -> None:
         self._seed_providers(
             [
@@ -174,6 +286,220 @@ class ProviderServiceTests(unittest.TestCase):
         current_config = self.config_manager.get_raw_config()
         self.assertEqual([True, True], [item["enabled"] for item in current_config["providers"]])
         self.assertTrue(all("target_format" not in item for item in current_config["providers"]))
+
+    def test_batch_disable_providers_preserves_stable_relative_order(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "enabled-b",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+                {
+                    "name": "enabled-c",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-c",
+                    "model_list": ["gpt-4.1-nano"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-d",
+                    "model_list": ["gpt-4.1-micro"],
+                },
+            ]
+        )
+
+        self.service.batch_set_provider_enabled(["enabled-c", "enabled-a"], False)
+
+        self.assertEqual(
+            ["enabled-b", "enabled-a", "enabled-c", "disabled-a"],
+            self._current_provider_names(),
+        )
+
+    def test_batch_enable_providers_preserves_stable_relative_order(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+                {
+                    "name": "disabled-b",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-c",
+                    "model_list": ["gpt-4.1-nano"],
+                },
+                {
+                    "name": "disabled-c",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-d",
+                    "model_list": ["gpt-4.1-micro"],
+                },
+            ]
+        )
+
+        self.service.batch_set_provider_enabled(["disabled-c", "disabled-a"], True)
+
+        self.assertEqual(
+            ["enabled-a", "disabled-a", "disabled-c", "disabled-b"],
+            self._current_provider_names(),
+        )
+
+    def test_reorder_providers_updates_config_order(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "enabled-b",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-c",
+                    "model_list": ["gpt-4.1-nano"],
+                },
+            ]
+        )
+
+        result = self.service.reorder_providers(
+            ["enabled-b", "enabled-a", "disabled-a"]
+        )
+
+        self.assertEqual(3, result["count"])
+        self.assertEqual(
+            ["enabled-b", "enabled-a", "disabled-a"],
+            result["names"],
+        )
+        self.assertEqual(1, self.reload_count)
+        self.assertEqual(
+            ["enabled-b", "enabled-a", "disabled-a"],
+            self._current_provider_names(),
+        )
+
+    def test_reorder_providers_rejects_missing_name(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+            ]
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "Provider order must include every provider exactly once"
+        ):
+            self.service.reorder_providers(["enabled-a"])
+
+    def test_reorder_providers_rejects_duplicate_name(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+            ]
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "Duplicate provider name in order list: enabled-a"
+        ):
+            self.service.reorder_providers(["enabled-a", "enabled-a"])
+
+    def test_reorder_providers_rejects_unknown_name(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+            ]
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "Provider order must include every provider exactly once"
+        ):
+            self.service.reorder_providers(["enabled-a", "unknown-provider"])
+
+    def test_reorder_providers_rejects_disabled_provider_before_enabled_provider(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "disabled-a",
+                    "enabled": False,
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+            ]
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "Enabled providers must appear before disabled providers"
+        ):
+            self.service.reorder_providers(["disabled-a", "enabled-a"])
 
     def test_batch_delete_providers_removes_selected_entries(self) -> None:
         self._seed_providers(

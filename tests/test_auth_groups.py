@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.application.app_context import AppContext
 from src.config import build_auth_group_schemas, build_provider_schemas
 from src.config.auth_group_manager import AuthGroupManager, AuthGroupSelectionError
-from src.config.provider_config import AuthGroupSchema, ProviderConfigSchema
+from src.config.provider_config import AuthEntrySchema, AuthGroupSchema, ProviderConfigSchema
 from src.config.config_manager import ConfigManager
 from src.repositories import AuthGroupRepository
 from src.services.auth_group_service import AuthGroupService
@@ -71,6 +71,16 @@ class AuthGroupConfigTests(unittest.TestCase):
                 ],
                 available_auth_group_names=set(),
             )
+
+    def test_auth_entry_allows_empty_header_value(self) -> None:
+        entry = AuthEntrySchema.from_mapping(
+            {
+                "id": "key-a",
+                "headers": {"Authorization": ""},
+            }
+        )
+
+        self.assertEqual({"Authorization": ""}, entry.to_mapping()["headers"])
 
 
 class AuthGroupManagerTests(unittest.TestCase):
@@ -331,6 +341,37 @@ class AuthGroupServiceTests(unittest.TestCase):
         listed = self.service.list_auth_groups()
         self.assertEqual(["pool-a"], [item["name"] for item in listed])
 
+    def test_get_first_entry_headers_returns_first_entry_mapping(self) -> None:
+        self.service.create_auth_group(
+            {
+                "name": "pool-a",
+                "strategy": "least_inflight",
+                "entries": [
+                    {
+                        "id": "key-a",
+                        "headers": {
+                            "Authorization": "Bearer sk-a",
+                            "x-org": "team-a",
+                        },
+                    },
+                    {
+                        "id": "key-b",
+                        "headers": {"Authorization": "Bearer sk-b"},
+                    },
+                ],
+            }
+        )
+
+        headers = self.service.get_first_entry_headers("pool-a")
+
+        self.assertEqual(
+            {
+                "Authorization": "Bearer sk-a",
+                "x-org": "team-a",
+            },
+            headers,
+        )
+
     def test_import_auth_entries_accepts_yaml_list(self) -> None:
         entries = self.service.import_auth_entries(
             """
@@ -361,6 +402,18 @@ entries:
 
         self.assertEqual(1, len(entries))
         self.assertEqual("key-a", entries[0]["id"])
+
+    def test_import_auth_entries_accepts_empty_header_value(self) -> None:
+        entries = self.service.import_auth_entries(
+            """
+- id: key-a
+  headers:
+    Authorization:
+"""
+        )
+
+        self.assertEqual(1, len(entries))
+        self.assertEqual("", entries[0]["headers"]["Authorization"])
 
     def test_import_auth_entries_rejects_invalid_yaml_shape(self) -> None:
         with self.assertRaisesRegex(ValueError, "entries 必须是列表"):

@@ -153,11 +153,9 @@ def normalize_headers(value: Any) -> Dict[str, str]:
     seen_names: set[str] = set()
     for raw_key, raw_value in value.items():
         header_name = clean_optional_string(raw_key)
-        header_value = clean_optional_string(raw_value)
+        header_value = "" if raw_value is None else str(raw_value).strip()
         if header_name is None:
             raise ValueError("header name must not be empty")
-        if header_value is None:
-            raise ValueError(f"header value for {header_name} must not be empty")
         normalized_name = header_name.lower()
         if normalized_name in seen_names:
             raise ValueError(f"duplicate header detected: {header_name}")

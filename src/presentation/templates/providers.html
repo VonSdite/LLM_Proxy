@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260403-11">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260411-9">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
@@ -46,11 +46,6 @@
                     <div class="section-header-actions">
                         <button type="button" class="btn btn-primary" onclick="openCreateModal()">新增 Provider</button>
                     </div>
-                </div>
-                <div class="toolbar-summary provider-batch-summary">
-                    <span class="toolbar-pill">已选 <strong id="selectedProviderCount">0</strong> 个</span>
-                    <button type="button" class="btn btn-toolbar-secondary" id="enableSelectedProvidersBtn" onclick="runProviderBatchAction('enable')" disabled>启用</button>
-                    <button type="button" class="btn btn-toolbar-secondary" id="disableSelectedProvidersBtn" onclick="runProviderBatchAction('disable')" disabled>禁用</button>
                 </div>
                 <div class="providers-table-shell" id="providersContainer">
                     <div class="loading">正在加载 provider 配置...</div>
@@ -173,11 +168,75 @@
                         </div>
                         <div class="mb-3" id="providerLegacyApiKeyField">
                             <label class="form-label">Legacy API Key</label>
-                            <input type="text" class="form-control" id="providerApiKey" placeholder="留空则不写入配置">
+                            <div class="sensitive-input-shell">
+                                <input
+                                    type="password"
+                                    class="form-control sensitive-input-control"
+                                    id="providerApiKey"
+                                    placeholder="留空则不写入配置"
+                                    autocomplete="new-password"
+                                    spellcheck="false"
+                                >
+                                <button
+                                    type="button"
+                                    class="sensitive-input-toggle"
+                                    data-sensitive-toggle-for="providerApiKey"
+                                    data-sensitive-label="Legacy API Key"
+                                    onclick="toggleSensitiveInputVisibility('providerApiKey')"
+                                    aria-controls="providerApiKey"
+                                    aria-pressed="false"
+                                    aria-label="显示 Legacy API Key"
+                                    title="显示 Legacy API Key"
+                                >
+                                    <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                        <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                                    </svg>
+                                    <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                        <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                        <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    <span class="visually-hidden">显示 Legacy API Key</span>
+                                </button>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">代理</label>
-                            <input type="text" class="form-control" id="providerProxy" placeholder="例如 http://127.0.0.1:7890">
+                            <div class="sensitive-input-shell">
+                                <input
+                                    type="password"
+                                    class="form-control sensitive-input-control"
+                                    id="providerProxy"
+                                    placeholder="例如 http://127.0.0.1:7890"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                >
+                                <button
+                                    type="button"
+                                    class="sensitive-input-toggle"
+                                    data-sensitive-toggle-for="providerProxy"
+                                    data-sensitive-label="代理"
+                                    onclick="toggleSensitiveInputVisibility('providerProxy')"
+                                    aria-controls="providerProxy"
+                                    aria-pressed="false"
+                                    aria-label="显示代理"
+                                    title="显示代理"
+                                >
+                                    <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                        <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                                    </svg>
+                                    <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                        <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                        <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                    <span class="visually-hidden">显示代理</span>
+                                </button>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Hook</label>
@@ -389,9 +448,9 @@
                             >entries:
   - id: key-1  # 必填：Entry 唯一 ID，组内不能重复
     enabled: true  # 可选：默认 true；设为 false 时该 Entry 不参与调度
-    headers:  # 必填：至少提供 1 个请求头
-      Authorization: "Bearer sk-xxx"  # 示例：Bearer Token
-      # x-api-key: "your-api-key"  # 可选：如果上游用 x-api-key，可改成这个
+    headers:  # 必填：至少提供 1 个请求头，value 可以先留空
+      Authorization: "Bearer "  # 示例：可先保留 Bearer 前缀，稍后再补 token
+      # x-api-key: ""  # 可选：如果上游用 x-api-key，可改成这个
     max_concurrency: 3  # 可选：最大并发；留空表示不限制
     cooldown_seconds_on_429: 120  # 可选：429 冷却秒数；留空则继承 Group 默认值
     request_quota_per_minute: 60  # 可选：每分钟请求数上限；留空表示不限制
@@ -464,6 +523,13 @@
             <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteAuthEntryBtn" onclick="confirmDeleteAuthEntry(event)">确认</button>
         </div>
     </div>
+    <div class="inline-confirm-popover floating-delete-popover" id="authGroupDeletePopover" data-placement="bottom" hidden>
+        <div class="inline-confirm-text">确认删除？</div>
+        <div class="inline-confirm-actions">
+            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelDeleteAuthGroupConfirm(event)">取消</button>
+            <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteAuthGroupBtn" onclick="confirmDeleteAuthGroup(event)">确认</button>
+        </div>
+    </div>
     <div class="provider-help-popover" id="providerHelpPopover" data-placement="bottom" hidden>
         <div class="provider-help-popover-header">
             <div class="provider-help-popover-title" id="providerHelpTitle"></div>
@@ -499,6 +565,7 @@
         let selectedProviderNames = new Set();
         let togglingProviderNames = new Set();
         let providerBatchActionInFlight = false;
+        let providerOrderActionInFlight = false;
         let fetchedModelCandidates = [];
         let fetchedModelSelection = new Set();
         let fetchedModelExistingSelection = new Set();
@@ -506,6 +573,8 @@
         let activeProviderHelpTopic = null;
         let activeProviderHelpTrigger = null;
         let activeProviderTab = 'providers';
+        let pendingDeleteAuthGroupName = null;
+        let deletingAuthGroupName = null;
         let pendingDeleteAuthEntryKey = null;
         let authEntryCardSequence = 0;
         let providerTransportAutoSyncEnabled = true;
@@ -603,11 +672,14 @@
             fetch_models: {
                 title: '拉取模型怎么工作',
                 html: `
-                    <p>“拉取模型”会请求当前上游提供的 <code>/v1/models</code> 或 <code>/models</code> 接口，用它返回的模型列表帮助你填充当前 provider 的 <code>model_list</code>。</p>
+                    <p>“拉取模型”会先从当前 Provider API 推导出基础地址，然后只尝试两个候选接口：</p>
                     <ul>
-                        <li><strong>HTTP/HTTPS</strong>：直接请求当前配置地址对应的模型接口。</li>
-                        <li><strong>WebSocket</strong>：会自动把 <code>ws://</code> / <code>wss://</code> 推导成对应的 <code>http://</code> / <code>https://</code> 后再尝试拉取。</li>
+                        <li><code>/v1/models</code></li>
+                        <li><code>/models</code></li>
                     </ul>
+                    <p><strong>WebSocket</strong> 地址会先把 <code>ws://</code> / <code>wss://</code> 转成对应的 <code>http://</code> / <code>https://</code> 再请求。</p>
+                    <p><strong>Legacy API Key 模式</strong> 会自动带上当前表单里的 Bearer Token。</p>
+                    <p><strong>Auth Group 模式</strong> 会使用所选 Auth Group 的第一个 entry，并把该 entry 里的 headers 原样带去请求上游模型接口。</p>
                     <p>这一步只是帮你发现可选模型，不会修改上游协议，也不会自动替你决定 <code>source_format</code> 或 <code>target_formats</code>。</p>
                 `,
             },
@@ -639,6 +711,95 @@
 
         function decodeProviderName(encodedName) {
             return decodeURIComponent(encodedName);
+        }
+
+        function isProviderEnabled(provider) {
+            return provider?.enabled !== false;
+        }
+
+        function getGroupedProviderOrderNames(providerList = providers) {
+            const enabledNames = [];
+            const disabledNames = [];
+
+            providerList.forEach(provider => {
+                const normalizedName = String(provider?.name || '').trim();
+                if (!normalizedName) {
+                    return;
+                }
+                if (isProviderEnabled(provider)) {
+                    enabledNames.push(normalizedName);
+                } else {
+                    disabledNames.push(normalizedName);
+                }
+            });
+
+            return {
+                enabled: enabledNames,
+                disabled: disabledNames,
+                all: enabledNames.concat(disabledNames),
+            };
+        }
+
+        function getProviderMoveState(name) {
+            const normalizedName = String(name || '').trim();
+            if (!normalizedName) {
+                return { canMoveUp: false, canMoveDown: false };
+            }
+
+            const provider = providers.find(item => String(item?.name || '').trim() === normalizedName);
+            if (!provider) {
+                return { canMoveUp: false, canMoveDown: false };
+            }
+
+            const groupedNames = getGroupedProviderOrderNames();
+            const groupNames = isProviderEnabled(provider) ? groupedNames.enabled : groupedNames.disabled;
+            const groupIndex = groupNames.indexOf(normalizedName);
+            if (groupIndex < 0) {
+                return { canMoveUp: false, canMoveDown: false };
+            }
+
+            return {
+                canMoveUp: groupIndex > 0,
+                canMoveDown: groupIndex < groupNames.length - 1,
+            };
+        }
+
+        function buildMovedProviderOrderNames(name, direction) {
+            const normalizedName = String(name || '').trim();
+            const normalizedDirection = direction === 'up' ? 'up' : direction === 'down' ? 'down' : '';
+            if (!normalizedName || !normalizedDirection) {
+                return null;
+            }
+
+            const provider = providers.find(item => String(item?.name || '').trim() === normalizedName);
+            if (!provider) {
+                return null;
+            }
+
+            const groupedNames = getGroupedProviderOrderNames();
+            const groupNames = (isProviderEnabled(provider) ? groupedNames.enabled : groupedNames.disabled).slice();
+            const groupIndex = groupNames.indexOf(normalizedName);
+            if (groupIndex < 0) {
+                return null;
+            }
+
+            const targetIndex = normalizedDirection === 'up' ? groupIndex - 1 : groupIndex + 1;
+            if (targetIndex < 0 || targetIndex >= groupNames.length) {
+                return null;
+            }
+
+            const [movedName] = groupNames.splice(groupIndex, 1);
+            groupNames.splice(targetIndex, 0, movedName);
+            return isProviderEnabled(provider)
+                ? groupNames.concat(groupedNames.disabled)
+                : groupedNames.enabled.concat(groupNames);
+        }
+
+        function hasProviderMutationInFlight() {
+            return providerBatchActionInFlight
+                || providerOrderActionInFlight
+                || togglingProviderNames.size > 0
+                || deletingProviderName !== null;
         }
 
         function getProviderTabButton(tabName) {
@@ -751,6 +912,9 @@
             if (!event.target.closest('.inline-confirm-wrap') && !event.target.closest('#providerDeletePopover')) {
                 closeDeleteProviderConfirm();
             }
+            if (!event.target.closest('[data-auth-group-delete-trigger]') && !event.target.closest('#authGroupDeletePopover')) {
+                closeDeleteAuthGroupConfirm();
+            }
             if (!event.target.closest('[data-auth-entry-delete-trigger]') && !event.target.closest('#authEntryDeletePopover')) {
                 closeDeleteAuthEntryConfirm();
             }
@@ -763,6 +927,7 @@
             if (event.key === 'Escape') {
                 closeAllCustomSelects();
                 closeDeleteProviderConfirm();
+                closeDeleteAuthGroupConfirm();
                 closeDeleteAuthEntryConfirm();
                 hideProviderHelpPopover();
             }
@@ -771,6 +936,7 @@
         window.addEventListener('resize', function() {
             closeAllCustomSelects();
             closeDeleteProviderConfirm(false);
+            closeDeleteAuthGroupConfirm(false);
             closeDeleteAuthEntryConfirm(false);
             syncProviderHelpPopover();
         });
@@ -781,6 +947,7 @@
             }
             closeAllCustomSelects();
             closeDeleteProviderConfirm(false);
+            closeDeleteAuthGroupConfirm(false);
             closeDeleteAuthEntryConfirm(false);
             syncProviderHelpPopover();
         }, true);
@@ -853,6 +1020,138 @@
             popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
         }
 
+        function getAuthGroupDeletePopoverElement() {
+            return document.getElementById('authGroupDeletePopover');
+        }
+
+        function getAuthGroupDeleteTrigger(name) {
+            const triggerKey = encodeURIComponent(name);
+            return Array.from(document.querySelectorAll('[data-auth-group-delete-trigger]'))
+                .find(element => element.dataset.authGroupDeleteTrigger === triggerKey) || null;
+        }
+
+        function clearActiveAuthGroupDeleteTriggers() {
+            document.querySelectorAll('[data-auth-group-delete-trigger].is-active').forEach(element => {
+                element.classList.remove('is-active');
+            });
+        }
+
+        function hideAuthGroupDeletePopover() {
+            const popover = getAuthGroupDeletePopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty('top');
+            popover.style.removeProperty('left');
+            popover.style.removeProperty('--popover-arrow-left');
+            popover.dataset.placement = 'bottom';
+        }
+
+        function syncDeleteAuthGroupPopover() {
+            const popover = getAuthGroupDeletePopoverElement();
+            if (!popover) return;
+
+            clearActiveAuthGroupDeleteTriggers();
+            if (pendingDeleteAuthGroupName === null) {
+                hideAuthGroupDeletePopover();
+                return;
+            }
+
+            const trigger = getAuthGroupDeleteTrigger(pendingDeleteAuthGroupName);
+            if (!trigger || !document.body.contains(trigger)) {
+                pendingDeleteAuthGroupName = null;
+                deletingAuthGroupName = null;
+                hideAuthGroupDeletePopover();
+                return;
+            }
+
+            trigger.classList.add('is-active');
+            popover.hidden = false;
+            const confirmButton = document.getElementById('confirmDeleteAuthGroupBtn');
+            if (confirmButton) {
+                confirmButton.disabled = deletingAuthGroupName === pendingDeleteAuthGroupName;
+                confirmButton.textContent = deletingAuthGroupName === pendingDeleteAuthGroupName ? '删除中...' : '确认';
+            }
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 10;
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const left = Math.min(
+                window.innerWidth - popoverRect.width - viewportPadding,
+                Math.max(viewportPadding, triggerRect.left + ((triggerRect.width - popoverRect.width) / 2))
+            );
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? 'bottom' : 'top';
+            popover.style.top = `${top}px`;
+            popover.style.left = `${left}px`;
+            popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
+        }
+
+        function toggleDeleteAuthGroupConfirm(name, event) {
+            event?.preventDefault();
+            event?.stopPropagation();
+            if (deletingAuthGroupName !== null) {
+                return;
+            }
+
+            pendingDeleteAuthGroupName = pendingDeleteAuthGroupName === name ? null : name;
+            closeDeleteProviderConfirm(false);
+            closeDeleteAuthEntryConfirm(false);
+            syncDeleteAuthGroupPopover();
+        }
+
+        function cancelDeleteAuthGroupConfirm(event) {
+            event?.stopPropagation();
+            closeDeleteAuthGroupConfirm();
+        }
+
+        function closeDeleteAuthGroupConfirm(shouldSync = true) {
+            if (pendingDeleteAuthGroupName === null && deletingAuthGroupName === null) return;
+            if (deletingAuthGroupName !== null) {
+                return;
+            }
+            pendingDeleteAuthGroupName = null;
+            hideAuthGroupDeletePopover();
+            clearActiveAuthGroupDeleteTriggers();
+        }
+
+        async function confirmDeleteAuthGroup(event) {
+            event?.stopPropagation();
+            const name = pendingDeleteAuthGroupName;
+            if (pendingDeleteAuthGroupName !== name || deletingAuthGroupName === name) return;
+
+            deletingAuthGroupName = name;
+            syncDeleteAuthGroupPopover();
+
+            try {
+                const response = await fetch(`/api/auth-groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '删除 Auth Group 失败');
+                }
+                pendingDeleteAuthGroupName = null;
+                deletingAuthGroupName = null;
+                hideAuthGroupDeletePopover();
+                clearActiveAuthGroupDeleteTriggers();
+                showMessage('Auth Group 删除成功，配置已重载', 'success');
+                await loadPageData();
+            } catch (error) {
+                console.error('删除 auth group 失败:', error);
+                deletingAuthGroupName = null;
+                syncDeleteAuthGroupPopover();
+                showActionError('删除 Auth Group', error, { fallback: '删除 Auth Group 失败' });
+            }
+        }
+
         function getNormalizedSelectedProviderNames() {
             const availableNames = new Set(
                 providers
@@ -868,34 +1167,30 @@
         }
 
         function updateProviderSelectionUi() {
-            const selectedNames = getNormalizedSelectedProviderNames();
-            const selectedCount = selectedNames.length;
-            const totalCount = providers.length;
-            const selectedCountElement = document.getElementById('selectedProviderCount');
-            if (selectedCountElement) {
-                selectedCountElement.textContent = String(selectedCount);
-            }
+            const providerInteractionLocked = hasProviderMutationInFlight();
 
-            const selectAllCheckbox = document.getElementById('providerSelectAllCheckbox');
-            if (selectAllCheckbox) {
-                selectAllCheckbox.checked = totalCount > 0 && selectedCount === totalCount;
-                selectAllCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalCount;
-                selectAllCheckbox.disabled = providerBatchActionInFlight || totalCount === 0;
-            }
+            document.querySelectorAll('[data-provider-group-select-checkbox]').forEach(element => {
+                if (!(element instanceof HTMLInputElement)) return;
+                const groupKey = String(element.dataset.providerGroupSelectCheckbox || '').trim();
+                const groupNames = getProviderGroupNames(groupKey);
+                const selectedGroupCount = groupNames.filter(name => selectedProviderNames.has(name)).length;
+                element.checked = groupNames.length > 0 && selectedGroupCount === groupNames.length;
+                element.indeterminate = selectedGroupCount > 0 && selectedGroupCount < groupNames.length;
+                element.disabled = providerInteractionLocked || groupNames.length === 0;
+            });
 
             document.querySelectorAll('[data-provider-row-checkbox]').forEach(element => {
                 if (!(element instanceof HTMLInputElement)) return;
-                element.disabled = providerBatchActionInFlight;
+                element.disabled = providerInteractionLocked;
             });
 
-            const shouldDisableBatchButtons = providerBatchActionInFlight || selectedCount === 0;
             [
-                'enableSelectedProvidersBtn',
-                'disableSelectedProvidersBtn',
-            ].forEach(id => {
-                const button = document.getElementById(id);
+                { id: 'disableEnabledProvidersBtn', groupKey: 'enabled' },
+                { id: 'enableDisabledProvidersBtn', groupKey: 'disabled' },
+            ].forEach(item => {
+                const button = document.getElementById(item.id);
                 if (!button) return;
-                button.disabled = shouldDisableBatchButtons;
+                button.disabled = providerInteractionLocked || getSelectedProviderNamesForGroup(item.groupKey).length === 0;
             });
         }
 
@@ -923,9 +1218,72 @@
             renderProviders();
         }
 
+        function getProviderGroupNames(groupKey) {
+            const normalizedGroupKey = String(groupKey || '').trim().toLowerCase();
+            return providers
+                .filter(provider => normalizedGroupKey === 'disabled' ? !isProviderEnabled(provider) : isProviderEnabled(provider))
+                .map(provider => String(provider?.name || '').trim())
+                .filter(name => name !== '');
+        }
+
+        function getSelectedProviderNamesForGroup(groupKey) {
+            const groupNameSet = new Set(getProviderGroupNames(groupKey));
+            return getNormalizedSelectedProviderNames().filter(name => groupNameSet.has(name));
+        }
+
+        function toggleProviderGroupSelection(groupKey, checked) {
+            const groupNames = getProviderGroupNames(groupKey);
+            if (checked) {
+                groupNames.forEach(name => selectedProviderNames.add(name));
+            } else {
+                groupNames.forEach(name => selectedProviderNames.delete(name));
+            }
+            renderProviders();
+        }
+
         function clearSelectedProviders() {
             selectedProviderNames = new Set();
             renderProviders();
+        }
+
+        async function saveProviderOrder(names) {
+            providerOrderActionInFlight = true;
+            closeDeleteProviderConfirm(false);
+            renderProviders();
+
+            try {
+                const response = await fetch('/api/providers/order', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ names: names }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Reorder Provider failed');
+                }
+
+                await loadProviders();
+            } catch (error) {
+                console.error('Reorder provider failed:', error);
+                showActionError('Reorder Provider', error, { fallback: 'Reorder Provider failed' });
+            } finally {
+                providerOrderActionInFlight = false;
+                renderProviders();
+            }
+        }
+
+        async function moveProvider(name, direction) {
+            const normalizedName = String(name || '').trim();
+            if (!normalizedName || hasProviderMutationInFlight()) {
+                return;
+            }
+
+            const nextOrderNames = buildMovedProviderOrderNames(normalizedName, direction);
+            if (!nextOrderNames) {
+                return;
+            }
+
+            await saveProviderOrder(nextOrderNames);
         }
 
         function getProviderBatchActionMeta(action) {
@@ -1046,6 +1404,7 @@
 
             pendingDeleteAuthEntryKey = pendingDeleteAuthEntryKey === entryKey ? null : entryKey;
             closeDeleteProviderConfirm(false);
+            closeDeleteAuthGroupConfirm(false);
             syncDeleteAuthEntryPopover();
         }
 
@@ -1410,6 +1769,100 @@
             updateFetchModelsButtonState();
         }
 
+        const providerSensitiveInputIds = ['providerApiKey', 'providerProxy'];
+        const providerSensitiveAutoVisibleIds = new Set();
+        const providerSensitiveRevealTimers = new Map();
+        const providerSensitiveRevealDelayMs = 500;
+
+        function clearSensitiveInputAutoReveal(inputId) {
+            const timerId = providerSensitiveRevealTimers.get(inputId);
+            if (timerId) {
+                window.clearTimeout(timerId);
+                providerSensitiveRevealTimers.delete(inputId);
+            }
+            providerSensitiveAutoVisibleIds.delete(inputId);
+        }
+
+        function syncSensitiveInputToggle(inputId) {
+            const input = document.getElementById(inputId);
+            const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+            if (!input || !toggleButton) {
+                return;
+            }
+            const hasValue = input.value.trim() !== '';
+            if (!hasValue) {
+                clearSensitiveInputAutoReveal(inputId);
+                toggleButton.dataset.sensitiveManualVisible = 'false';
+            }
+            const isManualVisible = hasValue && toggleButton.dataset.sensitiveManualVisible === 'true';
+            const isVisible = hasValue && (isManualVisible || providerSensitiveAutoVisibleIds.has(inputId));
+            input.type = isVisible ? 'text' : 'password';
+            toggleButton.hidden = !hasValue;
+            toggleButton.classList.toggle('is-visible', isManualVisible);
+            const label = toggleButton.dataset.sensitiveLabel || '内容';
+            const actionText = isManualVisible ? '隐藏' : '显示';
+            toggleButton.setAttribute('aria-pressed', isManualVisible ? 'true' : 'false');
+            toggleButton.setAttribute('aria-label', `${actionText}${label}`);
+            toggleButton.title = `${actionText}${label}`;
+            const hiddenText = toggleButton.querySelector('.visually-hidden');
+            if (hiddenText) {
+                hiddenText.textContent = `${actionText}${label}`;
+            }
+        }
+
+        function setSensitiveInputVisibility(inputId, visible) {
+            const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+            if (!toggleButton) {
+                return;
+            }
+            clearSensitiveInputAutoReveal(inputId);
+            toggleButton.dataset.sensitiveManualVisible = visible ? 'true' : 'false';
+            syncSensitiveInputToggle(inputId);
+        }
+
+        function temporarilyRevealSensitiveInput(inputId) {
+            const input = document.getElementById(inputId);
+            const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+            if (!input || !toggleButton) {
+                return;
+            }
+            if (toggleButton.dataset.sensitiveManualVisible === 'true' || input.value.trim() === '') {
+                syncSensitiveInputToggle(inputId);
+                return;
+            }
+            clearSensitiveInputAutoReveal(inputId);
+            providerSensitiveAutoVisibleIds.add(inputId);
+            syncSensitiveInputToggle(inputId);
+            const timerId = window.setTimeout(() => {
+                providerSensitiveRevealTimers.delete(inputId);
+                providerSensitiveAutoVisibleIds.delete(inputId);
+                syncSensitiveInputToggle(inputId);
+            }, providerSensitiveRevealDelayMs);
+            providerSensitiveRevealTimers.set(inputId, timerId);
+        }
+
+        function toggleSensitiveInputVisibility(inputId) {
+            const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+            const input = document.getElementById(inputId);
+            if (!toggleButton || !input) {
+                return;
+            }
+            const isManualVisible = toggleButton.dataset.sensitiveManualVisible === 'true';
+            setSensitiveInputVisibility(inputId, !isManualVisible);
+            input.focus({ preventScroll: true });
+        }
+
+        function resetProviderSensitiveInputs() {
+            providerSensitiveInputIds.forEach(inputId => {
+                const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+                if (toggleButton) {
+                    toggleButton.dataset.sensitiveManualVisible = 'false';
+                }
+                clearSensitiveInputAutoReveal(inputId);
+                syncSensitiveInputToggle(inputId);
+            });
+        }
+
         function getSelectedOptionValues(select) {
             if (!select) {
                 return [];
@@ -1738,6 +2191,7 @@
             document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? buildModelListValue(provider.model_list) : '';
             document.getElementById('providerHook').value = provider?.hook || '';
             resetProviderTransportAutoSync(provider);
+            resetProviderSensitiveInputs();
             updateProviderAuthModeFields();
             updateModelListCount();
             updateFetchModelsButtonState();
@@ -1792,12 +2246,31 @@
         }
 
         function canFetchModels() {
-            return !!document.getElementById('providerApi').value.trim();
+            const api = document.getElementById('providerApi')?.value?.trim() || '';
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authGroup = document.getElementById('providerAuthGroup')?.value?.trim() || '';
+            if (!api) {
+                return false;
+            }
+            if (authMode === 'auth_group') {
+                return !!authGroup;
+            }
+            return true;
         }
 
         function updateFetchModelsButtonState() {
             const button = document.getElementById('fetchModelsBtn');
             if (!button || button.dataset.loading === 'true') return;
+            const api = document.getElementById('providerApi')?.value?.trim() || '';
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authGroup = document.getElementById('providerAuthGroup')?.value?.trim() || '';
+            if (!api) {
+                button.title = '请先填写 API 地址';
+            } else if (authMode === 'auth_group' && !authGroup) {
+                button.title = '请先选择 Auth Group';
+            } else {
+                button.title = '';
+            }
             button.disabled = !canFetchModels();
         }
 
@@ -1821,6 +2294,7 @@
 
         function openCreateAuthGroupModal() {
             switchProviderTab('auth_groups');
+            closeDeleteAuthGroupConfirm(false);
             editingAuthGroupName = null;
             document.getElementById('authGroupModalLabel').textContent = '新增 Auth Group';
             fillAuthGroupForm(null);
@@ -1831,6 +2305,7 @@
             const authGroup = authGroups.find(item => item.name === name);
             if (!authGroup) return;
             switchProviderTab('auth_groups');
+            closeDeleteAuthGroupConfirm(false);
             editingAuthGroupName = name;
             document.getElementById('authGroupModalLabel').textContent = '编辑 Auth Group';
             fillAuthGroupForm(authGroup);
@@ -1850,6 +2325,7 @@
                 }
                 authGroups = Array.isArray(data) ? data : [];
                 renderProviderAuthGroupOptions(document.getElementById('providerAuthGroup')?.value || '');
+                updateFetchModelsButtonState();
                 renderAuthGroups();
             } catch (error) {
                 console.error('加载 auth group 失败:', error);
@@ -1932,6 +2408,8 @@
                 const entries = Array.isArray(group.entries) ? group.entries : [];
                 const summary = group.summary || {};
                 const entryCount = Number(summary.entry_count || entries.length || 0);
+                const encodedGroupName = encodeURIComponent(group.name);
+                const isDeletePending = pendingDeleteAuthGroupName === group.name;
                 html += `
                     <tr>
                         <td class="provider-name-cell">
@@ -1954,9 +2432,17 @@
                         </td>
                         <td>
                             <div class="action-buttons">
-                                <button class="btn-action btn-edit" onclick="openEditAuthGroupModal(decodeProviderName('${encodeURIComponent(group.name)}'))">编辑</button>
-                                <button class="btn-action btn-edit" onclick="openAuthGroupRuntimeModal(decodeProviderName('${encodeURIComponent(group.name)}'))">运行态</button>
-                                <button class="btn-action btn-delete" onclick="deleteAuthGroup(decodeProviderName('${encodeURIComponent(group.name)}'))">删除</button>
+                                <button class="btn-action btn-edit" onclick="openEditAuthGroupModal(decodeProviderName('${encodedGroupName}'))">编辑</button>
+                                <button class="btn-action btn-edit" onclick="openAuthGroupRuntimeModal(decodeProviderName('${encodedGroupName}'))">运行态</button>
+                                <div class="inline-confirm-wrap">
+                                    <button
+                                        type="button"
+                                        class="btn-action btn-delete ${isDeletePending ? 'is-active' : ''}"
+                                        data-auth-group-delete-trigger="${encodedGroupName}"
+                                        onclick="toggleDeleteAuthGroupConfirm(decodeProviderName('${encodedGroupName}'), event)"
+                                        ${deletingAuthGroupName === group.name ? 'disabled' : ''}
+                                    >删除</button>
+                                </div>
                             </div>
                         </td>
                     </tr>
@@ -1967,47 +2453,73 @@
             container.innerHTML = html;
         }
 
-        function renderProviders() {
-            const container = document.getElementById('providersContainer');
-            const providerCountElement = document.getElementById('providerCount');
-            if (providerCountElement) {
-                providerCountElement.textContent = providers.length;
-            }
-            if (!providers.length) {
-                container.innerHTML = '<div class="empty-state">当前没有 provider 配置</div>';
-                updateProviderSelectionUi();
-                return;
-            }
-
+        function buildProviderTable(groupKey, title, providerList, emptyText) {
+            const normalizedGroupKey = String(groupKey || '').trim().toLowerCase();
+            const batchActionMeta = normalizedGroupKey === 'disabled'
+                ? {
+                    action: 'enable',
+                    buttonId: 'enableDisabledProvidersBtn',
+                    buttonLabel: '启用',
+                }
+                : {
+                    action: 'disable',
+                    buttonId: 'disableEnabledProvidersBtn',
+                    buttonLabel: '禁用',
+                };
             let html = `
-                <table class="providers-table">
-                    <thead>
-                        <tr>
-                            <th class="provider-select-column">
-                                <input
-                                    type="checkbox"
-                                    class="provider-table-checkbox"
-                                    id="providerSelectAllCheckbox"
-                                    onchange="toggleAllProvidersSelection(this.checked)"
-                                >
-                            </th>
-                            <th>名称</th>
-                            <th>API 地址</th>
-                            <th>模型</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+                <section class="provider-group-card">
+                    <div class="provider-group-header">
+                        <div class="provider-group-heading">
+                            <h4 class="provider-group-title">${escapeHtml(title)}</h4>
+                            <button
+                                type="button"
+                                class="btn btn-toolbar-secondary provider-group-batch-btn"
+                                id="${batchActionMeta.buttonId}"
+                                onclick="runProviderBatchAction('${batchActionMeta.action}', '${normalizedGroupKey}')"
+                                disabled
+                            >${batchActionMeta.buttonLabel}</button>
+                        </div>
+                        <span class="toolbar-pill">${providerList.length} 个</span>
+                    </div>
             `;
 
-            providers.forEach(provider => {
-                const isEnabled = provider?.enabled !== false;
+            if (!providerList.length) {
+                html += `<div class="empty-state">${escapeHtml(emptyText)}</div></section>`;
+                return html;
+            }
+
+            html += `
+                    <table class="providers-table">
+                        <thead>
+                            <tr>
+                                <th class="provider-select-column">
+                                    <input
+                                        type="checkbox"
+                                        class="provider-table-checkbox"
+                                        data-provider-group-select-checkbox="${normalizedGroupKey}"
+                                        onchange="toggleProviderGroupSelection('${normalizedGroupKey}', this.checked)"
+                                    >
+                                </th>
+                                <th>名称</th>
+                                <th>API 地址</th>
+                                <th>模型</th>
+                                <th class="provider-order-column">顺序</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            providerList.forEach(provider => {
+                const isEnabled = isProviderEnabled(provider);
                 const encodedProviderName = encodeURIComponent(provider.name);
                 const isSelected = selectedProviderNames.has(provider.name);
                 const models = Array.isArray(provider.model_list) ? provider.model_list : [];
                 const preview = getModelPreview(models);
                 const isDeletePending = pendingDeleteProviderName === provider.name;
                 const isTogglePending = togglingProviderNames.has(provider.name);
+                const providerMoveState = getProviderMoveState(provider.name);
+                const providerActionLocked = hasProviderMutationInFlight();
                 const modelTags = preview.visible.length
                     ? preview.visible.map(model => `<span class="model-tag">${escapeHtml(model)}</span>`).join('')
                     : '<span class="muted-text">未配置</span>';
@@ -2034,7 +2546,7 @@
                                 data-provider-row-checkbox="${encodedProviderName}"
                                 onchange="toggleProviderSelection(decodeProviderName('${encodedProviderName}'), this.checked)"
                                 ${isSelected ? 'checked' : ''}
-                                ${providerBatchActionInFlight ? 'disabled' : ''}
+                                ${providerActionLocked ? 'disabled' : ''}
                             >
                         </td>
                         <td class="provider-name-cell">
@@ -2043,7 +2555,6 @@
                         <td class="provider-api-cell" title="${escapeHtml(provider.api)}">
                             <span class="provider-api-text">${escapeHtml(provider.api)}</span>
                             <div class="provider-meta-line">
-                                <span class="provider-chip ${isEnabled ? 'provider-chip-hook' : 'provider-chip-muted'}">${isEnabled ? 'enabled' : 'disabled'}</span>
                                 <span class="provider-chip">${escapeHtml(provider.transport || 'http')}</span>
                                 <span class="provider-chip">${escapeHtml(provider.source_format || 'openai_chat')}</span>
                                 ${targetFormatChips}
@@ -2056,13 +2567,43 @@
                             <div class="model-tags model-tags-preview">${modelTags}</div>
                             ${modelSummary}
                         </td>
+                        <td class="provider-order-cell">
+                            <div class="provider-order-actions">
+                                <div class="provider-order-stepper" role="group" aria-label="调整 Provider 顺序">
+                                    <button
+                                        type="button"
+                                        class="provider-order-step provider-order-step-up"
+                                        onclick="moveProvider(decodeProviderName('${encodedProviderName}'), 'up')"
+                                        ${providerActionLocked || !providerMoveState.canMoveUp ? 'disabled' : ''}
+                                        aria-label="上移 Provider"
+                                        title="上移"
+                                    >
+                                        <svg class="provider-order-step-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                                            <path d="M6 12.5 10 8.5l4 4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="provider-order-step provider-order-step-down"
+                                        onclick="moveProvider(decodeProviderName('${encodedProviderName}'), 'down')"
+                                        ${providerActionLocked || !providerMoveState.canMoveDown ? 'disabled' : ''}
+                                        aria-label="下移 Provider"
+                                        title="下移"
+                                    >
+                                        <svg class="provider-order-step-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                                            <path d="M6 7.5 10 11.5l4-4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </td>
                         <td class="provider-actions-cell">
                             <div class="action-buttons">
                                 <button class="btn-action btn-edit" onclick="openEditModal(decodeProviderName('${encodedProviderName}'))">编辑</button>
                                 <button
                                     class="btn-action ${isEnabled ? 'btn-delete' : 'btn-edit'}"
                                     onclick="setProviderEnabled(decodeProviderName('${encodedProviderName}'), ${isEnabled ? 'false' : 'true'})"
-                                    ${isTogglePending || providerBatchActionInFlight ? 'disabled' : ''}
+                                    ${providerActionLocked ? 'disabled' : ''}
                                 >${isTogglePending ? '处理中...' : (isEnabled ? '禁用' : '启用')}</button>
                                 <div class="inline-confirm-wrap">
                                     <button
@@ -2070,7 +2611,7 @@
                                         class="btn-action btn-delete ${isDeletePending ? 'is-active' : ''}"
                                         data-provider-delete-trigger="${encodedProviderName}"
                                         onclick="toggleDeleteProviderConfirm(decodeProviderName('${encodedProviderName}'), event)"
-                                        ${providerBatchActionInFlight ? 'disabled' : ''}
+                                        ${providerActionLocked ? 'disabled' : ''}
                                     >删除</button>
                                 </div>
                             </div>
@@ -2079,8 +2620,30 @@
                 `;
             });
 
-            html += '</tbody></table>';
-            container.innerHTML = html;
+            html += '</tbody></table></section>';
+            return html;
+        }
+
+        function renderProviders() {
+            const container = document.getElementById('providersContainer');
+            const providerCountElement = document.getElementById('providerCount');
+            if (providerCountElement) {
+                providerCountElement.textContent = providers.length;
+            }
+            if (!providers.length) {
+                container.innerHTML = '<div class="empty-state">当前没有 provider 配置</div>';
+                updateProviderSelectionUi();
+                return;
+            }
+
+            const enabledProviders = providers.filter(provider => isProviderEnabled(provider));
+            const disabledProviders = providers.filter(provider => !isProviderEnabled(provider));
+            container.innerHTML = `
+                <div class="provider-group-list">
+                    ${buildProviderTable('enabled', '已启用', enabledProviders, '当前没有已启用 Provider')}
+                    ${buildProviderTable('disabled', '已禁用', disabledProviders, '当前没有已禁用 Provider')}
+                </div>
+            `;
             updateProviderSelectionUi();
             syncDeleteProviderPopover();
         }
@@ -2172,10 +2735,15 @@
             expandAuthEntryCard(card);
         }
 
+
         function handleAuthEntrySummaryKeydown(event, element) {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
             toggleAuthEntryCard(element);
+        }
+
+        function getDefaultAuthEntryHeaders() {
+            return [{ key: 'Authorization', value: 'Bearer ' }];
         }
 
         function createAuthEntryCardElement(entry = null) {
@@ -2266,7 +2834,9 @@
             const headers = entry?.headers && typeof entry.headers === 'object' ? entry.headers : {};
             const headerEntries = Object.entries(headers);
             if (!headerEntries.length) {
-                addAuthHeaderRow(wrapper.querySelector('.btn-field-secondary'));
+                getDefaultAuthEntryHeaders().forEach(header => {
+                    addAuthHeaderRow(wrapper.querySelector('.btn-field-secondary'), header);
+                });
             } else {
                 headerEntries.forEach(([key, value]) => {
                     addAuthHeaderRow(wrapper.querySelector('.btn-field-secondary'), { key, value });
@@ -2370,8 +2940,21 @@
         }
 
         function getAuthEntryYamlTemplate(entryId = 'key-1') {
-            const textarea = getAuthEntryYamlTextarea();
-            const templateText = String(textarea?.defaultValue || '').trimEnd();
+            const templateLines = [
+                "entries:",
+                "  - id: key-1  # 必填：Entry 唯一 ID，组内不能重复",
+                "    enabled: true  # 可选：默认 true；设为 false 时该 Entry 不参与调度",
+                "    headers:  # 必填：至少提供 1 个请求头，value 可以先留空",
+                "      Authorization: \"Bearer \"  # 示例：可先保留 Bearer 前缀，稍后再补 token",
+                "      # x-api-key: \"\"  # 可选：如果上游用 x-api-key，可改成这个",
+                "    max_concurrency: 3  # 可选：最大并发；留空表示不限制",
+                "    cooldown_seconds_on_429: 120  # 可选：429 冷却秒数；留空则继承 Group 默认值",
+                "    request_quota_per_minute: 60  # 可选：每分钟请求数上限；留空表示不限制",
+                "    request_quota_per_day: 3000  # 可选：每天请求数上限；留空表示不限制",
+                "    token_quota_per_minute: 120000  # 可选：每分钟 Token 上限；留空表示不限制",
+                "    token_quota_per_day: 5000000  # 可选：每天 Token 上限；留空表示不限制",
+            ];
+            const templateText = templateLines.join(String.fromCharCode(10));
             if (!entryId) {
                 return templateText;
             }
@@ -2997,24 +3580,6 @@
             }
         }
 
-        async function deleteAuthGroup(name) {
-            if (!window.confirm(`确认删除 Auth Group “${name}”？`)) {
-                return;
-            }
-            try {
-                const response = await fetch(`/api/auth-groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
-                const result = await response.json();
-                if (!response.ok) {
-                    throw new Error(result.error || '删除 Auth Group 失败');
-                }
-                showMessage('Auth Group 删除成功，配置已重载', 'success');
-                await loadPageData();
-            } catch (error) {
-                console.error('删除 auth group 失败:', error);
-                showActionError('删除 Auth Group', error, { fallback: '删除 Auth Group 失败' });
-            }
-        }
-
         function renderAuthGroupRuntime(runtime) {
             const summaryElement = document.getElementById('authGroupRuntimeSummary');
             const container = document.getElementById('authGroupRuntimeContainer');
@@ -3238,7 +3803,7 @@
 
         async function setProviderEnabled(name, enabled) {
             const normalizedName = String(name || '').trim();
-            if (!normalizedName || providerBatchActionInFlight || togglingProviderNames.has(normalizedName)) {
+            if (!normalizedName || hasProviderMutationInFlight()) {
                 return;
             }
 
@@ -3268,11 +3833,18 @@
             }
         }
 
-        async function runProviderBatchAction(action) {
-            const selectedNames = getNormalizedSelectedProviderNames();
-            if (!selectedNames.length || providerBatchActionInFlight) {
+        async function runProviderBatchAction(action, groupKey = '') {
+            const selectedNames = groupKey
+                ? getSelectedProviderNamesForGroup(groupKey)
+                : getNormalizedSelectedProviderNames();
+            if (!selectedNames.length || hasProviderMutationInFlight()) {
                 if (!selectedNames.length) {
-                    showMessage('请先选择至少一个 Provider', 'error');
+                    const groupLabel = groupKey === 'enabled'
+                        ? '已启用'
+                        : groupKey === 'disabled'
+                            ? '已禁用'
+                            : '';
+                    showMessage(`请先选择至少一个${groupLabel ? `${groupLabel} ` : ''}Provider`, 'error');
                 }
                 return;
             }
@@ -3288,9 +3860,10 @@
 
         function toggleDeleteProviderConfirm(name, event) {
             event?.stopPropagation();
-            if (deletingProviderName !== null || providerBatchActionInFlight) return;
+            if (hasProviderMutationInFlight()) return;
 
             pendingDeleteProviderName = pendingDeleteProviderName === name ? null : name;
+            closeDeleteAuthGroupConfirm(false);
             closeDeleteAuthEntryConfirm(false);
             if (pendingDeleteProviderName !== name) {
                 deletingProviderName = null;
@@ -3357,9 +3930,14 @@
                 showMessage('请先填写 API 地址', 'error');
                 return;
             }
+            if ((document.getElementById('providerAuthMode')?.value || 'legacy_api_key') === 'auth_group' && !payload.auth_group) {
+                showMessage('请先选择 Auth Group', 'error');
+                return;
+            }
 
             const params = new URLSearchParams({ api: payload.api });
             if (payload.api_key) params.set('api_key', payload.api_key);
+            if (payload.auth_group) params.set('auth_group', payload.auth_group);
             if (payload.proxy) params.set('proxy', payload.proxy);
             if (payload.timeout_seconds) params.set('timeout_seconds', payload.timeout_seconds);
             if (payload.verify_ssl) params.set('verify_ssl', payload.verify_ssl);
@@ -3503,12 +4081,19 @@
             document.getElementById('providerName').addEventListener('input', updateFetchModelsButtonState);
             document.getElementById('providerApi').addEventListener('input', handleProviderApiInput);
             document.getElementById('providerAuthMode').addEventListener('change', updateFetchModelsButtonState);
+            document.getElementById('providerAuthGroup').addEventListener('change', updateFetchModelsButtonState);
             document.getElementById('providerTransport').addEventListener('change', handleProviderTransportChange);
+            providerSensitiveInputIds.forEach(inputId => {
+                document.getElementById(inputId)?.addEventListener('input', function() {
+                    temporarilyRevealSensitiveInput(inputId);
+                });
+            });
             document.getElementById('providerModelList').addEventListener('input', updateModelListCount);
             document.getElementById('fetchModelSearchInput').addEventListener('input', renderFetchModelPicker);
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
             window.addEventListener('resize', resizeAuthEntryYamlEditor);
             initializeAuthEntryYamlEditor();
+            resetProviderSensitiveInputs();
             document.getElementById('authEntriesContainer').addEventListener('input', function(event) {
                 const card = event.target instanceof HTMLElement ? event.target.closest('.auth-entry-card') : null;
                 syncAuthEntryCardSummary(card);

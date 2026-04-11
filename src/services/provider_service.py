@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 from ..application.app_context import AppContext
 from ..config.provider_config import (
     ProviderConfigSchema,
+    parse_optional_bool,
     validate_auth_group_provider_definitions,
 )
 
@@ -46,7 +47,7 @@ class ProviderService:
         if self._find_provider(providers, provider_config.name):
             raise ValueError(f"Provider already exists: {provider_config.name}")
 
-        providers.append(stored)
+        self._insert_provider_by_enabled_group(providers, stored)
         self._save_providers(config, providers)
         return normalized
 
@@ -56,6 +57,7 @@ class ProviderService:
         target = self._find_provider(providers, current_name)
         if target is None:
             raise ValueError(f'Provider not found: {current_name}')
+        target_enabled = self._is_provider_enabled(target)
 
         normalized_payload = dict(payload)
         if 'enabled' not in normalized_payload:
@@ -70,6 +72,8 @@ class ProviderService:
             raise ValueError(f"Provider already exists: {provider_config.name}")
 
         providers[providers.index(target)] = stored
+        if provider_config.enabled != target_enabled:
+            providers = self._regroup_providers_by_enabled(providers)
         self._save_providers(config, providers)
         return normalized
 
@@ -95,6 +99,7 @@ class ProviderService:
         normalized['enabled'] = bool(enabled)
         provider_config = ProviderConfigSchema.from_payload(normalized)
         providers[target_index] = provider_config.to_storage_mapping()
+        providers = self._regroup_providers_by_enabled(providers)
         self._save_providers(config, providers)
         return provider_config.to_mapping()
 
@@ -109,11 +114,39 @@ class ProviderService:
             normalized['enabled'] = bool(enabled)
             providers[target_index] = ProviderConfigSchema.from_payload(normalized).to_storage_mapping()
 
+        providers = self._regroup_providers_by_enabled(providers)
         self._save_providers(config, providers)
         return {
             'count': len(normalized_names),
             'names': normalized_names,
             'enabled': bool(enabled),
+        }
+
+    def reorder_providers(self, names: List[str]) -> Dict[str, Any]:
+        normalized_names = self._normalize_provider_order_names(names)
+        config = self._config_manager.get_raw_config()
+        providers = self._extract_providers(config)
+        current_names = self._list_provider_names(providers)
+
+        current_name_set = set(current_names)
+        provided_name_set = set(normalized_names)
+        unknown_names = [name for name in normalized_names if name not in current_name_set]
+        missing_names = [name for name in current_names if name not in provided_name_set]
+        if unknown_names or missing_names or len(normalized_names) != len(current_names):
+            raise ValueError(
+                "Provider order must include every provider exactly once"
+            )
+
+        providers_by_name = {
+            str(provider.get("name", "")).strip(): provider
+            for provider in providers
+        }
+        ordered_providers = [providers_by_name[name] for name in normalized_names]
+        self._ensure_grouped_provider_order(ordered_providers)
+        self._save_providers(config, ordered_providers)
+        return {
+            "count": len(normalized_names),
+            "names": normalized_names,
         }
 
     def batch_delete_providers(self, names: List[str]) -> Dict[str, Any]:
@@ -198,6 +231,81 @@ class ProviderService:
         if not normalized_names:
             raise ValueError('Provider names must be a non-empty list')
         return normalized_names
+
+    @staticmethod
+    def _normalize_provider_order_names(names: Any) -> List[str]:
+        if not isinstance(names, list):
+            raise ValueError("Provider names must be a non-empty list")
+
+        normalized_names: List[str] = []
+        seen_names = set()
+        for raw_name in names:
+            name = str(raw_name or "").strip()
+            if not name:
+                raise ValueError("Provider names must not be empty")
+            if name in seen_names:
+                raise ValueError(f"Duplicate provider name in order list: {name}")
+            seen_names.add(name)
+            normalized_names.append(name)
+
+        if not normalized_names:
+            raise ValueError("Provider names must be a non-empty list")
+        return normalized_names
+
+    @staticmethod
+    def _is_provider_enabled(provider: Dict[str, Any]) -> bool:
+        return parse_optional_bool(provider.get("enabled"), default=True) is not False
+
+    @classmethod
+    def _regroup_providers_by_enabled(
+        cls,
+        providers: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        enabled_providers = [
+            provider for provider in providers if cls._is_provider_enabled(provider)
+        ]
+        disabled_providers = [
+            provider for provider in providers if not cls._is_provider_enabled(provider)
+        ]
+        return enabled_providers + disabled_providers
+
+    @classmethod
+    def _insert_provider_by_enabled_group(
+        cls,
+        providers: List[Dict[str, Any]],
+        provider: Dict[str, Any],
+    ) -> None:
+        if cls._is_provider_enabled(provider):
+            first_disabled_index = next(
+                (
+                    index
+                    for index, current_provider in enumerate(providers)
+                    if not cls._is_provider_enabled(current_provider)
+                ),
+                len(providers),
+            )
+            providers.insert(first_disabled_index, provider)
+            return
+        providers.append(provider)
+
+    @classmethod
+    def _ensure_grouped_provider_order(
+        cls,
+        providers: List[Dict[str, Any]],
+    ) -> None:
+        disabled_seen = False
+        for provider in providers:
+            if cls._is_provider_enabled(provider):
+                if disabled_seen:
+                    raise ValueError(
+                        "Enabled providers must appear before disabled providers"
+                    )
+                continue
+            disabled_seen = True
+
+    @staticmethod
+    def _list_provider_names(providers: List[Dict[str, Any]]) -> List[str]:
+        return [str(provider.get("name", "")).strip() for provider in providers]
 
     @staticmethod
     def _find_provider_indexes(providers: List[Dict[str, Any]], names: List[str]) -> List[int]:
