@@ -1140,39 +1140,72 @@ class ProxyService:
         if not trace_id or not self._config_manager.is_llm_request_debug_enabled():
             return
 
-        record = {
-            "trace_id": trace_id,
-            "stage": stage,
-            "start_line": start_line,
-            "headers": self._normalize_trace_headers(headers),
-            "payload": self._normalize_trace_payload(payload),
-        }
+        metadata_parts = [f"trace_id={trace_id}", f"stage={self._format_trace_stage(stage)}"]
         if route_name:
-            record["route_name"] = route_name
+            metadata_parts.append(f"route={route_name}")
         if client_ip:
-            record["client_ip"] = client_ip
+            metadata_parts.append(f"client_ip={client_ip}")
         if provider_name:
-            record["provider_name"] = provider_name
+            metadata_parts.append(f"provider={provider_name}")
         if request_model:
-            record["request_model"] = request_model
+            metadata_parts.append(f"request_model={request_model}")
         if upstream_model:
-            record["upstream_model"] = upstream_model
+            metadata_parts.append(f"upstream_model={upstream_model}")
         if target_format:
-            record["target_format"] = target_format
+            metadata_parts.append(f"target_format={target_format}")
         if status_code is not None:
-            record["status_code"] = status_code
+            metadata_parts.append(f"status={status_code}")
         if stream is not None:
-            record["stream"] = stream
+            metadata_parts.append(f"stream={str(stream).lower()}")
         if attempt is not None:
-            record["attempt"] = attempt
+            metadata_parts.append(f"attempt={attempt}")
         if completed is not None:
-            record["completed"] = completed
+            metadata_parts.append(f"completed={str(completed).lower()}")
         if error_type:
-            record["error_type"] = error_type
+            metadata_parts.append(f"error_type={error_type}")
         if error_summary:
-            record["error_summary"] = error_summary
+            metadata_parts.append(f"error_summary={error_summary}")
 
-        self._trace_logger.info(json.dumps(record, ensure_ascii=False, default=str))
+        message_parts = [
+            f"[LLM TRACE] {' | '.join(metadata_parts)}",
+            self._format_trace_http_block(start_line, headers, payload),
+        ]
+        self._trace_logger.info("\n".join(message_parts))
+
+    @staticmethod
+    def _format_trace_stage(stage: str) -> str:
+        stage_map = {
+            "downstream_request": "downstream_request(下游请求)",
+            "upstream_request": "upstream_request(上游请求)",
+            "upstream_response": "upstream_response(上游响应)",
+            "downstream_response": "downstream_response(下游响应)",
+        }
+        normalized_stage = str(stage or "").strip().lower()
+        return stage_map.get(normalized_stage, normalized_stage or "unknown")
+
+    @classmethod
+    def _format_trace_http_block(
+        cls,
+        start_line: str,
+        headers: Dict[str, Any],
+        payload: Any,
+    ) -> str:
+        normalized_headers = cls._normalize_trace_headers(headers)
+        lines = [str(start_line or "").strip() or "<empty start-line>"]
+        for key, value in normalized_headers.items():
+            lines.append(f"{cls._format_trace_header_name(key)}: {value}")
+
+        formatted_payload = cls._format_trace_body(payload)
+        if formatted_payload:
+            lines.extend(["", formatted_payload])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_trace_header_name(name: str) -> str:
+        normalized_name = str(name or "").strip()
+        if not normalized_name:
+            return "<empty-header>"
+        return "-".join(part.capitalize() for part in normalized_name.split("-"))
 
     @staticmethod
     def _normalize_trace_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
@@ -1195,6 +1228,15 @@ class ProxyService:
         if isinstance(payload, str):
             return cls._decode_trace_body(payload.encode("utf-8"))
         return cls._normalize_trace_scalar(payload)
+
+    @classmethod
+    def _format_trace_body(cls, payload: Any) -> str:
+        normalized_payload = cls._normalize_trace_payload(payload)
+        if normalized_payload in (None, "", b""):
+            return ""
+        if isinstance(normalized_payload, (dict, list)):
+            return json.dumps(normalized_payload, ensure_ascii=False, indent=2)
+        return str(normalized_payload)
 
     @staticmethod
     def _normalize_trace_scalar(value: Any) -> Any:

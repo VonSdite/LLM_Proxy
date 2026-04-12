@@ -52,6 +52,12 @@ class WebController:
         self._app.route("/api/settings/system", methods=["PUT"])(
             auth(self.update_system_settings)
         )
+        self._app.route("/api/settings/system/basic", methods=["PUT"])(
+            auth(self.update_basic_settings)
+        )
+        self._app.route("/api/settings/system/debug", methods=["PUT"])(
+            auth(self.update_debug_settings)
+        )
 
     def home(self) -> str:
         return self.providers_page()
@@ -196,4 +202,36 @@ class WebController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error updating system settings: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def update_basic_settings(self) -> ResponseReturnValue:
+        try:
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                return jsonify({"error": "Request body must be a JSON object"}), 400
+
+            result = self._settings_service.update_basic_settings(payload)
+            if result.get("auth_config_changed"):
+                self._auth_service.clear_sessions()
+
+            response = make_response(jsonify(result))
+            if result.get("auth_config_changed"):
+                response.delete_cookie("session_token")
+            return response
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating basic settings: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def update_debug_settings(self) -> ResponseReturnValue:
+        try:
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                return jsonify({"error": "Request body must be a JSON object"}), 400
+            return jsonify(self._settings_service.update_debug_settings(payload))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating debug settings: %s", exc)
             return jsonify({"error": str(exc)}), 500

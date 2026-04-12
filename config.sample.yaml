@@ -1,16 +1,28 @@
 server:
+  # 修改监听地址或监听端口后，需要重启服务才会生效。
   port: 8080
   host: 127.0.0.1
 
+database:
+  # 可选，默认是 data/requests.db
+  path: data/requests.db
+
 logging:
+  # 可选，默认是 logs
   path: logs
+  # 支持：DEBUG / INFO / WARNING / ERROR / CRITICAL
   level: INFO
+  # 开启后会把下游请求、上游请求、上游响应、下游响应写入
+  # logs/llm_request_trace.log，内容按 HTTP 报文风格换行记录。
   llm_request_debug_enabled: false
 
 chat:
+  # 开启后会按 IP 白名单控制 chat 请求与 /v1/models 返回结果。
   whitelist_enabled: false
 
 admin:
+  # username 和 password 同时非空时启用后台登录；
+  # 只要任一为空，就关闭后台登录。
   username: admin
   password: admin
 
