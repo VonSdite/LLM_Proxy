@@ -10,7 +10,7 @@
             visibility: hidden;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/settings.css?v=20260412-7" id="settingsPageStyles">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260412-8" id="settingsPageStyles">
     <script>
         (function () {
             const root = document.documentElement;
@@ -38,14 +38,14 @@
 
 {% block content %}
         <section class="settings-section">
-            <form class="settings-form" onsubmit="saveSystemSettings(event)">
-                <div class="section-card settings-shell-card">
+            <div class="settings-form">
+                <section class="section-card settings-shell-card">
                     <div class="section-header settings-shell-header">
                         <div>
-                            <h2 class="section-title">配置项</h2>
-                            <p class="section-subtitle">按需维护当前系统的运行、调试与管理配置。</p>
+                            <h2 class="section-title">基础设置</h2>
+                            <p class="section-subtitle">修改后点击保存，确保配置更新成功。</p>
                         </div>
-                        <button type="submit" class="btn btn-primary" id="saveSettingsBtn">保存设置</button>
+                        <button type="button" class="btn btn-primary" id="saveBasicSettingsBtn" onclick="saveBasicSettings()" disabled>保存设置</button>
                     </div>
                     <div class="settings-card-stack">
                         <section class="settings-subcard">
@@ -161,58 +161,59 @@
                                 </div>
                             </div>
                         </section>
-
-                        <section class="settings-subcard">
-                            <div class="section-header">
-                                <div>
-                                    <h3 class="section-title">Debug</h3>
-                                </div>
-                            </div>
-                            <div class="settings-grid settings-grid-debug">
-                                <div class="setting-field setting-field-span-2">
-                                    <label class="setting-label" for="logPath">日志路径</label>
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        id="logPath"
-                                        placeholder="例如 ./logs 或 /var/log/llm-proxy"
-                                        autocomplete="off"
-                                        spellcheck="false"
-                                    >
-                                </div>
-                                <div class="setting-field">
-                                    <label class="setting-label" for="logLevel">日志级别</label>
-                                    <select class="form-control settings-select" id="logLevel">
-                                        <option value="DEBUG">DEBUG</option>
-                                        <option value="INFO">INFO</option>
-                                        <option value="WARNING">WARNING</option>
-                                        <option value="ERROR">ERROR</option>
-                                        <option value="CRITICAL">CRITICAL</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="setting-toggle-inline">
-                                <div class="setting-toggle-meta">
-                                    <div class="setting-toggle-title-row">
-                                        <span class="setting-toggle-title">LLM Trace</span>
-                                        <button
-                                            type="button"
-                                            class="field-help-button"
-                                            data-settings-help-topic="llm_trace"
-                                            onclick="toggleSettingsHelp('llm_trace', event)"
-                                            aria-label="查看 LLM Trace 说明"
-                                        >?</button>
-                                    </div>
-                                </div>
-                                <label class="switch" aria-label="切换 LLM Trace">
-                                    <input type="checkbox" id="llmRequestDebugEnabled">
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                        </section>
                     </div>
-                </div>
-            </form>
+                </section>
+
+                <section class="section-card settings-shell-card settings-shell-card-debug">
+                    <div class="section-header settings-shell-header">
+                        <div>
+                            <h2 class="section-title">Debug</h2>
+                            <p class="section-subtitle">修改后自动生效。</p>
+                        </div>
+                    </div>
+                    <div class="settings-grid settings-grid-debug">
+                        <div class="setting-field">
+                            <label class="setting-label" for="logPath">日志路径</label>
+                            <input
+                                type="text"
+                                class="form-control"
+                                id="logPath"
+                                placeholder="例如 ./logs 或 /var/log/llm-proxy"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                        </div>
+                        <div class="setting-field">
+                            <label class="setting-label" for="logLevel">日志级别</label>
+                            <select class="form-control settings-select" id="logLevel">
+                                <option value="DEBUG">DEBUG</option>
+                                <option value="INFO">INFO</option>
+                                <option value="WARNING">WARNING</option>
+                                <option value="ERROR">ERROR</option>
+                                <option value="CRITICAL">CRITICAL</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-toggle-inline">
+                        <div class="setting-toggle-meta">
+                            <div class="setting-toggle-title-row">
+                                <span class="setting-toggle-title">LLM Trace</span>
+                                <button
+                                    type="button"
+                                    class="field-help-button"
+                                    data-settings-help-topic="llm_trace"
+                                    onclick="toggleSettingsHelp('llm_trace', event)"
+                                    aria-label="查看 LLM Trace 说明"
+                                >?</button>
+                            </div>
+                        </div>
+                        <label class="switch" aria-label="切换 LLM Trace">
+                            <input type="checkbox" id="llmRequestDebugEnabled">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </section>
+            </div>
         </section>
 {% endblock %}
 
@@ -224,33 +225,19 @@
         </div>
         <div class="settings-help-popover-body" id="settingsHelpBody"></div>
     </div>
-
-    <div class="modal fade" id="serverRestartRequiredModal" tabindex="-1" aria-labelledby="serverRestartRequiredModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 shadow">
-                <div class="modal-header border-bottom-0">
-                    <h5 class="modal-title fw-semibold" id="serverRestartRequiredModalLabel">需要重启服务</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
-                </div>
-                <div class="modal-body pt-0">
-                    监听 IP 或监听端口已变更，需要重启服务后生效。
-                </div>
-                <div class="modal-footer border-top-0">
-                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">我知道了</button>
-                </div>
-            </div>
-        </div>
-    </div>
 {% endblock %}
 
 {% block page_scripts %}
     <script src="/static/js/ui-message.js?v=20260319-1"></script>
     <script>
-        let settingsSaving = false;
+        let basicSettingsSaving = false;
+        let debugSettingsSaving = false;
+        let pendingDebugSave = false;
         let currentSettings = null;
+        let currentBasicSettingsSnapshot = "";
+        let currentDebugSettingsSnapshot = "";
         let activeSettingsHelpTrigger = null;
         let activeSettingsHelpTopic = null;
-        let serverRestartRequiredModalInstance = null;
         const settingsSensitiveInputIds = ["adminPassword"];
         const settingsSensitiveAutoVisibleIds = new Set();
         const settingsSensitiveRevealTimers = new Map();
@@ -258,7 +245,7 @@
 
         const settingsHelpTopics = {
             server_host: {
-                title: '监听 IP',
+                title: "监听 IP",
                 html: `
                     <p>填写服务启动后实际绑定的监听地址，例如 <code>127.0.0.1</code>、<code>0.0.0.0</code>。</p>
                     <p>保存后会写入配置文件。</p>
@@ -266,7 +253,7 @@
                 `
             },
             server_port: {
-                title: '监听端口',
+                title: "监听端口",
                 html: `
                     <p>填写服务启动时绑定的监听端口，范围为 <code>1-65535</code>。</p>
                     <p>保存后会写入配置文件。</p>
@@ -274,14 +261,14 @@
                 `
             },
             admin_auth: {
-                title: '后台登录',
+                title: "后台登录",
                 html: `
                     <p>用户名和密码都填写时，后台页面与管理接口会启用登录校验。</p>
                     <p>只要任一项为空，就会关闭登录校验，访问后台页面时不再要求登录。</p>
                 `
             },
             llm_trace: {
-                title: 'LLM Trace',
+                title: "LLM Trace",
                 html: `
                     <p>关闭时不记录 LLM Trace。</p>
                     <p>开启后会把下游请求、转换后的上游请求、上游响应、转换后的下游响应这四个阶段写入 <code>logs/llm_request_trace.log</code>，每个阶段都会记录起始行、Header 和 Payload。</p>
@@ -378,19 +365,7 @@
             });
         }
 
-        function fillSettingsForm(settings) {
-            currentSettings = settings;
-            document.getElementById("serverHost").value = settings?.server?.host || "";
-            document.getElementById("serverPort").value = settings?.server?.port || "";
-            document.getElementById("adminUsername").value = settings?.admin?.username || "";
-            document.getElementById("adminPassword").value = settings?.admin?.password || "";
-            document.getElementById("logPath").value = settings?.logging?.path || "";
-            document.getElementById("logLevel").value = settings?.logging?.level || "INFO";
-            document.getElementById("llmRequestDebugEnabled").checked = Boolean(settings?.logging?.llm_request_debug_enabled);
-            resetSensitiveInputs();
-        }
-
-        function collectSystemSettingsPayload() {
+        function collectBasicSettingsPayload() {
             return {
                 server: {
                     host: document.getElementById("serverHost").value.trim(),
@@ -399,13 +374,41 @@
                 admin: {
                     username: document.getElementById("adminUsername").value.trim(),
                     password: document.getElementById("adminPassword").value
-                },
+                }
+            };
+        }
+
+        function collectDebugSettingsPayload() {
+            return {
                 logging: {
                     path: document.getElementById("logPath").value.trim(),
                     level: document.getElementById("logLevel").value,
                     llm_request_debug_enabled: document.getElementById("llmRequestDebugEnabled").checked
                 }
             };
+        }
+
+        function fillBasicSettingsForm(settings) {
+            document.getElementById("serverHost").value = settings?.server?.host || "";
+            document.getElementById("serverPort").value = settings?.server?.port || "";
+            document.getElementById("adminUsername").value = settings?.admin?.username || "";
+            document.getElementById("adminPassword").value = settings?.admin?.password || "";
+            currentBasicSettingsSnapshot = JSON.stringify(collectBasicSettingsPayload());
+            resetSensitiveInputs();
+            updateBasicSettingsSaveButtonState();
+        }
+
+        function fillDebugSettingsForm(settings) {
+            document.getElementById("logPath").value = settings?.logging?.path || "";
+            document.getElementById("logLevel").value = settings?.logging?.level || "INFO";
+            document.getElementById("llmRequestDebugEnabled").checked = Boolean(settings?.logging?.llm_request_debug_enabled);
+            currentDebugSettingsSnapshot = JSON.stringify(collectDebugSettingsPayload());
+        }
+
+        function fillSettingsForm(settings) {
+            currentSettings = settings;
+            fillBasicSettingsForm(settings);
+            fillDebugSettingsForm(settings);
         }
 
         async function loadSystemSettings() {
@@ -421,55 +424,37 @@
             }
         }
 
-        function getServerRestartRequiredModalInstance() {
-            const modalElement = document.getElementById("serverRestartRequiredModal");
-            if (!modalElement || !window.bootstrap || !window.bootstrap.Modal) {
-                return null;
-            }
-            if (!serverRestartRequiredModalInstance) {
-                serverRestartRequiredModalInstance = window.bootstrap.Modal.getOrCreateInstance(modalElement);
-            }
-            return serverRestartRequiredModalInstance;
+        function hasBasicSettingsChanged() {
+            return JSON.stringify(collectBasicSettingsPayload()) !== currentBasicSettingsSnapshot;
         }
 
-        function showServerRestartRequiredDialog() {
-            const modalElement = document.getElementById("serverRestartRequiredModal");
-            const modalInstance = getServerRestartRequiredModalInstance();
-            if (!modalElement || !modalInstance) {
-                window.alert("监听 IP 或监听端口已变更，需要重启服务后生效。");
+        function hasDebugSettingsChanged() {
+            return JSON.stringify(collectDebugSettingsPayload()) !== currentDebugSettingsSnapshot;
+        }
+
+        function updateBasicSettingsSaveButtonState() {
+            const saveButton = document.getElementById("saveBasicSettingsBtn");
+            if (!saveButton) {
+                return;
+            }
+            saveButton.disabled = basicSettingsSaving || !hasBasicSettingsChanged();
+        }
+
+        async function saveBasicSettings() {
+            if (basicSettingsSaving || !hasBasicSettingsChanged()) {
                 return Promise.resolve();
             }
 
-            return new Promise(resolve => {
-                const handleHidden = function () {
-                    modalElement.removeEventListener("hidden.bs.modal", handleHidden);
-                    resolve();
-                };
-                modalElement.addEventListener("hidden.bs.modal", handleHidden, { once: true });
-                modalInstance.show();
-            });
-        }
-
-        async function saveSystemSettings(event) {
-            event.preventDefault();
-            if (settingsSaving) {
-                return;
-            }
-
-            settingsSaving = true;
-            const saveButton = document.getElementById("saveSettingsBtn");
-            if (saveButton) {
-                saveButton.disabled = true;
-                saveButton.textContent = "保存中...";
-            }
+            basicSettingsSaving = true;
+            updateBasicSettingsSaveButtonState();
 
             try {
-                const response = await fetch("/api/settings/system", {
+                const response = await fetch("/api/settings/system/basic", {
                     method: "PUT",
                     headers: {
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify(collectSystemSettingsPayload())
+                    body: JSON.stringify(collectBasicSettingsPayload())
                 });
                 const data = await response.json();
                 if (!response.ok) {
@@ -480,7 +465,11 @@
                     throw new Error(data?.error || "保存系统设置失败");
                 }
 
-                fillSettingsForm(data.settings);
+                currentSettings = data.settings;
+                fillBasicSettingsForm(data.settings);
+                if (!hasDebugSettingsChanged()) {
+                    fillDebugSettingsForm(data.settings);
+                }
 
                 const messages = ["系统设置已保存"];
                 if (data.auth_config_changed) {
@@ -488,7 +477,7 @@
                 }
                 showMessage(messages.join("；"), "success", { dismissMs: 4200 });
                 if (data.server_restart_required) {
-                    await showServerRestartRequiredDialog();
+                    showMessage("监听 IP 或监听端口已变更，重启服务后生效", "warning", { dismissMs: 5000 });
                 }
 
                 if (data.auth_config_changed) {
@@ -503,10 +492,50 @@
             } catch (error) {
                 showActionError("保存系统设置", error);
             } finally {
-                settingsSaving = false;
-                if (saveButton) {
-                    saveButton.disabled = false;
-                    saveButton.textContent = "保存设置";
+                basicSettingsSaving = false;
+                updateBasicSettingsSaveButtonState();
+            }
+        }
+
+        async function saveDebugSettings() {
+            if (debugSettingsSaving) {
+                pendingDebugSave = true;
+                return Promise.resolve();
+            }
+
+            if (!hasDebugSettingsChanged()) {
+                return;
+            }
+
+            debugSettingsSaving = true;
+
+            try {
+                const response = await fetch("/api/settings/system/debug", {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(collectDebugSettingsPayload())
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        window.location.href = "/login";
+                        return;
+                    }
+                    throw new Error(data?.error || "保存调试设置失败");
+                }
+
+                currentSettings = data.settings;
+                fillDebugSettingsForm(data.settings);
+                showMessage("调试设置已保存", "success", { dismissMs: 2600 });
+            } catch (error) {
+                showActionError("保存调试设置", error);
+            } finally {
+                debugSettingsSaving = false;
+                if (pendingDebugSave) {
+                    pendingDebugSave = false;
+                    await saveDebugSettings();
                 }
             }
         }
@@ -598,6 +627,7 @@
         document.addEventListener("DOMContentLoaded", function () {
             initThemeToggle();
             resetSensitiveInputs();
+
             settingsSensitiveInputIds.forEach(inputId => {
                 const input = document.getElementById(inputId);
                 if (!input) {
@@ -605,6 +635,7 @@
                 }
                 input.addEventListener("input", function () {
                     temporarilyRevealSensitiveInput(inputId);
+                    updateBasicSettingsSaveButtonState();
                 });
                 input.addEventListener("focus", function () {
                     temporarilyRevealSensitiveInput(inputId);
@@ -615,6 +646,24 @@
                     }
                     clearSensitiveInputAutoReveal(inputId);
                     syncSensitiveInputToggle(inputId);
+                    updateBasicSettingsSaveButtonState();
+                });
+            });
+
+            ["serverHost", "serverPort", "adminUsername"].forEach(inputId => {
+                const input = document.getElementById(inputId);
+                input?.addEventListener("input", updateBasicSettingsSaveButtonState);
+                input?.addEventListener("change", updateBasicSettingsSaveButtonState);
+            });
+
+            document.getElementById("logPath")?.addEventListener("change", function () {
+                saveDebugSettings();
+            });
+
+            ["logLevel", "llmRequestDebugEnabled"].forEach(inputId => {
+                const input = document.getElementById(inputId);
+                input?.addEventListener("change", function () {
+                    saveDebugSettings();
                 });
             });
         });

@@ -78,10 +78,7 @@
 
 .settings-page .settings-grid-debug {
     margin-bottom: 14px;
-}
-
-.settings-page .settings-grid-debug .setting-field:last-child {
-    max-width: 320px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .settings-page input[type="number"]::-webkit-outer-spin-button,
