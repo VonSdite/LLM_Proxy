@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
 from typing import Any, Dict, Iterable, Optional
 
 from flask import Response, jsonify, request
@@ -111,17 +112,34 @@ class ProxyController:
         error_type: str,
         code: Optional[str] = None,
         error_format: str = "openai_chat",
+        trace_id: Optional[str] = None,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        request_model: Optional[str] = None,
+        target_format: Optional[str] = None,
     ) -> tuple[Response, int]:
+        payload = self._build_error_payload(
+            message,
+            error_type=error_type,
+            status_code=status_code,
+            code=code,
+            error_format=error_format,
+        )
+        self._proxy_service.log_downstream_response_trace(
+            trace_id=trace_id,
+            status_code=status_code,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            payload=payload,
+            route_name=route_name,
+            client_ip=client_ip,
+            provider_name=provider_name,
+            request_model=request_model,
+            target_format=target_format,
+            error_type=error_type,
+        )
         return (
-            jsonify(
-                self._build_error_payload(
-                    message,
-                    error_type=error_type,
-                    status_code=status_code,
-                    code=code,
-                    error_format=error_format,
-                )
-            ),
+            jsonify(payload),
             status_code,
         )
 
@@ -197,8 +215,12 @@ class ProxyController:
         if not normalized_expected_target_formats:
             raise ValueError("expected_target_formats must not be empty")
         resolved_error_format = error_format or normalized_expected_target_formats[0]
+        client_ip = normalize_ip(request.remote_addr)
+        trace_id: Optional[str] = None
+        model_name: Optional[str] = None
+        provider_name: Optional[str] = None
+        resolved_target_format: Optional[str] = None
         try:
-            client_ip = normalize_ip(request.remote_addr)
             self._logger.info(
                 "Proxy request received: route=%s ip=%s", route_name, client_ip
             )
@@ -326,6 +348,7 @@ class ProxyController:
                     error_format=resolved_error_format,
                 )
             resolved_target_format = matched_target_formats[0]
+            provider_name = getattr(provider, "name", None)
 
             client_requested_usage_chunk = False
             if inspect_stream_usage:
@@ -334,6 +357,18 @@ class ProxyController:
                     stream_options.get("include_usage") is True
                 )
 
+            trace_id = uuid4().hex
+            self._proxy_service.log_downstream_request_trace(
+                trace_id=trace_id,
+                start_line=self._build_request_start_line(request.method, request.full_path),
+                headers=self._copy_headers(request.headers),
+                payload=request_data,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider_name,
+                request_model=model_name,
+                target_format=resolved_target_format,
+            )
             headers = self._filter_request_headers(request.headers)
             start_time = now_local_datetime()
 
@@ -364,6 +399,9 @@ class ProxyController:
                 on_complete=on_proxy_complete,
                 forward_stream_usage=client_requested_usage_chunk,
                 resolved_target_format=resolved_target_format,
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
             )
             if result is None:
                 failure_info = failure_info or ProxyErrorInfo(
@@ -386,6 +424,12 @@ class ProxyController:
                     error_type=failure_info.error_type,
                     code=failure_info.error_code,
                     error_format=resolved_error_format,
+                    trace_id=trace_id,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                    provider_name=provider_name,
+                    request_model=model_name,
+                    target_format=resolved_target_format,
                 )
 
             return result
@@ -404,6 +448,12 @@ class ProxyController:
                 error_type=exc.error_type,
                 code=exc.error_type,
                 error_format=resolved_error_format,
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider_name,
+                request_model=model_name,
+                target_format=resolved_target_format,
             )
         except Exception as exc:
             self._logger.error("Error in %s: %s", route_name, exc)
@@ -413,6 +463,12 @@ class ProxyController:
                 error_type="server_error",
                 code="internal_error",
                 error_format=resolved_error_format,
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider_name,
+                request_model=model_name,
+                target_format=resolved_target_format,
             )
 
     def list_models(self) -> ResponseReturnValue:
@@ -482,3 +538,12 @@ class ProxyController:
             "upgrade",
         }
         return {k: v for k, v in headers.items() if k.lower() not in excluded}
+
+    @staticmethod
+    def _copy_headers(headers: Any) -> Dict[str, str]:
+        return {key: value for key, value in headers.items()}
+
+    @staticmethod
+    def _build_request_start_line(method: str, full_path: str) -> str:
+        normalized_path = str(full_path or "").rstrip("?") or "/"
+        return f"{str(method or 'POST').upper()} {normalized_path} HTTP/1.1"

@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """页面与统计控制器。"""
 
-from flask import jsonify, render_template, request
+from flask import jsonify, make_response, render_template, request
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
-from ..services import AuthenticationService, LogService
+from ..services import AuthenticationService, LogService, SettingsService
 from .decorators import require_authentication
 
 
@@ -17,6 +17,7 @@ class WebController:
         self,
         ctx: AppContext,
         log_service: LogService,
+        settings_service: SettingsService,
         auth_service: AuthenticationService,
     ):
         self._ctx = ctx
@@ -24,6 +25,7 @@ class WebController:
         self._logger = ctx.logger
         self._config_manager = ctx.config_manager
         self._log_service = log_service
+        self._settings_service = settings_service
         self._auth_service = auth_service
         self._register_routes()
 
@@ -34,6 +36,7 @@ class WebController:
         self._app.route("/providers")(auth(self.providers_page))
         self._app.route("/users")(auth(self.users_page))
         self._app.route("/statistics")(auth(self.index))
+        self._app.route("/settings")(auth(self.settings_page))
 
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
         self._app.route("/api/request-logs", methods=["GET"])(
@@ -42,6 +45,12 @@ class WebController:
         self._app.route("/api/usernames", methods=["GET"])(auth(self.get_usernames))
         self._app.route("/api/request-models", methods=["GET"])(
             auth(self.get_request_models)
+        )
+        self._app.route("/api/settings/system", methods=["GET"])(
+            auth(self.get_system_settings)
+        )
+        self._app.route("/api/settings/system", methods=["PUT"])(
+            auth(self.update_system_settings)
         )
 
     def home(self) -> str:
@@ -69,6 +78,14 @@ class WebController:
             "providers.html",
             active_page="providers",
             chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
+            current_username=self._get_current_username(),
+            auth_enabled=self._auth_service.is_auth_enabled(),
+        )
+
+    def settings_page(self) -> str:
+        return render_template(
+            "settings.html",
+            active_page="settings",
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
         )
@@ -151,4 +168,32 @@ class WebController:
             return jsonify(models)
         except Exception as exc:
             self._logger.error("Error getting request models: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def get_system_settings(self) -> ResponseReturnValue:
+        try:
+            settings = self._settings_service.get_system_settings()
+            return jsonify(settings)
+        except Exception as exc:
+            self._logger.error("Error getting system settings: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def update_system_settings(self) -> ResponseReturnValue:
+        try:
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                return jsonify({"error": "Request body must be a JSON object"}), 400
+
+            result = self._settings_service.update_system_settings(payload)
+            if result.get("auth_config_changed"):
+                self._auth_service.clear_sessions()
+
+            response = make_response(jsonify(result))
+            if result.get("auth_config_changed"):
+                response.delete_cookie("session_token")
+            return response
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating system settings: %s", exc)
             return jsonify({"error": str(exc)}), 500

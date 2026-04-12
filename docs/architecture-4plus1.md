@@ -50,6 +50,9 @@ downstream request
   - 校验下游 route 和 `target_formats`
   - 根据 route family 解析本次请求命中的 `target_format`
   - 构造标准错误体
+- `WebController`
+  - 提供统计页面与系统设置页面
+  - 暴露系统设置读取与保存接口
 - `ProviderManager`
   - 加载 provider 配置
   - 维护 `provider/model -> provider` 映射
@@ -60,6 +63,10 @@ downstream request
 - `ProxyService`
   - 组装整条代理链路
   - 使用本次解析出的 `target_format` 选择 translator 和 encoder
+  - 在开启 `logging.llm_request_debug_enabled` 时输出独立 trace
+- `SettingsService`
+  - 维护 `server`、`admin` 与 `logging`
+  - 管理立即生效项与重启生效项的边界
 - `ExecutorRegistry`
   - 负责 HTTP / WebSocket 上游连接
 - `Decoder`
@@ -117,7 +124,53 @@ controller 会根据 route 在 `target_formats` 里解析出本次请求实际�
 - `target_formats`
 - `transport`
 
-### 3.2 Provider Runtime Contract
+### 3.2 Control-Plane Settings Contract
+
+系统设置页与配置接口：
+
+- 页面
+  - `GET /settings`
+- API
+  - `GET /api/settings/system`
+  - `PUT /api/settings/system`
+
+当前支持的配置项：
+
+- `server.host`
+- `server.port`
+- `admin.username`
+- `admin.password`
+- `logging.path`
+- `logging.level`
+- `logging.llm_request_debug_enabled`
+
+行为约束：
+
+- `server.host` / `server.port`
+  - 保存时写回配置文件
+  - 如果值发生变化，需要重启服务后生效
+- `admin.username` / `admin.password`
+  - 两者都非空时启用后台登录
+  - 任一为空时关闭后台登录
+  - 保存后会清空进程内 session，避免旧凭据继续生效
+- `logging.path` / `logging.level`
+  - 保存后会重新装配 logger
+  - 新请求会按新的日志路径和日志级别输出
+- `logging.llm_request_debug_enabled`
+  - 打开后写入独立 trace 日志
+  - 记录四个阶段：
+    - 下游请求
+    - 转换后的上游请求
+    - 上游响应
+    - 转换后的下游响应
+  - 每条记录包含起始行、header 与 payload
+
+运行时内存状态补充：
+
+- `Application`
+  - 在保存日志配置后可重新装配 logger handler
+
+### 3.3 Provider Runtime Contract
 
 Provider 公共运行时字段只有：
 
@@ -161,7 +214,7 @@ Hook 运行时上下文还会暴露最小重试状态：
 - `WEBSOCKET_ERROR`
 - `TRANSPORT_ERROR`
 
-### 3.3 Internal Stream Detection
+### 3.4 Internal Stream Detection
 
 流式识别完全是内部实现细节：
 
@@ -177,6 +230,17 @@ Hook 运行时上下文还会暴露最小重试状态：
   - 触发首块探测兜底
 
 这层能力保留在 executor / decoder 中，不暴露给用户配置。
+
+### 3.5 Runtime Trace Logging
+
+当 `logging.llm_request_debug_enabled = true` 时：
+
+- 应用会写入 `logs/llm_request_trace.log`
+- 与 `app.log`、`access.log` 分离
+- 采用相同的滚动策略：
+  - `RotatingFileHandler`
+  - `maxBytes = 10 MiB`
+  - `backupCount = 3`
 
 ## 4. Development View
 
@@ -199,20 +263,24 @@ Hook 运行时上下文还会暴露最小重试状态：
 
 ### 4.2 Key Files
 
-- [src/services/proxy_service.py](/d:/001Code/008llm/003LLM_Proxy/src/services/proxy_service.py)
+- [src/services/proxy_service.py](../src/services/proxy_service.py)
   - 主代理 orchestration
-- [src/config/provider_config.py](/d:/001Code/008llm/003LLM_Proxy/src/config/provider_config.py)
+- [src/services/settings_service.py](../src/services/settings_service.py)
+  - 系统设置保存与生效边界
+- [src/config/provider_config.py](../src/config/provider_config.py)
   - Provider schema
-- [src/executors/registry.py](/d:/001Code/008llm/003LLM_Proxy/src/executors/registry.py)
+- [src/executors/registry.py](../src/executors/registry.py)
   - HTTP / WebSocket executors
-- [src/proxy_core/decoders.py](/d:/001Code/008llm/003LLM_Proxy/src/proxy_core/decoders.py)
+- [src/proxy_core/decoders.py](../src/proxy_core/decoders.py)
   - 流式解码
-- [src/proxy_core/encoder.py](/d:/001Code/008llm/003LLM_Proxy/src/proxy_core/encoder.py)
+- [src/proxy_core/encoder.py](../src/proxy_core/encoder.py)
   - 下游编码
-- [src/translators/registry.py](/d:/001Code/008llm/003LLM_Proxy/src/translators/registry.py)
+- [src/translators/registry.py](../src/translators/registry.py)
   - 4x4 translator registry
-- [src/presentation/templates/providers.html](/d:/001Code/008llm/003LLM_Proxy/src/presentation/templates/providers.html)
+- [src/presentation/templates/providers.html](../src/presentation/templates/providers.html)
   - Provider 页面、多选 `target_formats` 与互斥说明
+- [src/presentation/templates/settings.html](../src/presentation/templates/settings.html)
+  - 系统设置页面与帮助说明
 
 ## 5. Physical View
 
@@ -220,6 +288,7 @@ Hook 运行时上下文还会暴露最小重试状态：
 
 - 一个 Flask 应用
 - 一个配置文件
+- 一组滚动日志文件
 - 多个 provider 指向多个真实上游
 - 下游统一接入这个代理
 

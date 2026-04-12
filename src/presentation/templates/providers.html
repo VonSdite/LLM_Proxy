@@ -1,10 +1,10 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260411-9">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260412-1">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
-{% block header_subtitle %}维护 providers 配置，修改后自动重载生效。{% endblock %}
+{% block header_subtitle %}维护 providers 配置{% endblock %}
 
 {% block content %}
         <section class="providers-toolbar-section">
@@ -170,7 +170,7 @@
                             <label class="form-label">Legacy API Key</label>
                             <div class="sensitive-input-shell">
                                 <input
-                                    type="password"
+                                    type="text"
                                     class="form-control sensitive-input-control"
                                     id="providerApiKey"
                                     placeholder="留空则不写入配置"
@@ -206,7 +206,7 @@
                             <label class="form-label">代理</label>
                             <div class="sensitive-input-shell">
                                 <input
-                                    type="password"
+                                    type="text"
                                     class="form-control sensitive-input-control"
                                     id="providerProxy"
                                     placeholder="例如 http://127.0.0.1:7890"
@@ -1790,13 +1790,13 @@
                 return;
             }
             const hasValue = input.value.trim() !== '';
-            if (!hasValue) {
+            if (!hasValue && !providerSensitiveAutoVisibleIds.has(inputId)) {
                 clearSensitiveInputAutoReveal(inputId);
                 toggleButton.dataset.sensitiveManualVisible = 'false';
             }
-            const isManualVisible = hasValue && toggleButton.dataset.sensitiveManualVisible === 'true';
-            const isVisible = hasValue && (isManualVisible || providerSensitiveAutoVisibleIds.has(inputId));
-            input.type = isVisible ? 'text' : 'password';
+            const isManualVisible = toggleButton.dataset.sensitiveManualVisible === 'true';
+            const isVisible = isManualVisible || providerSensitiveAutoVisibleIds.has(inputId);
+            input.classList.toggle('is-masked', hasValue && !isVisible);
             toggleButton.hidden = !hasValue;
             toggleButton.classList.toggle('is-visible', isManualVisible);
             const label = toggleButton.dataset.sensitiveLabel || '内容';
@@ -2489,7 +2489,15 @@
             }
 
             html += `
-                    <table class="providers-table">
+                    <table class="providers-table provider-list-table">
+                        <colgroup>
+                            <col class="provider-select-col">
+                            <col class="provider-name-col">
+                            <col class="provider-api-col">
+                            <col class="provider-model-col">
+                            <col class="provider-order-col">
+                            <col class="provider-actions-col">
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th class="provider-select-column">
@@ -4084,8 +4092,19 @@
             document.getElementById('providerAuthGroup').addEventListener('change', updateFetchModelsButtonState);
             document.getElementById('providerTransport').addEventListener('change', handleProviderTransportChange);
             providerSensitiveInputIds.forEach(inputId => {
-                document.getElementById(inputId)?.addEventListener('input', function() {
+                const input = document.getElementById(inputId);
+                input?.addEventListener('input', function() {
                     temporarilyRevealSensitiveInput(inputId);
+                });
+                input?.addEventListener('focus', function() {
+                    temporarilyRevealSensitiveInput(inputId);
+                });
+                input?.addEventListener('blur', function() {
+                    if (document.activeElement?.closest(`[data-sensitive-toggle-for="${inputId}"]`)) {
+                        return;
+                    }
+                    clearSensitiveInputAutoReveal(inputId);
+                    syncSensitiveInputToggle(inputId);
                 });
             });
             document.getElementById('providerModelList').addEventListener('input', updateModelListCount);
@@ -4112,5 +4131,3 @@
         });
     </script>
 {% endblock %}
-
-

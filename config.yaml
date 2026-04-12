@@ -1,45 +1,53 @@
 server:
   port: 8080
   host: 127.0.0.1
+logging:
+  llm_request_debug_enabled: false
 chat:
   whitelist_enabled: true
 admin:
   username: admin
   password: admin
 providers:
-- name: volcengine
+- name: volc_code
   enabled: true
-  api: http://127.0.0.1:22026
+  api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
   transport: http
   source_format: openai_chat
-  verify_ssl: false
-  model_list:
-  - kimi-k2.5
-  - deepseek/deepseek-chat
-  - deepseek/deepseek-reasoner
-  - glm/glm-4.5
-  - glm/glm-4.5-air
-  - glm/glm-4.6
-  - glm/glm-4.7
-  - glm/glm-5
-  - volc_chat/deepseek-v3-2-251201
-  - volc_chat/doubao-seed-2-0-code-preview-260215
-  - volc_chat/doubao-seed-2-0-pro-260215
-  - volc_chat/doubao-seedance-2-0-260128
-  - volc_code/DeepSeek-V3.2
-  - volc_code/Doubao-Seed-2.0-Code
-  - volc_code/Doubao-Seed-2.0-pro
-  - volc_code/GLM-4.7
-  - volc_code/MiniMax-M2.5
-  - volc_code/kimi-k2.5
   target_formats:
   - openai_chat
+  - claude_chat
+  - codex
+  api_key:
+  verify_ssl: false
+  model_list:
+  - ark-code-latest
+  - kimi-k2.5
+  - MiniMax-M2.5
+  - GLM-4.7
+  - DeepSeek-V3.2
+  - Doubao-Seed-2.0-Code
+  - Doubao-Seed-2.0-pro
+- name: deepseek
+  enabled: false
+  api: https://api.deepseek.com/v1/chat/completions
+  transport: http
+  source_format: openai_chat
+  target_formats:
+  - openai_chat
+  - claude_chat
+  - codex
+  api_key:
+  verify_ssl: false
+  model_list:
+  - deepseek-chat
+  - deepseek-reasoner
 auth_groups:
-- name: a
+- name: group1
   strategy: least_inflight
   cooldown_seconds_on_429: 60
   entries:
-  - id: a
+  - id: key1
     enabled: true
     headers:
-      a: a
+      Authorization: "Bearer 1"

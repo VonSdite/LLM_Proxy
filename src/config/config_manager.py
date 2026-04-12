@@ -46,14 +46,10 @@ class ConfigManager:
         return bool(admin and admin.get("username") and admin.get("password"))
 
     def is_chat_whitelist_enabled(self) -> bool:
-        value = self.get("chat.whitelist_enabled", False)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        if isinstance(value, int):
-            return value != 0
-        return False
+        return self._read_bool("chat.whitelist_enabled", default=False)
+
+    def is_llm_request_debug_enabled(self) -> bool:
+        return self._read_bool("logging.llm_request_debug_enabled", default=False)
 
     def get_database_path(self) -> str:
         return self.get("database.path", self._root_path / "data/requests.db")
@@ -163,3 +159,13 @@ class ConfigManager:
         if isinstance(value, (list, tuple)):
             return any(str(item or "").strip() for item in value)
         return True
+
+    def _read_bool(self, key: str, default: bool = False) -> bool:
+        value = self.get(key, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        if isinstance(value, int):
+            return value != 0
+        return bool(default)
