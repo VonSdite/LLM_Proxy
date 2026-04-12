@@ -74,8 +74,6 @@ class Application:
         )
 
         logger = logging.getLogger('app')
-        logger.handlers.clear()
-
         app_log_handler = RotatingFileHandler(
             log_path / 'app.log',
             maxBytes=10 * 1024 * 1024,
@@ -89,11 +87,8 @@ class Application:
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(formatter)
         console_handler.setLevel(level)
-        logger.addHandler(console_handler)
-        logger.setLevel(level)
 
         access_logger = logging.getLogger('access')
-        access_logger.handlers.clear()
         access_handler = RotatingFileHandler(
             log_path / 'access.log',
             maxBytes=10 * 1024 * 1024,
@@ -107,12 +102,61 @@ class Application:
             )
         )
         access_handler.setLevel(level)
-        access_logger.addHandler(access_handler)
-        access_logger.setLevel(level)
+
+        trace_logger = logging.getLogger('llm_request_trace')
+        trace_handler = RotatingFileHandler(
+            log_path / 'llm_request_trace.log',
+            maxBytes=10 * 1024 * 1024,
+            backupCount=3,
+            encoding='utf-8',
+        )
+        trace_handler.setFormatter(formatter)
+        trace_handler.setLevel(level)
+
+        self._replace_logger_handlers(
+            logger,
+            [app_log_handler, console_handler],
+            level,
+        )
+        self._replace_logger_handlers(
+            access_logger,
+            [access_handler],
+            level,
+        )
+        self._replace_logger_handlers(
+            trace_logger,
+            [trace_handler],
+            level,
+            propagate=False,
+        )
 
         self._logger = logger
         self._access_logger = access_logger
+        self._trace_logger = trace_logger
         cast(Any, self._flask_app).logger = logger
+
+    @staticmethod
+    def _replace_logger_handlers(
+        logger: logging.Logger,
+        handlers: list[logging.Handler],
+        level: int,
+        *,
+        propagate: bool | None = None,
+    ) -> None:
+        """原子替换 logger handler，避免重载失败时丢失旧输出。"""
+        previous_handlers = list(logger.handlers)
+        logger.handlers.clear()
+        for handler in handlers:
+            logger.addHandler(handler)
+        logger.setLevel(level)
+        if propagate is not None:
+            logger.propagate = propagate
+
+        for handler in previous_handlers:
+            try:
+                handler.close()
+            except Exception:
+                pass
 
     def _setup_request_access_logging(self) -> None:
         """注册请求访问日志钩子，仅记录 IP、URL 与模型。"""
@@ -179,7 +223,10 @@ class Application:
             self._auth_group_manager,
         )
         model_discovery_service = ModelDiscoveryService(self._ctx)
-        settings_service = SettingsService(self._ctx)
+        settings_service = SettingsService(
+            self._ctx,
+            reload_logging_callback=self.reload_logging_settings,
+        )
 
         self._auth_controller = AuthenticationController(self._ctx, auth_service)
         self._user_controller = UserController(self._ctx, user_service, auth_service)
@@ -198,7 +245,12 @@ class Application:
             log_service,
             self._provider_manager,
         )
-        self._web_controller = WebController(self._ctx, log_service, auth_service)
+        self._web_controller = WebController(
+            self._ctx,
+            log_service,
+            settings_service,
+            auth_service,
+        )
 
         self._logger.info('All controllers initialized successfully')
 
@@ -231,3 +283,12 @@ class Application:
         server = WSGIServer((host, port), self._flask_app)
         self._logger.info('Starting LLM Proxy on %s:%s...', host, port)
         server.serve_forever()
+
+    def reload_logging_settings(self) -> None:
+        """按当前配置重新装配日志输出。"""
+        self._setup_logging()
+        self._logger.info(
+            'Logging settings reloaded: path=%s level=%s',
+            self._config_manager.get_log_path(),
+            self._config_manager.get_log_level(),
+        )

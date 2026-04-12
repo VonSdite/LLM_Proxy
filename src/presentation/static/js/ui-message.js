@@ -17,6 +17,11 @@
         ["provider proxy must be a valid absolute url", "代理地址必须是完整 URL"],
         ["websocket upstream currently only supports http/https proxy", "WebSocket 上游当前仅支持 HTTP/HTTPS 代理"],
         ["model_list must be a list or newline-separated string", "模型列表格式无效，请使用数组或按行分隔的文本"],
+        ["server host is required", "请填写监听 IP"],
+        ["server host must be a valid ip address", "监听 IP 格式无效，请填写合法 IP 地址"],
+        ["server port must be an integer", "监听端口必须是整数"],
+        ["server port must be between 1 and 65535", "监听端口必须在 1 到 65535 之间"],
+        ["log path is required", "请填写日志路径"],
     ]);
 
     function normalizeText(value) {
@@ -174,6 +179,9 @@
 
         matched = normalizedMessage.match(/^(https?:\/\/\S+|wss?:\/\/\S+) request failed: (.+)$/i);
         if (matched) return buildTranslatedError(formatRequestFailureMessage(matched[2]), true);
+
+        matched = normalizedMessage.match(/^Log level must be one of:\s*(.+)$/i);
+        if (matched) return buildTranslatedError(`日志级别无效，支持：${matched[1]}`);
 
         return null;
     }

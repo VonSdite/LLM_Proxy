@@ -1,0 +1,622 @@
+{% extends "base_admin.html" %}
+
+{% block page_title %}系统设置{% endblock %}
+{% block page_css %}
+    <script>
+        document.documentElement.classList.add("settings-select-pending");
+    </script>
+    <style>
+        html.settings-select-pending #logLevel {
+            visibility: hidden;
+        }
+    </style>
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260412-7" id="settingsPageStyles">
+    <script>
+        (function () {
+            const root = document.documentElement;
+            const revealSelect = function () {
+                root.classList.remove("settings-select-pending");
+            };
+            const settingsStyleLink = document.getElementById("settingsPageStyles");
+            if (!settingsStyleLink) {
+                revealSelect();
+                return;
+            }
+            if (settingsStyleLink.sheet) {
+                revealSelect();
+                return;
+            }
+            settingsStyleLink.addEventListener("load", revealSelect, { once: true });
+            settingsStyleLink.addEventListener("error", revealSelect, { once: true });
+            window.addEventListener("load", revealSelect, { once: true });
+        })();
+    </script>
+{% endblock %}
+{% block body_class %}settings-page{% endblock %}
+{% block header_title %}系统设置{% endblock %}
+{% block header_subtitle %}集中维护系统运行与管理相关配置{% endblock %}
+
+{% block content %}
+        <section class="settings-section">
+            <form class="settings-form" onsubmit="saveSystemSettings(event)">
+                <div class="section-card settings-shell-card">
+                    <div class="section-header settings-shell-header">
+                        <div>
+                            <h2 class="section-title">配置项</h2>
+                            <p class="section-subtitle">按需维护当前系统的运行、调试与管理配置。</p>
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="saveSettingsBtn">保存设置</button>
+                    </div>
+                    <div class="settings-card-stack">
+                        <section class="settings-subcard">
+                            <div class="section-header">
+                                <div>
+                                    <h3 class="section-title">Server</h3>
+                                </div>
+                            </div>
+                            <div class="settings-grid">
+                                <div class="setting-field">
+                                    <label class="setting-label" for="serverHost">
+                                        <span>监听 IP</span>
+                                        <button
+                                            type="button"
+                                            class="field-help-button"
+                                            data-settings-help-topic="server_host"
+                                            onclick="toggleSettingsHelp('server_host', event)"
+                                            aria-label="查看监听 IP 说明"
+                                        >?</button>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        id="serverHost"
+                                        placeholder="例如 127.0.0.1 或 0.0.0.0"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    >
+                                </div>
+                                <div class="setting-field">
+                                    <label class="setting-label" for="serverPort">
+                                        <span>监听端口</span>
+                                        <button
+                                            type="button"
+                                            class="field-help-button"
+                                            data-settings-help-topic="server_port"
+                                            onclick="toggleSettingsHelp('server_port', event)"
+                                            aria-label="查看监听端口说明"
+                                        >?</button>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        class="form-control"
+                                        id="serverPort"
+                                        min="1"
+                                        max="65535"
+                                        placeholder="例如 8080"
+                                    >
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-subcard">
+                            <div class="section-header">
+                                <div class="section-title-with-help">
+                                    <h3 class="section-title">后台登录</h3>
+                                    <button
+                                        type="button"
+                                        class="field-help-button"
+                                        data-settings-help-topic="admin_auth"
+                                        onclick="toggleSettingsHelp('admin_auth', event)"
+                                        aria-label="查看后台登录说明"
+                                    >?</button>
+                                </div>
+                            </div>
+                            <div class="settings-grid">
+                                <div class="setting-field">
+                                    <label class="setting-label" for="adminUsername">用户名</label>
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        id="adminUsername"
+                                        placeholder="留空则不启用登录"
+                                        autocomplete="username"
+                                        spellcheck="false"
+                                    >
+                                </div>
+                                <div class="setting-field">
+                                    <label class="setting-label" for="adminPassword">密码</label>
+                                    <div class="sensitive-input-shell">
+                                        <input
+                                            type="text"
+                                            class="form-control sensitive-input-control"
+                                            id="adminPassword"
+                                            placeholder="留空则不启用登录"
+                                            autocomplete="current-password"
+                                            spellcheck="false"
+                                        >
+                                        <button
+                                            type="button"
+                                            class="sensitive-input-toggle"
+                                            data-sensitive-toggle-for="adminPassword"
+                                            data-sensitive-label="密码"
+                                            onclick="toggleSensitiveInputVisibility('adminPassword')"
+                                            aria-controls="adminPassword"
+                                            aria-pressed="false"
+                                            aria-label="显示密码"
+                                            title="显示密码"
+                                        >
+                                            <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                                <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                                <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                                            </svg>
+                                            <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                                <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                                <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                                <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                                <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                            <span class="visually-hidden">显示密码</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-subcard">
+                            <div class="section-header">
+                                <div>
+                                    <h3 class="section-title">Debug</h3>
+                                </div>
+                            </div>
+                            <div class="settings-grid settings-grid-debug">
+                                <div class="setting-field setting-field-span-2">
+                                    <label class="setting-label" for="logPath">日志路径</label>
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        id="logPath"
+                                        placeholder="例如 ./logs 或 /var/log/llm-proxy"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    >
+                                </div>
+                                <div class="setting-field">
+                                    <label class="setting-label" for="logLevel">日志级别</label>
+                                    <select class="form-control settings-select" id="logLevel">
+                                        <option value="DEBUG">DEBUG</option>
+                                        <option value="INFO">INFO</option>
+                                        <option value="WARNING">WARNING</option>
+                                        <option value="ERROR">ERROR</option>
+                                        <option value="CRITICAL">CRITICAL</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="setting-toggle-inline">
+                                <div class="setting-toggle-meta">
+                                    <div class="setting-toggle-title-row">
+                                        <span class="setting-toggle-title">LLM Trace</span>
+                                        <button
+                                            type="button"
+                                            class="field-help-button"
+                                            data-settings-help-topic="llm_trace"
+                                            onclick="toggleSettingsHelp('llm_trace', event)"
+                                            aria-label="查看 LLM Trace 说明"
+                                        >?</button>
+                                    </div>
+                                </div>
+                                <label class="switch" aria-label="切换 LLM Trace">
+                                    <input type="checkbox" id="llmRequestDebugEnabled">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </form>
+        </section>
+{% endblock %}
+
+{% block after_container %}
+    <div class="settings-help-popover" id="settingsHelpPopover" data-placement="bottom" hidden>
+        <div class="settings-help-popover-header">
+            <div class="settings-help-popover-title" id="settingsHelpTitle">说明</div>
+            <button type="button" class="settings-help-popover-close" onclick="hideSettingsHelpPopover()" aria-label="关闭说明">×</button>
+        </div>
+        <div class="settings-help-popover-body" id="settingsHelpBody"></div>
+    </div>
+
+    <div class="modal fade" id="serverRestartRequiredModal" tabindex="-1" aria-labelledby="serverRestartRequiredModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <h5 class="modal-title fw-semibold" id="serverRestartRequiredModalLabel">需要重启服务</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    监听 IP 或监听端口已变更，需要重启服务后生效。
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">我知道了</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block page_scripts %}
+    <script src="/static/js/ui-message.js?v=20260319-1"></script>
+    <script>
+        let settingsSaving = false;
+        let currentSettings = null;
+        let activeSettingsHelpTrigger = null;
+        let activeSettingsHelpTopic = null;
+        let serverRestartRequiredModalInstance = null;
+        const settingsSensitiveInputIds = ["adminPassword"];
+        const settingsSensitiveAutoVisibleIds = new Set();
+        const settingsSensitiveRevealTimers = new Map();
+        const settingsSensitiveRevealDelayMs = 500;
+
+        const settingsHelpTopics = {
+            server_host: {
+                title: '监听 IP',
+                html: `
+                    <p>填写服务启动后实际绑定的监听地址，例如 <code>127.0.0.1</code>、<code>0.0.0.0</code>。</p>
+                    <p>保存后会写入配置文件。</p>
+                    <p>如果监听 IP 发生变化，需要重启服务后才会生效。</p>
+                `
+            },
+            server_port: {
+                title: '监听端口',
+                html: `
+                    <p>填写服务启动时绑定的监听端口，范围为 <code>1-65535</code>。</p>
+                    <p>保存后会写入配置文件。</p>
+                    <p>如果监听端口发生变化，需要重启服务后才会生效。</p>
+                `
+            },
+            admin_auth: {
+                title: '后台登录',
+                html: `
+                    <p>用户名和密码都填写时，后台页面与管理接口会启用登录校验。</p>
+                    <p>只要任一项为空，就会关闭登录校验，访问后台页面时不再要求登录。</p>
+                `
+            },
+            llm_trace: {
+                title: 'LLM Trace',
+                html: `
+                    <p>关闭时不记录 LLM Trace。</p>
+                    <p>开启后会把下游请求、转换后的上游请求、上游响应、转换后的下游响应这四个阶段写入 <code>logs/llm_request_trace.log</code>，每个阶段都会记录起始行、Header 和 Payload。</p>
+                `
+            }
+        };
+
+        function clearSensitiveInputAutoReveal(inputId) {
+            const timerId = settingsSensitiveRevealTimers.get(inputId);
+            if (timerId) {
+                window.clearTimeout(timerId);
+                settingsSensitiveRevealTimers.delete(inputId);
+            }
+            settingsSensitiveAutoVisibleIds.delete(inputId);
+        }
+
+        function syncSensitiveInputToggle(inputId) {
+            const input = document.getElementById(inputId);
+            const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+            if (!input || !toggleButton) {
+                return;
+            }
+            const hasValue = input.value.trim() !== "";
+            if (!hasValue && !settingsSensitiveAutoVisibleIds.has(inputId)) {
+                clearSensitiveInputAutoReveal(inputId);
+                toggleButton.dataset.sensitiveManualVisible = "false";
+            }
+            const isManualVisible = toggleButton.dataset.sensitiveManualVisible === "true";
+            const isVisible = isManualVisible || settingsSensitiveAutoVisibleIds.has(inputId);
+            input.classList.toggle("is-masked", hasValue && !isVisible);
+            toggleButton.hidden = !hasValue;
+            toggleButton.classList.toggle("is-visible", isManualVisible);
+            const label = toggleButton.dataset.sensitiveLabel || "内容";
+            const actionText = isManualVisible ? "隐藏" : "显示";
+            toggleButton.setAttribute("aria-pressed", isManualVisible ? "true" : "false");
+            toggleButton.setAttribute("aria-label", `${actionText}${label}`);
+            toggleButton.title = `${actionText}${label}`;
+            const hiddenText = toggleButton.querySelector(".visually-hidden");
+            if (hiddenText) {
+                hiddenText.textContent = `${actionText}${label}`;
+            }
+        }
+
+        function setSensitiveInputVisibility(inputId, visible) {
+            const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+            if (!toggleButton) {
+                return;
+            }
+            clearSensitiveInputAutoReveal(inputId);
+            toggleButton.dataset.sensitiveManualVisible = visible ? "true" : "false";
+            syncSensitiveInputToggle(inputId);
+        }
+
+        function temporarilyRevealSensitiveInput(inputId) {
+            const input = document.getElementById(inputId);
+            const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+            if (!input || !toggleButton) {
+                return;
+            }
+            if (toggleButton.dataset.sensitiveManualVisible === "true" || input.value.trim() === "") {
+                syncSensitiveInputToggle(inputId);
+                return;
+            }
+            clearSensitiveInputAutoReveal(inputId);
+            settingsSensitiveAutoVisibleIds.add(inputId);
+            syncSensitiveInputToggle(inputId);
+            const timerId = window.setTimeout(() => {
+                settingsSensitiveRevealTimers.delete(inputId);
+                settingsSensitiveAutoVisibleIds.delete(inputId);
+                syncSensitiveInputToggle(inputId);
+            }, settingsSensitiveRevealDelayMs);
+            settingsSensitiveRevealTimers.set(inputId, timerId);
+        }
+
+        function toggleSensitiveInputVisibility(inputId) {
+            const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+            const input = document.getElementById(inputId);
+            if (!toggleButton || !input) {
+                return;
+            }
+            const isManualVisible = toggleButton.dataset.sensitiveManualVisible === "true";
+            setSensitiveInputVisibility(inputId, !isManualVisible);
+            input.focus({ preventScroll: true });
+        }
+
+        function resetSensitiveInputs() {
+            settingsSensitiveInputIds.forEach(inputId => {
+                const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
+                if (toggleButton) {
+                    toggleButton.dataset.sensitiveManualVisible = "false";
+                }
+                clearSensitiveInputAutoReveal(inputId);
+                syncSensitiveInputToggle(inputId);
+            });
+        }
+
+        function fillSettingsForm(settings) {
+            currentSettings = settings;
+            document.getElementById("serverHost").value = settings?.server?.host || "";
+            document.getElementById("serverPort").value = settings?.server?.port || "";
+            document.getElementById("adminUsername").value = settings?.admin?.username || "";
+            document.getElementById("adminPassword").value = settings?.admin?.password || "";
+            document.getElementById("logPath").value = settings?.logging?.path || "";
+            document.getElementById("logLevel").value = settings?.logging?.level || "INFO";
+            document.getElementById("llmRequestDebugEnabled").checked = Boolean(settings?.logging?.llm_request_debug_enabled);
+            resetSensitiveInputs();
+        }
+
+        function collectSystemSettingsPayload() {
+            return {
+                server: {
+                    host: document.getElementById("serverHost").value.trim(),
+                    port: document.getElementById("serverPort").value.trim()
+                },
+                admin: {
+                    username: document.getElementById("adminUsername").value.trim(),
+                    password: document.getElementById("adminPassword").value
+                },
+                logging: {
+                    path: document.getElementById("logPath").value.trim(),
+                    level: document.getElementById("logLevel").value,
+                    llm_request_debug_enabled: document.getElementById("llmRequestDebugEnabled").checked
+                }
+            };
+        }
+
+        async function loadSystemSettings() {
+            try {
+                const response = await fetch("/api/settings/system");
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.error || "加载系统设置失败");
+                }
+                fillSettingsForm(data);
+            } catch (error) {
+                showActionError("加载系统设置", error);
+            }
+        }
+
+        function getServerRestartRequiredModalInstance() {
+            const modalElement = document.getElementById("serverRestartRequiredModal");
+            if (!modalElement || !window.bootstrap || !window.bootstrap.Modal) {
+                return null;
+            }
+            if (!serverRestartRequiredModalInstance) {
+                serverRestartRequiredModalInstance = window.bootstrap.Modal.getOrCreateInstance(modalElement);
+            }
+            return serverRestartRequiredModalInstance;
+        }
+
+        function showServerRestartRequiredDialog() {
+            const modalElement = document.getElementById("serverRestartRequiredModal");
+            const modalInstance = getServerRestartRequiredModalInstance();
+            if (!modalElement || !modalInstance) {
+                window.alert("监听 IP 或监听端口已变更，需要重启服务后生效。");
+                return Promise.resolve();
+            }
+
+            return new Promise(resolve => {
+                const handleHidden = function () {
+                    modalElement.removeEventListener("hidden.bs.modal", handleHidden);
+                    resolve();
+                };
+                modalElement.addEventListener("hidden.bs.modal", handleHidden, { once: true });
+                modalInstance.show();
+            });
+        }
+
+        async function saveSystemSettings(event) {
+            event.preventDefault();
+            if (settingsSaving) {
+                return;
+            }
+
+            settingsSaving = true;
+            const saveButton = document.getElementById("saveSettingsBtn");
+            if (saveButton) {
+                saveButton.disabled = true;
+                saveButton.textContent = "保存中...";
+            }
+
+            try {
+                const response = await fetch("/api/settings/system", {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(collectSystemSettingsPayload())
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        window.location.href = "/login";
+                        return;
+                    }
+                    throw new Error(data?.error || "保存系统设置失败");
+                }
+
+                fillSettingsForm(data.settings);
+
+                const messages = ["系统设置已保存"];
+                if (data.auth_config_changed) {
+                    messages.push(data.settings?.auth_enabled ? "管理员配置已更新，请重新登录" : "管理员登录已关闭，后续访问无需登录");
+                }
+                showMessage(messages.join("；"), "success", { dismissMs: 4200 });
+                if (data.server_restart_required) {
+                    await showServerRestartRequiredDialog();
+                }
+
+                if (data.auth_config_changed) {
+                    window.setTimeout(function () {
+                        if (data.settings?.auth_enabled) {
+                            window.location.href = "/login";
+                            return;
+                        }
+                        window.location.reload();
+                    }, 900);
+                }
+            } catch (error) {
+                showActionError("保存系统设置", error);
+            } finally {
+                settingsSaving = false;
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.textContent = "保存设置";
+                }
+            }
+        }
+
+        function hideSettingsHelpPopover() {
+            const popover = document.getElementById("settingsHelpPopover");
+            if (popover) {
+                popover.hidden = true;
+            }
+            activeSettingsHelpTrigger = null;
+            activeSettingsHelpTopic = null;
+        }
+
+        function positionSettingsHelpPopover(trigger, popover) {
+            if (!trigger || !popover) {
+                return;
+            }
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const scrollY = window.scrollY || window.pageYOffset;
+            const scrollX = window.scrollX || window.pageXOffset;
+
+            popover.hidden = false;
+            popover.style.visibility = "hidden";
+            popover.style.left = "0";
+            popover.style.top = "0";
+
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 14;
+            const centeredLeft = triggerRect.left + scrollX + (triggerRect.width / 2) - (popoverRect.width / 2);
+            const maxLeft = scrollX + window.innerWidth - popoverRect.width - viewportPadding;
+            const minLeft = scrollX + viewportPadding;
+            const left = Math.max(minLeft, Math.min(centeredLeft, maxLeft));
+
+            let top = triggerRect.bottom + scrollY + 12;
+            let placement = "bottom";
+
+            if (top + popoverRect.height > scrollY + window.innerHeight - viewportPadding) {
+                top = triggerRect.top + scrollY - popoverRect.height - 12;
+                placement = "top";
+            }
+
+            popover.dataset.placement = placement;
+            popover.style.left = `${left}px`;
+            popover.style.top = `${Math.max(scrollY + viewportPadding, top)}px`;
+            popover.style.visibility = "visible";
+        }
+
+        function toggleSettingsHelp(topic, event) {
+            const normalizedTopic = String(topic || "");
+            const trigger = event?.currentTarget || document.querySelector(`[data-settings-help-topic="${normalizedTopic}"]`);
+            const popover = document.getElementById("settingsHelpPopover");
+            const helpTopic = settingsHelpTopics[normalizedTopic];
+            if (!trigger || !popover || !helpTopic) {
+                return;
+            }
+
+            if (!popover.hidden && activeSettingsHelpTrigger === trigger && activeSettingsHelpTopic === normalizedTopic) {
+                hideSettingsHelpPopover();
+                return;
+            }
+
+            document.getElementById("settingsHelpTitle").textContent = helpTopic.title;
+            document.getElementById("settingsHelpBody").innerHTML = helpTopic.html;
+            activeSettingsHelpTrigger = trigger;
+            activeSettingsHelpTopic = normalizedTopic;
+            positionSettingsHelpPopover(trigger, popover);
+        }
+
+        document.addEventListener("click", function (event) {
+            if (!event.target.closest("[data-settings-help-topic]") && !event.target.closest("#settingsHelpPopover")) {
+                hideSettingsHelpPopover();
+            }
+        });
+
+        window.addEventListener("resize", function () {
+            if (activeSettingsHelpTrigger) {
+                positionSettingsHelpPopover(activeSettingsHelpTrigger, document.getElementById("settingsHelpPopover"));
+            }
+        });
+
+        window.addEventListener("scroll", function () {
+            if (activeSettingsHelpTrigger) {
+                positionSettingsHelpPopover(activeSettingsHelpTrigger, document.getElementById("settingsHelpPopover"));
+            }
+        }, true);
+
+        document.addEventListener("DOMContentLoaded", loadSystemSettings);
+        document.addEventListener("DOMContentLoaded", function () {
+            initThemeToggle();
+            resetSensitiveInputs();
+            settingsSensitiveInputIds.forEach(inputId => {
+                const input = document.getElementById(inputId);
+                if (!input) {
+                    return;
+                }
+                input.addEventListener("input", function () {
+                    temporarilyRevealSensitiveInput(inputId);
+                });
+                input.addEventListener("focus", function () {
+                    temporarilyRevealSensitiveInput(inputId);
+                });
+                input.addEventListener("blur", function () {
+                    if (document.activeElement?.closest(`[data-sensitive-toggle-for="${inputId}"]`)) {
+                        return;
+                    }
+                    clearSensitiveInputAutoReveal(inputId);
+                    syncSensitiveInputToggle(inputId);
+                });
+            });
+        });
+    </script>
+{% endblock %}

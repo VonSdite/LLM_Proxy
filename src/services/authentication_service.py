@@ -75,6 +75,12 @@ class AuthenticationService:
         if session:
             self._logger.info(f"Destroyed session for user={session['username']!r}")
 
+    def clear_sessions(self) -> None:
+        """清空全部会话。"""
+        cleared_count = len(self._sessions)
+        self._sessions.clear()
+        self._logger.info("Cleared all sessions: count=%s", cleared_count)
+
     def get_session_username(self, session_token: Optional[str]) -> Optional[str]:
         """根据 session token 获取当前登录用户名。"""
         if not session_token:

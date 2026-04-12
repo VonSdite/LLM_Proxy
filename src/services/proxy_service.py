@@ -5,8 +5,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
+from http import HTTPStatus
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 import websocket
@@ -44,11 +47,68 @@ class ProxyService:
     """处理上游 LLM 代理请求。"""
 
     def __init__(self, ctx: AppContext, auth_group_manager: Optional[AuthGroupManager] = None):
+        self._config_manager = ctx.config_manager
         self._logger = ctx.logger
+        self._trace_logger = logging.getLogger("llm_request_trace")
         self._root_path = ctx.root_path
         self._auth_group_manager = auth_group_manager
         self._executor_registry = build_default_executor_registry(self._logger)
         self._translator_registry = build_default_translator_registry()
+
+    def log_downstream_request_trace(
+        self,
+        *,
+        trace_id: Optional[str],
+        start_line: str,
+        headers: Dict[str, Any],
+        payload: Any,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        request_model: Optional[str] = None,
+        target_format: Optional[str] = None,
+    ) -> None:
+        self._log_trace_entry(
+            stage="downstream_request",
+            trace_id=trace_id,
+            start_line=start_line,
+            headers=headers,
+            payload=payload,
+            route_name=route_name,
+            client_ip=client_ip,
+            provider_name=provider_name,
+            request_model=request_model,
+            target_format=target_format,
+        )
+
+    def log_downstream_response_trace(
+        self,
+        *,
+        trace_id: Optional[str],
+        status_code: int,
+        headers: Dict[str, Any],
+        payload: Any,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        request_model: Optional[str] = None,
+        target_format: Optional[str] = None,
+        error_type: Optional[str] = None,
+    ) -> None:
+        self._log_trace_entry(
+            stage="downstream_response",
+            trace_id=trace_id,
+            start_line=self._build_response_start_line(status_code),
+            headers=headers,
+            payload=payload,
+            route_name=route_name,
+            client_ip=client_ip,
+            provider_name=provider_name,
+            request_model=request_model,
+            target_format=target_format,
+            status_code=status_code,
+            error_type=error_type,
+        )
 
     def proxy_request(
         self,
@@ -58,6 +118,9 @@ class ProxyService:
         on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
         forward_stream_usage: bool = False,
         resolved_target_format: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
     ) -> Tuple[Optional[Response], int, Optional[ProxyErrorInfo]]:
         """代理请求到目标 provider，并处理重试、格式转换与 guard。"""
         target_url = provider.api
@@ -166,6 +229,24 @@ class ProxyService:
                     request_ctx.auth_group_name or "<none>",
                     request_ctx.auth_entry_id or "<none>",
                 )
+                self._log_trace_entry(
+                    stage="upstream_request",
+                    trace_id=trace_id,
+                    start_line=self._build_upstream_request_start_line(
+                        provider.transport,
+                        target_url,
+                    ),
+                    headers=headers,
+                    payload=translated_body,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                    provider_name=provider.name,
+                    request_model=requested_model,
+                    upstream_model=str(translated_body.get("model") or upstream_model),
+                    target_format=downstream_target_format,
+                    stream=requested_stream,
+                    attempt=attempt + 1,
+                )
                 if self._auth_group_manager is not None:
                     self._auth_group_manager.mark_request_dispatched(selected_auth)
 
@@ -190,6 +271,11 @@ class ProxyService:
                         provider,
                         opened,
                         downstream_target_format,
+                        trace_id=trace_id,
+                        route_name=route_name,
+                        client_ip=client_ip,
+                        request_model=requested_model,
+                        upstream_model=upstream_model,
                     )
                     finalize_attempt(
                         status_code=opened.status_code,
@@ -222,6 +308,11 @@ class ProxyService:
                         provider,
                         opened,
                         downstream_target_format,
+                        trace_id=trace_id,
+                        route_name=route_name,
+                        client_ip=client_ip,
+                        request_model=requested_model,
+                        upstream_model=upstream_model,
                     )
                     finalize_attempt(
                         status_code=opened.status_code,
@@ -242,6 +333,9 @@ class ProxyService:
                         on_complete=on_complete,
                         forward_stream_usage=forward_stream_usage,
                         finalize_attempt=finalize_attempt,
+                        trace_id=trace_id,
+                        route_name=route_name,
+                        client_ip=client_ip,
                     )
                 else:
                     response = self._build_nonstream_response(
@@ -254,6 +348,9 @@ class ProxyService:
                         opened=opened,
                         on_complete=on_complete,
                         finalize_attempt=finalize_attempt,
+                        trace_id=trace_id,
+                        route_name=route_name,
+                        client_ip=client_ip,
                     )
 
                 self._logger.info(
@@ -341,11 +438,20 @@ class ProxyService:
         on_complete: Optional[Callable[[Dict[str, Any]], None]],
         forward_stream_usage: bool,
         finalize_attempt: Optional[Callable[..., None]] = None,
+        trace_id: Optional[str] = None,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
     ) -> Response:
         response = opened.response
         meta = self._create_empty_meta()
         completed = False
         terminal_sent = False
+        raw_response_headers = dict(getattr(response, "headers", {}) or {})
+        upstream_payload_buffer = bytearray()
+        downstream_payload_buffer = bytearray()
+        downstream_headers = self._filter_response_headers(getattr(response, "headers", {}))
+        downstream_headers["Content-Type"] = "text/event-stream; charset=utf-8"
+        downstream_headers["Cache-Control"] = "no-cache"
 
         def safe_on_complete(
             *,
@@ -375,7 +481,10 @@ class ProxyService:
             completion_error_type: Optional[HookErrorType] = None
             completion_error_message: Optional[str] = None
             try:
-                upstream_chunks = response.iter_content(chunk_size=None)
+                upstream_chunks = self._iter_stream_chunks_with_trace(
+                    response.iter_content(chunk_size=None),
+                    upstream_payload_buffer,
+                )
                 for event in decode_stream_events(upstream_chunks, opened.stream_format):
                     downstream_chunks = translator.translate_stream_event(
                         self._get_upstream_model_name(provider.name, request_ctx.request_model),
@@ -393,6 +502,7 @@ class ProxyService:
                         if guarded_chunk.kind == "done":
                             encoded_terminal = encode_downstream_chunk(guarded_chunk, downstream_target_format)
                             if encoded_terminal:
+                                downstream_payload_buffer.extend(encoded_terminal)
                                 yield encoded_terminal
                             continue
                         if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
@@ -406,6 +516,7 @@ class ProxyService:
                             continue
                         encoded_chunk = encode_downstream_chunk(guarded_chunk, downstream_target_format)
                         if encoded_chunk:
+                            downstream_payload_buffer.extend(encoded_chunk)
                             yield encoded_chunk
 
                 if should_emit_terminal_chunk(downstream_target_format) and not terminal_sent:
@@ -414,6 +525,7 @@ class ProxyService:
                         downstream_target_format,
                     )
                     if encoded_terminal:
+                        downstream_payload_buffer.extend(encoded_terminal)
                         yield encoded_terminal
             except requests.exceptions.RequestException as exc:
                 completion_error_type = self._classify_request_error(exc)
@@ -434,18 +546,66 @@ class ProxyService:
                 try:
                     response.close()
                 finally:
+                    self._log_trace_entry(
+                        stage="upstream_response",
+                        trace_id=trace_id,
+                        start_line=self._build_response_start_line(
+                            opened.status_code,
+                            getattr(response, "reason", None),
+                        ),
+                        headers=raw_response_headers,
+                        payload=bytes(upstream_payload_buffer),
+                        route_name=route_name,
+                        client_ip=client_ip,
+                        provider_name=provider.name,
+                        request_model=request_ctx.request_model,
+                        upstream_model=self._get_upstream_model_name(
+                            provider.name,
+                            request_ctx.request_model,
+                        ),
+                        target_format=downstream_target_format,
+                        status_code=opened.status_code,
+                        stream=True,
+                        completed=completion_error_type is None,
+                        error_type=(
+                            completion_error_type.value
+                            if completion_error_type is not None
+                            else None
+                        ),
+                    )
+                    self._log_trace_entry(
+                        stage="downstream_response",
+                        trace_id=trace_id,
+                        start_line=self._build_response_start_line(opened.status_code),
+                        headers=downstream_headers,
+                        payload=bytes(downstream_payload_buffer),
+                        route_name=route_name,
+                        client_ip=client_ip,
+                        provider_name=provider.name,
+                        request_model=request_ctx.request_model,
+                        upstream_model=self._get_upstream_model_name(
+                            provider.name,
+                            request_ctx.request_model,
+                        ),
+                        target_format=downstream_target_format,
+                        status_code=opened.status_code,
+                        stream=True,
+                        completed=completion_error_type is None,
+                        error_type=(
+                            completion_error_type.value
+                            if completion_error_type is not None
+                            else None
+                        ),
+                    )
                     safe_on_complete(
                         error_type=completion_error_type,
                         error_message=completion_error_message,
                     )
 
-        headers = self._filter_response_headers(getattr(response, "headers", {}))
-        headers["Content-Type"] = "text/event-stream; charset=utf-8"
-        headers["Cache-Control"] = "no-cache"
         return Response(
             stream_with_context(generate()),
             status=opened.status_code,
-            headers=headers,
+            headers=downstream_headers,
         )
 
     def _build_nonstream_response(
@@ -460,10 +620,35 @@ class ProxyService:
         opened: OpenedUpstreamResponse,
         on_complete: Optional[Callable[[Dict[str, Any]], None]],
         finalize_attempt: Optional[Callable[..., None]] = None,
+        trace_id: Optional[str] = None,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
     ) -> Response:
         response = opened.response
         try:
             raw_body = self._read_response_body(response)
+            raw_response_headers = dict(getattr(response, "headers", {}) or {})
+            self._log_trace_entry(
+                stage="upstream_response",
+                trace_id=trace_id,
+                start_line=self._build_response_start_line(
+                    opened.status_code,
+                    getattr(response, "reason", None),
+                ),
+                headers=raw_response_headers,
+                payload=raw_body,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider.name,
+                request_model=request_ctx.request_model,
+                upstream_model=self._get_upstream_model_name(
+                    provider.name,
+                    request_ctx.request_model,
+                ),
+                target_format=downstream_target_format,
+                status_code=opened.status_code,
+                stream=False,
+            )
             parsed_body = self._parse_json_bytes(raw_body)
             translated_payload = translator.translate_nonstream_response(
                 self._get_upstream_model_name(provider.name, request_ctx.request_model),
@@ -488,6 +673,24 @@ class ProxyService:
             response_body = encode_downstream_response_body(body_to_send, downstream_target_format)
             headers = self._filter_response_headers(getattr(response, "headers", {}))
             headers["Content-Type"] = self._resolve_nonstream_content_type(body_to_send, opened.content_type)
+            self._log_trace_entry(
+                stage="downstream_response",
+                trace_id=trace_id,
+                start_line=self._build_response_start_line(opened.status_code),
+                headers=headers,
+                payload=response_body,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider.name,
+                request_model=request_ctx.request_model,
+                upstream_model=self._get_upstream_model_name(
+                    provider.name,
+                    request_ctx.request_model,
+                ),
+                target_format=downstream_target_format,
+                status_code=opened.status_code,
+                stream=False,
+            )
             return Response(
                 response_body,
                 status=opened.status_code,
@@ -501,6 +704,11 @@ class ProxyService:
         provider: LLMProvider,
         opened: OpenedUpstreamResponse,
         target_format: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        request_model: Optional[str] = None,
+        upstream_model: Optional[str] = None,
     ) -> tuple[bytes, Dict[str, str], Optional[str]]:
         response = opened.response
         try:
@@ -519,6 +727,25 @@ class ProxyService:
             headers = self._filter_response_headers(getattr(response, "headers", {}))
             if opened.content_type:
                 headers["Content-Type"] = opened.content_type
+            self._log_trace_entry(
+                stage="upstream_response",
+                trace_id=trace_id,
+                start_line=self._build_response_start_line(
+                    opened.status_code,
+                    getattr(response, "reason", None),
+                ),
+                headers=dict(getattr(response, "headers", {}) or {}),
+                payload=body,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider.name,
+                request_model=request_model,
+                upstream_model=upstream_model,
+                target_format=self._resolve_downstream_target_format(provider, target_format),
+                status_code=opened.status_code,
+                stream=opened.is_stream,
+                error_summary=summary,
+            )
             return body, headers, summary
         finally:
             response.close()
@@ -528,8 +755,38 @@ class ProxyService:
         provider: LLMProvider,
         opened: OpenedUpstreamResponse,
         target_format: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        request_model: Optional[str] = None,
+        upstream_model: Optional[str] = None,
     ) -> tuple[Response, Optional[str]]:
-        body, headers, summary = self._consume_upstream_error(provider, opened, target_format)
+        body, headers, summary = self._consume_upstream_error(
+            provider,
+            opened,
+            target_format,
+            trace_id=trace_id,
+            route_name=route_name,
+            client_ip=client_ip,
+            request_model=request_model,
+            upstream_model=upstream_model,
+        )
+        self._log_trace_entry(
+            stage="downstream_response",
+            trace_id=trace_id,
+            start_line=self._build_response_start_line(opened.status_code),
+            headers=headers,
+            payload=body,
+            route_name=route_name,
+            client_ip=client_ip,
+            provider_name=provider.name,
+            request_model=request_model,
+            upstream_model=upstream_model,
+            target_format=self._resolve_downstream_target_format(provider, target_format),
+            status_code=opened.status_code,
+            stream=opened.is_stream,
+            error_summary=summary,
+        )
         return Response(body, status=opened.status_code, headers=headers), summary
 
     def _guard_stream_chunk(
@@ -832,6 +1089,17 @@ class ProxyService:
         return HookErrorType.TRANSPORT_ERROR
 
     @staticmethod
+    def _iter_stream_chunks_with_trace(
+        upstream_chunks: Iterator[bytes],
+        payload_buffer: bytearray,
+    ) -> Iterator[bytes]:
+        for chunk in upstream_chunks:
+            if not chunk:
+                continue
+            payload_buffer.extend(ProxyService._coerce_trace_bytes(chunk))
+            yield chunk
+
+    @staticmethod
     def _filter_response_headers(headers: Any) -> Dict[str, str]:
         excluded = {
             "transfer-encoding",
@@ -847,3 +1115,134 @@ class ProxyService:
             "content-encoding",
         }
         return {key: value for key, value in headers.items() if key.lower() not in excluded}
+
+    def _log_trace_entry(
+        self,
+        *,
+        stage: str,
+        trace_id: Optional[str],
+        start_line: str,
+        headers: Dict[str, Any],
+        payload: Any,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        request_model: Optional[str] = None,
+        upstream_model: Optional[str] = None,
+        target_format: Optional[str] = None,
+        status_code: Optional[int] = None,
+        stream: Optional[bool] = None,
+        attempt: Optional[int] = None,
+        completed: Optional[bool] = None,
+        error_type: Optional[str] = None,
+        error_summary: Optional[str] = None,
+    ) -> None:
+        if not trace_id or not self._config_manager.is_llm_request_debug_enabled():
+            return
+
+        record = {
+            "trace_id": trace_id,
+            "stage": stage,
+            "start_line": start_line,
+            "headers": self._normalize_trace_headers(headers),
+            "payload": self._normalize_trace_payload(payload),
+        }
+        if route_name:
+            record["route_name"] = route_name
+        if client_ip:
+            record["client_ip"] = client_ip
+        if provider_name:
+            record["provider_name"] = provider_name
+        if request_model:
+            record["request_model"] = request_model
+        if upstream_model:
+            record["upstream_model"] = upstream_model
+        if target_format:
+            record["target_format"] = target_format
+        if status_code is not None:
+            record["status_code"] = status_code
+        if stream is not None:
+            record["stream"] = stream
+        if attempt is not None:
+            record["attempt"] = attempt
+        if completed is not None:
+            record["completed"] = completed
+        if error_type:
+            record["error_type"] = error_type
+        if error_summary:
+            record["error_summary"] = error_summary
+
+        self._trace_logger.info(json.dumps(record, ensure_ascii=False, default=str))
+
+    @staticmethod
+    def _normalize_trace_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = {}
+        for key, value in dict(headers or {}).items():
+            normalized[str(key)] = ProxyService._normalize_trace_scalar(value)
+        return normalized
+
+    @classmethod
+    def _normalize_trace_payload(cls, payload: Any) -> Any:
+        if isinstance(payload, dict):
+            return {
+                str(key): cls._normalize_trace_payload(value)
+                for key, value in payload.items()
+            }
+        if isinstance(payload, (list, tuple)):
+            return [cls._normalize_trace_payload(item) for item in payload]
+        if isinstance(payload, bytes):
+            return cls._decode_trace_body(payload)
+        if isinstance(payload, str):
+            return cls._decode_trace_body(payload.encode("utf-8"))
+        return cls._normalize_trace_scalar(payload)
+
+    @staticmethod
+    def _normalize_trace_scalar(value: Any) -> Any:
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return str(value)
+
+    @staticmethod
+    def _decode_trace_body(payload: bytes) -> Any:
+        text = payload.decode("utf-8", errors="replace")
+        stripped = text.strip()
+        if not stripped:
+            return text
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return text
+
+    @staticmethod
+    def _coerce_trace_bytes(payload: Any) -> bytes:
+        if isinstance(payload, bytes):
+            return payload
+        if payload is None:
+            return b""
+        return str(payload).encode("utf-8", errors="replace")
+
+    @staticmethod
+    def _build_response_start_line(status_code: int, reason: Optional[str] = None) -> str:
+        reason_phrase = str(reason or "").strip()
+        if not reason_phrase:
+            try:
+                reason_phrase = HTTPStatus(int(status_code)).phrase
+            except ValueError:
+                reason_phrase = ""
+        if reason_phrase:
+            return f"HTTP/1.1 {status_code} {reason_phrase}"
+        return f"HTTP/1.1 {status_code}"
+
+    @staticmethod
+    def _build_upstream_request_start_line(transport: str, target_url: str) -> str:
+        normalized_transport = str(transport or "").strip().lower()
+        if normalized_transport == "websocket":
+            parsed = urlparse(str(target_url or "").strip())
+            if parsed.scheme.lower() == "http":
+                parsed = parsed._replace(scheme="ws")
+            elif parsed.scheme.lower() == "https":
+                parsed = parsed._replace(scheme="wss")
+            return f"CONNECT {parsed.geturl()} HTTP/1.1"
+        return f"POST {target_url} HTTP/1.1"

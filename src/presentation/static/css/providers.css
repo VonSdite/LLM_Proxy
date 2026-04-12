@@ -223,6 +223,30 @@
     font-size: 14px;
 }
 
+.providers-page .provider-list-table {
+    table-layout: fixed;
+}
+
+.providers-page .provider-list-table col.provider-select-col {
+    width: 40px;
+}
+
+.providers-page .provider-list-table col.provider-name-col {
+    width: 132px;
+}
+
+.providers-page .provider-list-table col.provider-api-col {
+    width: 35%;
+}
+
+.providers-page .provider-list-table col.provider-order-col {
+    width: 76px;
+}
+
+.providers-page .provider-list-table col.provider-actions-col {
+    width: 180px;
+}
+
 .providers-page .providers-table th,
 .providers-page .providers-table td {
     border-bottom: 1px solid var(--line);
@@ -363,8 +387,8 @@
 
 .providers-page .providers-table th.provider-select-column,
 .providers-page .providers-table td.provider-select-cell {
-    width: 48px;
-    min-width: 48px;
+    width: 40px;
+    min-width: 40px;
     text-align: center;
     vertical-align: middle;
 }
@@ -525,6 +549,7 @@
 }
 
 .providers-page .provider-name-text {
+    display: block;
     font-weight: 700;
 }
 
@@ -537,6 +562,22 @@
 
 .providers-page .providers-table td.provider-model-cell {
     vertical-align: middle;
+}
+
+.providers-page .provider-list-table td.provider-name-cell,
+.providers-page .provider-list-table td.provider-api-cell,
+.providers-page .provider-list-table td.provider-model-cell {
+    overflow: hidden;
+}
+
+.providers-page .provider-list-table .provider-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.providers-page .provider-list-table td.provider-api-cell {
+    width: auto;
+    max-width: none;
 }
 
 .providers-page .entry-editor-header {
@@ -994,6 +1035,11 @@
     width: 1%;
     white-space: nowrap;
     vertical-align: middle;
+}
+
+.providers-page .provider-list-table td.provider-actions-cell,
+.providers-page .provider-list-table th:last-child {
+    width: 180px;
 }
 
 .providers-page .btn-edit {
@@ -1576,6 +1622,10 @@
 
 .providers-page .sensitive-input-control {
     padding-right: 52px;
+}
+
+.providers-page .sensitive-input-control.is-masked {
+    -webkit-text-security: disc;
 }
 
 .providers-page .sensitive-input-toggle {
