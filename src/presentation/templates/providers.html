@@ -170,9 +170,10 @@
                             <label class="form-label">Legacy API Key</label>
                             <div class="sensitive-input-shell">
                                 <input
-                                    type="text"
+                                    type="password"
                                     class="form-control sensitive-input-control"
                                     id="providerApiKey"
+                                    data-sensitive-masked-type="password"
                                     placeholder="留空则不写入配置"
                                     autocomplete="new-password"
                                     spellcheck="false"
@@ -2399,7 +2400,28 @@
             }
             const isManualVisible = toggleButton.dataset.sensitiveManualVisible === 'true';
             const isVisible = isManualVisible || providerSensitiveAutoVisibleIds.has(inputId);
-            input.classList.toggle('is-masked', hasValue && !isVisible);
+            const maskedType = String(input.dataset.sensitiveMaskedType || '').trim().toLowerCase();
+            const visibleType = String(input.dataset.sensitiveVisibleType || 'text').trim().toLowerCase() || 'text';
+            const shouldToggleInputType = maskedType !== '' && maskedType !== visibleType;
+            if (shouldToggleInputType) {
+                const nextType = isVisible ? visibleType : maskedType;
+                if (input.type !== nextType) {
+                    const selectionStart = typeof input.selectionStart === 'number' ? input.selectionStart : null;
+                    const selectionEnd = typeof input.selectionEnd === 'number' ? input.selectionEnd : null;
+                    const hadFocus = document.activeElement === input;
+                    input.type = nextType;
+                    if (hadFocus && selectionStart !== null && selectionEnd !== null) {
+                        try {
+                            input.setSelectionRange(selectionStart, selectionEnd);
+                        } catch (error) {
+                            void error;
+                        }
+                    }
+                }
+                input.classList.remove('is-masked');
+            } else {
+                input.classList.toggle('is-masked', hasValue && !isVisible);
+            }
             toggleButton.hidden = !hasValue;
             toggleButton.classList.toggle('is-visible', isManualVisible);
             const label = toggleButton.dataset.sensitiveLabel || '内容';
