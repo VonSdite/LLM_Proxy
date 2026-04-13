@@ -271,7 +271,16 @@
                                     <button type="button" class="btn btn-secondary btn-field-secondary" id="deleteSelectedModelTestsBtn" onclick="deleteSelectedModelTestRows()">删除</button>
                                 </div>
                                 <div class="model-test-toolbar-side" id="modelTestAuthEntryShell" hidden>
-                                    <label class="form-label">Auth Entry</label>
+                                    <div class="model-test-auth-entry-label-group">
+                                        <label class="form-label">Auth Entry</label>
+                                        <button
+                                            type="button"
+                                            class="field-help-button field-help-button-inline"
+                                            data-provider-help-topic="model_test_auth_entry"
+                                            onclick="toggleProviderHelp('model_test_auth_entry', event)"
+                                            aria-label="查看 Auth Entry 测试说明"
+                                        >?</button>
+                                    </div>
                                     <select class="form-control" id="modelTestAuthEntry"></select>
                                 </div>
                                 <div class="model-test-toolbar-actions">
@@ -289,7 +298,6 @@
                                 </div>
                             </div>
                             <div class="model-test-summary" id="modelTestSummary">共 0 行，已选 0 行</div>
-                            <div class="model-test-auth-hint" id="modelTestAuthHint" hidden></div>
                             <div class="providers-table-shell model-test-table-shell" id="modelTestTableContainer">
                                 <div class="empty-state">正在加载模型表格...</div>
                             </div>
@@ -698,8 +706,20 @@
                     </ul>
                     <p><strong>WebSocket</strong> 地址会先把 <code>ws://</code> / <code>wss://</code> 转成对应的 <code>http://</code> / <code>https://</code> 再请求。</p>
                     <p><strong>Legacy API Key 模式</strong> 会自动带上当前表单里的 Bearer Token。</p>
-                    <p><strong>Auth Group 模式</strong> 会使用所选 Auth Group 的第一个 entry，并把该 entry 里的 headers 原样带去请求上游模型接口。</p>
+                    <p><strong>Auth Group 模式</strong> 必须显式选择一个 <code>Auth Entry</code>，并把这条 entry 的 headers 原样带去请求上游模型接口。</p>
                     <p>这一步只是帮你发现可选模型，不会修改上游协议，也不会自动替你决定 <code>source_format</code> 或 <code>target_formats</code>。</p>
+                `,
+            },
+            model_test_auth_entry: {
+                title: 'Auth Entry 说明',
+                html: `
+                    <p>这里的 <code>Auth Entry</code> 只在 <code>Auth Group</code> 模式下出现。</p>
+                    <ul>
+                        <li><strong>未选 Auth Group</strong>：当前 Provider 使用 Auth Group 鉴权时，需要先选择 Auth Group，才能继续拉取模型或测试模型。</li>
+                        <li><strong>拉取模型</strong>：会使用当前选中的 Auth Entry 发起上游模型列表请求。</li>
+                        <li><strong>测试模型</strong>：会使用当前选中的 Auth Entry 发起上游模型测试</li>
+                        <li><strong>影响范围</strong>：它只影响当前表单里的拉取模型和模型测试，不会修改 Auth Group 配置本身。</li>
+                    </ul>
                 `,
             },
         };
@@ -1798,11 +1818,6 @@
         function resetModelTestState() {
             modelTestRows = [];
             modelTestRowSequence = 0;
-            const authHint = document.getElementById('modelTestAuthHint');
-            if (authHint) {
-                authHint.textContent = '';
-                authHint.hidden = true;
-            }
             const container = document.getElementById('modelTestTableContainer');
             if (container) {
                 container.innerHTML = '<div class="empty-state">当前没有模型，请先新增或拉取模型</div>';
@@ -1876,7 +1891,7 @@
             const resolvedValue = String(preferredValue || select.value || fallbackValue || '').trim();
 
             if (authMode !== 'auth_group' || !authGroupName) {
-                select.innerHTML = '<option value="">当前不使用 Auth Group</option>';
+                select.innerHTML = '<option value="">未选择 Auth Group</option>';
                 select.value = '';
                 renderCustomSelectOptions('modelTestAuthEntry');
                 return;
@@ -1905,7 +1920,6 @@
 
         function syncModelTestAuthEntryUi() {
             const shell = document.getElementById('modelTestAuthEntryShell');
-            const hintElement = document.getElementById('modelTestAuthHint');
             const select = document.getElementById('modelTestAuthEntry');
             const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
             const authGroupName = document.getElementById('providerAuthGroup')?.value?.trim() || '';
@@ -1918,31 +1932,6 @@
             if (select) {
                 select.disabled = authMode === 'auth_group' && (!authGroupName || !entries.length);
             }
-
-            if (!hintElement) {
-                return;
-            }
-
-            if (authMode !== 'auth_group') {
-                hintElement.textContent = '';
-                hintElement.hidden = true;
-                return;
-            }
-
-            if (!authGroupName) {
-                hintElement.textContent = '当前 Provider 使用 Auth Group 鉴权，请先选择 Auth Group 后再测试。';
-                hintElement.hidden = false;
-                return;
-            }
-
-            if (!entries.length) {
-                hintElement.textContent = '当前 Auth Group 没有可选 Entry，暂时无法发起测试。';
-                hintElement.hidden = false;
-                return;
-            }
-
-            hintElement.textContent = '本次测试固定使用所选 Auth Entry，不参与运行时调度。';
-            hintElement.hidden = false;
         }
 
         function getSelectedModelTestRows() {
@@ -4549,18 +4538,25 @@
 
         async function fetchModels() {
             const payload = collectFormData();
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authEntryId = document.getElementById('modelTestAuthEntry')?.value?.trim() || '';
             if (!payload.api) {
                 showMessage('请先填写 API 地址', 'error');
                 return;
             }
-            if ((document.getElementById('providerAuthMode')?.value || 'legacy_api_key') === 'auth_group' && !payload.auth_group) {
+            if (authMode === 'auth_group' && !payload.auth_group) {
                 showMessage('请先选择 Auth Group', 'error');
+                return;
+            }
+            if (authMode === 'auth_group' && !authEntryId) {
+                showMessage('请先选择 Auth Entry', 'error');
                 return;
             }
 
             const params = new URLSearchParams({ api: payload.api });
             if (payload.api_key) params.set('api_key', payload.api_key);
             if (payload.auth_group) params.set('auth_group', payload.auth_group);
+            if (payload.auth_group && authEntryId) params.set('auth_entry_id', authEntryId);
             if (payload.proxy) params.set('proxy', payload.proxy);
             if (payload.timeout_seconds) params.set('timeout_seconds', payload.timeout_seconds);
             if (payload.verify_ssl) params.set('verify_ssl', payload.verify_ssl);
