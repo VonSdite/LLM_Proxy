@@ -64,9 +64,16 @@ downstream request
   - 组装整条代理链路
   - 使用本次解析出的 `target_format` 选择 translator 和 encoder
   - 在开启 `logging.llm_request_debug_enabled` 时输出独立 trace
+- `ProviderModelTestService`
+  - 复用 translator / executor / request-side hook
+  - 按当前 Provider 表单快照直连上游测试模型可用性、首字延迟与 TPS
+  - 在协议支持时显式请求 usage 返回
 - `SettingsService`
   - 维护 `server`、`admin` 与 `logging`
   - 管理立即生效项与重启生效项的边界
+- `ProviderRuntimeFactory`
+  - 负责临时 / 正式 Provider 运行时对象构建
+  - 统一 hook 加载与缓存
 - `ExecutorRegistry`
   - 负责 HTTP / WebSocket 上游连接
 - `Decoder`
@@ -249,6 +256,50 @@ Hook 运行时上下文还会暴露最小重试状态：
   - `RotatingFileHandler`
   - `maxBytes = 10 MiB`
   - `backupCount = 3`
+
+### 3.6 Control-Plane Model Testing
+
+Provider 编辑页新增控制平面测试接口：
+
+- `POST /api/providers/test-models`
+
+链路如下：
+
+```text
+provider editor form snapshot
+  -> controller
+  -> auth header resolve (api_key or auth_group + auth_entry)
+  -> ProviderRuntimeFactory
+  -> request_guard / header_hook
+  -> translator.translate_request()
+  -> usage request enrichment when protocol supports it
+  -> executor
+  -> decoder
+  -> translator.translate_response(openai_chat benchmark view)
+  -> metric collector
+  -> modal result table
+```
+
+行为约束：
+
+- 这是控制平面能力，不经过下游 `/v1/chat/completions` / `/v1/responses` / `/v1/messages`
+- 只应用 request-side hook：
+  - `header_hook`
+  - `request_guard`
+- 不应用 `response_guard`
+- `auth_group` 测试固定使用显式选择的 `auth_entry`
+  - 不经过 `AuthGroupManager.acquire()`
+  - 不写运行态冷却、并发、配额
+- 首字延迟仅在真实流式首个文本增量到达时记录
+- TPS 仅在拿到 completion usage 后计算
+- 如果上游成功但未返回 usage：
+  - `available = true`
+  - `tps = null`
+
+补充说明：
+
+- 数据平面主代理链路未变化
+- 新增的是一条控制平面上游探测与性能测试链路
 
 ## 4. Development View
 

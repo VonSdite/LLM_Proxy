@@ -51,8 +51,12 @@ class FakeProviderService:
 class FakeAuthGroupService:
     def __init__(self) -> None:
         self.header_calls: list[str] = []
+        self.entry_header_calls: list[tuple[str, str]] = []
         self.headers_by_name: dict[str, dict[str, str]] = {
             "pool-a": {"Authorization": "Bearer sk-a", "x-org": "team-a"}
+        }
+        self.headers_by_entry: dict[tuple[str, str], dict[str, str]] = {
+            ("pool-a", "entry-a"): {"Authorization": "Bearer sk-entry-a", "x-org": "team-a"}
         }
 
     def get_first_entry_headers(self, name: str) -> dict[str, str]:
@@ -60,6 +64,13 @@ class FakeAuthGroupService:
         if name not in self.headers_by_name:
             raise ValueError(f"Auth group not found: {name}")
         return dict(self.headers_by_name[name])
+
+    def get_entry_headers(self, name: str, entry_id: str) -> dict[str, str]:
+        self.entry_header_calls.append((name, entry_id))
+        key = (name, entry_id)
+        if key not in self.headers_by_entry:
+            raise ValueError(f"Auth entry not found: {name}/{entry_id}")
+        return dict(self.headers_by_entry[key])
 
 
 class FakeModelDiscoveryService:
@@ -92,6 +103,37 @@ class FakeModelDiscoveryService:
         }
 
 
+class FakeProviderModelTestService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def test_models(
+        self,
+        payload: dict[str, object],
+        *,
+        request_headers: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "payload": dict(payload),
+                "request_headers": dict(request_headers or {}),
+            }
+        )
+        models = payload.get("models") if isinstance(payload.get("models"), list) else []
+        return {
+            "results": [
+                {
+                    "requested_model": str(models[0]) if models else "demo-model",
+                    "available": True,
+                    "first_token_latency_ms": 12.5,
+                    "tps": 18.2,
+                    "response_model": "demo-model",
+                    "error": None,
+                }
+            ]
+        }
+
+
 class ProviderControllerOrderRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         app = Flask(__name__)
@@ -102,9 +144,11 @@ class ProviderControllerOrderRouteTests(unittest.TestCase):
             flask_app=app,
         )
         self.provider_service = FakeProviderService()
+        self.provider_model_test_service = FakeProviderModelTestService()
         self.controller = ProviderController(
             ctx,
             self.provider_service,  # type: ignore[arg-type]
+            self.provider_model_test_service,  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
@@ -162,9 +206,11 @@ class ProviderControllerFetchModelsRouteTests(unittest.TestCase):
         self.provider_service = FakeProviderService()
         self.auth_group_service = FakeAuthGroupService()
         self.model_discovery_service = FakeModelDiscoveryService()
+        self.provider_model_test_service = FakeProviderModelTestService()
         self.controller = ProviderController(
             ctx,
             self.provider_service,  # type: ignore[arg-type]
+            self.provider_model_test_service,  # type: ignore[arg-type]
             self.auth_group_service,  # type: ignore[arg-type]
             self.model_discovery_service,  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
@@ -217,6 +263,106 @@ class ProviderControllerFetchModelsRouteTests(unittest.TestCase):
             response.get_json(),
         )
         self.assertEqual([], self.model_discovery_service.calls)
+
+
+class ProviderControllerTestModelsRouteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=None,  # type: ignore[arg-type]
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        self.provider_service = FakeProviderService()
+        self.auth_group_service = FakeAuthGroupService()
+        self.provider_model_test_service = FakeProviderModelTestService()
+        self.controller = ProviderController(
+            ctx,
+            self.provider_service,  # type: ignore[arg-type]
+            self.provider_model_test_service,  # type: ignore[arg-type]
+            self.auth_group_service,  # type: ignore[arg-type]
+            object(),  # type: ignore[arg-type]
+            object(),  # type: ignore[arg-type]
+            FakeAuthService(),  # type: ignore[arg-type]
+        )
+        self.client = app.test_client()
+
+    def test_test_models_route_uses_selected_auth_entry_headers(self) -> None:
+        response = self.client.post(
+            "/api/providers/test-models",
+            json={
+                "api": "https://example.com/v1/chat/completions",
+                "auth_group": "pool-a",
+                "auth_entry_id": "entry-a",
+                "models": ["demo-model"],
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([("pool-a", "entry-a")], self.auth_group_service.entry_header_calls)
+        self.assertEqual(
+            {
+                "Authorization": "Bearer sk-entry-a",
+                "x-org": "team-a",
+            },
+            self.provider_model_test_service.calls[0]["request_headers"],
+        )
+
+    def test_test_models_route_rejects_auth_group_and_api_key_together(self) -> None:
+        response = self.client.post(
+            "/api/providers/test-models",
+            json={
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "sk-demo",
+                "auth_group": "pool-a",
+                "auth_entry_id": "entry-a",
+                "models": ["demo-model"],
+            },
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            {
+                "error": "Model test must use either auth_group or api_key, not both",
+            },
+            response.get_json(),
+        )
+        self.assertEqual([], self.provider_model_test_service.calls)
+
+    def test_test_models_route_requires_auth_entry_id_when_auth_group_is_set(self) -> None:
+        response = self.client.post(
+            "/api/providers/test-models",
+            json={
+                "api": "https://example.com/v1/chat/completions",
+                "auth_group": "pool-a",
+                "models": ["demo-model"],
+            },
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            {
+                "error": "Model test auth_group requires auth_entry_id",
+            },
+            response.get_json(),
+        )
+        self.assertEqual([], self.provider_model_test_service.calls)
+
+    def test_test_models_route_supports_legacy_api_key_mode(self) -> None:
+        response = self.client.post(
+            "/api/providers/test-models",
+            json={
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "sk-legacy-demo",
+                "models": ["demo-model"],
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([], self.auth_group_service.entry_header_calls)
+        self.assertEqual({}, self.provider_model_test_service.calls[0]["request_headers"])
+        self.assertEqual("sk-legacy-demo", self.provider_model_test_service.calls[0]["payload"]["api_key"])
 
 
 if __name__ == "__main__":

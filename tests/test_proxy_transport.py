@@ -594,7 +594,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         css = css_path.read_text(encoding="utf-8")
 
-        self.assertIn("/static/css/providers.css?v=20260411-9", html)
+        self.assertRegex(
+            html,
+            r'/static/css/providers\.css\?v=\d{8}-\d+',
+        )
         self.assertIn('id="providerTransport"', html)
         self.assertIn('id="providerSourceFormat"', html)
         self.assertIn('id="providerTargetFormat"', html)
@@ -674,7 +677,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("setupCustomSelect('providerAuthGroup');", html)
         self.assertIn("renderCustomSelectOptions('providerAuthGroup');", html)
         self.assertIn(
-            "document.getElementById('providerAuthGroup').addEventListener('change', updateFetchModelsButtonState);",
+            "document.getElementById('providerAuthGroup').addEventListener('change', function() {",
             html,
         )
         self.assertIn("setupCustomSelect('authGroupStrategy');", html)
@@ -764,6 +767,17 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="fetchModelSelectAllCheckbox"', html)
         self.assertIn("toggleFilteredFetchedModels(this.checked)", html)
         self.assertIn("if (payload.auth_group) params.set('auth_group', payload.auth_group);", html)
+        self.assertIn('id="modelTestSelectAllCheckbox"', html)
+        self.assertIn('id="runSelectedModelTestsBtn"', html)
+        self.assertIn('id="deleteSelectedModelTestsBtn"', html)
+        self.assertIn('id="modelTestAuthEntry"', html)
+        self.assertIn('id="modelTestSummary"', html)
+        self.assertIn('id="modelTestTableContainer"', html)
+        self.assertIn("setupCustomSelect('modelTestAuthEntry');", html)
+        self.assertIn("/api/providers/test-models", html)
+        self.assertIn("function setModelTestRowsFromModels(", html)
+        self.assertIn("function runModelTestsForRows(", html)
+        self.assertNotIn('id="providerModelList"', html)
         self.assertIn('class="provider-model-cell"', html)
         self.assertIn('class="provider-meta-line"', html)
         self.assertIn('class="providers-table-shell auth-groups-table-shell"', html)
@@ -848,6 +862,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .provider-batch-summary {", css)
         self.assertNotIn(".providers-page .provider-batch-delete-modal-dialog {", css)
         self.assertIn(".providers-page .provider-table-checkbox {", css)
+        self.assertIn(".providers-page .model-test-toolbar {", css)
+        self.assertIn(".providers-page .model-test-table {", css)
+        self.assertIn(".providers-page .model-test-status-badge {", css)
         self.assertIn(".providers-page .provider-group-list {", css)
         self.assertIn(".providers-page .provider-group-card {", css)
         self.assertIn(".providers-page .provider-group-header {", css)
@@ -903,8 +920,16 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         html = template_path.read_text(encoding="utf-8")
 
-        self.assertNotIn("addEventListener('blur'", html)
+        self.assertNotIn(
+            "document.getElementById('providerModelList').addEventListener('blur'",
+            html,
+        )
+        self.assertNotIn(
+            "document.getElementById('providerModelList').addEventListener('input'",
+            html,
+        )
         self.assertNotIn("applyNormalizedModelListValue();", html)
+        self.assertIn("function setModelTestRowsFromModels(", html)
 
         script_start = html.index("function normalizeModelListItems")
         script_end = html.index("function fillForm")
@@ -915,19 +940,36 @@ const vm = require("vm");
 const sandbox = {{
   console,
   messages: [],
+  authGroups: [],
+  modelTestRows: [],
+  modelTestRowSequence: 0,
   providerTargetFormatOptions: ["openai_chat", "openai_responses", "claude_chat", "codex"],
   providerTargetFormatConflictGroups: [["openai_responses", "codex"]],
+  escapeHtml(value) {{
+    return String(value ?? "");
+  }},
+  renderCustomSelectOptions() {{}},
+  formatActionErrorMessage(_title, detail, options) {{
+    return detail?.message || options?.fallback || "";
+  }},
   showMessage(message, level) {{
     sandbox.messages.push({{ message, level }});
   }},
   document: {{
     elements: {{
-      providerModelList: {{ value: " beta \\nAlpha\\nalpha\\nBeta\\nbeta\\n" }},
-      providerModelCount: {{ textContent: "" }},
       providerName: {{ value: " demo " }},
       providerApi: {{ value: " https://example.com/v1/chat/completions " }},
       providerAuthMode: {{ value: "auth_group" }},
       providerAuthGroup: {{ value: " shared-pool " }},
+      modelTestAuthEntry: {{ value: " entry-a ", innerHTML: "", disabled: false }},
+      modelTestAuthEntryShell: {{ hidden: false }},
+      modelTestAuthHint: {{ textContent: "", hidden: true }},
+      modelTestSummary: {{ textContent: "" }},
+      modelTestTableContainer: {{ innerHTML: "" }},
+      runSelectedModelTestsBtn: {{ disabled: false, textContent: "" }},
+      deleteSelectedModelTestsBtn: {{ disabled: false }},
+      tidyModelListBtn: {{ disabled: false }},
+      modelTestSelectAllCheckbox: {{ checked: false, indeterminate: false }},
       providerTransport: {{ value: "http" }},
       providerSourceFormat: {{ value: "openai_chat" }},
       providerTargetFormat: {{
@@ -953,7 +995,10 @@ const sandbox = {{
 }};
 vm.createContext(sandbox);
 vm.runInContext({json.dumps(script)}, sandbox);
+sandbox.renderCustomSelectOptions = () => {{}};
+sandbox.syncCustomSelectValue = () => {{}};
 
+sandbox.setModelTestRowsFromModels(" beta \\nAlpha\\nalpha\\nBeta\\nbeta\\n");
 const collectedBefore = sandbox.collectFormData();
 sandbox.tidyModelList();
 const collectedAfter = sandbox.collectFormData();
@@ -963,12 +1008,12 @@ process.stdout.write(JSON.stringify({{
   beforeTargetFormats: collectedBefore.target_formats,
   beforeAuthGroup: collectedBefore.auth_group,
   beforeApiKey: collectedBefore.api_key,
-  afterTextarea: sandbox.document.elements.providerModelList.value,
+  afterRows: sandbox.modelTestRows.map(row => row.model),
   afterModelList: collectedAfter.model_list,
   afterTargetFormats: collectedAfter.target_formats,
   afterAuthGroup: collectedAfter.auth_group,
   afterApiKey: collectedAfter.api_key,
-  countText: sandbox.document.elements.providerModelCount.textContent,
+  countText: sandbox.document.elements.modelTestSummary.textContent,
   message: sandbox.messages[0]?.message || "",
 }}));
 """
@@ -984,7 +1029,7 @@ process.stdout.write(JSON.stringify({{
         self.assertEqual(["openai_chat"], payload["beforeTargetFormats"])
         self.assertEqual("shared-pool", payload["beforeAuthGroup"])
         self.assertEqual("", payload["beforeApiKey"])
-        self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterTextarea"])
+        self.assertEqual(["Alpha", "Beta", "alpha", "beta"], payload["afterRows"])
         self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterModelList"])
         self.assertEqual(["openai_chat"], payload["afterTargetFormats"])
         self.assertEqual("shared-pool", payload["afterAuthGroup"])
@@ -1271,6 +1316,4 @@ class DashboardTemplateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
 

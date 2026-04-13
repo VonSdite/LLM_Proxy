@@ -16,6 +16,7 @@ from .provider_config import (
     validate_auth_group_definitions,
     validate_auth_group_provider_definitions,
 )
+from .provider_runtime_factory import ProviderRuntimeFactory
 
 if TYPE_CHECKING:
     from .auth_group_manager import AuthGroupManager
@@ -28,6 +29,7 @@ __all__ = [
     "ProviderConfigSchema",
     "RuntimeProviderSpec",
     "ProviderRuntimeView",
+    "ProviderRuntimeFactory",
     "build_auth_group_schemas",
     "build_provider_schemas",
     "validate_auth_group_definitions",
