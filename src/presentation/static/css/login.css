@@ -115,6 +115,75 @@ body.login-page {
     box-shadow: 0 0 0 3px var(--focus);
 }
 
+.login-page .sensitive-input-shell {
+    position: relative;
+}
+
+.login-page .sensitive-input-control {
+    padding-right: 52px;
+}
+
+.login-page .sensitive-input-control.is-masked {
+    -webkit-text-security: disc;
+}
+
+.login-page .sensitive-input-toggle {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: rgba(148, 163, 184, 0.88);
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none;
+    transition: color var(--transition), opacity var(--transition);
+}
+
+.login-page .sensitive-input-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.login-page .sensitive-input-icon-eye-off {
+    display: none;
+}
+
+.login-page .sensitive-input-toggle.is-visible .sensitive-input-icon-eye {
+    display: none;
+}
+
+.login-page .sensitive-input-toggle.is-visible .sensitive-input-icon-eye-off {
+    display: block;
+}
+
+.login-page .sensitive-input-toggle:hover,
+.login-page .sensitive-input-toggle:focus-visible {
+    background: transparent;
+    color: var(--primary-active);
+    outline: none;
+    box-shadow: none;
+}
+
+:root[data-theme="dark"] .login-page .sensitive-input-toggle {
+    background: transparent;
+    color: rgba(197, 208, 220, 0.82);
+}
+
+:root[data-theme="dark"] .login-page .sensitive-input-toggle:hover,
+:root[data-theme="dark"] .login-page .sensitive-input-toggle:focus-visible {
+    background: transparent;
+    color: #e6f0ff;
+}
+
 .login-page .btn-login {
     width: 100%;
     min-height: 40px;
