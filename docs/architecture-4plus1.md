@@ -68,6 +68,7 @@ downstream request
   - 复用 translator / executor / request-side hook
   - 按当前 Provider 表单快照直连上游测试模型可用性、首字延迟与 TPS
   - 在协议支持时显式请求 usage 返回
+  - 批量测试按前端当前选择的模型行逐条执行并逐条回填结果
 - `SettingsService`
   - 维护 `server`、`admin` 与 `logging`
   - 管理立即生效项与重启生效项的边界
@@ -257,10 +258,11 @@ Hook 运行时上下文还会暴露最小重试状态：
   - `maxBytes = 10 MiB`
   - `backupCount = 3`
 
-### 3.6 Control-Plane Model Testing
+### 3.6 Control-Plane Model Fetching And Testing
 
-Provider 编辑页新增控制平面测试接口：
+Provider 编辑页包含两条控制平面上游探测链路：
 
+- `GET /api/providers/fetch-models`
 - `POST /api/providers/test-models`
 
 链路如下：
@@ -280,26 +282,44 @@ provider editor form snapshot
   -> modal result table
 ```
 
+模型拉取链路如下：
+
+```text
+provider editor form snapshot
+  -> controller
+  -> auth header resolve (api_key or auth_group + auth_entry)
+  -> model endpoint inference
+  -> upstream fetch (/v1/models or /models)
+  -> fetched model picker
+  -> provider form model table
+```
+
 行为约束：
 
-- 这是控制平面能力，不经过下游 `/v1/chat/completions` / `/v1/responses` / `/v1/messages`
+- 这两条都是控制平面能力，不经过下游 `/v1/chat/completions` / `/v1/responses` / `/v1/messages`
+- Provider 编辑页的 `model_list` 采用表格编辑，并以当前前端行状态作为唯一数据源
 - 只应用 request-side hook：
   - `header_hook`
   - `request_guard`
 - 不应用 `response_guard`
-- `auth_group` 测试固定使用显式选择的 `auth_entry`
-  - 不经过 `AuthGroupManager.acquire()`
-  - 不写运行态冷却、并发、配额
+- `auth_group` 模式下：
+  - 拉取模型必须显式选择 `auth_entry`
+  - 测试模型也必须显式选择 `auth_entry`
+  - 两者都不经过 `AuthGroupManager.acquire()`
+  - 两者都不写运行态冷却、并发、配额
 - 首字延迟仅在真实流式首个文本增量到达时记录
 - TPS 仅在拿到 completion usage 后计算
 - 如果上游成功但未返回 usage：
   - `available = true`
   - `tps = null`
+- 批量测试会先锁定本次选中的目标行，再按顺序逐条请求
+- 每一条测试结果一返回就立即回填到对应表格行
+- 批量测试属于当前页面会话内行为；页面刷新或离开后，尚未开始的后续测试不会继续执行
 
 补充说明：
 
 - 数据平面主代理链路未变化
-- 新增的是一条控制平面上游探测与性能测试链路
+- 新增的是 Provider 编辑页上的控制平面上游模型拉取与性能测试链路
 
 ## 4. Development View
 

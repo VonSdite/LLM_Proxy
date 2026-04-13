@@ -218,7 +218,7 @@ class ProviderControllerFetchModelsRouteTests(unittest.TestCase):
         )
         self.client = app.test_client()
 
-    def test_fetch_models_route_uses_first_auth_group_headers(self) -> None:
+    def test_fetch_models_route_requires_auth_entry_id_when_auth_group_is_set(self) -> None:
         response = self.client.get(
             "/api/providers/fetch-models",
             query_string={
@@ -228,21 +228,41 @@ class ProviderControllerFetchModelsRouteTests(unittest.TestCase):
             },
         )
 
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            {
+                "error": "Model fetch auth_group requires auth_entry_id",
+            },
+            response.get_json(),
+        )
+        self.assertEqual([], self.auth_group_service.header_calls)
+        self.assertEqual([], self.model_discovery_service.calls)
+
+    def test_fetch_models_route_uses_selected_auth_entry_headers(self) -> None:
+        response = self.client.get(
+            "/api/providers/fetch-models",
+            query_string={
+                "api": "https://example.com/v1/chat/completions",
+                "auth_group": "pool-a",
+                "auth_entry_id": "entry-a",
+            },
+        )
+
         self.assertEqual(200, response.status_code)
-        self.assertEqual(["pool-a"], self.auth_group_service.header_calls)
+        self.assertEqual([("pool-a", "entry-a")], self.auth_group_service.entry_header_calls)
         self.assertEqual(
             {
                 "api": "https://example.com/v1/chat/completions",
                 "api_key": None,
                 "request_headers": {
-                    "Authorization": "Bearer sk-a",
+                    "Authorization": "Bearer sk-entry-a",
                     "x-org": "team-a",
                 },
                 "proxy": None,
-                "timeout_seconds": "15",
+                "timeout_seconds": None,
                 "verify_ssl": None,
             },
-            self.model_discovery_service.calls[0],
+            self.model_discovery_service.calls[-1],
         )
 
     def test_fetch_models_route_rejects_auth_group_and_api_key_together(self) -> None:
@@ -263,6 +283,23 @@ class ProviderControllerFetchModelsRouteTests(unittest.TestCase):
             response.get_json(),
         )
         self.assertEqual([], self.model_discovery_service.calls)
+
+    def test_fetch_models_route_rejects_auth_entry_without_auth_group(self) -> None:
+        response = self.client.get(
+            "/api/providers/fetch-models",
+            query_string={
+                "api": "https://example.com/v1/chat/completions",
+                "auth_entry_id": "entry-a",
+            },
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            {
+                "error": "Model fetch auth_entry_id requires auth_group",
+            },
+            response.get_json(),
+        )
 
 
 class ProviderControllerTestModelsRouteTests(unittest.TestCase):

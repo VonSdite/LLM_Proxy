@@ -1880,6 +1880,14 @@
     justify-content: flex-end;
 }
 
+.providers-page .model-test-auth-entry-label-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    min-height: 34px;
+}
+
 .providers-page .model-test-toolbar-actions {
     display: inline-flex;
     align-items: center;
@@ -1924,10 +1932,14 @@
 }
 
 .providers-page .model-test-toolbar-side .form-label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
     margin: 0;
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 700;
+    line-height: 1;
 }
 
 .providers-page .model-test-toolbar-side .custom-select,
@@ -1949,8 +1961,7 @@
     opacity: 0.72;
 }
 
-.providers-page .model-test-summary,
-.providers-page .model-test-auth-hint {
+.providers-page .model-test-summary {
     color: var(--text-secondary);
     font-size: 13px;
 }
@@ -1958,10 +1969,6 @@
 .providers-page .model-test-summary {
     margin-bottom: 8px;
     font-weight: 600;
-}
-
-.providers-page .model-test-auth-hint {
-    margin-bottom: 12px;
 }
 
 .providers-page .model-test-table-shell {

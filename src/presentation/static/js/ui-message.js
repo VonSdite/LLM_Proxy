@@ -21,6 +21,8 @@
         ["model test must use either auth_group or api_key, not both", "模型测试时 Auth Group 与 API Key 只能二选一"],
         ["model test auth_entry_id requires auth_group", "模型测试时只有选择了 Auth Group 才能指定 Auth Entry"],
         ["model test auth_group requires auth_entry_id", "模型测试时请选择一个 Auth Entry"],
+        ["model fetch auth_entry_id requires auth_group", "拉取模型时只有选择了 Auth Group 才能指定 Auth Entry"],
+        ["model fetch auth_group requires auth_entry_id", "拉取模型时请选择一个 Auth Entry"],
         ["auth entry id is required", "请选择一个 Auth Entry"],
         ["server host is required", "请填写监听 IP"],
         ["server host must be a valid ip address", "监听 IP 格式无效，请填写合法 IP 地址"],

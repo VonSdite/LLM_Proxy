@@ -383,12 +383,17 @@ class ProviderController:
         try:
             api_key = request.args.get('api_key')
             auth_group_name = request.args.get('auth_group')
+            auth_entry_id = request.args.get('auth_entry_id')
             if api_key and auth_group_name:
                 raise ValueError('Model fetch must use either auth_group or api_key, not both')
+            if auth_entry_id and not auth_group_name:
+                raise ValueError('Model fetch auth_entry_id requires auth_group')
 
             request_headers = None
             if auth_group_name:
-                request_headers = self._auth_group_service.get_first_entry_headers(auth_group_name)
+                if not auth_entry_id:
+                    raise ValueError('Model fetch auth_group requires auth_entry_id')
+                request_headers = self._auth_group_service.get_entry_headers(auth_group_name, auth_entry_id)
 
             result = self._model_discovery_service.fetch_models_preview(
                 api=request.args.get('api', ''),
