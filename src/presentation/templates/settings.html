@@ -637,9 +637,6 @@
                     temporarilyRevealSensitiveInput(inputId);
                     updateBasicSettingsSaveButtonState();
                 });
-                input.addEventListener("focus", function () {
-                    temporarilyRevealSensitiveInput(inputId);
-                });
                 input.addEventListener("blur", function () {
                     if (document.activeElement?.closest(`[data-sensitive-toggle-for="${inputId}"]`)) {
                         return;

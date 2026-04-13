@@ -2375,7 +2375,7 @@
         const providerSensitiveInputIds = ['providerApiKey', 'providerProxy'];
         const providerSensitiveAutoVisibleIds = new Set();
         const providerSensitiveRevealTimers = new Map();
-        const providerSensitiveRevealDelayMs = 120;
+        const providerSensitiveRevealDelayMs = 500;
 
         function clearSensitiveInputAutoReveal(inputId) {
             const timerId = providerSensitiveRevealTimers.get(inputId);
