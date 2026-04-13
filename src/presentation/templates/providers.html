@@ -2375,7 +2375,7 @@
         const providerSensitiveInputIds = ['providerApiKey', 'providerProxy'];
         const providerSensitiveAutoVisibleIds = new Set();
         const providerSensitiveRevealTimers = new Map();
-        const providerSensitiveRevealDelayMs = 500;
+        const providerSensitiveRevealDelayMs = 120;
 
         function clearSensitiveInputAutoReveal(inputId) {
             const timerId = providerSensitiveRevealTimers.get(inputId);
@@ -3250,10 +3250,17 @@
 
             const enabledProviders = providers.filter(provider => isProviderEnabled(provider));
             const disabledProviders = providers.filter(provider => !isProviderEnabled(provider));
+            const providerGroupSections = [
+                buildProviderTable('enabled', '已启用', enabledProviders, '当前没有已启用 Provider'),
+            ];
+            if (disabledProviders.length > 0) {
+                providerGroupSections.push(
+                    buildProviderTable('disabled', '已禁用', disabledProviders, '当前没有已禁用 Provider')
+                );
+            }
             container.innerHTML = `
                 <div class="provider-group-list">
-                    ${buildProviderTable('enabled', '已启用', enabledProviders, '当前没有已启用 Provider')}
-                    ${buildProviderTable('disabled', '已禁用', disabledProviders, '当前没有已禁用 Provider')}
+                    ${providerGroupSections.join('')}
                 </div>
             `;
             updateProviderSelectionUi();
@@ -4716,9 +4723,6 @@
             providerSensitiveInputIds.forEach(inputId => {
                 const input = document.getElementById(inputId);
                 input?.addEventListener('input', function() {
-                    temporarilyRevealSensitiveInput(inputId);
-                });
-                input?.addEventListener('focus', function() {
                     temporarilyRevealSensitiveInput(inputId);
                 });
                 input?.addEventListener('blur', function() {
