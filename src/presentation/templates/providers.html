@@ -267,14 +267,6 @@
                         <div class="model-test-inline-editor">
                             <div class="model-test-toolbar">
                                 <div class="model-test-toolbar-main">
-                                    <label class="model-test-select-all-label" for="modelTestSelectAllCheckbox">
-                                        <input
-                                            type="checkbox"
-                                            class="provider-table-checkbox"
-                                            id="modelTestSelectAllCheckbox"
-                                            onchange="toggleAllModelTestRows(this.checked)"
-                                        >
-                                    </label>
                                     <button type="button" class="btn btn-secondary btn-field-secondary" id="runSelectedModelTestsBtn" onclick="runSelectedModelTests()">测试</button>
                                     <button type="button" class="btn btn-secondary btn-field-secondary" id="deleteSelectedModelTestsBtn" onclick="deleteSelectedModelTestRows()">删除</button>
                                 </div>
@@ -2043,7 +2035,14 @@
                     </colgroup>
                     <thead>
                         <tr>
-                            <th class="provider-select-column model-test-select-column"></th>
+                            <th class="provider-select-column model-test-select-column">
+                                <input
+                                    type="checkbox"
+                                    class="provider-table-checkbox"
+                                    id="modelTestSelectAllCheckbox"
+                                    onchange="toggleAllModelTestRows(this.checked)"
+                                >
+                            </th>
                             <th class="model-test-model-column">模型</th>
                             <th class="model-test-status-column">是否可用</th>
                             <th class="model-test-metric-column">首字延迟</th>
