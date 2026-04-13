@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260412-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260413-1">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置{% endblock %}
@@ -261,22 +261,47 @@
                     <div class="mb-3 provider-model-list-section">
                         <div class="field-header">
                             <div class="field-header-meta">
-                                <label class="form-label" for="providerModelList">Model List</label>
-                                <span class="field-meta-badge" id="providerModelCount">0 个模型</span>
-                            </div>
-                            <div class="field-header-actions">
-                                <button type="button" class="btn btn-secondary btn-field-secondary" onclick="tidyModelList()">整理</button>
-                                <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onclick="fetchModels()">拉取模型</button>
-                                <button
-                                    type="button"
-                                    class="field-help-button"
-                                    data-provider-help-topic="fetch_models"
-                                    onclick="toggleProviderHelp('fetch_models', event)"
-                                    aria-label="查看拉取模型说明"
-                                >?</button>
+                                <label class="form-label">Model List</label>
                             </div>
                         </div>
-                        <textarea class="form-control provider-models-textarea" id="providerModelList" placeholder="每行一个模型，支持粘贴后整理排序；保存时会自动去空行并去重"></textarea>
+                        <div class="model-test-inline-editor">
+                            <div class="model-test-toolbar">
+                                <div class="model-test-toolbar-main">
+                                    <label class="model-test-select-all-label" for="modelTestSelectAllCheckbox">
+                                        <input
+                                            type="checkbox"
+                                            class="provider-table-checkbox"
+                                            id="modelTestSelectAllCheckbox"
+                                            onchange="toggleAllModelTestRows(this.checked)"
+                                        >
+                                    </label>
+                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="runSelectedModelTestsBtn" onclick="runSelectedModelTests()">测试</button>
+                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="deleteSelectedModelTestsBtn" onclick="deleteSelectedModelTestRows()">删除</button>
+                                </div>
+                                <div class="model-test-toolbar-side" id="modelTestAuthEntryShell" hidden>
+                                    <label class="form-label">Auth Entry</label>
+                                    <select class="form-control" id="modelTestAuthEntry"></select>
+                                </div>
+                                <div class="model-test-toolbar-actions">
+                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="tidyModelListBtn" onclick="tidyModelList()">整理</button>
+                                    <div class="fetch-model-help-group">
+                                        <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onclick="fetchModels()">拉取模型</button>
+                                        <button
+                                            type="button"
+                                            class="field-help-button field-help-button-inline"
+                                            data-provider-help-topic="fetch_models"
+                                            onclick="toggleProviderHelp('fetch_models', event)"
+                                            aria-label="查看拉取模型说明"
+                                        >?</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="model-test-summary" id="modelTestSummary">共 0 行，已选 0 行</div>
+                            <div class="model-test-auth-hint" id="modelTestAuthHint" hidden></div>
+                            <div class="providers-table-shell model-test-table-shell" id="modelTestTableContainer">
+                                <div class="empty-state">正在加载模型表格...</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer border-top-0">
@@ -580,6 +605,8 @@
         let providerTransportAutoSyncEnabled = true;
         let authEntryYamlEditor = null;
         let authEntryYamlThemeObserver = null;
+        let modelTestRows = [];
+        let modelTestRowSequence = 0;
         const providerTargetFormatOptions = ['openai_chat', 'openai_responses', 'claude_chat', 'codex'];
         const defaultNewProviderTargetFormats = ['openai_chat', 'codex', 'claude_chat'];
         const providerTargetFormatConflictGroups = [
@@ -1579,7 +1606,7 @@
 
         function openFetchModelPicker(fetchedModels) {
             const normalizedFetchedModels = normalizeModelListItems(Array.isArray(fetchedModels) ? fetchedModels.join('\n') : '');
-            const currentModels = normalizeModelListItems(document.getElementById('providerModelList').value);
+            const currentModels = getNormalizedModelListItemsFromRows();
             const fetchedModelSet = new Set(normalizedFetchedModels);
 
             fetchedModelCandidates = normalizedFetchedModels;
@@ -1626,10 +1653,7 @@
         }
 
         function applyFetchedModelsSelection() {
-            const textarea = document.getElementById('providerModelList');
-            if (!textarea) return;
-
-            const currentModels = normalizeModelListItems(textarea.value);
+            const currentModels = getNormalizedModelListItemsFromRows();
             const currentModelSet = new Set(currentModels);
             const fetchedModelSet = new Set(fetchedModelCandidates);
             const selectedFetchedModels = fetchedModelCandidates.filter(model => fetchedModelSelection.has(model));
@@ -1658,8 +1682,9 @@
             const addedCount = selectedFetchedModels.filter(model => !currentModelSet.has(model)).length;
             const removedCount = currentModels.filter(model => fetchedModelSet.has(model) && !fetchedModelSelection.has(model)).length;
 
-            textarea.value = buildModelListValue(nextModels);
+            setModelTestRowsFromModels(nextModels, { preserveExistingState: true });
             updateModelListCount();
+            renderModelTestTable();
             fetchModelPickerModalInstance.hide();
 
             if (!addedCount && !removedCount) {
@@ -1689,6 +1714,16 @@
             return models.join('\n');
         }
 
+        function getModelTestRowModelItems() {
+            return modelTestRows
+                .map(row => String(row?.model || '').trim())
+                .filter(model => model !== '');
+        }
+
+        function getNormalizedModelListItemsFromRows() {
+            return normalizeModelListItems(buildModelListValue(getModelTestRowModelItems()));
+        }
+
         function compareModelListItems(a, b) {
             if (a < b) return -1;
             if (a > b) return 1;
@@ -1700,26 +1735,19 @@
         }
 
         function updateModelListCount() {
-            const countElement = document.getElementById('providerModelCount');
-            const textarea = document.getElementById('providerModelList');
-            if (!countElement || !textarea) return;
-
-            const models = normalizeModelListItems(textarea.value);
-            countElement.textContent = `${models.length} 个模型`;
+            return getNormalizedModelListItemsFromRows().length;
         }
 
         function applyNormalizedModelListValue(showFeedback = false, sortItems = false) {
-            const textarea = document.getElementById('providerModelList');
-            if (!textarea) return false;
-
-            const before = textarea.value;
+            const before = buildModelListValue(getModelTestRowModelItems());
             const normalizedItems = normalizeModelListItems(before);
             const nextItems = sortItems ? sortModelListItems(normalizedItems) : normalizedItems;
             const normalizedValue = buildModelListValue(nextItems);
             const changed = before !== normalizedValue;
 
-            textarea.value = normalizedValue;
+            setModelTestRowsFromModels(nextItems, { preserveExistingState: true });
             updateModelListCount();
+            renderModelTestTable();
 
             if (showFeedback) {
                 if (changed) {
@@ -1733,7 +1761,593 @@
         }
 
         function tidyModelList() {
+            if (hasActiveModelTestRows()) {
+                return;
+            }
             applyNormalizedModelListValue(true, true);
+        }
+
+        function getModelListItemsPreserveOrder(value) {
+            if (Array.isArray(value)) {
+                return value
+                    .map(item => String(item ?? '').trim())
+                    .filter(item => item !== '');
+            }
+            return String(value ?? '')
+                .split(/\r?\n/)
+                .map(item => item.trim())
+                .filter(item => item !== '');
+        }
+
+        function createModelTestRow(model = '') {
+            return {
+                rowId: ++modelTestRowSequence,
+                model: String(model || '').trim(),
+                selected: false,
+                available: null,
+                firstTokenLatencyMs: null,
+                tps: null,
+                responseModel: '',
+                error: '',
+                testing: false,
+            };
+        }
+
+        function clearModelTestRowResult(row) {
+            if (!row) return;
+            row.available = null;
+            row.firstTokenLatencyMs = null;
+            row.tps = null;
+            row.responseModel = '';
+            row.error = '';
+            row.testing = false;
+        }
+
+        function resetModelTestState() {
+            modelTestRows = [];
+            modelTestRowSequence = 0;
+            const authHint = document.getElementById('modelTestAuthHint');
+            if (authHint) {
+                authHint.textContent = '';
+                authHint.hidden = true;
+            }
+            const container = document.getElementById('modelTestTableContainer');
+            if (container) {
+                container.innerHTML = '<div class="empty-state">当前没有模型，请先新增或拉取模型</div>';
+            }
+            const summary = document.getElementById('modelTestSummary');
+            if (summary) {
+                summary.textContent = '共 0 行，已选 0 行';
+            }
+        }
+
+        function setModelTestRowsFromModels(models, options = {}) {
+            const { preserveExistingState = false } = options || {};
+            const normalizedModels = getModelListItemsPreserveOrder(models);
+            const previousRows = Array.isArray(modelTestRows) ? modelTestRows.slice() : [];
+            const consumedIndexes = new Set();
+            const nextRows = normalizedModels.map(model => {
+                const matchedIndex = preserveExistingState
+                    ? previousRows.findIndex((row, index) => {
+                    return !consumedIndexes.has(index) && String(row?.model || '').trim() === model;
+                    })
+                    : -1;
+                if (matchedIndex >= 0) {
+                    consumedIndexes.add(matchedIndex);
+                    return {
+                        ...previousRows[matchedIndex],
+                        model,
+                    };
+                }
+                return createModelTestRow(model);
+            });
+
+            modelTestRows = nextRows;
+            modelTestRowSequence = modelTestRows.reduce((maxValue, row) => {
+                return Math.max(maxValue, Number(row?.rowId || 0));
+            }, modelTestRowSequence);
+        }
+
+        function addModelTestRow() {
+            modelTestRows.push(createModelTestRow(''));
+            renderModelTestTable();
+        }
+
+        function hasActiveModelTestRows() {
+            return modelTestRows.some(row => row?.testing === true);
+        }
+
+        function getCurrentModelTestAuthEntries() {
+            const authGroupName = document.getElementById('providerAuthGroup')?.value?.trim() || '';
+            if (!authGroupName) {
+                return [];
+            }
+            const authGroup = authGroups.find(item => String(item?.name || '').trim() === authGroupName);
+            return Array.isArray(authGroup?.entries) ? authGroup.entries : [];
+        }
+
+        function getDefaultModelTestAuthEntryId(entries) {
+            const normalizedEntries = Array.isArray(entries) ? entries : [];
+            const firstEnabledEntry = normalizedEntries.find(entry => entry?.enabled !== false);
+            const fallbackEntry = firstEnabledEntry || normalizedEntries[0];
+            return String(fallbackEntry?.id || '').trim();
+        }
+
+        function renderModelTestAuthEntryOptions(preferredValue = '') {
+            const select = document.getElementById('modelTestAuthEntry');
+            if (!select) return;
+
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authGroupName = document.getElementById('providerAuthGroup')?.value?.trim() || '';
+            const entries = getCurrentModelTestAuthEntries();
+            const fallbackValue = getDefaultModelTestAuthEntryId(entries);
+            const resolvedValue = String(preferredValue || select.value || fallbackValue || '').trim();
+
+            if (authMode !== 'auth_group' || !authGroupName) {
+                select.innerHTML = '<option value="">当前不使用 Auth Group</option>';
+                select.value = '';
+                renderCustomSelectOptions('modelTestAuthEntry');
+                return;
+            }
+
+            if (!entries.length) {
+                select.innerHTML = '<option value="">当前 Auth Group 没有可用 Entry</option>';
+                select.value = '';
+                renderCustomSelectOptions('modelTestAuthEntry');
+                return;
+            }
+
+            select.innerHTML = entries
+                .map(entry => {
+                    const entryId = String(entry?.id || '').trim();
+                    const disabledLabel = entry?.enabled === false ? '（disabled）' : '';
+                    return `<option value="${escapeHtml(entryId)}">${escapeHtml(entryId)}${disabledLabel}</option>`;
+                })
+                .join('');
+            select.value = resolvedValue;
+            if (select.value !== resolvedValue) {
+                select.value = fallbackValue;
+            }
+            renderCustomSelectOptions('modelTestAuthEntry');
+        }
+
+        function syncModelTestAuthEntryUi() {
+            const shell = document.getElementById('modelTestAuthEntryShell');
+            const hintElement = document.getElementById('modelTestAuthHint');
+            const select = document.getElementById('modelTestAuthEntry');
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authGroupName = document.getElementById('providerAuthGroup')?.value?.trim() || '';
+            const entries = getCurrentModelTestAuthEntries();
+
+            if (shell) {
+                shell.hidden = authMode !== 'auth_group';
+            }
+
+            if (select) {
+                select.disabled = authMode === 'auth_group' && (!authGroupName || !entries.length);
+            }
+
+            if (!hintElement) {
+                return;
+            }
+
+            if (authMode !== 'auth_group') {
+                hintElement.textContent = '';
+                hintElement.hidden = true;
+                return;
+            }
+
+            if (!authGroupName) {
+                hintElement.textContent = '当前 Provider 使用 Auth Group 鉴权，请先选择 Auth Group 后再测试。';
+                hintElement.hidden = false;
+                return;
+            }
+
+            if (!entries.length) {
+                hintElement.textContent = '当前 Auth Group 没有可选 Entry，暂时无法发起测试。';
+                hintElement.hidden = false;
+                return;
+            }
+
+            hintElement.textContent = '本次测试固定使用所选 Auth Entry，不参与运行时调度。';
+            hintElement.hidden = false;
+        }
+
+        function getSelectedModelTestRows() {
+            return modelTestRows.filter(row => row.selected);
+        }
+
+        function getFilledModelTestRows() {
+            return modelTestRows.filter(row => String(row?.model || '').trim() !== '');
+        }
+
+        function canRunModelTests() {
+            const api = document.getElementById('providerApi')?.value?.trim() || '';
+            if (!api || !getFilledModelTestRows().length) {
+                return false;
+            }
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            if (authMode !== 'auth_group') {
+                return true;
+            }
+            const authGroupName = document.getElementById('providerAuthGroup')?.value?.trim() || '';
+            const authEntryId = document.getElementById('modelTestAuthEntry')?.value?.trim() || '';
+            return !!authGroupName && !!authEntryId;
+        }
+
+        function formatModelTestMetric(value, suffix) {
+            const numericValue = Number(value);
+            if (!Number.isFinite(numericValue)) {
+                return '--';
+            }
+            return `${numericValue.toFixed(2)} ${suffix}`;
+        }
+
+        function formatModelTestInlineError(errorText) {
+            if (!errorText) {
+                return '';
+            }
+            return formatActionErrorMessage('测试模型', { message: errorText }, { fallback: '模型测试失败' });
+        }
+
+        function buildModelTestAvailabilityMarkup(row) {
+            if (row.testing) {
+                return '<span class="model-test-status-badge is-testing">测试中</span>';
+            }
+            if (row.available === true) {
+                return '<span class="model-test-status-badge is-success">可用</span>';
+            }
+            if (row.available === false) {
+                return '<span class="model-test-status-badge is-error">不可用</span>';
+            }
+            return '<span class="model-test-status-badge">未测试</span>';
+        }
+
+        function renderModelTestTable() {
+            const container = document.getElementById('modelTestTableContainer');
+            const summary = document.getElementById('modelTestSummary');
+            if (!container || !summary) return;
+
+            renderModelTestAuthEntryOptions(document.getElementById('modelTestAuthEntry')?.value || '');
+            syncModelTestAuthEntryUi();
+
+            const selectedRows = getSelectedModelTestRows();
+            const filledRows = getFilledModelTestRows();
+            const selectedFilledRows = selectedRows.filter(row => String(row?.model || '').trim() !== '' && !row.testing);
+            const deletableSelectedRows = selectedRows.filter(row => !row.testing);
+            summary.textContent = `共 ${modelTestRows.length} 行，可测试 ${filledRows.length} 个，已选 ${selectedRows.length} 行`;
+
+            const batchRunButton = document.getElementById('runSelectedModelTestsBtn');
+            if (batchRunButton) {
+                batchRunButton.disabled = !canRunModelTests() || !selectedFilledRows.length;
+                batchRunButton.textContent = '测试';
+            }
+            const batchDeleteButton = document.getElementById('deleteSelectedModelTestsBtn');
+            if (batchDeleteButton) {
+                batchDeleteButton.disabled = !deletableSelectedRows.length;
+            }
+            const tidyButton = document.getElementById('tidyModelListBtn');
+            if (tidyButton) {
+                tidyButton.disabled = hasActiveModelTestRows();
+            }
+
+            container.innerHTML = `
+                <table class="providers-table model-test-table">
+                    <colgroup>
+                        <col class="model-test-select-col">
+                        <col class="model-test-model-col">
+                        <col class="model-test-status-col">
+                        <col class="model-test-latency-col">
+                        <col class="model-test-tps-col">
+                        <col class="model-test-actions-col">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th class="provider-select-column model-test-select-column"></th>
+                            <th class="model-test-model-column">模型</th>
+                            <th class="model-test-status-column">是否可用</th>
+                            <th class="model-test-metric-column">首字延迟</th>
+                            <th class="model-test-metric-column">TPS</th>
+                            <th class="model-test-actions-column">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${modelTestRows.map(row => `
+                            <tr>
+                                <td class="provider-select-cell">
+                                    <input
+                                        type="checkbox"
+                                        class="provider-table-checkbox${row.testing ? ' is-testing-locked' : ''}"
+                                        ${row.selected || row.testing ? 'checked' : ''}
+                                        ${row.testing ? 'aria-disabled="true"' : ''}
+                                        onclick="return handleModelTestRowCheckboxClick(event, ${row.rowId})"
+                                        onchange="toggleModelTestRowSelection(${row.rowId}, this.checked)"
+                                    >
+                                </td>
+                                <td class="model-test-model-cell">
+                                    <input
+                                        type="text"
+                                        class="form-control model-test-model-input"
+                                        value="${escapeHtml(row.model)}"
+                                        placeholder="请输入模型 ID"
+                                        ${row.testing ? 'disabled' : ''}
+                                        oninput="handleModelTestRowInput(${row.rowId}, this.value)"
+                                        onchange="handleModelTestRowChange(${row.rowId}, this.value)"
+                                    >
+                                </td>
+                                <td class="model-test-status-cell">${buildModelTestAvailabilityMarkup(row)}</td>
+                                <td class="model-test-metric-cell">${row.testing ? '测试中...' : formatModelTestMetric(row.firstTokenLatencyMs, 'ms')}</td>
+                                <td class="model-test-metric-cell">${row.testing ? '测试中...' : formatModelTestMetric(row.tps, 'tok/s')}</td>
+                                <td class="model-test-actions-cell">
+                                    <div class="action-buttons">
+                                        <button
+                                            type="button"
+                                            class="btn-action btn-edit"
+                                            onclick="runSingleModelTest(${row.rowId})"
+                                            ${(row.testing || !String(row.model || '').trim() || !canRunModelTests()) ? 'disabled' : ''}
+                                        >${row.testing ? '测试中...' : '测试'}</button>
+                                        <button
+                                            type="button"
+                                            class="btn-action btn-delete"
+                                            onclick="deleteModelTestRow(${row.rowId})"
+                                            ${row.testing ? 'disabled' : ''}
+                                        >删除</button>
+                                    </div>
+                                    ${row.error ? `<div class="model-test-row-error">${escapeHtml(formatModelTestInlineError(row.error))}</div>` : ''}
+                                </td>
+                            </tr>
+                        `).join('')}
+                        <tr class="model-test-add-row">
+                            <td colspan="6" class="model-test-add-row-cell">
+                                <button
+                                    type="button"
+                                    class="model-test-add-row-button"
+                                    onclick="addModelTestRow()"
+                                >
+                                    <span class="model-test-add-row-icon" aria-hidden="true">+</span>
+                                    <span class="model-test-add-row-text">新增模型</span>
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            `;
+
+            const selectAllCheckbox = document.getElementById('modelTestSelectAllCheckbox');
+            if (selectAllCheckbox) {
+                const selectableRows = modelTestRows.filter(row => !row.testing);
+                const selectedSelectableCount = selectableRows.filter(row => row.selected).length;
+                selectAllCheckbox.checked = selectableRows.length > 0 && selectedSelectableCount === selectableRows.length;
+                selectAllCheckbox.indeterminate = selectedSelectableCount > 0 && selectedSelectableCount < selectableRows.length;
+            }
+        }
+
+        function handleModelTestRowInput(rowId, value) {
+            const row = modelTestRows.find(item => item.rowId === rowId);
+            if (!row) return;
+            if (row.testing) return;
+            row.model = String(value || '');
+            clearModelTestRowResult(row);
+            updateModelListCount();
+        }
+
+        function handleModelTestRowChange(rowId, value) {
+            const row = modelTestRows.find(item => item.rowId === rowId);
+            if (!row) return;
+            if (row.testing) return;
+            row.model = String(value || '').trim();
+            clearModelTestRowResult(row);
+            updateModelListCount();
+            renderModelTestTable();
+        }
+
+        function handleModelTestRowCheckboxClick(event, rowId) {
+            const row = modelTestRows.find(item => item.rowId === rowId);
+            if (!row || !row.testing) {
+                return true;
+            }
+            event?.preventDefault();
+            event?.stopPropagation();
+            return false;
+        }
+
+        function toggleModelTestRowSelection(rowId, checked) {
+            const row = modelTestRows.find(item => item.rowId === rowId);
+            if (!row) return;
+            if (row.testing) {
+                renderModelTestTable();
+                return;
+            }
+            row.selected = checked;
+            renderModelTestTable();
+        }
+
+        function toggleAllModelTestRows(checked) {
+            modelTestRows.forEach(row => {
+                if (row.testing) {
+                    return;
+                }
+                row.selected = checked;
+            });
+            renderModelTestTable();
+        }
+
+        function deleteModelTestRow(rowId) {
+            const row = modelTestRows.find(item => item.rowId === rowId);
+            if (!row || row.testing) {
+                return;
+            }
+            modelTestRows = modelTestRows.filter(row => row.rowId !== rowId);
+            updateModelListCount();
+            renderModelTestTable();
+        }
+
+        function deleteSelectedModelTestRows() {
+            const selectedRows = getSelectedModelTestRows().filter(row => !row.testing);
+            if (!selectedRows.length) {
+                showMessage('请先选择至少一行模型', 'error');
+                return;
+            }
+            const selectedRowIdSet = new Set(selectedRows.map(row => row.rowId));
+            modelTestRows = modelTestRows.filter(row => !selectedRowIdSet.has(row.rowId));
+            updateModelListCount();
+            renderModelTestTable();
+            showMessage(`已删除 ${selectedRows.length} 行模型`, 'success');
+        }
+
+        function buildModelTestPayload(targetRows) {
+            const payload = collectFormData();
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authGroupName = document.getElementById('providerAuthGroup')?.value?.trim() || '';
+            const authEntryId = document.getElementById('modelTestAuthEntry')?.value?.trim() || '';
+            payload.models = targetRows.map(row => String(row?.model || '').trim()).filter(model => model !== '');
+            if (authMode === 'auth_group') {
+                payload.auth_group = authGroupName;
+                payload.auth_entry_id = authEntryId;
+                payload.api_key = '';
+            } else {
+                payload.auth_group = '';
+                payload.auth_entry_id = '';
+            }
+            return payload;
+        }
+
+        function isModelTestRowStillPresent(row) {
+            if (!row) {
+                return false;
+            }
+            return modelTestRows.some(item => item?.rowId === row.rowId);
+        }
+
+        function applyModelTestResult(row, result) {
+            if (!row) {
+                return;
+            }
+
+            row.testing = false;
+            if (!result || typeof result !== 'object') {
+                row.available = false;
+                row.firstTokenLatencyMs = null;
+                row.tps = null;
+                row.responseModel = '';
+                row.error = 'Missing model test result';
+                return;
+            }
+
+            row.available = result.available === true;
+            row.firstTokenLatencyMs = Number.isFinite(Number(result.first_token_latency_ms))
+                ? Number(result.first_token_latency_ms)
+                : null;
+            row.tps = Number.isFinite(Number(result.tps))
+                ? Number(result.tps)
+                : null;
+            row.responseModel = typeof result.response_model === 'string' ? result.response_model : '';
+            row.error = typeof result.error === 'string' ? result.error : '';
+        }
+
+        async function runModelTestsForRows(targetRows) {
+            const rowsToTest = (Array.isArray(targetRows) ? targetRows : [])
+                .filter(row => row && !row.testing && String(row.model || '').trim() !== '');
+            if (!rowsToTest.length) {
+                showMessage('请先选择至少一个可测试的模型', 'error');
+                return;
+            }
+
+            const api = document.getElementById('providerApi')?.value?.trim() || '';
+            if (!api) {
+                showMessage('请先填写 API 地址', 'error');
+                return;
+            }
+
+            const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
+            const authGroupName = document.getElementById('providerAuthGroup')?.value?.trim() || '';
+            const authEntryId = document.getElementById('modelTestAuthEntry')?.value?.trim() || '';
+            if (authMode === 'auth_group') {
+                if (!authGroupName) {
+                    showMessage('请先选择 Auth Group', 'error');
+                    return;
+                }
+                if (!authEntryId) {
+                    showMessage('请先选择 Auth Entry', 'error');
+                    return;
+                }
+            }
+
+            rowsToTest.forEach(row => {
+                clearModelTestRowResult(row);
+                row.testing = true;
+                row.selected = false;
+            });
+            renderModelTestTable();
+
+            let completedCount = 0;
+            let successCount = 0;
+            let failureCount = 0;
+
+            for (const row of rowsToTest) {
+                if (!isModelTestRowStillPresent(row)) {
+                    continue;
+                }
+
+                try {
+                    const response = await fetch('/api/providers/test-models', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(buildModelTestPayload([row])),
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || '模型测试失败');
+                    }
+
+                    applyModelTestResult(row, Array.isArray(result.results) ? result.results[0] : null);
+                    completedCount += 1;
+                    if (row.available === true) {
+                        successCount += 1;
+                    } else {
+                        failureCount += 1;
+                    }
+                } catch (error) {
+                    console.error('模型测试失败:', error);
+                    row.testing = false;
+                    row.available = false;
+                    row.firstTokenLatencyMs = null;
+                    row.tps = null;
+                    row.error = error?.message || '模型测试失败';
+                    completedCount += 1;
+                    failureCount += 1;
+
+                    if (rowsToTest.length === 1) {
+                        showActionError('测试模型', error, { fallback: '模型测试失败' });
+                    }
+                } finally {
+                    renderModelTestTable();
+                }
+            }
+
+            if (!completedCount) {
+                return;
+            }
+
+            if (failureCount === 0) {
+                showMessage(`已完成 ${completedCount} 个模型测试`, 'success');
+                return;
+            }
+            if (successCount === 0) {
+                showMessage(`已完成 ${completedCount} 个模型测试，全部失败`, 'error');
+                return;
+            }
+            showMessage(`已完成 ${completedCount} 个模型测试，成功 ${successCount} 个，失败 ${failureCount} 个`, 'success');
+        }
+
+        async function runSingleModelTest(rowId) {
+            const row = modelTestRows.find(item => item.rowId === rowId);
+            if (!row) return;
+            await runModelTestsForRows([row]);
+        }
+
+        async function runSelectedModelTests() {
+            await runModelTestsForRows(getSelectedModelTestRows());
         }
 
         function renderProviderAuthGroupOptions(selectedValue = '') {
@@ -1767,6 +2381,7 @@
                 legacyApiKeyField.hidden = authMode !== 'legacy_api_key';
             }
             updateFetchModelsButtonState();
+            renderModelTestTable();
         }
 
         const providerSensitiveInputIds = ['providerApiKey', 'providerProxy'];
@@ -1940,9 +2555,7 @@
             const normalizedTargetFormats = targetFormatInput
                 ? normalizeProviderTargetFormatValues(getSelectedOptionValues(targetFormatInput))
                 : ['openai_chat'];
-            const normalizedModelList = buildModelListValue(
-                normalizeModelListItems(document.getElementById('providerModelList').value)
-            );
+            const normalizedModelList = buildModelListValue(getNormalizedModelListItemsFromRows());
             const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
             const authGroup = authMode === 'auth_group'
                 ? document.getElementById('providerAuthGroup')?.value?.trim() || ''
@@ -2188,13 +2801,14 @@
             document.getElementById('providerTimeout').value = provider?.timeout_seconds || '';
             document.getElementById('providerRetries').value = provider?.max_retries || '';
             setSelectValueOrFallback('providerVerifySsl', provider?.verify_ssl === true ? 'true' : 'false', 'false');
-            document.getElementById('providerModelList').value = Array.isArray(provider?.model_list) ? buildModelListValue(provider.model_list) : '';
+            setModelTestRowsFromModels(Array.isArray(provider?.model_list) ? provider.model_list : []);
             document.getElementById('providerHook').value = provider?.hook || '';
             resetProviderTransportAutoSync(provider);
             resetProviderSensitiveInputs();
             updateProviderAuthModeFields();
             updateModelListCount();
             updateFetchModelsButtonState();
+            renderModelTestTable();
         }
 
         function inferExplicitTransportFromApi(apiValue) {
@@ -2232,6 +2846,7 @@
         function handleProviderApiInput() {
             syncProviderTransportWithApi();
             updateFetchModelsButtonState();
+            renderModelTestTable();
         }
 
         function handleProviderTransportChange() {
@@ -2326,6 +2941,7 @@
                 authGroups = Array.isArray(data) ? data : [];
                 renderProviderAuthGroupOptions(document.getElementById('providerAuthGroup')?.value || '');
                 updateFetchModelsButtonState();
+                renderModelTestTable();
                 renderAuthGroups();
             } catch (error) {
                 console.error('加载 auth group 失败:', error);
@@ -3978,6 +4594,7 @@
             initThemeToggle();
             setupCustomSelect('providerAuthMode');
             setupCustomSelect('providerAuthGroup');
+            setupCustomSelect('modelTestAuthEntry');
             setupCustomSelect('providerTransport');
             setupCustomSelect('providerSourceFormat');
             setupCustomSelect('providerTargetFormat');
@@ -3992,6 +4609,7 @@
                     fetchModelPickerModalInstance.hide();
                 }
                 resetFetchModelPickerState();
+                resetModelTestState();
                 editingProviderName = null;
                 fillForm(null);
             });
@@ -4088,8 +4706,17 @@
             });
             document.getElementById('providerName').addEventListener('input', updateFetchModelsButtonState);
             document.getElementById('providerApi').addEventListener('input', handleProviderApiInput);
-            document.getElementById('providerAuthMode').addEventListener('change', updateFetchModelsButtonState);
-            document.getElementById('providerAuthGroup').addEventListener('change', updateFetchModelsButtonState);
+            document.getElementById('providerAuthMode').addEventListener('change', function() {
+                updateFetchModelsButtonState();
+                renderModelTestTable();
+            });
+            document.getElementById('providerAuthGroup').addEventListener('change', function() {
+                updateFetchModelsButtonState();
+                renderModelTestTable();
+            });
+            document.getElementById('modelTestAuthEntry').addEventListener('change', function() {
+                renderModelTestTable();
+            });
             document.getElementById('providerTransport').addEventListener('change', handleProviderTransportChange);
             providerSensitiveInputIds.forEach(inputId => {
                 const input = document.getElementById(inputId);
@@ -4107,7 +4734,6 @@
                     syncSensitiveInputToggle(inputId);
                 });
             });
-            document.getElementById('providerModelList').addEventListener('input', updateModelListCount);
             document.getElementById('fetchModelSearchInput').addEventListener('input', renderFetchModelPicker);
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
             window.addEventListener('resize', resizeAuthEntryYamlEditor);
@@ -4126,6 +4752,7 @@
             updateModelListCount();
             updateProviderAuthModeFields();
             updateFetchModelsButtonState();
+            renderModelTestTable();
             updateProviderSelectionUi();
             loadPageData();
         });

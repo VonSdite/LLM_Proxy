@@ -31,6 +31,7 @@ from ..proxy_core import (
 from ..translators import Translator, build_default_translator_registry
 from ..utils.compat import dataclass
 from ..utils.net import build_requests_proxies
+from .upstream_usage import ensure_upstream_usage_capture
 
 
 @dataclass(frozen=True, slots=True)
@@ -1002,16 +1003,7 @@ class ProxyService:
         translated_body: Dict[str, Any],
         stream: bool,
     ) -> None:
-        if str(source_format or "").strip().lower() != "openai_chat" or not stream:
-            return
-        stream_options = translated_body.get("stream_options")
-        if not isinstance(stream_options, dict):
-            stream_options = {}
-        else:
-            stream_options = dict(stream_options)
-        if stream_options.get("include_usage") is not True:
-            stream_options["include_usage"] = True
-        translated_body["stream_options"] = stream_options
+        ensure_upstream_usage_capture(source_format, translated_body, stream)
 
     @staticmethod
     def _ensure_supported_target_format(target_format: str) -> None:

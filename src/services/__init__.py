@@ -6,6 +6,7 @@ from .authentication_service import AuthenticationService
 from .auth_group_service import AuthGroupService
 from .log_service import LogService
 from .model_discovery_service import ModelDiscoveryService
+from .provider_model_test_service import ProviderModelTestService
 from .provider_service import ProviderService
 from .proxy_service import ProxyService
 from .settings_service import SettingsService
@@ -17,6 +18,7 @@ __all__ = [
     'UserService',
     'LogService',
     'ModelDiscoveryService',
+    'ProviderModelTestService',
     'ProxyService',
     'ProviderService',
     'SettingsService',

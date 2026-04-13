@@ -17,6 +17,11 @@
         ["provider proxy must be a valid absolute url", "代理地址必须是完整 URL"],
         ["websocket upstream currently only supports http/https proxy", "WebSocket 上游当前仅支持 HTTP/HTTPS 代理"],
         ["model_list must be a list or newline-separated string", "模型列表格式无效，请使用数组或按行分隔的文本"],
+        ["model test models must be a non-empty list", "请至少选择一个要测试的模型"],
+        ["model test must use either auth_group or api_key, not both", "模型测试时 Auth Group 与 API Key 只能二选一"],
+        ["model test auth_entry_id requires auth_group", "模型测试时只有选择了 Auth Group 才能指定 Auth Entry"],
+        ["model test auth_group requires auth_entry_id", "模型测试时请选择一个 Auth Entry"],
+        ["auth entry id is required", "请选择一个 Auth Entry"],
         ["server host is required", "请填写监听 IP"],
         ["server host must be a valid ip address", "监听 IP 格式无效，请填写合法 IP 地址"],
         ["server port must be an integer", "监听端口必须是整数"],
@@ -146,6 +151,9 @@
 
         matched = normalizedMessage.match(/^Provider not found:\s*(.+)$/i);
         if (matched) return buildTranslatedError(`Provider 不存在：${matched[1]}`);
+
+        matched = normalizedMessage.match(/^Auth entry not found:\s*(.+)$/i);
+        if (matched) return buildTranslatedError(`Auth Entry 不存在：${matched[1]}`);
 
         matched = normalizedMessage.match(/^Duplicate provider name detected:\s*(.+)$/i);
         if (matched) return buildTranslatedError(`Provider 名称重复：${matched[1]}`);

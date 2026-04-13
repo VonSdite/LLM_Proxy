@@ -12,6 +12,7 @@ from ..services import (
     AuthGroupService,
     AuthenticationService,
     ModelDiscoveryService,
+    ProviderModelTestService,
     ProviderService,
     SettingsService,
 )
@@ -25,6 +26,7 @@ class ProviderController:
         self,
         ctx: AppContext,
         provider_service: ProviderService,
+        provider_model_test_service: ProviderModelTestService,
         auth_group_service: AuthGroupService,
         model_discovery_service: ModelDiscoveryService,
         settings_service: SettingsService,
@@ -33,6 +35,7 @@ class ProviderController:
         self._app = ctx.flask_app
         self._logger = ctx.logger
         self._provider_service = provider_service
+        self._provider_model_test_service = provider_model_test_service
         self._auth_group_service = auth_group_service
         self._model_discovery_service = model_discovery_service
         self._settings_service = settings_service
@@ -52,6 +55,12 @@ class ProviderController:
             raise ValueError('Provider names must be a non-empty list')
         return [str(item) for item in value]
 
+    @staticmethod
+    def _coerce_model_name_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError("Model test models must be a non-empty list")
+        return [str(item) for item in value]
+
     def _register_routes(self) -> None:
         auth = require_authentication(self._auth_service)
 
@@ -60,6 +69,7 @@ class ProviderController:
         self._app.route('/api/providers/batch', methods=['POST'])(auth(self.batch_providers))
         self._app.route('/api/providers/order', methods=['PUT'])(auth(self.reorder_providers))
         self._app.route('/api/providers/fetch-models', methods=['GET'])(auth(self.fetch_models))
+        self._app.route('/api/providers/test-models', methods=['POST'])(auth(self.test_models))
         self._app.route('/api/providers/chat-whitelist', methods=['PUT'])(auth(self.update_chat_whitelist))
         self._app.route('/api/providers/<string:name>', methods=['GET'])(auth(self.get_provider))
         self._app.route('/api/providers/<string:name>', methods=['PUT'])(auth(self.update_provider))
@@ -399,6 +409,41 @@ class ProviderController:
         except Exception as exc:
             self._logger.error('Error fetching provider models: %s', exc)
             return jsonify({'error': str(exc)}), 500
+
+    def test_models(self) -> ResponseReturnValue:
+        try:
+            payload = self._get_request_payload()
+            api_key = str(payload.get("api_key") or "").strip() or None
+            auth_group_name = str(payload.get("auth_group") or "").strip() or None
+            auth_entry_id = str(payload.get("auth_entry_id") or "").strip() or None
+            if api_key and auth_group_name:
+                raise ValueError("Model test must use either auth_group or api_key, not both")
+            if auth_entry_id and not auth_group_name:
+                raise ValueError("Model test auth_entry_id requires auth_group")
+
+            request_headers = None
+            if auth_group_name:
+                if not auth_entry_id:
+                    raise ValueError("Model test auth_group requires auth_entry_id")
+                request_headers = self._auth_group_service.get_entry_headers(auth_group_name, auth_entry_id)
+
+            normalized_payload = dict(payload)
+            normalized_payload["models"] = self._coerce_model_name_list(payload.get("models"))
+            result = self._provider_model_test_service.test_models(
+                normalized_payload,
+                request_headers=request_headers,
+            )
+            self._logger.info(
+                "Provider models tested: provider=%s models=%s",
+                normalized_payload.get("name") or "<unsaved>",
+                len(result.get("results", [])),
+            )
+            return jsonify(result)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error testing provider models: %s", exc)
+            return jsonify({"error": str(exc)}), 500
 
     def update_chat_whitelist(self) -> ResponseReturnValue:
         try:

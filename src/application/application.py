@@ -12,6 +12,7 @@ from .app_context import AppContext, Logger
 from ..config import (
     ConfigManager,
     ProviderManager,
+    ProviderRuntimeFactory,
     build_auth_group_schemas,
     build_provider_schemas,
 )
@@ -29,6 +30,7 @@ from ..services import (
     AuthenticationService,
     LogService,
     ModelDiscoveryService,
+    ProviderModelTestService,
     ProviderService,
     ProxyService,
     SettingsService,
@@ -205,7 +207,8 @@ class Application:
         from ..config import AuthGroupManager
 
         self._auth_group_manager = AuthGroupManager(self._ctx, self._auth_group_repository)
-        self._provider_manager = ProviderManager(self._ctx)
+        self._provider_runtime_factory = ProviderRuntimeFactory(self._ctx)
+        self._provider_manager = ProviderManager(self._ctx, runtime_factory=self._provider_runtime_factory)
         self.reload_providers()
 
     def _setup_controllers(self) -> None:
@@ -217,6 +220,10 @@ class Application:
         proxy_service = ProxyService(self._ctx, self._auth_group_manager)
         log_service = LogService(self._ctx, self._log_repository)
         provider_service = ProviderService(self._ctx, self.reload_providers)
+        provider_model_test_service = ProviderModelTestService(
+            self._ctx,
+            self._provider_runtime_factory,
+        )
         auth_group_service = AuthGroupService(
             self._ctx,
             self.reload_providers,
@@ -233,6 +240,7 @@ class Application:
         self._provider_controller = ProviderController(
             self._ctx,
             provider_service,
+            provider_model_test_service,
             auth_group_service,
             model_discovery_service,
             settings_service,
