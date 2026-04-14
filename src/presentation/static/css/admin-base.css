@@ -439,6 +439,11 @@ body.app-page {
     pointer-events: none;
 }
 
+html.js .app-page select[data-custom-select]:not(.native-select-hidden) {
+    opacity: 0;
+    pointer-events: none;
+}
+
 .app-page .custom-select {
     position: relative;
 }
