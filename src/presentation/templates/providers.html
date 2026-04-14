@@ -1857,9 +1857,31 @@
             }, modelTestRowSequence);
         }
 
+        function revealAppendedModelTestRow() {
+            const container = document.getElementById('modelTestTableContainer');
+            if (!(container instanceof HTMLElement)) {
+                return;
+            }
+            window.requestAnimationFrame(() => {
+                const modelInputs = container.querySelectorAll('.model-test-model-input');
+                const lastInput = modelInputs[modelInputs.length - 1];
+                const addRowButton = container.querySelector('.model-test-add-row-button');
+                container.scrollTop = container.scrollHeight;
+                window.requestAnimationFrame(() => {
+                    if (addRowButton instanceof HTMLElement) {
+                        addRowButton.scrollIntoView({ block: 'end', inline: 'nearest' });
+                    } else if (lastInput instanceof HTMLElement) {
+                        lastInput.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                    }
+                    focusElementSafely(lastInput);
+                });
+            });
+        }
+
         function addModelTestRow() {
             modelTestRows.push(createModelTestRow(''));
             renderModelTestTable();
+            revealAppendedModelTestRow();
         }
 
         function preventModelTestActionMouseDown(event) {
