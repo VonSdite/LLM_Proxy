@@ -269,8 +269,8 @@
                         <div class="model-test-inline-editor">
                             <div class="model-test-toolbar">
                                 <div class="model-test-toolbar-main">
-                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="runSelectedModelTestsBtn" onclick="runSelectedModelTests()">测试</button>
-                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="deleteSelectedModelTestsBtn" onclick="deleteSelectedModelTestRows()">删除</button>
+                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="runSelectedModelTestsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="runSelectedModelTests()">测试</button>
+                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="deleteSelectedModelTestsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="deleteSelectedModelTestRows()">删除</button>
                                 </div>
                                 <div class="model-test-toolbar-side" id="modelTestAuthEntryShell" hidden>
                                     <div class="model-test-auth-entry-label-group">
@@ -286,9 +286,9 @@
                                     <select class="form-control" id="modelTestAuthEntry" data-custom-select="true"></select>
                                 </div>
                                 <div class="model-test-toolbar-actions">
-                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="tidyModelListBtn" onclick="tidyModelList()">整理</button>
+                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="tidyModelListBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="tidyModelList()">整理</button>
                                     <div class="fetch-model-help-group">
-                                        <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onclick="fetchModels()">拉取模型</button>
+                                        <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="fetchModels()">拉取模型</button>
                                         <button
                                             type="button"
                                             class="field-help-button field-help-button-inline"
@@ -1862,6 +1862,14 @@
             renderModelTestTable();
         }
 
+        function preventModelTestActionMouseDown(event) {
+            const activeElement = document.activeElement;
+            if (!activeElement?.classList?.contains('model-test-model-input')) {
+                return;
+            }
+            event?.preventDefault();
+        }
+
         function hasActiveModelTestRows() {
             return modelTestRows.some(row => row?.testing === true);
         }
@@ -2073,12 +2081,14 @@
                                         <button
                                             type="button"
                                             class="btn-action btn-edit"
+                                            onmousedown="preventModelTestActionMouseDown(event)"
                                             onclick="runSingleModelTest(${row.rowId})"
                                             ${(row.testing || !String(row.model || '').trim() || !canRunModelTests()) ? 'disabled' : ''}
                                         >${row.testing ? '测试中...' : '测试'}</button>
                                         <button
                                             type="button"
                                             class="btn-action btn-delete"
+                                            onmousedown="preventModelTestActionMouseDown(event)"
                                             onclick="deleteModelTestRow(${row.rowId})"
                                             ${row.testing ? 'disabled' : ''}
                                         >删除</button>
@@ -2092,6 +2102,7 @@
                                 <button
                                     type="button"
                                     class="model-test-add-row-button"
+                                    onmousedown="preventModelTestActionMouseDown(event)"
                                     onclick="addModelTestRow()"
                                 >
                                     <span class="model-test-add-row-icon" aria-hidden="true">+</span>
