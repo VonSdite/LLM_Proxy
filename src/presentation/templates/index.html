@@ -30,6 +30,7 @@
                     <select
                         id="username"
                         multiple
+                        data-custom-select="true"
                         data-placeholder="全部用户"
                         data-multi-select-hint="可多选；不选则不过滤"
                         data-visible-chip-count="3"
@@ -41,6 +42,7 @@
                     <select
                         id="requestModel"
                         multiple
+                        data-custom-select="true"
                         data-placeholder="全部模型"
                         data-multi-select-hint="可多选；不选则不过滤"
                         data-visible-chip-count="3"
@@ -133,7 +135,7 @@
                             </div>
                             <div class="page-size-controls">
                                 <label for="pageSizeSelect">每页显示:</label>
-                                <select id="pageSizeSelect" onchange="changePageSize()">
+                                <select id="pageSizeSelect" data-custom-select="true" onchange="changePageSize()">
                                     <option value="50">50</option>
                                     <option value="100">100</option>
                                     <option value="200">200</option>
@@ -875,8 +877,7 @@
             return params;
         }
 
-        // 页面加载时初始化
-        document.addEventListener('DOMContentLoaded', function() {
+        function initDashboardPage() {
             initThemeToggle();
             setupCustomSelect('username');
             setupCustomSelect('requestModel');
@@ -911,7 +912,9 @@
             }
             document.getElementById('startDate')?.addEventListener('change', updateDatePresetUi);
             document.getElementById('endDate')?.addEventListener('change', updateDatePresetUi);
-        });
+        }
+
+        initDashboardPage();
 
         document.addEventListener('click', function(event) {
             if (!event.target.closest('.custom-select')) {
@@ -1226,7 +1229,6 @@
         }
     </script>
 {% endblock %}
-
 
 
 

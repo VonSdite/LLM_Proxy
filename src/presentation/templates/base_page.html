@@ -4,9 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {% include "_theme_bootstrap.html" %}
+    <script>
+        document.documentElement.classList.add("js");
+    </script>
     <title>{% block page_title %}LLM Proxy{% endblock %}</title>
     <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="/static/css/admin-base.css?v=20260319-3">
+    <link rel="stylesheet" href="/static/css/admin-base.css?v=20260414-1">
     {% block page_css %}{% endblock %}
 </head>
 <body class="{% block body_class_prefix %}{% endblock %}{% block body_class %}{% endblock %}">

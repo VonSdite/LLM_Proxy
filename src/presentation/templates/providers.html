@@ -110,7 +110,7 @@
                                 <span>上游传输</span>
                                 <button type="button" class="field-help-button" data-provider-help-topic="transport" onclick="toggleProviderHelp('transport', event)" aria-label="查看上游传输说明">?</button>
                             </label>
-                            <select class="form-control" id="providerTransport">
+                            <select class="form-control" id="providerTransport" data-custom-select="true">
                                 <option value="http">HTTP</option>
                                 <option value="websocket">WebSocket</option>
                             </select>
@@ -120,7 +120,7 @@
                                 <span>上游格式</span>
                                 <button type="button" class="field-help-button" data-provider-help-topic="source_format" onclick="toggleProviderHelp('source_format', event)" aria-label="查看上游格式说明">?</button>
                             </label>
-                            <select class="form-control" id="providerSourceFormat">
+                            <select class="form-control" id="providerSourceFormat" data-custom-select="true">
                                 <option value="openai_chat">openai_chat</option>
                                 <option value="openai_responses">openai_responses</option>
                                 <option value="claude_chat">claude_chat</option>
@@ -137,6 +137,7 @@
                                 class="form-control"
                                 id="providerTargetFormat"
                                 multiple
+                                data-custom-select="true"
                                 data-placeholder="请选择下游格式"
                                 data-multi-select-hint="可多选，点击已选项可取消；互斥项会自动替换"
                             >
@@ -148,7 +149,7 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Auth 方式</label>
-                            <select class="form-control" id="providerAuthMode" onchange="updateProviderAuthModeFields()">
+                            <select class="form-control" id="providerAuthMode" data-custom-select="true" onchange="updateProviderAuthModeFields()">
                                 <option value="legacy_api_key">Legacy API Key</option>
                                 <option value="auth_group">Auth Group</option>
                             </select>
@@ -164,7 +165,7 @@
                                     aria-label="查看 Auth Group 字段说明"
                                 >?</button>
                             </label>
-                            <select class="form-control" id="providerAuthGroup"></select>
+                            <select class="form-control" id="providerAuthGroup" data-custom-select="true"></select>
                         </div>
                         <div class="mb-3" id="providerLegacyApiKeyField">
                             <label class="form-label">Legacy API Key</label>
@@ -253,7 +254,7 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label">证书校验（HTTPS/WSS）</label>
-                            <select class="form-control" id="providerVerifySsl">
+                            <select class="form-control" id="providerVerifySsl" data-custom-select="true">
                                 <option value="true">启用</option>
                                 <option value="false">禁用</option>
                             </select>
@@ -282,7 +283,7 @@
                                             aria-label="查看 Auth Entry 测试说明"
                                         >?</button>
                                     </div>
-                                    <select class="form-control" id="modelTestAuthEntry"></select>
+                                    <select class="form-control" id="modelTestAuthEntry" data-custom-select="true"></select>
                                 </div>
                                 <div class="model-test-toolbar-actions">
                                     <button type="button" class="btn btn-secondary btn-field-secondary" id="tidyModelListBtn" onclick="tidyModelList()">整理</button>
@@ -397,7 +398,7 @@
                                     aria-label="查看 Auth Group 策略说明"
                                 >?</button>
                             </label>
-                            <select class="form-control" id="authGroupStrategy">
+                            <select class="form-control" id="authGroupStrategy" data-custom-select="true">
                                 <option value="least_inflight">least_inflight</option>
                             </select>
                         </div>
@@ -1473,7 +1474,7 @@
             removeAuthEntryCard(entryKey);
         }
 
-        function getModelPreview(models, limit = 6) {
+        function getModelPreview(models, limit = 4) {
             const items = Array.isArray(models) ? models : [];
             const visible = items.slice(0, limit);
             return {
@@ -3162,7 +3163,7 @@
                             <div class="model-summary-bar">
                                 <span class="model-count">共 ${preview.total} 个</span>
                                 ${preview.hiddenCount ? `<span class="model-more">+${preview.hiddenCount}</span>` : ''}
-                                <button class="btn-inline" type="button" onclick="openModelDetail(decodeProviderName('${encodedProviderName}'))">查看全部</button>
+                                ${preview.hiddenCount ? `<button class="btn-inline" type="button" onclick="openModelDetail(decodeProviderName('${encodedProviderName}'))">查看全部</button>` : ''}
                             </div>
                       `
                     : '';
@@ -4614,7 +4615,7 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
+        function initProvidersPage() {
             initThemeToggle();
             setupCustomSelect('providerAuthMode');
             setupCustomSelect('providerAuthGroup');
@@ -4776,6 +4777,8 @@
             renderModelTestTable();
             updateProviderSelectionUi();
             loadPageData();
-        });
+        }
+
+        initProvidersPage();
     </script>
 {% endblock %}

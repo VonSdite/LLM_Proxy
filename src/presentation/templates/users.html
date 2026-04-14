@@ -104,7 +104,7 @@
                             </div>
                             <div class="page-size-controls">
                                 <label for="pageSizeSelect">每页显示:</label>
-                                <select id="pageSizeSelect" onchange="changePageSize()">
+                                <select id="pageSizeSelect" data-custom-select="true" onchange="changePageSize()">
                                     <option value="50">50</option>
                                     <option value="100">100</option>
                                     <option value="200">200</option>
@@ -603,7 +603,7 @@
             renderCustomSelectOptions(selectId);
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
+        function initUsersPage() {
             initThemeToggle();
             updateChatWhitelistUi();
             setupCustomSelect('pageSizeSelect');
@@ -672,7 +672,9 @@
                     renderPermissionDetailList();
                 });
             }
-        });
+        }
+
+        initUsersPage();
 
         function initUserSearch() {
             const userSearchInput = document.getElementById('userSearchInput');
