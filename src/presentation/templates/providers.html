@@ -2019,31 +2019,11 @@
 
         function renderModelTestTable() {
             const container = document.getElementById('modelTestTableContainer');
-            const summary = document.getElementById('modelTestSummary');
-            if (!container || !summary) return;
+            if (!container) return;
 
             renderModelTestAuthEntryOptions(document.getElementById('modelTestAuthEntry')?.value || '');
             syncModelTestAuthEntryUi();
-
-            const selectedRows = getSelectedModelTestRows();
-            const filledRows = getFilledModelTestRows();
-            const selectedFilledRows = selectedRows.filter(row => String(row?.model || '').trim() !== '' && !row.testing);
-            const deletableSelectedRows = selectedRows.filter(row => !row.testing);
-            summary.textContent = `共 ${modelTestRows.length} 行，可测试 ${filledRows.length} 个，已选 ${selectedRows.length} 行`;
-
-            const batchRunButton = document.getElementById('runSelectedModelTestsBtn');
-            if (batchRunButton) {
-                batchRunButton.disabled = !canRunModelTests() || !selectedFilledRows.length;
-                batchRunButton.textContent = '测试';
-            }
-            const batchDeleteButton = document.getElementById('deleteSelectedModelTestsBtn');
-            if (batchDeleteButton) {
-                batchDeleteButton.disabled = !deletableSelectedRows.length;
-            }
-            const tidyButton = document.getElementById('tidyModelListBtn');
-            if (tidyButton) {
-                tidyButton.disabled = hasActiveModelTestRows();
-            }
+            updateModelTestTableSummaryAndControls();
 
             container.innerHTML = `
                 <table class="providers-table model-test-table">
@@ -2092,8 +2072,8 @@
                                         value="${escapeHtml(row.model)}"
                                         placeholder="请输入模型 ID"
                                         ${row.testing ? 'disabled' : ''}
-                                        oninput="handleModelTestRowInput(${row.rowId}, this.value)"
-                                        onchange="handleModelTestRowChange(${row.rowId}, this.value)"
+                                        oninput="handleModelTestRowInput(${row.rowId}, this.value, this)"
+                                        onchange="handleModelTestRowChange(${row.rowId}, this.value, this)"
                                     >
                                 </td>
                                 <td class="model-test-status-cell">${buildModelTestAvailabilityMarkup(row)}</td>
@@ -2136,33 +2116,114 @@
                     </tbody>
                 </table>
             `;
+            syncModelTestSelectAllCheckbox();
+        }
 
-            const selectAllCheckbox = document.getElementById('modelTestSelectAllCheckbox');
-            if (selectAllCheckbox) {
-                const selectableRows = modelTestRows.filter(row => !row.testing);
-                const selectedSelectableCount = selectableRows.filter(row => row.selected).length;
-                selectAllCheckbox.checked = selectableRows.length > 0 && selectedSelectableCount === selectableRows.length;
-                selectAllCheckbox.indeterminate = selectedSelectableCount > 0 && selectedSelectableCount < selectableRows.length;
+        function updateModelTestTableSummaryAndControls() {
+            const summary = document.getElementById('modelTestSummary');
+            if (!summary) return;
+
+            const selectedRows = getSelectedModelTestRows();
+            const filledRows = getFilledModelTestRows();
+            const selectedFilledRows = selectedRows.filter(row => String(row?.model || '').trim() !== '' && !row.testing);
+            const deletableSelectedRows = selectedRows.filter(row => !row.testing);
+            summary.textContent = `共 ${modelTestRows.length} 行，可测试 ${filledRows.length} 个，已选 ${selectedRows.length} 行`;
+
+            const batchRunButton = document.getElementById('runSelectedModelTestsBtn');
+            if (batchRunButton) {
+                batchRunButton.disabled = !canRunModelTests() || !selectedFilledRows.length;
+                batchRunButton.textContent = '测试';
+            }
+            const batchDeleteButton = document.getElementById('deleteSelectedModelTestsBtn');
+            if (batchDeleteButton) {
+                batchDeleteButton.disabled = !deletableSelectedRows.length;
+            }
+            const tidyButton = document.getElementById('tidyModelListBtn');
+            if (tidyButton) {
+                tidyButton.disabled = hasActiveModelTestRows();
             }
         }
 
-        function handleModelTestRowInput(rowId, value) {
+        function syncModelTestSelectAllCheckbox() {
+            const selectAllCheckbox = document.getElementById('modelTestSelectAllCheckbox');
+            if (!selectAllCheckbox) {
+                return;
+            }
+            const selectableRows = modelTestRows.filter(row => !row.testing);
+            const selectedSelectableCount = selectableRows.filter(row => row.selected).length;
+            selectAllCheckbox.checked = selectableRows.length > 0 && selectedSelectableCount === selectableRows.length;
+            selectAllCheckbox.indeterminate = selectedSelectableCount > 0 && selectedSelectableCount < selectableRows.length;
+        }
+
+        function refreshModelTestRowDisplay(rowId, inputElement) {
+            const row = modelTestRows.find(item => item.rowId === rowId);
+            if (!row) return;
+
+            const rowElement = inputElement?.closest('tr');
+            if (!(rowElement instanceof HTMLElement)) {
+                return;
+            }
+
+            const statusCell = rowElement.querySelector('.model-test-status-cell');
+            if (statusCell instanceof HTMLElement) {
+                statusCell.innerHTML = buildModelTestAvailabilityMarkup(row);
+            }
+
+            const metricCells = rowElement.querySelectorAll('.model-test-metric-cell');
+            if (metricCells[0] instanceof HTMLElement) {
+                metricCells[0].textContent = row.testing ? '测试中...' : formatModelTestMetric(row.firstTokenLatencyMs, 'ms');
+            }
+            if (metricCells[1] instanceof HTMLElement) {
+                metricCells[1].textContent = row.testing ? '测试中...' : formatModelTestMetric(row.tps, 'tok/s');
+            }
+
+            const runButton = rowElement.querySelector('.btn-action.btn-edit');
+            if (runButton instanceof HTMLButtonElement) {
+                runButton.disabled = row.testing || !String(row.model || '').trim() || !canRunModelTests();
+                runButton.textContent = row.testing ? '测试中...' : '测试';
+            }
+
+            const deleteButton = rowElement.querySelector('.btn-action.btn-delete');
+            if (deleteButton instanceof HTMLButtonElement) {
+                deleteButton.disabled = !!row.testing;
+            }
+
+            const actionsCell = rowElement.querySelector('.model-test-actions-cell');
+            if (actionsCell instanceof HTMLElement) {
+                const existingError = actionsCell.querySelector('.model-test-row-error');
+                if (row.error) {
+                    const errorText = formatModelTestInlineError(row.error);
+                    if (existingError instanceof HTMLElement) {
+                        existingError.textContent = errorText;
+                    } else {
+                        actionsCell.insertAdjacentHTML('beforeend', `<div class="model-test-row-error">${escapeHtml(errorText)}</div>`);
+                    }
+                } else if (existingError instanceof HTMLElement) {
+                    existingError.remove();
+                }
+            }
+        }
+
+        function handleModelTestRowInput(rowId, value, inputElement) {
             const row = modelTestRows.find(item => item.rowId === rowId);
             if (!row) return;
             if (row.testing) return;
             row.model = String(value || '');
             clearModelTestRowResult(row);
             updateModelListCount();
+            updateModelTestTableSummaryAndControls();
+            refreshModelTestRowDisplay(rowId, inputElement);
         }
 
-        function handleModelTestRowChange(rowId, value) {
+        function handleModelTestRowChange(rowId, value, inputElement) {
             const row = modelTestRows.find(item => item.rowId === rowId);
             if (!row) return;
             if (row.testing) return;
-            row.model = String(value || '').trim();
+            row.model = String(value || '');
             clearModelTestRowResult(row);
             updateModelListCount();
-            renderModelTestTable();
+            updateModelTestTableSummaryAndControls();
+            refreshModelTestRowDisplay(rowId, inputElement);
         }
 
         function handleModelTestRowCheckboxClick(event, rowId) {

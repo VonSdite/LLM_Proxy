@@ -1420,6 +1420,31 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn(".dashboard-page .custom-select-menu-action.is-checked .custom-select-menu-action-box,", index_css)
         self.assertIn("--nav-tab-hover-bg:", admin_base_css)
 
+    def test_provider_template_keeps_model_row_change_from_rebuilding_table(self) -> None:
+        providers_html = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "presentation"
+            / "templates"
+            / "providers.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("function refreshModelTestRowDisplay(rowId, inputElement)", providers_html)
+        self.assertIn("function updateModelTestTableSummaryAndControls()", providers_html)
+        self.assertIn("onchange=\"handleModelTestRowChange(${row.rowId}, this.value, this)\"", providers_html)
+        self.assertNotIn(
+            "function handleModelTestRowChange(rowId, value) {\n"
+            "            const row = modelTestRows.find(item => item.rowId === rowId);\n"
+            "            if (!row) return;\n"
+            "            if (row.testing) return;\n"
+            "            row.model = String(value || '').trim();\n"
+            "            clearModelTestRowResult(row);\n"
+            "            updateModelListCount();\n"
+            "            renderModelTestTable();\n"
+            "        }",
+            providers_html,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
