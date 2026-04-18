@@ -177,10 +177,11 @@ class ProviderService:
     @staticmethod
     def _find_provider(providers: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
         normalized_name = str(name).strip()
-        for provider in providers:
-            if str(provider.get('name', '')).strip() == normalized_name:
-                return provider
-        return None
+        provider_indexes = ProviderService._build_provider_indexes_by_name(providers)
+        provider_index = provider_indexes.get(normalized_name)
+        if provider_index is None:
+            return None
+        return providers[provider_index]
 
     @staticmethod
     def _validate_providers(config: Dict[str, Any], providers: List[Dict[str, Any]]) -> None:
@@ -268,17 +269,21 @@ class ProviderService:
 
     @staticmethod
     def _list_provider_names(providers: List[Dict[str, Any]]) -> List[str]:
-        return [str(provider.get("name", "")).strip() for provider in providers]
+        return list(ProviderService._build_provider_indexes_by_name(providers).keys())
+
+    @staticmethod
+    def _build_provider_indexes_by_name(providers: List[Dict[str, Any]]) -> Dict[str, int]:
+        return {
+            str(provider.get("name", "")).strip(): index
+            for index, provider in enumerate(providers)
+        }
 
     @staticmethod
     def _find_provider_indexes(providers: List[Dict[str, Any]], names: List[str]) -> List[int]:
-        indexes_by_name = {
-            str(provider.get('name', '')).strip(): index
-            for index, provider in enumerate(providers)
-        }
-        missing_names = [name for name in names if name not in indexes_by_name]
+        provider_indexes = ProviderService._build_provider_indexes_by_name(providers)
+        missing_names = [name for name in names if name not in provider_indexes]
         if missing_names:
             if len(missing_names) == 1:
                 raise ValueError(f'Provider not found: {missing_names[0]}')
             raise ValueError(f"Providers not found: {', '.join(missing_names)}")
-        return [indexes_by_name[name] for name in names]
+        return [provider_indexes[name] for name in names]
