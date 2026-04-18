@@ -12,6 +12,7 @@ from ..config.provider_config import (
     parse_optional_bool,
     validate_auth_group_provider_definitions,
 )
+from .config_sections import read_auth_group_entries, read_provider_entries
 
 
 class ProviderService:
@@ -26,12 +27,12 @@ class ProviderService:
         config = self._config_manager.get_raw_config()
         return [
             ProviderConfigSchema.from_mapping(provider).to_mapping()
-            for provider in self._extract_providers(config)
+            for provider in read_provider_entries(config)
         ]
 
     def get_provider(self, name: str) -> Optional[Dict[str, Any]]:
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         provider = self._find_provider(providers, name)
         if provider is None:
             return None
@@ -39,7 +40,7 @@ class ProviderService:
 
     def create_provider(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         provider_config = ProviderConfigSchema.from_payload(payload)
         normalized = provider_config.to_mapping()
         stored = provider_config.to_storage_mapping()
@@ -53,7 +54,7 @@ class ProviderService:
 
     def update_provider(self, current_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         target = self._find_provider(providers, current_name)
         if target is None:
             raise ValueError(f'Provider not found: {current_name}')
@@ -79,7 +80,7 @@ class ProviderService:
 
     def delete_provider(self, name: str) -> None:
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         target = self._find_provider(providers, name)
         if target is None:
             raise ValueError(f'Provider not found: {name}')
@@ -89,7 +90,7 @@ class ProviderService:
 
     def set_provider_enabled(self, name: str, enabled: bool) -> Dict[str, Any]:
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         target = self._find_provider(providers, name)
         if target is None:
             raise ValueError(f'Provider not found: {name}')
@@ -106,7 +107,7 @@ class ProviderService:
     def batch_set_provider_enabled(self, names: List[str], enabled: bool) -> Dict[str, Any]:
         normalized_names = self._normalize_provider_names(names)
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         target_indexes = self._find_provider_indexes(providers, normalized_names)
 
         for target_index in target_indexes:
@@ -125,7 +126,7 @@ class ProviderService:
     def reorder_providers(self, names: List[str]) -> Dict[str, Any]:
         normalized_names = self._normalize_provider_order_names(names)
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         current_names = self._list_provider_names(providers)
 
         current_name_set = set(current_names)
@@ -152,7 +153,7 @@ class ProviderService:
     def batch_delete_providers(self, names: List[str]) -> Dict[str, Any]:
         normalized_names = self._normalize_provider_names(names)
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         self._find_provider_indexes(providers, normalized_names)
 
         name_set = set(normalized_names)
@@ -174,18 +175,6 @@ class ProviderService:
         self._reload_callback()
 
     @staticmethod
-    def _extract_providers(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        providers = config.get('providers', [])
-        if providers is None:
-            providers = []
-        if not isinstance(providers, list):
-            raise ValueError("Config field 'providers' must be a list")
-        for index, provider in enumerate(providers):
-            if not isinstance(provider, dict):
-                raise ValueError(f'Provider entry at index {index} must be an object')
-        return list(providers)
-
-    @staticmethod
     def _find_provider(providers: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
         normalized_name = str(name).strip()
         for provider in providers:
@@ -194,21 +183,9 @@ class ProviderService:
         return None
 
     @staticmethod
-    def _extract_auth_groups(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        auth_groups = config.get('auth_groups', [])
-        if auth_groups is None:
-            auth_groups = []
-        if not isinstance(auth_groups, list):
-            raise ValueError("Config field 'auth_groups' must be a list")
-        for index, auth_group in enumerate(auth_groups):
-            if not isinstance(auth_group, dict):
-                raise ValueError(f'Auth group entry at index {index} must be an object')
-        return list(auth_groups)
-
-    @staticmethod
     def _validate_providers(config: Dict[str, Any], providers: List[Dict[str, Any]]) -> None:
         validate_auth_group_provider_definitions(
-            ProviderService._extract_auth_groups(config),
+            read_auth_group_entries(config),
             providers,
         )
 
