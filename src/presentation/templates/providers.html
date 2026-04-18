@@ -609,6 +609,10 @@
         let authEntryYamlThemeObserver = null;
         let modelTestRows = [];
         let modelTestRowSequence = 0;
+        let providerDragState = null;
+        let providerDragTargetElement = null;
+        let modelTestDragState = null;
+        let modelTestDragTargetElement = null;
         const providerTargetFormatOptions = ['openai_chat', 'openai_responses', 'claude_chat', 'codex'];
         const defaultNewProviderTargetFormats = ['openai_chat', 'codex', 'claude_chat'];
         const providerTargetFormatConflictGroups = [
@@ -835,6 +839,144 @@
             return isProviderEnabled(provider)
                 ? groupNames.concat(groupedNames.disabled)
                 : groupedNames.enabled.concat(groupNames);
+        }
+
+        function buildDroppedProviderOrderNames(name, targetName, placeAfter) {
+            const normalizedName = String(name || '').trim();
+            const normalizedTargetName = String(targetName || '').trim();
+            if (!normalizedName || !normalizedTargetName || normalizedName === normalizedTargetName) {
+                return null;
+            }
+
+            const provider = providers.find(item => String(item?.name || '').trim() === normalizedName);
+            const targetProvider = providers.find(item => String(item?.name || '').trim() === normalizedTargetName);
+            if (!provider || !targetProvider || isProviderEnabled(provider) !== isProviderEnabled(targetProvider)) {
+                return null;
+            }
+
+            const groupedNames = getGroupedProviderOrderNames();
+            const groupNames = (isProviderEnabled(provider) ? groupedNames.enabled : groupedNames.disabled).slice();
+            const currentIndex = groupNames.indexOf(normalizedName);
+            const targetIndex = groupNames.indexOf(normalizedTargetName);
+            if (currentIndex < 0 || targetIndex < 0) {
+                return null;
+            }
+
+            const [movedName] = groupNames.splice(currentIndex, 1);
+            const adjustedTargetIndex = groupNames.indexOf(normalizedTargetName);
+            const insertIndex = placeAfter ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+            groupNames.splice(insertIndex, 0, movedName);
+            return isProviderEnabled(provider)
+                ? groupNames.concat(groupedNames.disabled)
+                : groupedNames.enabled.concat(groupNames);
+        }
+
+        function getDragPlacement(targetElement, event) {
+            if (!(targetElement instanceof HTMLElement)) {
+                return 'before';
+            }
+            const rect = targetElement.getBoundingClientRect();
+            const offsetY = Number(event?.clientY || 0) - rect.top;
+            return offsetY > (rect.height / 2) ? 'after' : 'before';
+        }
+
+        function updateRowDragIndicator(targetElement, placeAfter, stateKey) {
+            const targetStateKey = stateKey === 'provider' ? 'provider' : 'model';
+            const previousElement = targetStateKey === 'provider' ? providerDragTargetElement : modelTestDragTargetElement;
+            if (previousElement instanceof HTMLElement && previousElement !== targetElement) {
+                previousElement.classList.remove('is-drag-over-before', 'is-drag-over-after');
+            }
+            if (!(targetElement instanceof HTMLElement)) {
+                if (targetStateKey === 'provider') {
+                    providerDragTargetElement = null;
+                } else {
+                    modelTestDragTargetElement = null;
+                }
+                return;
+            }
+            targetElement.classList.toggle('is-drag-over-before', !placeAfter);
+            targetElement.classList.toggle('is-drag-over-after', !!placeAfter);
+            if (targetStateKey === 'provider') {
+                providerDragTargetElement = targetElement;
+            } else {
+                modelTestDragTargetElement = targetElement;
+            }
+        }
+
+        function clearRowDragIndicator(stateKey) {
+            const targetStateKey = stateKey === 'provider' ? 'provider' : 'model';
+            const previousElement = targetStateKey === 'provider' ? providerDragTargetElement : modelTestDragTargetElement;
+            if (previousElement instanceof HTMLElement) {
+                previousElement.classList.remove('is-drag-over-before', 'is-drag-over-after');
+            }
+            if (targetStateKey === 'provider') {
+                providerDragTargetElement = null;
+            } else {
+                modelTestDragTargetElement = null;
+            }
+        }
+
+        function handleProviderRowDragStart(name, groupKey, event) {
+            const normalizedName = String(name || '').trim();
+            const normalizedGroupKey = String(groupKey || '').trim().toLowerCase();
+            if (!normalizedName || hasProviderMutationInFlight()) {
+                event?.preventDefault();
+                return false;
+            }
+            providerDragState = {
+                name: normalizedName,
+                groupKey: normalizedGroupKey,
+            };
+            event?.dataTransfer?.setData('text/plain', normalizedName);
+            if (event?.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+            }
+            const rowElement = event?.currentTarget?.closest('tr');
+            rowElement?.classList?.add('is-dragging');
+            return true;
+        }
+
+        function handleProviderRowDragOver(targetName, groupKey, event) {
+            if (!providerDragState || hasProviderMutationInFlight()) {
+                return;
+            }
+            const normalizedTargetName = String(targetName || '').trim();
+            const normalizedGroupKey = String(groupKey || '').trim().toLowerCase();
+            if (!normalizedTargetName || providerDragState.groupKey !== normalizedGroupKey || providerDragState.name === normalizedTargetName) {
+                return;
+            }
+            event.preventDefault();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = 'move';
+            }
+            const rowElement = event.currentTarget?.closest('tr');
+            updateRowDragIndicator(rowElement, getDragPlacement(rowElement, event) === 'after', 'provider');
+        }
+
+        async function handleProviderRowDrop(targetName, groupKey, event) {
+            if (!providerDragState || hasProviderMutationInFlight()) {
+                return;
+            }
+            event.preventDefault();
+            const normalizedTargetName = String(targetName || '').trim();
+            const normalizedGroupKey = String(groupKey || '').trim().toLowerCase();
+            const rowElement = event.currentTarget?.closest('tr');
+            const placeAfter = getDragPlacement(rowElement, event) === 'after';
+            clearRowDragIndicator('provider');
+            if (!normalizedTargetName || providerDragState.groupKey !== normalizedGroupKey || providerDragState.name === normalizedTargetName) {
+                return;
+            }
+            const nextOrderNames = buildDroppedProviderOrderNames(providerDragState.name, normalizedTargetName, placeAfter);
+            if (nextOrderNames) {
+                await saveProviderOrder(nextOrderNames);
+            }
+        }
+
+        function handleProviderRowDragEnd(event) {
+            clearRowDragIndicator('provider');
+            providerDragState = null;
+            const rowElement = event?.currentTarget?.closest('tr');
+            rowElement?.classList?.remove('is-dragging');
         }
 
         function hasProviderMutationInFlight() {
@@ -2054,16 +2196,41 @@
                     </thead>
                     <tbody>
                         ${modelTestRows.map(row => `
-                            <tr>
-                                <td class="provider-select-cell">
-                                    <input
-                                        type="checkbox"
-                                        class="provider-table-checkbox${row.testing ? ' is-testing-locked' : ''}"
-                                        ${row.selected || row.testing ? 'checked' : ''}
-                                        ${row.testing ? 'aria-disabled="true"' : ''}
-                                        onclick="return handleModelTestRowCheckboxClick(event, ${row.rowId})"
-                                        onchange="toggleModelTestRowSelection(${row.rowId}, this.checked)"
-                                    >
+                            <tr
+                                data-model-test-row-id="${row.rowId}"
+                                ondragover="handleModelTestRowDragOver(${row.rowId}, event)"
+                                ondrop="handleModelTestRowDrop(${row.rowId}, event)"
+                            >
+                                <td class="provider-select-cell model-test-select-cell">
+                                    <div class="list-row-leading">
+                                        <button
+                                            type="button"
+                                            class="drag-handle-button model-test-drag-handle"
+                                            draggable="${row.testing ? 'false' : 'true'}"
+                                            ondragstart="handleModelTestRowDragStart(${row.rowId}, event)"
+                                            ondragend="handleModelTestRowDragEnd(event)"
+                                            ${row.testing ? 'disabled' : ''}
+                                            aria-label="拖动调整模型顺序"
+                                            title="拖动调整顺序"
+                                        >
+                                            <svg class="drag-handle-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                                                <circle cx="7" cy="5" r="1.25"></circle>
+                                                <circle cx="13" cy="5" r="1.25"></circle>
+                                                <circle cx="7" cy="10" r="1.25"></circle>
+                                                <circle cx="13" cy="10" r="1.25"></circle>
+                                                <circle cx="7" cy="15" r="1.25"></circle>
+                                                <circle cx="13" cy="15" r="1.25"></circle>
+                                            </svg>
+                                        </button>
+                                        <input
+                                            type="checkbox"
+                                            class="provider-table-checkbox${row.testing ? ' is-testing-locked' : ''}"
+                                            ${row.selected || row.testing ? 'checked' : ''}
+                                            ${row.testing ? 'aria-disabled="true"' : ''}
+                                            onclick="return handleModelTestRowCheckboxClick(event, ${row.rowId})"
+                                            onchange="toggleModelTestRowSelection(${row.rowId}, this.checked)"
+                                        >
+                                    </div>
                                 </td>
                                 <td class="model-test-model-cell">
                                     <input
@@ -2153,6 +2320,81 @@
             const selectedSelectableCount = selectableRows.filter(row => row.selected).length;
             selectAllCheckbox.checked = selectableRows.length > 0 && selectedSelectableCount === selectableRows.length;
             selectAllCheckbox.indeterminate = selectedSelectableCount > 0 && selectedSelectableCount < selectableRows.length;
+        }
+
+        function buildDroppedModelTestRows(dragRowId, targetRowId, placeAfter) {
+            const draggedRowId = Number(dragRowId);
+            const destinationRowId = Number(targetRowId);
+            if (!Number.isFinite(draggedRowId) || !Number.isFinite(destinationRowId) || draggedRowId === destinationRowId) {
+                return null;
+            }
+            const rows = Array.isArray(modelTestRows) ? modelTestRows.slice() : [];
+            const currentIndex = rows.findIndex(item => Number(item?.rowId) === draggedRowId);
+            const targetIndex = rows.findIndex(item => Number(item?.rowId) === destinationRowId);
+            if (currentIndex < 0 || targetIndex < 0) {
+                return null;
+            }
+            const [movedRow] = rows.splice(currentIndex, 1);
+            const adjustedTargetIndex = rows.findIndex(item => Number(item?.rowId) === destinationRowId);
+            const insertIndex = placeAfter ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+            rows.splice(insertIndex, 0, movedRow);
+            return rows;
+        }
+
+        function handleModelTestRowDragStart(rowId, event) {
+            const row = modelTestRows.find(item => item.rowId === rowId);
+            if (!row || row.testing) {
+                event?.preventDefault();
+                return false;
+            }
+            modelTestDragState = { rowId: Number(rowId) };
+            event?.dataTransfer?.setData('text/plain', String(rowId));
+            if (event?.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+            }
+            const rowElement = event?.currentTarget?.closest('tr');
+            rowElement?.classList?.add('is-dragging');
+            return true;
+        }
+
+        function handleModelTestRowDragOver(rowId, event) {
+            if (!modelTestDragState) {
+                return;
+            }
+            const normalizedRowId = Number(rowId);
+            if (!Number.isFinite(normalizedRowId) || modelTestDragState.rowId === normalizedRowId) {
+                return;
+            }
+            event.preventDefault();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = 'move';
+            }
+            const rowElement = event.currentTarget?.closest('tr');
+            updateRowDragIndicator(rowElement, getDragPlacement(rowElement, event) === 'after', 'model');
+        }
+
+        function handleModelTestRowDrop(rowId, event) {
+            if (!modelTestDragState) {
+                return;
+            }
+            event.preventDefault();
+            const normalizedRowId = Number(rowId);
+            const rowElement = event.currentTarget?.closest('tr');
+            const placeAfter = getDragPlacement(rowElement, event) === 'after';
+            clearRowDragIndicator('model');
+            const nextRows = buildDroppedModelTestRows(modelTestDragState.rowId, normalizedRowId, placeAfter);
+            if (!nextRows) {
+                return;
+            }
+            modelTestRows = nextRows;
+            renderModelTestTable();
+        }
+
+        function handleModelTestRowDragEnd(event) {
+            clearRowDragIndicator('model');
+            modelTestDragState = null;
+            const rowElement = event?.currentTarget?.closest('tr');
+            rowElement?.classList?.remove('is-dragging');
         }
 
         function refreshModelTestRowDisplay(rowId, inputElement) {
@@ -3268,16 +3510,41 @@
                     .join('');
 
                 html += `
-                    <tr>
+                    <tr
+                        data-provider-row-name="${encodedProviderName}"
+                        ondragover="handleProviderRowDragOver(decodeProviderName('${encodedProviderName}'), '${normalizedGroupKey}', event)"
+                        ondrop="handleProviderRowDrop(decodeProviderName('${encodedProviderName}'), '${normalizedGroupKey}', event)"
+                    >
                         <td class="provider-select-cell">
-                            <input
-                                type="checkbox"
-                                class="provider-table-checkbox"
-                                data-provider-row-checkbox="${encodedProviderName}"
-                                onchange="toggleProviderSelection(decodeProviderName('${encodedProviderName}'), this.checked)"
-                                ${isSelected ? 'checked' : ''}
-                                ${providerActionLocked ? 'disabled' : ''}
-                            >
+                            <div class="list-row-leading">
+                                <button
+                                    type="button"
+                                    class="drag-handle-button provider-drag-handle"
+                                    draggable="${providerActionLocked ? 'false' : 'true'}"
+                                    ondragstart="handleProviderRowDragStart(decodeProviderName('${encodedProviderName}'), '${normalizedGroupKey}', event)"
+                                    ondragend="handleProviderRowDragEnd(event)"
+                                    ${providerActionLocked ? 'disabled' : ''}
+                                    aria-label="拖动调整 Provider 顺序"
+                                    title="拖动调整顺序"
+                                >
+                                    <svg class="drag-handle-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                                        <circle cx="7" cy="5" r="1.25"></circle>
+                                        <circle cx="13" cy="5" r="1.25"></circle>
+                                        <circle cx="7" cy="10" r="1.25"></circle>
+                                        <circle cx="13" cy="10" r="1.25"></circle>
+                                        <circle cx="7" cy="15" r="1.25"></circle>
+                                        <circle cx="13" cy="15" r="1.25"></circle>
+                                    </svg>
+                                </button>
+                                <input
+                                    type="checkbox"
+                                    class="provider-table-checkbox"
+                                    data-provider-row-checkbox="${encodedProviderName}"
+                                    onchange="toggleProviderSelection(decodeProviderName('${encodedProviderName}'), this.checked)"
+                                    ${isSelected ? 'checked' : ''}
+                                    ${providerActionLocked ? 'disabled' : ''}
+                                >
+                            </div>
                         </td>
                         <td class="provider-name-cell">
                             <span class="provider-name-text">${escapeHtml(provider.name)}</span>
