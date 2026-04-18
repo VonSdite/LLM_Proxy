@@ -393,7 +393,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 12px;
 }
 
 .providers-page .drag-handle-placeholder {
