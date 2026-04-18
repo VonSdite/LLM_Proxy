@@ -33,7 +33,7 @@ from src.repositories import AuthGroupRepository
 from src.services.model_discovery_service import ModelDiscoveryService
 from src.utils.database import create_connection_factory
 from src.utils.local_time import now_local_datetime
-from src.utils.net import build_websocket_connect_options
+from src.utils.net import build_websocket_connect_options, is_valid_ip, normalize_ip
 
 
 class FakeWebSocketConnection:
@@ -458,6 +458,15 @@ class WebSocketProxyBridgeTests(unittest.TestCase):
 
 
 class WebSocketConnectOptionsTests(unittest.TestCase):
+    def test_normalize_ip_strips_ipv6_mapped_prefix(self) -> None:
+        self.assertEqual("127.0.0.1", normalize_ip("::ffff:127.0.0.1"))
+
+    def test_normalize_ip_preserves_unparseable_input(self) -> None:
+        self.assertEqual("not-an-ip", normalize_ip(" not-an-ip "))
+
+    def test_is_valid_ip_accepts_ipv6_mapped_ipv4(self) -> None:
+        self.assertTrue(is_valid_ip("::ffff:127.0.0.1"))
+
     def test_build_websocket_connect_options_supports_http_proxy(self) -> None:
         options = build_websocket_connect_options(
             "http://user:pass@proxy.local:8080", False

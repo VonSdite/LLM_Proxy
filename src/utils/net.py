@@ -8,14 +8,22 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 
+def _normalize_ip_text(ip_value: Optional[str]) -> str:
+    """预处理 IP 文本，去除空白与 IPv6 映射前缀。"""
+    if not ip_value:
+        return ""
+
+    normalized_value = ip_value.strip()
+    if normalized_value.startswith("::ffff:"):
+        normalized_value = normalized_value[7:]
+    return normalized_value
+
+
 def normalize_ip(ip_value: Optional[str]) -> str:
     """规范化客户端 IP，并去除 IPv6 映射前缀。"""
-    if not ip_value:
-        return ''
-
-    value = ip_value.strip()
-    if value.startswith('::ffff:'):
-        value = value[7:]
+    value = _normalize_ip_text(ip_value)
+    if not value:
+        return ""
 
     try:
         parsed = ipaddress.ip_address(value)
@@ -26,12 +34,9 @@ def normalize_ip(ip_value: Optional[str]) -> str:
 
 def is_valid_ip(ip_value: Optional[str]) -> bool:
     """校验 IPv4/IPv6 地址格式。"""
-    if not ip_value:
+    value = _normalize_ip_text(ip_value)
+    if not value:
         return False
-
-    value = ip_value.strip()
-    if value.startswith('::ffff:'):
-        value = value[7:]
 
     try:
         ipaddress.ip_address(value)
