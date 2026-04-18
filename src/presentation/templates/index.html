@@ -936,7 +936,11 @@
             try {
                 const params = buildDashboardSearchParams();
                 const response = await fetch(`/api/statistics?${params}`, { cache: 'no-store' });
+                if (handleUnauthorizedResponse(response)) return;
                 const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.error || '加载统计数据失败');
+                }
                 if (requestToken !== statsRequestToken) return;
                 statsData = data;
                 if (!Array.isArray(statsData)) statsData = [];
@@ -1006,7 +1010,11 @@
         async function loadUsernames() {
             try {
                 const response = await fetch('/api/usernames');
+                if (handleUnauthorizedResponse(response)) return;
                 const usernames = await response.json();
+                if (!response.ok) {
+                    throw new Error('加载用户名列表失败');
+                }
 
                 const select = document.getElementById('username');
                 usernames.forEach(username => {
@@ -1025,7 +1033,11 @@
         async function loadRequestModels() {
             try {
                 const response = await fetch('/api/request-models');
+                if (handleUnauthorizedResponse(response)) return;
                 const models = await response.json();
+                if (!response.ok) {
+                    throw new Error('加载请求模型列表失败');
+                }
 
                 const select = document.getElementById('requestModel');
                 models.forEach(model => {
@@ -1055,7 +1067,11 @@
                 });
 
                 const response = await fetch(`/api/request-logs?${params}`, { cache: 'no-store' });
+                if (handleUnauthorizedResponse(response)) return;
                 const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.error || '加载日志失败');
+                }
                 if (requestToken !== logsRequestToken) return;
 
                 logsData = Array.isArray(data.logs) ? data.logs : [];
