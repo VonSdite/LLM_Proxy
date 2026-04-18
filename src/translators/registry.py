@@ -157,6 +157,10 @@ class OpenAIResponsesTranslator:
             translated["user"] = body.get("user")
         if body.get("metadata") is not None:
             translated["metadata"] = body.get("metadata")
+        if body.get("store") is not None:
+            translated["store"] = body.get("store")
+        if body.get("include") is not None:
+            translated["include"] = body.get("include")
         if body.get("parallel_tool_calls") is not None:
             translated["parallel_tool_calls"] = body.get("parallel_tool_calls")
 
