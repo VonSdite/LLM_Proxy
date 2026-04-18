@@ -1389,6 +1389,29 @@
     display: none !important;
 }
 
+:root[data-theme="dark"] .providers-page .provider-modal-tabs {
+    border-color: #313b47;
+    background: #0d1117;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+:root[data-theme="dark"] .providers-page .provider-modal-tab-btn {
+    color: #9da7b3;
+}
+
+:root[data-theme="dark"] .providers-page .provider-modal-tab-btn:hover,
+:root[data-theme="dark"] .providers-page .provider-modal-tab-btn:focus-visible {
+    color: var(--nav-tab-hover-text);
+    background: var(--nav-tab-hover-bg);
+    border-color: var(--nav-tab-hover-border);
+}
+
+:root[data-theme="dark"] .providers-page .provider-modal-tab-btn.is-active {
+    color: #fff;
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
 .providers-page .modal-title {
     color: var(--text-primary);
 }
