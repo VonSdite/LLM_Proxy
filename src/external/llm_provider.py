@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, cast
+from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
 from ..config.provider_config import resolve_provider_target_formats
 from ..hooks import HookContext, HookModule
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -43,29 +45,46 @@ class LLMProvider:
         return normalized_target_format in self.target_formats
 
     def apply_header_hook(self, ctx: HookContext, headers: Dict[str, str]) -> Dict[str, str]:
-        if self.hook and hasattr(self.hook, "header_hook"):
-            return self.hook.header_hook(ctx, headers)
-        return headers
+        return self._call_optional_hook(
+            "header_hook",
+            ctx,
+            headers,
+            default_value=headers,
+        )
 
     def apply_request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
-        if not self.hook:
-            return body
-
-        guard = cast(
-            Optional[Callable[[HookContext, Dict[str, Any]], Optional[Dict[str, Any]]]],
-            getattr(self.hook, "request_guard", None),
+        return self._call_optional_hook(
+            "request_guard",
+            ctx,
+            body,
+            default_value=body,
         )
-        if callable(guard):
-            guarded = guard(ctx, body)
-            return body if guarded is None else guarded
-        return body
 
     def apply_response_guard(self, ctx: HookContext, body: Any) -> Any:
-        if not self.hook:
-            return body
+        return self._call_optional_hook(
+            "response_guard",
+            ctx,
+            body,
+            default_value=body,
+        )
 
-        guard = cast(Optional[Callable[[HookContext, Any], Any]], getattr(self.hook, "response_guard", None))
-        if callable(guard):
-            guarded = guard(ctx, body)
-            return body if guarded is None else guarded
-        return body
+    def _call_optional_hook(
+        self,
+        method_name: str,
+        ctx: HookContext,
+        payload: T,
+        *,
+        default_value: T,
+    ) -> T:
+        if not self.hook:
+            return default_value
+
+        hook_method = cast(
+            Optional[Callable[[HookContext, T], Any]],
+            getattr(self.hook, method_name, None),
+        )
+        if not callable(hook_method):
+            return default_value
+
+        guarded_payload = hook_method(ctx, payload)
+        return default_value if guarded_payload is None else cast(T, guarded_payload)
