@@ -14,6 +14,7 @@ from ..application.app_context import AppContext
 from ..hooks import HookAbortError
 from ..services.proxy_service import ProxyErrorInfo
 from ..utils import normalize_ip
+from ..utils.provider_targets import resolve_runtime_target_formats
 from ..utils.local_time import now_local_datetime
 from ..utils.compat import Protocol
 
@@ -268,25 +269,7 @@ class ProxyController:
 
     @staticmethod
     def _get_provider_target_formats(provider: Any) -> tuple[str, ...]:
-        candidate_formats = getattr(provider, "target_formats", None)
-        if candidate_formats:
-            normalized = tuple(
-                str(item or "").strip().lower()
-                for item in candidate_formats
-                if str(item or "").strip()
-            )
-            if normalized:
-                return normalized
-
-        # DEPRECATED compatibility path for legacy objects that still expose a
-        # single `target_format` field. New runtime/provider APIs should only
-        # provide `target_formats`, and this fallback can be removed later.
-        target_format = (
-            str(getattr(provider, "target_format", "") or "").strip().lower()
-        )
-        if target_format:
-            return (target_format,)
-        return ()
+        return resolve_runtime_target_formats(provider)
 
     @staticmethod
     def _format_provider_target_formats(target_formats: Iterable[str]) -> str:
