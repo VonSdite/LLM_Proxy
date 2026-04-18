@@ -57,6 +57,21 @@ class Translator(Protocol):
         ...
 
 
+def _translate_passthrough_stream_event(
+    event: StreamEvent,
+    *,
+    include_done_chunk: bool,
+) -> list[DownstreamChunk]:
+    if event.kind == "done":
+        return [DownstreamChunk(kind="done")] if include_done_chunk else []
+    if event.kind == "json":
+        event_name = event.event
+        if not event_name and isinstance(event.payload, dict):
+            event_name = str(event.payload.get("type") or "").strip() or None
+        return [DownstreamChunk(kind="json", payload=event.payload, event=event_name)]
+    return [DownstreamChunk(kind="text", payload=event.payload, event=event.event)]
+
+
 @dataclass(frozen=True)
 class OpenAIChatTranslator:
     source_format: str = "openai_chat"
@@ -77,14 +92,7 @@ class OpenAIChatTranslator:
         state: Dict[str, Any],
     ) -> list[DownstreamChunk]:
         del model_name, original_request, translated_request, state
-        if event.kind == "done":
-            return [DownstreamChunk(kind="done")]
-        if event.kind == "json":
-            event_name = event.event
-            if not event_name and isinstance(event.payload, dict):
-                event_name = str(event.payload.get("type") or "").strip() or None
-            return [DownstreamChunk(kind="json", payload=event.payload, event=event_name)]
-        return [DownstreamChunk(kind="text", payload=event.payload, event=event.event)]
+        return _translate_passthrough_stream_event(event, include_done_chunk=True)
 
     def translate_nonstream_response(
         self,
@@ -389,14 +397,7 @@ class OpenAIResponsesPassthroughTranslator:
         state: Dict[str, Any],
     ) -> list[DownstreamChunk]:
         del model_name, original_request, translated_request, state
-        if event.kind == "done":
-            return []
-        if event.kind == "json":
-            event_name = event.event
-            if not event_name and isinstance(event.payload, dict):
-                event_name = str(event.payload.get("type") or "").strip() or None
-            return [DownstreamChunk(kind="json", payload=event.payload, event=event_name)]
-        return [DownstreamChunk(kind="text", payload=event.payload, event=event.event)]
+        return _translate_passthrough_stream_event(event, include_done_chunk=False)
 
     def translate_nonstream_response(
         self,
@@ -766,14 +767,7 @@ class ClaudePassthroughTranslator:
         state: Dict[str, Any],
     ) -> list[DownstreamChunk]:
         del model_name, original_request, translated_request, state
-        if event.kind == "done":
-            return []
-        if event.kind == "json":
-            event_name = event.event
-            if not event_name and isinstance(event.payload, dict):
-                event_name = str(event.payload.get("type") or "").strip() or None
-            return [DownstreamChunk(kind="json", payload=event.payload, event=event_name)]
-        return [DownstreamChunk(kind="text", payload=event.payload, event=event.event)]
+        return _translate_passthrough_stream_event(event, include_done_chunk=False)
 
     def translate_nonstream_response(
         self,
@@ -882,14 +876,7 @@ class CodexPassthroughTranslator:
         state: Dict[str, Any],
     ) -> list[DownstreamChunk]:
         del model_name, original_request, translated_request, state
-        if event.kind == "done":
-            return []
-        if event.kind == "json":
-            event_name = event.event
-            if not event_name and isinstance(event.payload, dict):
-                event_name = str(event.payload.get("type") or "").strip() or None
-            return [DownstreamChunk(kind="json", payload=event.payload, event=event_name)]
-        return [DownstreamChunk(kind="text", payload=event.payload, event=event.event)]
+        return _translate_passthrough_stream_event(event, include_done_chunk=False)
 
     def translate_nonstream_response(
         self,
