@@ -156,7 +156,7 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual(("openai_chat",), schema.target_formats)
         runtime = RuntimeProviderSpec.from_schema(schema)
         self.assertEqual("openai_chat", runtime.source_format)
-        self.assertEqual("openai_chat", runtime.target_format)
+        self.assertEqual("openai_chat", runtime.primary_target_format)
         self.assertEqual(("openai_chat",), runtime.target_formats)
 
     def test_provider_schema_accepts_multiple_target_formats(self) -> None:

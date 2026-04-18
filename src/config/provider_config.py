@@ -583,9 +583,7 @@ class RuntimeProviderSpec:
         )
 
     @property
-    def target_format(self) -> str:
-        # DEPRECATED compatibility property. Runtime specs should prefer
-        # `target_formats` and derive a primary value explicitly when needed.
+    def primary_target_format(self) -> str:
         return self.target_formats[0]
 
 
@@ -630,12 +628,6 @@ class ProviderRuntimeView:
     @property
     def primary_target_format(self) -> str:
         return self.target_formats[0]
-
-    @property
-    def target_format(self) -> str:
-        # DEPRECATED compatibility property. Public runtime metadata should
-        # only expose `target_formats`.
-        return self.primary_target_format
 
 
 def build_auth_group_schemas(

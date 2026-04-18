@@ -7,10 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, cast
 
-from ..config.provider_config import (
-    DEFAULT_PROVIDER_TARGET_FORMAT,
-    resolve_provider_target_formats,
-)
+from ..config.provider_config import resolve_provider_target_formats
 from ..hooks import HookContext, HookModule
 
 
@@ -22,7 +19,6 @@ class LLMProvider:
     api: str
     transport: str = "http"
     source_format: str = "openai_chat"
-    target_format: str = "openai_chat"
     target_formats: tuple[str, ...] = ()
     api_key: Optional[str] = None
     auth_group: Optional[str] = None
@@ -35,23 +31,12 @@ class LLMProvider:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "model_list", tuple(self.model_list))
-        explicit_target_formats = tuple(self.target_formats)
-        # DEPRECATED compatibility path for legacy callers that still
-        # construct LLMProvider with a single `target_format` value.
-        normalized_target_formats = resolve_provider_target_formats(
-            explicit_target_formats or (self.target_format,)
-        )
-        normalized_target_format = str(self.target_format or "").strip().lower()
-        if explicit_target_formats and normalized_target_format and normalized_target_format != DEFAULT_PROVIDER_TARGET_FORMAT:
-            if normalized_target_format not in normalized_target_formats:
-                raise ValueError(
-                    "Provider target_format must also appear in target_formats when both are provided"
-                )
-            normalized_target_formats = (normalized_target_format,) + tuple(
-                item for item in normalized_target_formats if item != normalized_target_format
-            )
+        normalized_target_formats = resolve_provider_target_formats(self.target_formats)
         object.__setattr__(self, "target_formats", normalized_target_formats)
-        object.__setattr__(self, "target_format", normalized_target_formats[0])
+
+    @property
+    def primary_target_format(self) -> str:
+        return self.target_formats[0]
 
     def supports_target_format(self, target_format: str) -> bool:
         normalized_target_format = str(target_format or "").strip().lower()

@@ -145,7 +145,6 @@ class FakeProviderManager:
             api=self._provider.api,
             transport=self._provider.transport,
             source_format=self._provider.source_format,
-            target_format=self._provider.target_format,
             target_formats=self._provider.target_formats,
             model_list=self._provider.model_list,
             proxy=self._provider.proxy,
@@ -193,7 +192,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             api="https://example.com/v1/responses",
             transport="http",
             source_format="openai_responses",
-            target_format="codex",
+            target_formats=("codex",),
             model_list=("gpt-5-codex",),
         )
         app = Flask(__name__)
@@ -379,7 +378,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             name="demo",
             api="https://example.com/v1/chat/completions",
             model_list=("gpt-4.1",),
-            target_format="openai_chat",
+            target_formats=("openai_chat",),
         )
         app = Flask(__name__)
         ctx = AppContext(
@@ -420,7 +419,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             name="demo",
             api="https://example.com/v1/chat/completions",
             model_list=("gpt-4.1",),
-            target_format="openai_responses",
+            target_formats=("openai_responses",),
         )
         app = Flask(__name__)
         ctx = AppContext(
@@ -505,7 +504,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             name="demo",
             api="https://example.com/v1/responses",
             model_list=("gpt-5.2",),
-            target_format="codex",
+            target_formats=("codex",),
         )
         app = Flask(__name__)
         ctx = AppContext(
@@ -546,7 +545,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             name="demo",
             api="https://example.com/v1/chat/completions",
             model_list=("gpt-4.1",),
-            target_format="openai_chat",
+            target_formats=("openai_chat",),
         )
         app = Flask(__name__)
         ctx = AppContext(
@@ -586,7 +585,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             name="demo",
             api="https://example.com/v1/messages",
             model_list=("claude-sonnet-4-5",),
-            target_format="claude_chat",
+            target_formats=("claude_chat",),
         )
         app = Flask(__name__)
         ctx = AppContext(
@@ -630,7 +629,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             name="demo",
             api="https://example.com/v1/messages",
             model_list=("claude-sonnet-4-5",),
-            target_format="claude_chat",
+            target_formats=("claude_chat",),
         )
         logger = FakeLogger()
         app = Flask(__name__)
