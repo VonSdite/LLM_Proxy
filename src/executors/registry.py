@@ -48,6 +48,7 @@ class HttpExecutor:
         request_proxies: Optional[Dict[str, str]],
     ) -> OpenedUpstreamResponse:
         http_session = self._get_http_session()
+        self._reset_http_session_state(http_session)
         upstream_response = http_session.post(
             provider.api,
             headers=headers,
@@ -97,6 +98,10 @@ class HttpExecutor:
             session = self._build_http_session()
             self._http_local.session = session
         return session
+
+    @staticmethod
+    def _reset_http_session_state(session: requests.Session) -> None:
+        session.cookies.clear()
 
     @staticmethod
     def _build_http_session() -> requests.Session:

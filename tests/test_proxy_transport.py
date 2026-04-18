@@ -22,6 +22,7 @@ from src.config.provider_config import (
     RuntimeProviderSpec,
 )
 from src.config.provider_manager import ProviderManager
+from src.executors import HttpExecutor
 from src.external.stream_probe import probe_stream_response
 from src.external.upstream_websocket import (
     WebSocketUpstreamResponse,
@@ -74,6 +75,55 @@ class FakeLogger:
 
 
 class ProviderTransportTests(unittest.TestCase):
+    def test_http_executor_clears_session_cookies_before_request(self) -> None:
+        logger = FakeLogger()
+        executor = HttpExecutor(logger=logger)
+        provider = type(
+            "Provider",
+            (),
+            {
+                "api": "https://example.com/v1/chat/completions",
+                "transport": "http",
+                "name": "demo",
+            },
+        )()
+
+        class FakeCookies:
+            def __init__(self) -> None:
+                self.clear_calls = 0
+
+            def clear(self) -> None:
+                self.clear_calls += 1
+
+        class FakeResponse:
+            status_code = 200
+            headers = {"Content-Type": "application/json"}
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.cookies = FakeCookies()
+                self.post_calls: list[dict[str, object]] = []
+
+            def post(self, *args, **kwargs):
+                self.post_calls.append(dict(kwargs))
+                return FakeResponse()
+
+        fake_session = FakeSession()
+        executor._http_local.session = fake_session  # type: ignore[attr-defined]
+
+        executor.execute(
+            provider,  # type: ignore[arg-type]
+            headers={"authorization": "Bearer sk-demo"},
+            body={"model": "demo/model"},
+            requested_stream=False,
+            timeout_seconds=30,
+            verify_ssl=False,
+            request_proxies=None,
+        )
+
+        self.assertEqual(1, fake_session.cookies.clear_calls)
+        self.assertEqual(1, len(fake_session.post_calls))
+
     def test_provider_enabled_defaults_to_true(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
             {
