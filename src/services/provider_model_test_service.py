@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import replace
 from typing import Any, Dict, List, Mapping, Optional
 
 import requests
@@ -21,7 +20,7 @@ from ..proxy_core import decode_stream_events
 from ..translators import build_default_translator_registry
 from ..utils.http_headers import merge_http_headers, normalize_http_headers
 from ..utils.net import build_requests_proxies
-from .upstream_usage import ensure_upstream_usage_capture
+from .upstream_request_builder import build_upstream_request
 
 
 class ProviderModelTestService:
@@ -202,37 +201,33 @@ class ProviderModelTestService:
         previous_error_type: Optional[HookErrorType],
     ) -> tuple[Dict[str, str], Dict[str, Any], Dict[str, Any], HookContext]:
         request_data = self._build_benchmark_request(model_name)
-        request_ctx = HookContext(
-            retry=attempt,
-            root_path=self._root_path,
-            logger=self._logger,
-            provider_name=provider.name,
-            request_model=model_name,
-            upstream_model=model_name,
-            provider_source_format=provider.source_format,
-            provider_target_format=self._TEST_TARGET_FORMAT,
-            transport=provider.transport,
-            stream=True,
-            auth_group_name=provider.auth_group,
-            auth_entry_id=auth_entry_id,
-            last_status_code=previous_status_code,
-            last_error_type=previous_error_type,
-        )
-
         headers = {"content-type": "application/json"}
         if request_headers:
             headers = merge_http_headers(headers, request_headers)
         elif provider.api_key:
             headers["authorization"] = f"Bearer {provider.api_key}"
-        headers = provider.apply_header_hook(request_ctx, headers)
-
-        guarded_body = provider.apply_request_guard(request_ctx, dict(request_data))
-        if bool(guarded_body.get("stream", False)) != request_ctx.stream:
-            request_ctx = replace(request_ctx, stream=bool(guarded_body.get("stream", False)))
-
-        translated_body = translator.translate_request(model_name, guarded_body, request_ctx.stream)
-        ensure_upstream_usage_capture(provider.source_format, translated_body, request_ctx.stream)
-        return headers, guarded_body, translated_body, request_ctx
+        built_request = build_upstream_request(
+            root_path=self._root_path,
+            logger=self._logger,
+            provider=provider,
+            request_model=model_name,
+            upstream_model=model_name,
+            provider_target_format=self._TEST_TARGET_FORMAT,
+            request_data=request_data,
+            request_headers=headers,
+            translator=translator,
+            attempt=attempt,
+            previous_status_code=previous_status_code,
+            previous_error_type=previous_error_type,
+            auth_group_name=provider.auth_group,
+            auth_entry_id=auth_entry_id,
+        )
+        return (
+            built_request.headers,
+            built_request.guarded_body,
+            built_request.translated_body,
+            built_request.request_ctx,
+        )
 
     @staticmethod
     def _build_benchmark_request(model_name: str) -> Dict[str, Any]:

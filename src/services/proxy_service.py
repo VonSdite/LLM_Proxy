@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -30,7 +30,7 @@ from ..proxy_core import (
 from ..translators import Translator, build_default_translator_registry
 from ..utils.net import build_requests_proxies
 from .proxy_trace_logger import ProxyTraceLogger
-from .upstream_usage import ensure_upstream_usage_capture
+from .upstream_request_builder import build_upstream_request
 
 
 @dataclass(frozen=True)
@@ -145,44 +145,38 @@ class ProxyService:
             attempt: int,
             selected_auth: Optional[SelectedAuthEntry],
         ) -> Tuple[Dict[str, str], Dict[str, Any], Dict[str, Any], HookContext]:
-            initial_stream = bool(request_data.get("stream", False))
-            request_ctx = HookContext(
-                retry=attempt,
-                root_path=self._root_path,
-                logger=self._logger,
-                provider_name=provider.name,
-                request_model=requested_model,
-                upstream_model=upstream_model,
-                provider_source_format=provider.source_format,
-                provider_target_format=downstream_target_format,
-                transport=provider.transport,
-                stream=initial_stream,
-                auth_group_name=(
-                    selected_auth.auth_group_name
-                    if selected_auth is not None
-                    else provider.auth_group
-                ),
-                auth_entry_id=(selected_auth.entry_id if selected_auth is not None else None),
-                last_status_code=previous_status_code,
-                last_error_type=previous_error_type,
-            )
-
             headers = dict(request_headers)
             headers["content-type"] = "application/json"
             if selected_auth is not None:
                 headers.update(selected_auth.headers_mapping())
             elif provider.api_key:
                 headers["authorization"] = f"Bearer {provider.api_key}"
-            headers = provider.apply_header_hook(request_ctx, headers)
-
-            guarded_body = provider.apply_request_guard(request_ctx, dict(request_data))
-            guarded_stream = bool(guarded_body.get("stream", False))
-            if guarded_stream != request_ctx.stream:
-                request_ctx = replace(request_ctx, stream=guarded_stream)
-
-            translated_body = translator.translate_request(upstream_model, guarded_body, guarded_stream)
-            self._ensure_upstream_usage_capture(provider.source_format, translated_body, guarded_stream)
-            return headers, guarded_body, translated_body, request_ctx
+            built_request = build_upstream_request(
+                root_path=self._root_path,
+                logger=self._logger,
+                provider=provider,
+                request_model=requested_model,
+                upstream_model=upstream_model,
+                provider_target_format=downstream_target_format,
+                request_data=request_data,
+                request_headers=headers,
+                translator=translator,
+                attempt=attempt,
+                previous_status_code=previous_status_code,
+                previous_error_type=previous_error_type,
+                auth_group_name=(
+                    selected_auth.auth_group_name
+                    if selected_auth is not None
+                    else provider.auth_group
+                ),
+                auth_entry_id=(selected_auth.entry_id if selected_auth is not None else None),
+            )
+            return (
+                built_request.headers,
+                built_request.guarded_body,
+                built_request.translated_body,
+                built_request.request_ctx,
+            )
 
         for attempt in range(max_retries):
             selected_auth: Optional[SelectedAuthEntry] = None
@@ -1088,14 +1082,6 @@ class ProxyService:
         if requested_model_name.startswith(prefix):
             return requested_model_name[len(prefix):]
         return requested_model_name
-
-    @staticmethod
-    def _ensure_upstream_usage_capture(
-        source_format: str,
-        translated_body: Dict[str, Any],
-        stream: bool,
-    ) -> None:
-        ensure_upstream_usage_capture(source_format, translated_body, stream)
 
     @staticmethod
     def _ensure_supported_target_format(target_format: str) -> None:
