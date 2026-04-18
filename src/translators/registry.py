@@ -16,6 +16,7 @@ from .claude_bridge import (
     convert_openai_chat_response_to_claude as _convert_openai_chat_response_to_claude,
     translate_openai_chat_downstream_chunk_to_claude as _translate_openai_chat_downstream_chunk_to_claude,
 )
+from .tool_result_utils import normalize_tool_result_content
 from .codex_bridge import (
     convert_codex_request_to_openai_chat_request as _convert_codex_request_to_openai_chat_request,
 )
@@ -490,7 +491,7 @@ class ClaudeChatTranslator:
                                 {
                                     "type": "tool_result",
                                     "tool_use_id": tool_use_id,
-                                    "content": _normalize_tool_result_content(message.get("content")),
+                                    "content": normalize_tool_result_content(message.get("content")),
                                 }
                             ],
                         }
@@ -1240,16 +1241,6 @@ def _extract_text_content(content: Any) -> str:
         if isinstance(item.get("text"), str):
             parts.append(item["text"])
     return "\n".join(parts)
-
-
-def _normalize_tool_result_content(content: Any) -> Any:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, (dict, list)):
-        return json.dumps(content, ensure_ascii=False)
-    return str(content or "")
-
-
 def _to_openai_responses_input(messages: Any) -> tuple[str, list[Dict[str, Any]]]:
     if not isinstance(messages, list):
         return "", []
@@ -1272,7 +1263,7 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[Dict[str, Any]]
                     {
                         "type": "function_call_output",
                         "call_id": tool_call_id,
-                        "output": _normalize_tool_result_content(message.get("content")),
+                        "output": normalize_tool_result_content(message.get("content")),
                     }
                 )
             continue
