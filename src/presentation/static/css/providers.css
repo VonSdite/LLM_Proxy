@@ -474,7 +474,7 @@
 
 .providers-page .provider-group-card {
     display: grid;
-    gap: 12px;
+    gap: 0;
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
@@ -488,6 +488,7 @@
     justify-content: space-between;
     gap: 12px;
     padding: 14px 16px 0;
+    background: transparent;
 }
 
 .providers-page .provider-group-heading {
@@ -511,6 +512,44 @@
 :root[data-theme="dark"] .providers-page .provider-group-card {
     background: #161b22;
     border-color: #30363d;
+}
+
+:root[data-theme="dark"] .providers-page .provider-group-header {
+    background: transparent;
+}
+
+.providers-page .provider-group-table-wrap {
+    margin: 8px 0 0;
+    overflow: hidden;
+    border-top: 1px solid var(--line);
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.providers-page .provider-group-table-wrap .providers-table th {
+    vertical-align: middle;
+    line-height: 1.1;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    background: #f4f8fd;
+}
+
+.providers-page .provider-group-table-wrap .providers-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+:root[data-theme="dark"] .providers-page .provider-group-table-wrap {
+    border-top-color: #30363d;
+    background: transparent;
+    box-shadow: none;
+}
+
+:root[data-theme="dark"] .providers-page .provider-group-table-wrap .providers-table th {
+    background: #0f141b;
 }
 
 .providers-page .provider-table-checkbox {

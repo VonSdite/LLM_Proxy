@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260413-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260418-6">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置{% endblock %}
@@ -3445,34 +3445,35 @@
             }
 
             html += `
-                    <table class="providers-table provider-list-table">
-                        <colgroup>
-                            <col class="provider-select-col">
-                            <col class="provider-name-col">
-                            <col class="provider-api-col">
-                            <col class="provider-model-col">
-                            <col class="provider-actions-col">
-                        </colgroup>
-                        <thead>
-                            <tr>
-                                <th class="provider-select-column">
-                                    <div class="list-row-leading">
-                                        <span class="drag-handle-placeholder" aria-hidden="true"></span>
-                                        <input
-                                            type="checkbox"
-                                            class="provider-table-checkbox"
-                                            data-provider-group-select-checkbox="${normalizedGroupKey}"
-                                            onchange="toggleProviderGroupSelection('${normalizedGroupKey}', this.checked)"
-                                        >
-                                    </div>
-                                </th>
-                                <th>名称</th>
-                                <th>API 地址</th>
-                                <th>模型</th>
-                                <th>操作</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+                    <div class="provider-group-table-wrap">
+                        <table class="providers-table provider-list-table">
+                            <colgroup>
+                                <col class="provider-select-col">
+                                <col class="provider-name-col">
+                                <col class="provider-api-col">
+                                <col class="provider-model-col">
+                                <col class="provider-actions-col">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th class="provider-select-column">
+                                        <div class="list-row-leading">
+                                            <span class="drag-handle-placeholder" aria-hidden="true"></span>
+                                            <input
+                                                type="checkbox"
+                                                class="provider-table-checkbox"
+                                                data-provider-group-select-checkbox="${normalizedGroupKey}"
+                                                onchange="toggleProviderGroupSelection('${normalizedGroupKey}', this.checked)"
+                                            >
+                                        </div>
+                                    </th>
+                                    <th>名称</th>
+                                    <th>API 地址</th>
+                                    <th>模型</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
             `;
 
             providerList.forEach(provider => {
@@ -3579,7 +3580,7 @@
                 `;
             });
 
-            html += '</tbody></table></section>';
+            html += '</tbody></table></div></section>';
             return html;
         }
 
