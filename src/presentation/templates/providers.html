@@ -2111,12 +2111,15 @@
                     <thead>
                         <tr>
                             <th class="provider-select-column model-test-select-column">
-                                <input
-                                    type="checkbox"
-                                    class="provider-table-checkbox"
-                                    id="modelTestSelectAllCheckbox"
-                                    onchange="toggleAllModelTestRows(this.checked)"
-                                >
+                                <div class="list-row-leading">
+                                    <span class="drag-handle-placeholder" aria-hidden="true"></span>
+                                    <input
+                                        type="checkbox"
+                                        class="provider-table-checkbox"
+                                        id="modelTestSelectAllCheckbox"
+                                        onchange="toggleAllModelTestRows(this.checked)"
+                                    >
+                                </div>
                             </th>
                             <th class="model-test-model-column">模型</th>
                             <th class="model-test-status-column">是否可用</th>
@@ -3395,12 +3398,15 @@
                         <thead>
                             <tr>
                                 <th class="provider-select-column">
-                                    <input
-                                        type="checkbox"
-                                        class="provider-table-checkbox"
-                                        data-provider-group-select-checkbox="${normalizedGroupKey}"
-                                        onchange="toggleProviderGroupSelection('${normalizedGroupKey}', this.checked)"
-                                    >
+                                    <div class="list-row-leading">
+                                        <span class="drag-handle-placeholder" aria-hidden="true"></span>
+                                        <input
+                                            type="checkbox"
+                                            class="provider-table-checkbox"
+                                            data-provider-group-select-checkbox="${normalizedGroupKey}"
+                                            onchange="toggleProviderGroupSelection('${normalizedGroupKey}', this.checked)"
+                                        >
+                                    </div>
                                 </th>
                                 <th>名称</th>
                                 <th>API 地址</th>

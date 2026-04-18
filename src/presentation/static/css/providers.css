@@ -396,6 +396,14 @@
     gap: 8px;
 }
 
+.providers-page .drag-handle-placeholder {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    visibility: hidden;
+}
+
 .providers-page .drag-handle-button {
     display: inline-flex;
     align-items: center;
