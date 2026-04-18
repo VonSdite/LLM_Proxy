@@ -17,11 +17,8 @@ from src.services.proxy_service import ProxyService
 from src.translators import (
     ClaudeChatTranslator,
     ClaudePassthroughTranslator,
-    CodexChatTranslator,
-    CodexPassthroughTranslator,
     ComposedTranslator,
     OpenAIChatClaudeTranslator,
-    OpenAIChatCodexTranslator,
     OpenAIChatResponsesTranslator,
     OpenAIChatTranslator,
     OpenAIResponsesPassthroughTranslator,
@@ -182,33 +179,32 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual({"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}, translated["usage"])
         self.assertEqual("Be brief", translated["instructions"])
 
-    def test_codex_passthrough_translator_normalizes_request(self) -> None:
-        translator = CodexPassthroughTranslator()
+    def test_openai_responses_passthrough_translator_normalizes_response_done_event(self) -> None:
+        translator = OpenAIResponsesPassthroughTranslator()
 
-        translated = translator.translate_request(
+        translated_chunks = translator.translate_stream_event(
             "gpt-5-codex",
-            {
-                "input": [
-                    {
-                        "type": "message",
-                        "role": "system",
-                        "content": [{"type": "input_text", "text": "Be brief"}],
+            {"model": "gpt-5-codex"},
+            {"model": "gpt-5-codex"},
+            type(
+                "FakeEvent",
+                (),
+                {
+                    "kind": "json",
+                    "payload": {
+                        "type": "response.done",
+                        "response": {"id": "resp_1", "model": "gpt-5-codex"},
                     },
-                    {
-                        "type": "message",
-                        "role": "user",
-                        "content": [{"type": "input_text", "text": "Hello"}],
-                    },
-                ]
-            },
-            True,
+                    "raw": '{"type":"response.done"}',
+                    "event": "response.done",
+                },
+            )(),
+            {},
         )
 
-        self.assertEqual("gpt-5-codex", translated["model"])
-        self.assertEqual("developer", translated["input"][0]["role"])
-        self.assertEqual(["reasoning.encrypted_content"], translated["include"])
-        self.assertFalse(translated["store"])
-        self.assertTrue(translated["parallel_tool_calls"])
+        self.assertEqual(1, len(translated_chunks))
+        self.assertEqual("response.completed", translated_chunks[0].event)
+        self.assertEqual("response.completed", translated_chunks[0].payload["type"])
 
 
 class TranslatorRegistryTests(unittest.TestCase):
@@ -219,32 +215,31 @@ class TranslatorRegistryTests(unittest.TestCase):
             ("openai_chat", "openai_chat"): OpenAIChatTranslator,
             ("openai_chat", "openai_responses"): OpenAIChatResponsesTranslator,
             ("openai_chat", "claude_chat"): OpenAIChatClaudeTranslator,
-            ("openai_chat", "codex"): OpenAIChatCodexTranslator,
             ("openai_responses", "openai_chat"): OpenAIResponsesTranslator,
             ("openai_responses", "openai_responses"): OpenAIResponsesPassthroughTranslator,
             ("openai_responses", "claude_chat"): ComposedTranslator,
-            ("openai_responses", "codex"): ComposedTranslator,
             ("claude_chat", "openai_chat"): ClaudeChatTranslator,
             ("claude_chat", "openai_responses"): ComposedTranslator,
             ("claude_chat", "claude_chat"): ClaudePassthroughTranslator,
-            ("claude_chat", "codex"): ComposedTranslator,
-            ("codex", "openai_chat"): CodexChatTranslator,
-            ("codex", "openai_responses"): ComposedTranslator,
-            ("codex", "claude_chat"): ComposedTranslator,
-            ("codex", "codex"): CodexPassthroughTranslator,
         }
 
         for pair, expected_type in expected_pairs.items():
             self.assertIsInstance(registry.get(*pair), expected_type)
 
         total_pairs = sum(len(targets) for targets in registry._translators.values())  # type: ignore[attr-defined]
-        self.assertEqual(16, total_pairs)
+        self.assertEqual(9, total_pairs)
 
     def test_default_registry_rejects_removed_gemini_pairs(self) -> None:
         registry = build_default_translator_registry()
 
         with self.assertRaisesRegex(ValueError, "Unsupported translator pair: gemini_chat -> openai_chat"):
             registry.get("gemini_chat", "openai_chat")
+
+    def test_default_registry_rejects_removed_codex_pairs(self) -> None:
+        registry = build_default_translator_registry()
+
+        with self.assertRaisesRegex(ValueError, "Unsupported translator pair: codex -> openai_responses"):
+            registry.get("codex", "openai_responses")
 
 
 class ProxyServicePipelineTests(unittest.TestCase):
@@ -686,13 +681,13 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertNotIn(b"[DONE]", stream_body)
         self.assertTrue(fake_response.closed)
 
-    def test_proxy_service_translates_codex_stream_to_openai_responses(self) -> None:
+    def test_proxy_service_normalizes_response_done_to_response_completed(self) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
-            name="codex-upstream",
+            name="responses-upstream",
             api="https://example.com/v1/responses",
             transport="http",
-            source_format="codex",
+            source_format="openai_responses",
             target_formats=("openai_responses",),
             model_list=("gpt-5-codex",),
             max_retries=1,
@@ -702,7 +697,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             [
                 b'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","created_at":123,"model":"gpt-5-codex"}}\n\n',
                 b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg_resp_1_0","output_index":0,"delta":"Hi from Codex"}\n\n',
-                b'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_1","created_at":123,"model":"gpt-5-codex","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n',
+                b'event: response.done\ndata: {"type":"response.done","response":{"id":"resp_1","created_at":123,"model":"gpt-5-codex","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n',
                 b"data: [DONE]\n\n",
             ]
         )
@@ -724,7 +719,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             response, status_code, failure_info = service.proxy_request(
                 provider,
                 {
-                    "model": "codex-upstream/gpt-5-codex",
+                    "model": "responses-upstream/gpt-5-codex",
                     "input": [
                         {
                             "type": "message",
@@ -746,12 +741,13 @@ class ProxyServicePipelineTests(unittest.TestCase):
 
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
-        self.assertEqual("Be brief", captured["body"]["instructions"])
-        self.assertEqual("user", captured["body"]["input"][0]["role"])
-        self.assertEqual(["reasoning.encrypted_content"], captured["body"]["include"])
+        self.assertEqual("system", captured["body"]["input"][0]["role"])
+        self.assertEqual("user", captured["body"]["input"][1]["role"])
+        self.assertNotIn("include", captured["body"])
         self.assertIn(b"event: response.created", stream_body)
         self.assertIn(b"event: response.output_text.delta", stream_body)
         self.assertIn(b"event: response.completed", stream_body)
+        self.assertNotIn(b"event: response.done", stream_body)
         self.assertIn(b'"delta": "Hi from Codex"', stream_body)
         self.assertNotIn(b"[DONE]", stream_body)
         self.assertTrue(fake_response.closed)

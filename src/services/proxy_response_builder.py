@@ -479,7 +479,7 @@ class ProxyResponseBuilder:
                     },
                 )
             ]
-        if normalized_target_format in {"openai_responses", "codex"}:
+        if normalized_target_format == "openai_responses":
             return [
                 DownstreamChunk(
                     kind="json",

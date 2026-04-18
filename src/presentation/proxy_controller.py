@@ -298,7 +298,7 @@ class ProxyController:
     def responses(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
             route_name="responses",
-            expected_target_formats=("openai_responses", "codex"),
+            expected_target_formats=("openai_responses",),
             inspect_stream_usage=False,
         )
 

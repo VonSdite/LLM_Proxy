@@ -143,7 +143,6 @@
                                     <option value="openai_chat">openai_chat</option>
                                     <option value="openai_responses">openai_responses</option>
                                     <option value="claude_chat">claude_chat</option>
-                                    <option value="codex">codex</option>
                                 </select>
                             </div>
                             <div class="mb-3">
@@ -163,7 +162,6 @@
                                     <option value="openai_chat">openai_chat</option>
                                     <option value="openai_responses">openai_responses</option>
                                     <option value="claude_chat">claude_chat</option>
-                                    <option value="codex">codex</option>
                                 </select>
                             </div>
                             <div class="mb-3">
@@ -636,11 +634,9 @@
         let providerDragTargetElement = null;
         let modelTestDragState = null;
         let modelTestDragTargetElement = null;
-        const providerTargetFormatOptions = ['openai_chat', 'openai_responses', 'claude_chat', 'codex'];
-        const defaultNewProviderTargetFormats = ['openai_chat', 'codex', 'claude_chat'];
-        const providerTargetFormatConflictGroups = [
-            ['openai_responses', 'codex'],
-        ];
+        const providerTargetFormatOptions = ['openai_chat', 'openai_responses', 'claude_chat'];
+        const defaultNewProviderTargetFormats = ['openai_chat', 'openai_responses', 'claude_chat'];
+        const providerTargetFormatConflictGroups = [];
         const providerHelpTopics = {
             transport: {
                 title: '上游传输怎么选',
@@ -661,7 +657,6 @@
                         <li><strong>openai_chat</strong>：上游是 <code>/v1/chat/completions</code>，请求体里主要是 <code>messages</code>。</li>
                         <li><strong>openai_responses</strong>：上游是 <code>/v1/responses</code>，请求体主要是 <code>input</code> / <code>instructions</code>。</li>
                         <li><strong>claude_chat</strong>：上游是 <code>/v1/messages</code>。</li>
-                        <li><strong>codex</strong>：上游也是 Responses 家族，但需要 Codex 特化请求规范。</li>
                     </ul>
                     <p>常见例子：vLLM、OpenRouter、Ollama 的 OpenAI 兼容层通常选 <code>openai_chat</code>；Anthropic Messages 选 <code>claude_chat</code>。</p>
                 `,
@@ -673,11 +668,9 @@
                     <ul>
                         <li><strong>openai_chat</strong>：下游走 <code>/v1/chat/completions</code>。适合 OpenCode、Cherry Studio 的 OpenAI provider。</li>
                         <li><strong>openai_responses</strong>：下游走 <code>/v1/responses</code>。适合 Responses API 客户端。</li>
-                        <li><strong>codex</strong>：也走 <code>/v1/responses</code>，但保留 Codex 的请求语义。</li>
                         <li><strong>claude_chat</strong>：下游走 <code>/v1/messages</code>。适合 Claude Code 和 Anthropic 兼容客户端。</li>
                     </ul>
-                    <p>注意：有些下游格式会互斥，因为它们共用同一个 route family 但请求语义不同。目前 <code>openai_responses</code> 和 <code>codex</code> 不能同时启用；以后如果有新的互斥组合，也会在这里说明。</p>
-                    <p>在多选下拉里如果新选了冲突项，旧的冲突项会自动被替换。</p>
+                    <p>如果同一个 provider 需要同时服务不同客户端，可以按需组合 <code>openai_chat</code>、<code>openai_responses</code> 和 <code>claude_chat</code>。</p>
                 `,
             },
             auth_group_field: {

@@ -192,7 +192,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             api="https://example.com/v1/responses",
             transport="http",
             source_format="openai_responses",
-            target_formats=("codex",),
+            target_formats=("openai_responses",),
             model_list=("gpt-5-codex",),
         )
         app = Flask(__name__)
@@ -223,7 +223,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
                         "owned_by": "demo",
                         "provider_name": "demo",
                         "source_format": "openai_responses",
-                        "target_formats": ["codex"],
+                        "target_formats": ["openai_responses"],
                         "transport": "http",
                     }
                 ],
@@ -405,7 +405,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         self.assertEqual(
             {
                 "error": {
-                    "message": "Model demo/gpt-4.1 is configured for downstream formats openai_chat, not one of openai_responses, codex",
+                    "message": "Model demo/gpt-4.1 is configured for downstream formats openai_chat, not openai_responses",
                     "type": "invalid_request_error",
                     "param": None,
                     "code": "target_format_mismatch",
@@ -499,12 +499,12 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         assert proxy_service.last_kwargs is not None
         self.assertEqual("openai_chat", proxy_service.last_kwargs["resolved_target_format"])
 
-    def test_responses_route_allows_codex_target(self) -> None:
+    def test_responses_route_allows_openai_responses_target_on_responses_provider(self) -> None:
         provider = LLMProvider(
             name="demo",
             api="https://example.com/v1/responses",
             model_list=("gpt-5.2",),
-            target_formats=("codex",),
+            target_formats=("openai_responses",),
         )
         app = Flask(__name__)
         ctx = AppContext(

@@ -18,9 +18,6 @@ from .claude_bridge import (
     translate_openai_chat_downstream_chunk_to_claude as _translate_openai_chat_downstream_chunk_to_claude,
 )
 from .tool_result_utils import normalize_tool_result_content
-from .codex_bridge import (
-    convert_codex_request_to_openai_chat_request as _convert_codex_request_to_openai_chat_request,
-)
 from .responses_bridge import (
     convert_openai_chat_response_to_responses as _convert_openai_chat_response_to_responses,
     convert_openai_responses_request_to_chat_request as _convert_openai_responses_request_to_chat_request,
@@ -71,6 +68,32 @@ def _translate_passthrough_stream_event(
             event_name = str(event.payload.get("type") or "").strip() or None
         return [build_json_event_chunk(event_name, event.payload)]
     return [DownstreamChunk(kind="text", payload=event.payload, event=event.event)]
+
+
+def _normalize_openai_responses_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    payload_type = str(payload.get("type") or "").strip().lower()
+    if payload_type != "response.done":
+        return payload
+    normalized_payload = dict(payload)
+    normalized_payload["type"] = "response.completed"
+    return normalized_payload
+
+
+def _normalize_openai_responses_stream_event(event: StreamEvent) -> StreamEvent:
+    normalized_payload = _normalize_openai_responses_payload(event.payload)
+    normalized_event = event.event
+    if isinstance(normalized_payload, dict):
+        payload_type = str(normalized_payload.get("type") or "").strip()
+        if payload_type:
+            normalized_event = payload_type
+    return StreamEvent(
+        kind=event.kind,
+        payload=normalized_payload,
+        raw=event.raw,
+        event=normalized_event,
+    )
 
 
 @dataclass(frozen=True)
@@ -268,7 +291,7 @@ class OpenAIResponsesTranslator:
         if event_type in {"response.output_text.done", "response.function_call_arguments.done"}:
             return outputs
 
-        if event_type == "response.completed":
+        if event_type in {"response.completed", "response.done"}:
             response = payload.get("response") or {}
             if isinstance(response, dict):
                 if response.get("model") is not None:
@@ -398,7 +421,10 @@ class OpenAIResponsesPassthroughTranslator:
         state: Dict[str, Any],
     ) -> list[DownstreamChunk]:
         del model_name, original_request, translated_request, state
-        return _translate_passthrough_stream_event(event, include_done_chunk=False)
+        return _translate_passthrough_stream_event(
+            _normalize_openai_responses_stream_event(event),
+            include_done_chunk=False,
+        )
 
     def translate_nonstream_response(
         self,
@@ -408,7 +434,7 @@ class OpenAIResponsesPassthroughTranslator:
         payload: Any,
     ) -> Any:
         del model_name, original_request, translated_request
-        return payload
+        return _normalize_openai_responses_payload(payload)
 
 
 @dataclass(frozen=True)
@@ -821,115 +847,6 @@ class OpenAIChatClaudeTranslator:
 
 
 @dataclass(frozen=True)
-class CodexChatTranslator:
-    source_format: str = "codex"
-    target_format: str = "openai_chat"
-
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
-        responses_request = OpenAIResponsesTranslator().translate_request(model_name, body, stream)
-        return _normalize_codex_request(responses_request, model_name, stream)
-
-    def translate_stream_event(
-        self,
-        model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
-        event: StreamEvent,
-        state: Dict[str, Any],
-    ) -> list[DownstreamChunk]:
-        return OpenAIResponsesTranslator().translate_stream_event(
-            model_name,
-            original_request,
-            translated_request,
-            event,
-            state,
-        )
-
-    def translate_nonstream_response(
-        self,
-        model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
-        payload: Any,
-    ) -> Any:
-        return OpenAIResponsesTranslator().translate_nonstream_response(
-            model_name,
-            original_request,
-            translated_request,
-            _unwrap_codex_nonstream_payload(payload),
-        )
-
-
-@dataclass(frozen=True)
-class CodexPassthroughTranslator:
-    source_format: str = "codex"
-    target_format: str = "codex"
-
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
-        return _normalize_codex_request(body, model_name, stream)
-
-    def translate_stream_event(
-        self,
-        model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
-        event: StreamEvent,
-        state: Dict[str, Any],
-    ) -> list[DownstreamChunk]:
-        del model_name, original_request, translated_request, state
-        return _translate_passthrough_stream_event(event, include_done_chunk=False)
-
-    def translate_nonstream_response(
-        self,
-        model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
-        payload: Any,
-    ) -> Any:
-        del model_name, original_request, translated_request
-        return _unwrap_codex_nonstream_payload(payload)
-
-
-@dataclass(frozen=True)
-class OpenAIChatCodexTranslator:
-    source_format: str = "openai_chat"
-    target_format: str = "codex"
-
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
-        return _convert_codex_request_to_openai_chat_request(model_name, body, stream)
-
-    def translate_stream_event(
-        self,
-        model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
-        event: StreamEvent,
-        state: Dict[str, Any],
-    ) -> list[DownstreamChunk]:
-        return _translate_openai_chat_downstream_chunk_to_responses(
-            model_name,
-            original_request,
-            translated_request,
-            DownstreamChunk(kind=event.kind, payload=event.payload, event=event.event),
-            state.setdefault("responses_bridge", {}),
-        )
-
-    def translate_nonstream_response(
-        self,
-        model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
-        payload: Any,
-    ) -> Any:
-        return _convert_openai_chat_response_to_responses(
-            model_name,
-            original_request,
-            translated_request,
-            payload,
-        )
-
-
-@dataclass(frozen=True)
 class ComposedTranslator:
     source_format: str
     target_format: str
@@ -1036,9 +953,6 @@ def build_default_translator_registry() -> TranslatorRegistry:
     claude_chat = ClaudeChatTranslator()
     claude_passthrough = ClaudePassthroughTranslator()
     openai_chat_claude = OpenAIChatClaudeTranslator()
-    codex_chat = CodexChatTranslator()
-    codex_passthrough = CodexPassthroughTranslator()
-    openai_chat_codex = OpenAIChatCodexTranslator()
 
     builtin_translators: tuple[Translator, ...] = (
         openai_chat,
@@ -1048,83 +962,18 @@ def build_default_translator_registry() -> TranslatorRegistry:
         claude_chat,
         claude_passthrough,
         openai_chat_claude,
-        codex_chat,
-        codex_passthrough,
-        openai_chat_codex,
     )
     for translator in builtin_translators:
         registry.register(translator)
 
     composed_translators: tuple[Translator, ...] = (
         ComposedTranslator("openai_responses", "claude_chat", openai_responses, openai_chat_claude),
-        ComposedTranslator("openai_responses", "codex", openai_responses, openai_chat_codex),
         ComposedTranslator("claude_chat", "openai_responses", claude_chat, openai_chat_responses),
-        ComposedTranslator("claude_chat", "codex", claude_chat, openai_chat_codex),
-        ComposedTranslator("codex", "openai_responses", codex_chat, openai_chat_responses),
-        ComposedTranslator("codex", "claude_chat", codex_chat, openai_chat_claude),
     )
     for translator in composed_translators:
         registry.register(translator)
 
     return registry
-
-
-def _normalize_codex_request(request: Dict[str, Any], model_name: str, stream: bool) -> Dict[str, Any]:
-    normalized = dict(request)
-    normalized["model"] = model_name
-    normalized["stream"] = bool(stream)
-    normalized["store"] = False
-    normalized["parallel_tool_calls"] = True
-    normalized["include"] = ["reasoning.encrypted_content"]
-
-    for field in (
-        "max_output_tokens",
-        "max_completion_tokens",
-        "temperature",
-        "top_p",
-        "truncation",
-        "user",
-    ):
-        normalized.pop(field, None)
-
-    if normalized.get("service_tier") != "priority":
-        normalized.pop("service_tier", None)
-
-    input_items = normalized.get("input")
-    if isinstance(input_items, str):
-        normalized["input"] = [
-            {
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": input_items}],
-            }
-        ]
-    elif isinstance(input_items, list):
-        rewritten_input = []
-        for item in input_items:
-            if not isinstance(item, dict):
-                rewritten_input.append(item)
-                continue
-            rewritten = dict(item)
-            if (
-                str(rewritten.get("type") or "").strip().lower() == "message"
-                and str(rewritten.get("role") or "").strip().lower() == "system"
-            ):
-                rewritten["role"] = "developer"
-            rewritten_input.append(rewritten)
-        normalized["input"] = rewritten_input
-
-    return normalized
-
-
-def _unwrap_codex_nonstream_payload(payload: Any) -> Any:
-    if not isinstance(payload, dict):
-        return payload
-    response = payload.get("response")
-    payload_type = str(payload.get("type") or "").strip().lower()
-    if isinstance(response, dict) and payload_type == "response.completed":
-        return response
-    return payload
 
 
 def _to_claude_content_blocks(content: Any) -> list[Dict[str, Any]]:
