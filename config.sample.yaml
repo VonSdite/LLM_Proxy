@@ -90,12 +90,12 @@ providers:
     model_list:
       - claude-sonnet-4-5
 
-  - name: codex
+  - name: responses-codex
     api: https://api.openai.com/v1/responses
     transport: http
-    source_format: codex
+    source_format: openai_responses
     target_formats:
-      - codex
+      - openai_responses
     api_key: sk-your-openai-key
     verify_ssl: true
     timeout_seconds: 1200
@@ -111,16 +111,14 @@ providers:
   #   target_formats:
   #     - claude_chat
   #
-  # Codex commonly uses:
+  # Responses API clients (including Codex CLI) commonly use:
   #   target_formats:
-  #     - codex
+  #     - openai_responses
   #
   # A single provider can expose multiple downstream formats, for example:
   #   target_formats:
   #     - openai_chat
   #     - claude_chat
-  #
-  # openai_responses and codex are mutually exclusive in the same provider.
   #
   # Common upstream choices:
   #   /v1/chat/completions -> source_format: openai_chat
