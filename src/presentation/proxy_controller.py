@@ -14,7 +14,6 @@ from ..application.app_context import AppContext
 from ..hooks import HookAbortError
 from ..services.proxy_service import ProxyErrorInfo
 from ..utils import normalize_ip
-from ..utils.provider_targets import resolve_runtime_target_formats
 from ..utils.local_time import now_local_datetime
 from ..utils.compat import Protocol
 
@@ -269,7 +268,12 @@ class ProxyController:
 
     @staticmethod
     def _get_provider_target_formats(provider: Any) -> tuple[str, ...]:
-        return resolve_runtime_target_formats(provider)
+        candidate_formats = getattr(provider, "target_formats", ())
+        return tuple(
+            str(item or "").strip().lower()
+            for item in candidate_formats
+            if str(item or "").strip()
+        )
 
     @staticmethod
     def _format_provider_target_formats(target_formats: Iterable[str]) -> str:
