@@ -1290,7 +1290,7 @@
 }
 
 .providers-page .modal-dialog {
-    max-width: min(1120px, calc(100vw - 32px));
+    max-width: min(1040px, calc(100vw - 32px));
 }
 
 .providers-page .auth-entry-yaml-modal-dialog {
@@ -1344,6 +1344,49 @@
 
 .providers-page .provider-editor-modal .provider-model-list-section {
     margin-bottom: 8px !important;
+}
+
+.providers-page .provider-modal-tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 5px;
+    margin-bottom: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.72);
+}
+
+.providers-page .provider-modal-tab-btn {
+    min-width: 112px;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.providers-page .provider-modal-tab-btn:hover,
+.providers-page .provider-modal-tab-btn:focus-visible {
+    color: var(--nav-tab-hover-text);
+    background: var(--nav-tab-hover-bg);
+    border-color: var(--nav-tab-hover-border);
+    outline: none;
+}
+
+.providers-page .provider-modal-tab-btn.is-active {
+    color: #fff;
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.providers-page .provider-modal-tab-panel[hidden] {
+    display: none !important;
 }
 
 .providers-page .modal-title {

@@ -96,215 +96,237 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body pt-0">
-                    <div class="provider-form-grid">
-                        <div class="mb-3">
-                            <label class="form-label">Provider 名称 *</label>
-                            <input type="text" class="form-control" id="providerName" placeholder="例如 openai">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">API 地址 *</label>
-                            <input type="text" class="form-control" id="providerApi" placeholder="例如 https://api.openai.com/v1/chat/completions">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label field-label-with-help">
-                                <span>上游传输</span>
-                                <button type="button" class="field-help-button" data-provider-help-topic="transport" onclick="toggleProviderHelp('transport', event)" aria-label="查看上游传输说明">?</button>
-                            </label>
-                            <select class="form-control" id="providerTransport" data-custom-select="true">
-                                <option value="http">HTTP</option>
-                                <option value="websocket">WebSocket</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label field-label-with-help">
-                                <span>上游格式</span>
-                                <button type="button" class="field-help-button" data-provider-help-topic="source_format" onclick="toggleProviderHelp('source_format', event)" aria-label="查看上游格式说明">?</button>
-                            </label>
-                            <select class="form-control" id="providerSourceFormat" data-custom-select="true">
-                                <option value="openai_chat">openai_chat</option>
-                                <option value="openai_responses">openai_responses</option>
-                                <option value="claude_chat">claude_chat</option>
-                                <option value="codex">codex</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label field-label-with-help">
-                                <span>下游格式</span>
-                                <span class="field-mode-badge">多选</span>
-                                <button type="button" class="field-help-button" data-provider-help-topic="target_format" onclick="toggleProviderHelp('target_format', event)" aria-label="查看下游格式说明">?</button>
-                            </label>
-                            <select
-                                class="form-control"
-                                id="providerTargetFormat"
-                                multiple
-                                data-custom-select="true"
-                                data-placeholder="请选择下游格式"
-                                data-multi-select-hint="可多选，点击已选项可取消；互斥项会自动替换"
-                            >
-                                <option value="openai_chat">openai_chat</option>
-                                <option value="openai_responses">openai_responses</option>
-                                <option value="claude_chat">claude_chat</option>
-                                <option value="codex">codex</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Auth 方式</label>
-                            <select class="form-control" id="providerAuthMode" data-custom-select="true" onchange="updateProviderAuthModeFields()">
-                                <option value="legacy_api_key">Legacy API Key</option>
-                                <option value="auth_group">Auth Group</option>
-                            </select>
-                        </div>
-                        <div class="mb-3" id="providerAuthGroupField">
-                            <label class="form-label field-label-with-help">
-                                <span>Auth Group</span>
-                                <button
-                                    type="button"
-                                    class="field-help-button"
-                                    data-provider-help-topic="auth_group_field"
-                                    onclick="toggleProviderHelp('auth_group_field', event)"
-                                    aria-label="查看 Auth Group 字段说明"
-                                >?</button>
-                            </label>
-                            <select class="form-control" id="providerAuthGroup" data-custom-select="true"></select>
-                        </div>
-                        <div class="mb-3" id="providerLegacyApiKeyField">
-                            <label class="form-label">Legacy API Key</label>
-                            <div class="sensitive-input-shell">
-                                <input
-                                    type="password"
-                                    class="form-control sensitive-input-control"
-                                    id="providerApiKey"
-                                    data-sensitive-masked-type="password"
-                                    placeholder="留空则不写入配置"
-                                    autocomplete="new-password"
-                                    spellcheck="false"
-                                >
-                                <button
-                                    type="button"
-                                    class="sensitive-input-toggle"
-                                    data-sensitive-toggle-for="providerApiKey"
-                                    data-sensitive-label="Legacy API Key"
-                                    onclick="toggleSensitiveInputVisibility('providerApiKey')"
-                                    aria-controls="providerApiKey"
-                                    aria-pressed="false"
-                                    aria-label="显示 Legacy API Key"
-                                    title="显示 Legacy API Key"
-                                >
-                                    <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                        <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
-                                    </svg>
-                                    <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                        <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                                        <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                    <span class="visually-hidden">显示 Legacy API Key</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">代理</label>
-                            <div class="sensitive-input-shell">
-                                <input
-                                    type="text"
-                                    class="form-control sensitive-input-control"
-                                    id="providerProxy"
-                                    placeholder="例如 http://127.0.0.1:7890"
-                                    autocomplete="off"
-                                    spellcheck="false"
-                                >
-                                <button
-                                    type="button"
-                                    class="sensitive-input-toggle"
-                                    data-sensitive-toggle-for="providerProxy"
-                                    data-sensitive-label="代理"
-                                    onclick="toggleSensitiveInputVisibility('providerProxy')"
-                                    aria-controls="providerProxy"
-                                    aria-pressed="false"
-                                    aria-label="显示代理"
-                                    title="显示代理"
-                                >
-                                    <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                        <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
-                                    </svg>
-                                    <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                        <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                                        <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                    <span class="visually-hidden">显示代理</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Hook</label>
-                            <input type="text" class="form-control" id="providerHook" placeholder="例如 example_hook.py">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Timeout Seconds</label>
-                            <input type="number" class="form-control" id="providerTimeout" min="1" placeholder="例如 1200">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Max Retries</label>
-                            <input type="number" class="form-control" id="providerRetries" min="1" placeholder="例如 3">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">证书校验（HTTPS/WSS）</label>
-                            <select class="form-control" id="providerVerifySsl" data-custom-select="true">
-                                <option value="true">启用</option>
-                                <option value="false">禁用</option>
-                            </select>
-                        </div>
+                    <div class="provider-modal-tabs" role="tablist" aria-label="Provider 编辑页签">
+                        <button
+                            type="button"
+                            class="provider-modal-tab-btn is-active"
+                            id="providerModalTabBtn_basic"
+                            onclick="switchProviderModalTab('basic')"
+                            aria-selected="true"
+                            aria-controls="providerModalTabPanel_basic"
+                        >基础配置</button>
+                        <button
+                            type="button"
+                            class="provider-modal-tab-btn"
+                            id="providerModalTabBtn_models"
+                            onclick="switchProviderModalTab('models')"
+                            aria-selected="false"
+                            aria-controls="providerModalTabPanel_models"
+                        >模型列表</button>
                     </div>
-                    <div class="mb-3 provider-model-list-section">
-                        <div class="field-header">
-                            <div class="field-header-meta">
-                                <label class="form-label">Model List</label>
+                    <section class="provider-modal-tab-panel" id="providerModalTabPanel_basic" role="tabpanel" aria-labelledby="providerModalTabBtn_basic">
+                        <div class="provider-form-grid">
+                            <div class="mb-3">
+                                <label class="form-label">Provider 名称 *</label>
+                                <input type="text" class="form-control" id="providerName" placeholder="例如 openai">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">API 地址 *</label>
+                                <input type="text" class="form-control" id="providerApi" placeholder="例如 https://api.openai.com/v1/chat/completions">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label field-label-with-help">
+                                    <span>上游传输</span>
+                                    <button type="button" class="field-help-button" data-provider-help-topic="transport" onclick="toggleProviderHelp('transport', event)" aria-label="查看上游传输说明">?</button>
+                                </label>
+                                <select class="form-control" id="providerTransport" data-custom-select="true">
+                                    <option value="http">HTTP</option>
+                                    <option value="websocket">WebSocket</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label field-label-with-help">
+                                    <span>上游格式</span>
+                                    <button type="button" class="field-help-button" data-provider-help-topic="source_format" onclick="toggleProviderHelp('source_format', event)" aria-label="查看上游格式说明">?</button>
+                                </label>
+                                <select class="form-control" id="providerSourceFormat" data-custom-select="true">
+                                    <option value="openai_chat">openai_chat</option>
+                                    <option value="openai_responses">openai_responses</option>
+                                    <option value="claude_chat">claude_chat</option>
+                                    <option value="codex">codex</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label field-label-with-help">
+                                    <span>下游格式</span>
+                                    <span class="field-mode-badge">多选</span>
+                                    <button type="button" class="field-help-button" data-provider-help-topic="target_format" onclick="toggleProviderHelp('target_format', event)" aria-label="查看下游格式说明">?</button>
+                                </label>
+                                <select
+                                    class="form-control"
+                                    id="providerTargetFormat"
+                                    multiple
+                                    data-custom-select="true"
+                                    data-placeholder="请选择下游格式"
+                                    data-multi-select-hint="可多选，点击已选项可取消；互斥项会自动替换"
+                                >
+                                    <option value="openai_chat">openai_chat</option>
+                                    <option value="openai_responses">openai_responses</option>
+                                    <option value="claude_chat">claude_chat</option>
+                                    <option value="codex">codex</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Auth 方式</label>
+                                <select class="form-control" id="providerAuthMode" data-custom-select="true" onchange="updateProviderAuthModeFields()">
+                                    <option value="legacy_api_key">Legacy API Key</option>
+                                    <option value="auth_group">Auth Group</option>
+                                </select>
+                            </div>
+                            <div class="mb-3" id="providerAuthGroupField">
+                                <label class="form-label field-label-with-help">
+                                    <span>Auth Group</span>
+                                    <button
+                                        type="button"
+                                        class="field-help-button"
+                                        data-provider-help-topic="auth_group_field"
+                                        onclick="toggleProviderHelp('auth_group_field', event)"
+                                        aria-label="查看 Auth Group 字段说明"
+                                    >?</button>
+                                </label>
+                                <select class="form-control" id="providerAuthGroup" data-custom-select="true"></select>
+                            </div>
+                            <div class="mb-3" id="providerLegacyApiKeyField">
+                                <label class="form-label">Legacy API Key</label>
+                                <div class="sensitive-input-shell">
+                                    <input
+                                        type="password"
+                                        class="form-control sensitive-input-control"
+                                        id="providerApiKey"
+                                        data-sensitive-masked-type="password"
+                                        placeholder="留空则不写入配置"
+                                        autocomplete="new-password"
+                                        spellcheck="false"
+                                    >
+                                    <button
+                                        type="button"
+                                        class="sensitive-input-toggle"
+                                        data-sensitive-toggle-for="providerApiKey"
+                                        data-sensitive-label="Legacy API Key"
+                                        onclick="toggleSensitiveInputVisibility('providerApiKey')"
+                                        aria-controls="providerApiKey"
+                                        aria-pressed="false"
+                                        aria-label="显示 Legacy API Key"
+                                        title="显示 Legacy API Key"
+                                    >
+                                        <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                                        </svg>
+                                        <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                            <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        <span class="visually-hidden">显示 Legacy API Key</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">代理</label>
+                                <div class="sensitive-input-shell">
+                                    <input
+                                        type="text"
+                                        class="form-control sensitive-input-control"
+                                        id="providerProxy"
+                                        placeholder="例如 http://127.0.0.1:7890"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    >
+                                    <button
+                                        type="button"
+                                        class="sensitive-input-toggle"
+                                        data-sensitive-toggle-for="providerProxy"
+                                        data-sensitive-label="代理"
+                                        onclick="toggleSensitiveInputVisibility('providerProxy')"
+                                        aria-controls="providerProxy"
+                                        aria-pressed="false"
+                                        aria-label="显示代理"
+                                        title="显示代理"
+                                    >
+                                        <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                                        </svg>
+                                        <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                            <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        <span class="visually-hidden">显示代理</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Hook</label>
+                                <input type="text" class="form-control" id="providerHook" placeholder="例如 example_hook.py">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Timeout Seconds</label>
+                                <input type="number" class="form-control" id="providerTimeout" min="1" placeholder="例如 1200">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Max Retries</label>
+                                <input type="number" class="form-control" id="providerRetries" min="1" placeholder="例如 3">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">证书校验（HTTPS/WSS）</label>
+                                <select class="form-control" id="providerVerifySsl" data-custom-select="true">
+                                    <option value="true">启用</option>
+                                    <option value="false">禁用</option>
+                                </select>
                             </div>
                         </div>
-                        <div class="model-test-inline-editor">
-                            <div class="model-test-toolbar">
-                                <div class="model-test-toolbar-main">
-                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="runSelectedModelTestsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="runSelectedModelTests()">测试</button>
-                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="deleteSelectedModelTestsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="deleteSelectedModelTestRows()">删除</button>
-                                </div>
-                                <div class="model-test-toolbar-side" id="modelTestAuthEntryShell" hidden>
-                                    <div class="model-test-auth-entry-label-group">
-                                        <label class="form-label">Auth Entry</label>
-                                        <button
-                                            type="button"
-                                            class="field-help-button field-help-button-inline"
-                                            data-provider-help-topic="model_test_auth_entry"
-                                            onclick="toggleProviderHelp('model_test_auth_entry', event)"
-                                            aria-label="查看 Auth Entry 测试说明"
-                                        >?</button>
-                                    </div>
-                                    <select class="form-control" id="modelTestAuthEntry" data-custom-select="true"></select>
-                                </div>
-                                <div class="model-test-toolbar-actions">
-                                    <button type="button" class="btn btn-secondary btn-field-secondary" id="tidyModelListBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="tidyModelList()">整理</button>
-                                    <div class="fetch-model-help-group">
-                                        <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="fetchModels()">拉取模型</button>
-                                        <button
-                                            type="button"
-                                            class="field-help-button field-help-button-inline"
-                                            data-provider-help-topic="fetch_models"
-                                            onclick="toggleProviderHelp('fetch_models', event)"
-                                            aria-label="查看拉取模型说明"
-                                        >?</button>
-                                    </div>
+                    </section>
+                    <section class="provider-modal-tab-panel" id="providerModalTabPanel_models" role="tabpanel" aria-labelledby="providerModalTabBtn_models" hidden>
+                        <div class="mb-3 provider-model-list-section">
+                            <div class="field-header">
+                                <div class="field-header-meta">
+                                    <label class="form-label">Model List</label>
                                 </div>
                             </div>
-                            <div class="model-test-summary" id="modelTestSummary">共 0 行，已选 0 行</div>
-                            <div class="providers-table-shell model-test-table-shell" id="modelTestTableContainer">
-                                <div class="empty-state">正在加载模型表格...</div>
+                            <div class="model-test-inline-editor">
+                                <div class="model-test-toolbar">
+                                    <div class="model-test-toolbar-main">
+                                        <button type="button" class="btn btn-secondary btn-field-secondary" id="runSelectedModelTestsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="runSelectedModelTests()">测试</button>
+                                        <button type="button" class="btn btn-secondary btn-field-secondary" id="deleteSelectedModelTestsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="deleteSelectedModelTestRows()">删除</button>
+                                    </div>
+                                    <div class="model-test-toolbar-side" id="modelTestAuthEntryShell" hidden>
+                                        <div class="model-test-auth-entry-label-group">
+                                            <label class="form-label">Auth Entry</label>
+                                            <button
+                                                type="button"
+                                                class="field-help-button field-help-button-inline"
+                                                data-provider-help-topic="model_test_auth_entry"
+                                                onclick="toggleProviderHelp('model_test_auth_entry', event)"
+                                                aria-label="查看 Auth Entry 测试说明"
+                                            >?</button>
+                                        </div>
+                                        <select class="form-control" id="modelTestAuthEntry" data-custom-select="true"></select>
+                                    </div>
+                                    <div class="model-test-toolbar-actions">
+                                        <button type="button" class="btn btn-secondary btn-field-secondary" id="tidyModelListBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="tidyModelList()">整理</button>
+                                        <div class="fetch-model-help-group">
+                                            <button type="button" class="btn btn-secondary btn-fetch-inline" id="fetchModelsBtn" onmousedown="preventModelTestActionMouseDown(event)" onclick="fetchModels()">拉取模型</button>
+                                            <button
+                                                type="button"
+                                                class="field-help-button field-help-button-inline"
+                                                data-provider-help-topic="fetch_models"
+                                                onclick="toggleProviderHelp('fetch_models', event)"
+                                                aria-label="查看拉取模型说明"
+                                            >?</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="model-test-summary" id="modelTestSummary">共 0 行，已选 0 行</div>
+                                <div class="providers-table-shell model-test-table-shell" id="modelTestTableContainer">
+                                    <div class="empty-state">正在加载模型表格...</div>
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    </section>
                 </div>
                 <div class="modal-footer border-top-0">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -607,6 +629,7 @@
         let providerTransportAutoSyncEnabled = true;
         let authEntryYamlEditor = null;
         let authEntryYamlThemeObserver = null;
+        let activeProviderModalTab = 'basic';
         let modelTestRows = [];
         let modelTestRowSequence = 0;
         let providerDragState = null;
@@ -939,6 +962,14 @@
             return document.getElementById(`providerTabPanel_${tabName}`);
         }
 
+        function getProviderModalTabButton(tabName) {
+            return document.getElementById(`providerModalTabBtn_${tabName}`);
+        }
+
+        function getProviderModalTabPanel(tabName) {
+            return document.getElementById(`providerModalTabPanel_${tabName}`);
+        }
+
         function syncProviderTabUi() {
             ['providers', 'auth_groups'].forEach(tabName => {
                 const isActive = tabName === activeProviderTab;
@@ -962,6 +993,31 @@
             }
             activeProviderTab = tabName;
             syncProviderTabUi();
+        }
+
+        function syncProviderModalTabUi() {
+            ['basic', 'models'].forEach(tabName => {
+                const isActive = tabName === activeProviderModalTab;
+                const button = getProviderModalTabButton(tabName);
+                const panel = getProviderModalTabPanel(tabName);
+
+                if (button) {
+                    button.classList.toggle('is-active', isActive);
+                    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                }
+
+                if (panel) {
+                    panel.hidden = !isActive;
+                }
+            });
+        }
+
+        function switchProviderModalTab(tabName) {
+            if (!['basic', 'models'].includes(tabName)) {
+                return;
+            }
+            activeProviderModalTab = tabName;
+            syncProviderModalTabUi();
         }
 
         function getProviderHelpPopoverElement() {
@@ -3176,6 +3232,7 @@
             editingProviderName = null;
             document.getElementById('providerModalLabel').textContent = '新增 Provider';
             fillForm(null);
+            switchProviderModalTab('basic');
             providerModalInstance.show();
         }
 
@@ -3186,6 +3243,7 @@
             editingProviderName = name;
             document.getElementById('providerModalLabel').textContent = '编辑 Provider';
             fillForm(provider);
+            switchProviderModalTab('basic');
             providerModalInstance.show();
         }
 
@@ -4903,6 +4961,7 @@
                 resetModelTestState();
                 editingProviderName = null;
                 fillForm(null);
+                switchProviderModalTab('basic');
             });
             const authGroupModalElement = document.getElementById('authGroupModal');
             authGroupModalInstance = new bootstrap.Modal(authGroupModalElement);
