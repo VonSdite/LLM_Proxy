@@ -813,12 +813,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function getProviderGroupNames(groupKey)", html)
         self.assertIn("function getSelectedProviderNamesForGroup(groupKey)", html)
         self.assertIn("function toggleProviderGroupSelection(groupKey, checked)", html)
-        self.assertIn("function getProviderMoveState(name)", html)
-        self.assertIn("function buildMovedProviderOrderNames(name, direction)", html)
         self.assertIn("function hasProviderMutationInFlight()", html)
         self.assertIn("function buildProviderTable(groupKey, title, providerList, emptyText)", html)
         self.assertIn("function saveProviderOrder(names)", html)
-        self.assertIn("function moveProvider(name, direction)", html)
         self.assertIn("function updateProviderSelectionUi()", html)
         self.assertIn("function toggleProviderSelection(name, checked)", html)
         self.assertIn("function toggleAllProvidersSelection(checked)", html)
@@ -832,8 +829,6 @@ class ProviderTemplateTransportTests(unittest.TestCase):
             html,
         )
         self.assertNotIn('id="providerSelectAllCheckbox"', html)
-        self.assertIn('class="provider-order-column">顺序</th>', html)
-        self.assertIn('class="provider-order-cell"', html)
         self.assertIn('data-provider-group-select-checkbox="${normalizedGroupKey}"', html)
         self.assertIn('id="${batchActionMeta.buttonId}"', html)
         self.assertIn("class=\"btn btn-toolbar-secondary provider-group-batch-btn\"", html)
@@ -842,20 +837,13 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("buttonId: 'enableDisabledProvidersBtn'", html)
         self.assertIn("buttonLabel: '禁用'", html)
         self.assertIn("buttonLabel: '启用'", html)
-        self.assertIn('class="provider-order-step provider-order-step-up"', html)
-        self.assertIn('class="provider-order-step provider-order-step-down"', html)
-        self.assertIn('class="provider-order-step-icon"', html)
-        self.assertNotIn(">上移</button>", html)
-        self.assertNotIn(">下移</button>", html)
         self.assertIn("已启用", html)
         self.assertIn("已禁用", html)
-        self.assertIn('class="provider-order-stepper"', html)
-        self.assertIn("providerActionLocked || !providerMoveState.canMoveUp", html)
-        self.assertIn("providerActionLocked || !providerMoveState.canMoveDown", html)
         self.assertIn("if (!normalizedName || hasProviderMutationInFlight())", html)
         self.assertIn("groupLabel = groupKey === 'enabled'", html)
         self.assertIn('data-provider-row-checkbox="${encodedProviderName}"', html)
         self.assertIn('data-auth-group-delete-trigger="${encodedGroupName}"', html)
+        self.assertIn('class="drag-handle-button provider-drag-handle"', html)
         self.assertNotIn('provider-chip ${isEnabled ? \'provider-chip-hook\' : \'provider-chip-muted\'}', html)
         self.assertIn(
             "class=\"btn-action ${isEnabled ? 'btn-delete' : 'btn-edit'}\"", html
@@ -980,17 +968,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .provider-group-title {", css)
         self.assertIn(".providers-page #providersContainer.providers-table-shell {", css)
         self.assertIn(':root[data-theme="dark"] .providers-page .provider-group-card {', css)
-        self.assertIn(".providers-page .providers-table th.provider-order-column,", css)
-        self.assertIn(".providers-page .provider-order-actions {", css)
-        self.assertIn(".providers-page .provider-order-stepper {", css)
-        self.assertIn(".providers-page .provider-order-step {", css)
         self.assertIn(".providers-page .provider-list-table col.provider-select-col {", css)
         self.assertIn(".providers-page .drag-handle-button {", css)
         self.assertIn(".providers-page .providers-table tbody tr.is-drag-over-before td {", css)
         self.assertIn(".providers-page .providers-table tbody tr.is-drag-over-after td {", css)
         self.assertIn(".providers-page .btn-action:disabled {", css)
-        self.assertIn(".providers-page .provider-order-step:disabled {", css)
-        self.assertIn(':root[data-theme="dark"] .providers-page .provider-order-step:disabled {', css)
         self.assertIn(':root[data-theme="dark"] .providers-page .drag-handle-button {', css)
         self.assertIn(".providers-page .field-label-with-help {", css)
         self.assertIn(".providers-page .field-mode-badge {", css)
@@ -1211,7 +1193,7 @@ process.stdout.write(JSON.stringify({{
         self.assertTrue(payload["missingGroupDisabled"])
         self.assertFalse(payload["legacyDisabled"])
 
-    def test_provider_order_helpers_keep_enabled_group_before_disabled_group(
+    def test_provider_drag_drop_helpers_keep_enabled_group_before_disabled_group(
         self,
     ) -> None:
         template_path = (
@@ -1235,6 +1217,7 @@ const sandbox = {{
     {{ name: "enabled-a", enabled: true }},
     {{ name: "enabled-b", enabled: true }},
     {{ name: "disabled-a", enabled: false }},
+    {{ name: "disabled-b", enabled: false }},
   ],
   providerBatchActionInFlight: false,
   providerOrderActionInFlight: false,
@@ -1244,9 +1227,9 @@ const sandbox = {{
 vm.createContext(sandbox);
 vm.runInContext({json.dumps(script)}, sandbox);
 process.stdout.write(JSON.stringify({{
-  moveStateFirst: sandbox.getProviderMoveState("enabled-a"),
-  moveStateDisabled: sandbox.getProviderMoveState("disabled-a"),
-  movedUp: sandbox.buildMovedProviderOrderNames("enabled-b", "up"),
+  dropEnabled: sandbox.buildDroppedProviderOrderNames("enabled-a", "enabled-b", true),
+  dropDisabled: sandbox.buildDroppedProviderOrderNames("disabled-b", "disabled-a", false),
+  crossGroup: sandbox.buildDroppedProviderOrderNames("enabled-a", "disabled-a", true),
   mutationIdle: sandbox.hasProviderMutationInFlight(),
 }}));
 """
@@ -1259,17 +1242,14 @@ process.stdout.write(JSON.stringify({{
         payload = json.loads(completed.stdout.decode("utf-8"))
 
         self.assertEqual(
-            {"canMoveUp": False, "canMoveDown": True},
-            payload["moveStateFirst"],
+            ["enabled-b", "enabled-a", "disabled-a", "disabled-b"],
+            payload["dropEnabled"],
         )
         self.assertEqual(
-            {"canMoveUp": False, "canMoveDown": False},
-            payload["moveStateDisabled"],
+            ["enabled-a", "enabled-b", "disabled-b", "disabled-a"],
+            payload["dropDisabled"],
         )
-        self.assertEqual(
-            ["enabled-b", "enabled-a", "disabled-a"],
-            payload["movedUp"],
-        )
+        self.assertIsNone(payload["crossGroup"])
         self.assertFalse(payload["mutationIdle"])
 
 
