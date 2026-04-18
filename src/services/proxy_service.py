@@ -30,6 +30,7 @@ from ..proxy_core import (
 )
 from ..translators import Translator, build_default_translator_registry
 from ..utils.net import build_requests_proxies
+from ..utils.provider_targets import resolve_runtime_primary_target_format
 from .upstream_usage import ensure_upstream_usage_capture
 
 
@@ -1019,22 +1020,10 @@ class ProxyService:
         provider: LLMProvider,
         resolved_target_format: Optional[str] = None,
     ) -> str:
-        normalized_target_format = str(resolved_target_format or "").strip().lower()
-        if normalized_target_format:
-            return normalized_target_format
-
-        provider_target_formats = tuple(
-            str(item or "").strip().lower()
-            for item in getattr(provider, "target_formats", ())
-            if str(item or "").strip()
+        return resolve_runtime_primary_target_format(
+            provider,
+            preferred_target_format=resolved_target_format,
         )
-        if provider_target_formats:
-            return provider_target_formats[0]
-
-        # DEPRECATED compatibility path for legacy provider objects that still
-        # rely on a single `target_format` field. New callers should only pass
-        # `target_formats`, and this fallback can be removed later.
-        return str(getattr(provider, "target_format", "") or "").strip().lower()
 
     @staticmethod
     def _read_response_body(response: Any) -> bytes:
