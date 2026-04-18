@@ -8,7 +8,7 @@ import time
 from typing import Any, Dict
 
 from ..proxy_core.contracts import DownstreamChunk
-from .event_chunk_utils import build_json_event_chunk
+from .event_chunk_utils import build_json_event_chunk as _emit_event
 from .tool_result_utils import normalize_tool_result_content
 
 
@@ -647,12 +647,6 @@ def convert_openai_chat_response_to_responses(
     if finish_reason is not None:
         response["finish_reason"] = finish_reason
     return response
-
-
-def _emit_event(event_name: str, payload: Dict[str, Any]) -> DownstreamChunk:
-    return build_json_event_chunk(event_name, payload)
-
-
 def _next_sequence(state: Dict[str, Any]) -> int:
     sequence = int(state.get("seq") or 0) + 1
     state["seq"] = sequence

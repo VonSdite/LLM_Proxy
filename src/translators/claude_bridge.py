@@ -9,7 +9,7 @@ import time
 from typing import Any, Dict, List, Tuple
 
 from ..proxy_core.contracts import DownstreamChunk
-from .event_chunk_utils import build_json_event_chunk
+from .event_chunk_utils import build_json_event_chunk as _emit_event
 from .tool_result_utils import normalize_tool_result_content
 
 
@@ -711,7 +711,3 @@ def _map_openai_finish_reason_to_claude(reason: Any) -> str:
     if normalized == "length":
         return "max_tokens"
     return "end_turn"
-
-
-def _emit_event(event_name: str, payload: Dict[str, Any]) -> DownstreamChunk:
-    return build_json_event_chunk(event_name, payload)
