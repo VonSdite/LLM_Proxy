@@ -484,7 +484,6 @@ class ProxyService:
             "openai_chat",
             "openai_responses",
             "claude_chat",
-            "codex",
         }:
             raise ValueError(f"Unsupported downstream target_format: {target_format}")
 

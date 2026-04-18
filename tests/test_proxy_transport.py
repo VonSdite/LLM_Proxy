@@ -223,18 +223,17 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual("openai_chat", schema.target_format)
         self.assertEqual(("openai_chat", "claude_chat"), schema.target_formats)
 
-    def test_provider_schema_rejects_conflicting_target_formats(self) -> None:
+    def test_provider_schema_rejects_removed_codex_protocol(self) -> None:
         with self.assertRaisesRegex(
-            ValueError,
-            "Provider target_formats contains mutually exclusive formats: openai_responses, codex",
+            ValueError, "Provider source_format must be one of: claude_chat, openai_chat, openai_responses"
         ):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "demo",
-                    "api": "https://example.com/v1/chat/completions",
+                    "api": "https://example.com/v1/responses",
                     "api_key": "demo-key",
-                    "target_formats": ["openai_responses", "codex"],
-                    "model_list": ["gpt-4.1"],
+                    "source_format": "codex",
+                    "model_list": ["gpt-5-codex"],
                 }
             )
 
@@ -755,8 +754,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn('id="providerFormat"', html)
         self.assertNotIn('id="providerStreamFormat"', html)
 
-        for value in ("openai_chat", "openai_responses", "claude_chat", "codex"):
+        for value in ("openai_chat", "openai_responses", "claude_chat"):
             self.assertIn(f'value="{value}"', html)
+        self.assertNotIn('value="codex"', html)
         for removed_value in ("gemini_chat", "gemini_cli", "antigravity"):
             self.assertNotIn(f'value="{removed_value}"', html)
 
@@ -804,10 +804,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("custom-select-option custom-select-option-multi", html)
         self.assertIn("custom-select-menu-hint", html)
         self.assertIn(
-            "const defaultNewProviderTargetFormats = ['openai_chat', 'codex', 'claude_chat'];",
+            "const defaultNewProviderTargetFormats = ['openai_chat', 'openai_responses', 'claude_chat'];",
             html,
         )
-        self.assertIn("const providerTargetFormatConflictGroups = [", html)
+        self.assertIn("const providerTargetFormatConflictGroups = [];", html)
         self.assertIn("function setProviderTargetFormatValues(", html)
         self.assertIn("target_formats: normalizedTargetFormats,", html)
         self.assertIn("switchProviderModalTab('basic');", html)
@@ -1052,8 +1052,8 @@ const sandbox = {{
   authGroups: [],
   modelTestRows: [],
   modelTestRowSequence: 0,
-  providerTargetFormatOptions: ["openai_chat", "openai_responses", "claude_chat", "codex"],
-  providerTargetFormatConflictGroups: [["openai_responses", "codex"]],
+  providerTargetFormatOptions: ["openai_chat", "openai_responses", "claude_chat"],
+  providerTargetFormatConflictGroups: [],
   escapeHtml(value) {{
     return String(value ?? "");
   }},
@@ -1087,7 +1087,6 @@ const sandbox = {{
           {{ value: "openai_chat", textContent: "openai_chat", selected: true }},
           {{ value: "openai_responses", textContent: "openai_responses", selected: false }},
           {{ value: "claude_chat", textContent: "claude_chat", selected: false }},
-          {{ value: "codex", textContent: "codex", selected: false }},
         ],
       }},
       providerApiKey: {{ value: " secret " }},

@@ -5,11 +5,8 @@
 from .registry import (
     ClaudeChatTranslator,
     ClaudePassthroughTranslator,
-    CodexChatTranslator,
-    CodexPassthroughTranslator,
     ComposedTranslator,
     OpenAIChatClaudeTranslator,
-    OpenAIChatCodexTranslator,
     OpenAIChatResponsesTranslator,
     OpenAIChatTranslator,
     OpenAIResponsesPassthroughTranslator,
@@ -22,11 +19,8 @@ from .registry import (
 __all__ = [
     "ClaudeChatTranslator",
     "ClaudePassthroughTranslator",
-    "CodexChatTranslator",
-    "CodexPassthroughTranslator",
     "ComposedTranslator",
     "OpenAIChatClaudeTranslator",
-    "OpenAIChatCodexTranslator",
     "OpenAIChatResponsesTranslator",
     "OpenAIChatTranslator",
     "OpenAIResponsesPassthroughTranslator",

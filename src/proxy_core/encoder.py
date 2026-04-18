@@ -14,7 +14,7 @@ def encode_downstream_chunk(chunk: DownstreamChunk, target_format: str) -> bytes
     normalized_target = str(target_format or "").strip().lower()
     if normalized_target == "claude_chat":
         return _encode_claude_chunk(chunk)
-    if normalized_target in {"openai_responses", "codex"}:
+    if normalized_target == "openai_responses":
         return _encode_openai_responses_chunk(chunk)
     return _encode_openai_chat_chunk(chunk)
 
@@ -47,11 +47,11 @@ def is_terminal_chunk(chunk: DownstreamChunk, target_format: str) -> bool:
             return False
         payload_type = str(chunk.payload.get("type") or chunk.event or "").strip().lower()
         return payload_type in {"message_stop", "error"}
-    if normalized_target in {"openai_responses", "codex"}:
+    if normalized_target == "openai_responses":
         if chunk.kind != "json" or not isinstance(chunk.payload, dict):
             return False
         payload_type = str(chunk.payload.get("type") or chunk.event or "").strip().lower()
-        return payload_type in {"response.completed", "response.failed", "response.cancelled"}
+        return payload_type in {"response.completed", "response.done", "response.failed", "response.cancelled"}
     return chunk.kind == "done"
 
 

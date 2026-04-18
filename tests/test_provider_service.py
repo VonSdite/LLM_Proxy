@@ -97,6 +97,35 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("target_format", persisted_provider)
         self.assertEqual(["claude_chat"], persisted_provider["target_formats"])
 
+    def test_config_manager_normalizes_legacy_codex_protocol_aliases_on_load(self) -> None:
+        self._write_config(
+            {
+                "auth_groups": [],
+                "providers": [
+                    {
+                        "name": "demo",
+                        "api": "https://example.com/v1/responses",
+                        "api_key": "sk-demo",
+                        "source_format": "codex",
+                        "target_formats": ["codex"],
+                        "model_list": ["gpt-5-codex"],
+                    }
+                ],
+            }
+        )
+
+        migrated_manager = ConfigManager(self.config_path, self.root_path)
+
+        provider = migrated_manager.get_raw_config()["providers"][0]
+        self.assertEqual("openai_responses", provider["source_format"])
+        self.assertEqual(["openai_responses"], provider["target_formats"])
+
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        persisted_provider = persisted["providers"][0]
+        self.assertEqual("openai_responses", persisted_provider["source_format"])
+        self.assertEqual(["openai_responses"], persisted_provider["target_formats"])
+
     def test_update_provider_preserves_enabled_when_payload_omits_enabled(self) -> None:
         self._seed_providers(
             [

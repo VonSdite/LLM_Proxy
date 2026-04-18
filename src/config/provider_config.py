@@ -24,11 +24,8 @@ SUPPORTED_PROVIDER_PROTOCOLS = {
     "openai_chat",
     "openai_responses",
     "claude_chat",
-    "codex",
 }
-SUPPORTED_PROVIDER_TARGET_FORMAT_CONFLICT_GROUPS = (
-    ("openai_responses", "codex"),
-)
+SUPPORTED_PROVIDER_TARGET_FORMAT_CONFLICT_GROUPS = ()
 SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https", "ws", "wss"}
 SUPPORTED_AUTH_GROUP_STRATEGIES = {DEFAULT_AUTH_GROUP_STRATEGY}
 SUPPORTED_PROVIDER_FIELDS = {
