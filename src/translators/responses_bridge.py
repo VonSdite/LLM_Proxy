@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict
 
 from ..proxy_core.contracts import DownstreamChunk
+from .tool_result_utils import normalize_tool_result_content
 
 
 def convert_openai_responses_request_to_chat_request(
@@ -72,7 +73,7 @@ def convert_openai_responses_request_to_chat_request(
                     {
                         "role": "tool",
                         "tool_call_id": str(item.get("call_id") or ""),
-                        "content": _normalize_tool_result_content(item.get("output")),
+                        "content": normalize_tool_result_content(item.get("output")),
                     }
                 )
 
@@ -137,18 +138,6 @@ def _from_openai_responses_message_content(content: Any) -> Any:
         elif item_type == "input_image" and isinstance(item.get("image_url"), str):
             translated.append({"type": "image_url", "image_url": {"url": item.get("image_url")}})
     return translated
-
-
-def _normalize_tool_result_content(content: Any) -> Any:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, (dict, list)):
-        import json
-
-        return json.dumps(content, ensure_ascii=False)
-    return str(content or "")
-
-
 def translate_openai_chat_downstream_chunk_to_responses(
     model_name: str,
     original_request: Dict[str, Any],

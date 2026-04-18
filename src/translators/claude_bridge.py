@@ -9,6 +9,7 @@ import time
 from typing import Any, Dict, List, Tuple
 
 from ..proxy_core.contracts import DownstreamChunk
+from .tool_result_utils import normalize_tool_result_content
 
 
 def convert_claude_request_to_openai_chat_request(
@@ -418,7 +419,7 @@ def _convert_claude_blocks_to_openai_parts(content: Any, role: str) -> Tuple[Lis
                 {
                     "role": "tool",
                     "tool_call_id": str(part.get("tool_use_id") or ""),
-                    "content": _normalize_tool_result_content(part.get("content")),
+                    "content": normalize_tool_result_content(part.get("content")),
                 }
             )
 
@@ -688,16 +689,6 @@ def _coerce_tool_input(arguments: Any) -> Dict[str, Any]:
             return parsed
         return {"value": parsed}
     return {}
-
-
-def _normalize_tool_result_content(content: Any) -> Any:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, (dict, list)):
-        return json.dumps(content, ensure_ascii=False)
-    return str(content or "")
-
-
 def _budget_to_reasoning_effort(budget_tokens: Any) -> str:
     try:
         budget = int(budget_tokens)
