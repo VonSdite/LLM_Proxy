@@ -15,6 +15,7 @@ from ..config.provider_config import (
     AuthGroupSchema,
     validate_auth_group_provider_definitions,
 )
+from .config_sections import read_auth_group_entries, read_provider_entries
 
 
 class AuthGroupService:
@@ -33,8 +34,8 @@ class AuthGroupService:
 
     def list_auth_groups(self) -> List[Dict[str, Any]]:
         config = self._config_manager.get_raw_config()
-        auth_groups = self._extract_auth_groups(config)
-        providers = self._extract_providers(config)
+        auth_groups = read_auth_group_entries(config)
+        providers = read_provider_entries(config)
         summaries = self._build_auth_group_summary_map()
         provider_counts = self._count_providers_by_auth_group(providers)
         result: List[Dict[str, Any]] = []
@@ -47,8 +48,8 @@ class AuthGroupService:
 
     def get_auth_group(self, name: str) -> Optional[Dict[str, Any]]:
         config = self._config_manager.get_raw_config()
-        auth_groups = self._extract_auth_groups(config)
-        providers = self._extract_providers(config)
+        auth_groups = read_auth_group_entries(config)
+        providers = read_provider_entries(config)
         target = self._find_auth_group(auth_groups, name)
         if target is None:
             return None
@@ -60,8 +61,8 @@ class AuthGroupService:
 
     def create_auth_group(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         config = self._config_manager.get_raw_config()
-        auth_groups = self._extract_auth_groups(config)
-        providers = self._extract_providers(config)
+        auth_groups = read_auth_group_entries(config)
+        providers = read_provider_entries(config)
         auth_group = AuthGroupSchema.from_mapping(payload)
         normalized = auth_group.to_mapping()
 
@@ -74,8 +75,8 @@ class AuthGroupService:
 
     def update_auth_group(self, current_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         config = self._config_manager.get_raw_config()
-        auth_groups = self._extract_auth_groups(config)
-        providers = self._extract_providers(config)
+        auth_groups = read_auth_group_entries(config)
+        providers = read_provider_entries(config)
         auth_group = AuthGroupSchema.from_mapping(payload)
         normalized = auth_group.to_mapping()
 
@@ -98,8 +99,8 @@ class AuthGroupService:
 
     def delete_auth_group(self, name: str) -> None:
         config = self._config_manager.get_raw_config()
-        auth_groups = self._extract_auth_groups(config)
-        providers = self._extract_providers(config)
+        auth_groups = read_auth_group_entries(config)
+        providers = read_provider_entries(config)
         target = self._find_auth_group(auth_groups, name)
         if target is None:
             raise ValueError(f"Auth group not found: {name}")
@@ -113,7 +114,7 @@ class AuthGroupService:
     def get_auth_group_runtime(self, name: str) -> Dict[str, Any]:
         runtime = self._auth_group_manager.get_auth_group_runtime(name)
         config = self._config_manager.get_raw_config()
-        providers = self._extract_providers(config)
+        providers = read_provider_entries(config)
         runtime["provider_count"] = self._count_providers_by_auth_group(providers).get(runtime["name"], 0)
         return runtime
 
@@ -229,30 +230,6 @@ class AuthGroupService:
         config["providers"] = providers
         self._config_manager.write_raw_config(config)
         self._reload_callback()
-
-    @staticmethod
-    def _extract_auth_groups(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        auth_groups = config.get("auth_groups", [])
-        if auth_groups is None:
-            auth_groups = []
-        if not isinstance(auth_groups, list):
-            raise ValueError("Config field 'auth_groups' must be a list")
-        for index, auth_group in enumerate(auth_groups):
-            if not isinstance(auth_group, dict):
-                raise ValueError(f"Auth group entry at index {index} must be an object")
-        return list(auth_groups)
-
-    @staticmethod
-    def _extract_providers(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        providers = config.get("providers", [])
-        if providers is None:
-            providers = []
-        if not isinstance(providers, list):
-            raise ValueError("Config field 'providers' must be a list")
-        for index, provider in enumerate(providers):
-            if not isinstance(provider, dict):
-                raise ValueError(f"Provider entry at index {index} must be an object")
-        return list(providers)
 
     @staticmethod
     def _find_auth_group(auth_groups: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
