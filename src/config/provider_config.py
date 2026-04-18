@@ -16,16 +16,15 @@ DEFAULT_PROVIDER_VERIFY_SSL = False
 DEFAULT_PROVIDER_TRANSPORT = "http"
 DEFAULT_PROVIDER_SOURCE_FORMAT = "openai_chat"
 DEFAULT_PROVIDER_TARGET_FORMAT = "openai_chat"
-DEFAULT_PROVIDER_TARGET_FORMATS = (DEFAULT_PROVIDER_TARGET_FORMAT,)
-DEFAULT_AUTH_GROUP_STRATEGY = "least_inflight"
-DEFAULT_AUTH_GROUP_COOLDOWN_SECONDS_ON_429 = 60
-SUPPORTED_PROVIDER_TRANSPORTS = {"http", "websocket"}
-SUPPORTED_PROVIDER_PROTOCOLS = {
+SUPPORTED_PROVIDER_PROTOCOLS = (
     "openai_chat",
     "openai_responses",
     "claude_chat",
-}
-SUPPORTED_PROVIDER_TARGET_FORMAT_CONFLICT_GROUPS = ()
+)
+DEFAULT_PROVIDER_TARGET_FORMATS = SUPPORTED_PROVIDER_PROTOCOLS
+DEFAULT_AUTH_GROUP_STRATEGY = "least_inflight"
+DEFAULT_AUTH_GROUP_COOLDOWN_SECONDS_ON_429 = 60
+SUPPORTED_PROVIDER_TRANSPORTS = {"http", "websocket"}
 SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https", "ws", "wss"}
 SUPPORTED_AUTH_GROUP_STRATEGIES = {DEFAULT_AUTH_GROUP_STRATEGY}
 SUPPORTED_PROVIDER_FIELDS = {
@@ -34,7 +33,6 @@ SUPPORTED_PROVIDER_FIELDS = {
     "api",
     "transport",
     "source_format",
-    "target_formats",
     "api_key",
     "auth_group",
     "proxy",
@@ -223,30 +221,12 @@ def normalize_provider_target_formats(value: Any, *, field_name: str = "target_f
         target_formats.append(resolved)
     return tuple(target_formats)
 
-
-def validate_provider_target_format_conflicts(target_formats: Sequence[str]) -> None:
-    selected_formats = {
-        str(item or "").strip().lower()
-        for item in target_formats
-        if str(item or "").strip()
-    }
-    for group in SUPPORTED_PROVIDER_TARGET_FORMAT_CONFLICT_GROUPS:
-        conflicting = [item for item in group if item in selected_formats]
-        if len(conflicting) > 1:
-            raise ValueError(
-                "Provider target_formats contains mutually exclusive formats: "
-                + ", ".join(conflicting)
-            )
-
-
 def resolve_provider_target_formats(target_formats_value: Any) -> tuple[str, ...]:
     resolved_target_formats = list(
         normalize_provider_target_formats(target_formats_value, field_name="target_formats")
     )
     if not resolved_target_formats:
         resolved_target_formats = list(DEFAULT_PROVIDER_TARGET_FORMATS)
-
-    validate_provider_target_format_conflicts(resolved_target_formats)
     return tuple(resolved_target_formats)
 
 
@@ -482,8 +462,6 @@ class ProviderConfigSchema:
         if api_key and auth_group:
             raise ValueError("Provider must define either auth_group or api_key, not both")
 
-        target_formats = resolve_provider_target_formats(config.get("target_formats"))
-
         return cls(
             name=name,
             enabled=parse_optional_bool(
@@ -499,7 +477,7 @@ class ProviderConfigSchema:
                 default=DEFAULT_PROVIDER_SOURCE_FORMAT,
                 field_name="source_format",
             ),
-            target_formats=target_formats,
+            target_formats=DEFAULT_PROVIDER_TARGET_FORMATS,
             api_key=api_key,
             auth_group=auth_group,
             proxy=normalize_proxy_url(config.get("proxy")),
@@ -516,9 +494,7 @@ class ProviderConfigSchema:
 
     @property
     def target_format(self) -> str:
-        # DEPRECATED compatibility property. Public config/API payloads should
-        # only expose `target_formats`, and callers should migrate to
-        # `primary_target_format` or `target_formats` as appropriate.
+        # 兼容旧调用方的只读别名。
         return self.primary_target_format
 
     def to_mapping(self) -> Dict[str, Any]:
@@ -528,7 +504,6 @@ class ProviderConfigSchema:
             "api": self.api,
             "transport": self.transport,
             "source_format": self.source_format,
-            "target_formats": list(self.target_formats),
         }
 
         if self.api_key is not None:

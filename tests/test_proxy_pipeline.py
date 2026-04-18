@@ -735,8 +735,8 @@ class ProxyServicePipelineTests(unittest.TestCase):
 
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
-        self.assertEqual("user", captured["body"]["messages"][0]["role"])
-        self.assertEqual("Hello", captured["body"]["messages"][0]["content"])
+        self.assertEqual("user", captured["body"]["input"][0]["role"])
+        self.assertEqual("Hello", captured["body"]["input"][0]["content"][0]["text"])
         self.assertIn(b"event: message_start", stream_body)
         self.assertIn(b"event: content_block_start", stream_body)
         self.assertIn(b"event: content_block_delta", stream_body)
