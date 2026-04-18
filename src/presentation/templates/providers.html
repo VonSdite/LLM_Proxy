@@ -786,61 +786,6 @@
             };
         }
 
-        function getProviderMoveState(name) {
-            const normalizedName = String(name || '').trim();
-            if (!normalizedName) {
-                return { canMoveUp: false, canMoveDown: false };
-            }
-
-            const provider = providers.find(item => String(item?.name || '').trim() === normalizedName);
-            if (!provider) {
-                return { canMoveUp: false, canMoveDown: false };
-            }
-
-            const groupedNames = getGroupedProviderOrderNames();
-            const groupNames = isProviderEnabled(provider) ? groupedNames.enabled : groupedNames.disabled;
-            const groupIndex = groupNames.indexOf(normalizedName);
-            if (groupIndex < 0) {
-                return { canMoveUp: false, canMoveDown: false };
-            }
-
-            return {
-                canMoveUp: groupIndex > 0,
-                canMoveDown: groupIndex < groupNames.length - 1,
-            };
-        }
-
-        function buildMovedProviderOrderNames(name, direction) {
-            const normalizedName = String(name || '').trim();
-            const normalizedDirection = direction === 'up' ? 'up' : direction === 'down' ? 'down' : '';
-            if (!normalizedName || !normalizedDirection) {
-                return null;
-            }
-
-            const provider = providers.find(item => String(item?.name || '').trim() === normalizedName);
-            if (!provider) {
-                return null;
-            }
-
-            const groupedNames = getGroupedProviderOrderNames();
-            const groupNames = (isProviderEnabled(provider) ? groupedNames.enabled : groupedNames.disabled).slice();
-            const groupIndex = groupNames.indexOf(normalizedName);
-            if (groupIndex < 0) {
-                return null;
-            }
-
-            const targetIndex = normalizedDirection === 'up' ? groupIndex - 1 : groupIndex + 1;
-            if (targetIndex < 0 || targetIndex >= groupNames.length) {
-                return null;
-            }
-
-            const [movedName] = groupNames.splice(groupIndex, 1);
-            groupNames.splice(targetIndex, 0, movedName);
-            return isProviderEnabled(provider)
-                ? groupNames.concat(groupedNames.disabled)
-                : groupedNames.enabled.concat(groupNames);
-        }
-
         function buildDroppedProviderOrderNames(name, targetName, placeAfter) {
             const normalizedName = String(name || '').trim();
             const normalizedTargetName = String(targetName || '').trim();
@@ -1454,20 +1399,6 @@
                 providerOrderActionInFlight = false;
                 renderProviders();
             }
-        }
-
-        async function moveProvider(name, direction) {
-            const normalizedName = String(name || '').trim();
-            if (!normalizedName || hasProviderMutationInFlight()) {
-                return;
-            }
-
-            const nextOrderNames = buildMovedProviderOrderNames(normalizedName, direction);
-            if (!nextOrderNames) {
-                return;
-            }
-
-            await saveProviderOrder(nextOrderNames);
         }
 
         function getProviderBatchActionMeta(action) {
@@ -3459,7 +3390,6 @@
                             <col class="provider-name-col">
                             <col class="provider-api-col">
                             <col class="provider-model-col">
-                            <col class="provider-order-col">
                             <col class="provider-actions-col">
                         </colgroup>
                         <thead>
@@ -3475,7 +3405,6 @@
                                 <th>名称</th>
                                 <th>API 地址</th>
                                 <th>模型</th>
-                                <th class="provider-order-column">顺序</th>
                                 <th>操作</th>
                             </tr>
                         </thead>
@@ -3490,7 +3419,6 @@
                 const preview = getModelPreview(models);
                 const isDeletePending = pendingDeleteProviderName === provider.name;
                 const isTogglePending = togglingProviderNames.has(provider.name);
-                const providerMoveState = getProviderMoveState(provider.name);
                 const providerActionLocked = hasProviderMutationInFlight();
                 const modelTags = preview.visible.length
                     ? preview.visible.map(model => `<span class="model-tag">${escapeHtml(model)}</span>`).join('')
@@ -3563,36 +3491,6 @@
                         <td class="provider-model-cell">
                             <div class="model-tags model-tags-preview">${modelTags}</div>
                             ${modelSummary}
-                        </td>
-                        <td class="provider-order-cell">
-                            <div class="provider-order-actions">
-                                <div class="provider-order-stepper" role="group" aria-label="调整 Provider 顺序">
-                                    <button
-                                        type="button"
-                                        class="provider-order-step provider-order-step-up"
-                                        onclick="moveProvider(decodeProviderName('${encodedProviderName}'), 'up')"
-                                        ${providerActionLocked || !providerMoveState.canMoveUp ? 'disabled' : ''}
-                                        aria-label="上移 Provider"
-                                        title="上移"
-                                    >
-                                        <svg class="provider-order-step-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                                            <path d="M6 12.5 10 8.5l4 4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-                                        </svg>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="provider-order-step provider-order-step-down"
-                                        onclick="moveProvider(decodeProviderName('${encodedProviderName}'), 'down')"
-                                        ${providerActionLocked || !providerMoveState.canMoveDown ? 'disabled' : ''}
-                                        aria-label="下移 Provider"
-                                        title="下移"
-                                    >
-                                        <svg class="provider-order-step-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                                            <path d="M6 7.5 10 11.5l4-4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
                         </td>
                         <td class="provider-actions-cell">
                             <div class="action-buttons">
