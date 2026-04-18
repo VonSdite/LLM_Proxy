@@ -1,33 +1,68 @@
+from __future__ import annotations
+
 import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.application.app_context import AppContext
+from src.application.app_context import AppContext, Logger
 from src.presentation.web_controller import WebController
 from src.repositories.log_repository import LogRepository
 from src.repositories.user_repository import UserRepository
-from src.services.log_service import LogService
+from src.services import AuthenticationService, LogService, SettingsService
 from src.utils.database import create_connection_factory
 
 
 class FakeLogger:
-    def info(self, msg: str, *args) -> None:
-        del msg, args
+    def info(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None:
+        del msg, args, exc_info, stack_info, stacklevel, extra
 
-    def warning(self, msg: str, *args) -> None:
-        del msg, args
+    def warning(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None:
+        del msg, args, exc_info, stack_info, stacklevel, extra
 
-    def error(self, msg: str, *args) -> None:
-        del msg, args
+    def error(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None:
+        del msg, args, exc_info, stack_info, stacklevel, extra
 
-    def debug(self, msg: str, *args) -> None:
-        del msg, args
+    def debug(
+        self,
+        msg: object,
+        *args: object,
+        exc_info: object = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: object | None = None,
+    ) -> None:
+        del msg, args, exc_info, stack_info, stacklevel, extra
 
 
 class FakeAuthService:
@@ -43,13 +78,30 @@ class FakeAuthService:
         return ""
 
 
+class FakeSettingsService:
+    def get_system_settings(self) -> dict:
+        return {}
+
+    def update_system_settings(self, payload: dict) -> dict:
+        del payload
+        raise RuntimeError("Settings service is not configured for this test")
+
+    def update_basic_settings(self, payload: dict) -> dict:
+        del payload
+        raise RuntimeError("Settings service is not configured for this test")
+
+    def update_debug_settings(self, payload: dict) -> dict:
+        del payload
+        raise RuntimeError("Settings service is not configured for this test")
+
+
 class DashboardFilterApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root_path = Path(__file__).resolve().parents[1]
         self.db_path = self.root_path / f"dashboard-filters-{uuid4().hex}.db"
         self.app = Flask(__name__)
         self.ctx = AppContext(
-            logger=FakeLogger(),
+            logger=cast(Logger, FakeLogger()),
             config_manager=None,  # type: ignore[arg-type]
             root_path=self.root_path,
             flask_app=self.app,
@@ -58,7 +110,12 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.log_repository = LogRepository(self.connection_factory)
         self.user_repository = UserRepository(self.connection_factory)
         self.log_service = LogService(self.ctx, self.log_repository)
-        WebController(self.ctx, self.log_service, FakeAuthService())
+        WebController(
+            self.ctx,
+            self.log_service,
+            cast(SettingsService, FakeSettingsService()),
+            cast(AuthenticationService, FakeAuthService()),
+        )
         self.client = self.app.test_client()
 
         self.user_repository.create("alice", "10.0.0.1")

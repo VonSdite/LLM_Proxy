@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from http import HTTPStatus
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 from urllib.parse import urlparse
@@ -29,12 +29,11 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..translators import Translator, build_default_translator_registry
-from ..utils.compat import dataclass
 from ..utils.net import build_requests_proxies
 from .upstream_usage import ensure_upstream_usage_capture
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ProxyErrorInfo:
     """Structured failure information for locally generated proxy errors."""
 

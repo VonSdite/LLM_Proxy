@@ -16,11 +16,11 @@ from .provider_config import (
     validate_auth_group_definitions,
     validate_auth_group_provider_definitions,
 )
-from .provider_runtime_factory import ProviderRuntimeFactory
 
 if TYPE_CHECKING:
     from .auth_group_manager import AuthGroupManager
     from .provider_manager import ProviderManager
+    from .provider_runtime_factory import ProviderRuntimeFactory
 
 __all__ = [
     "ConfigManager",
@@ -40,6 +40,10 @@ __all__ = [
 
 
 def __getattr__(name: str):
+    if name == "ProviderRuntimeFactory":
+        from .provider_runtime_factory import ProviderRuntimeFactory
+
+        return ProviderRuntimeFactory
     if name == "AuthGroupManager":
         from .auth_group_manager import AuthGroupManager
 

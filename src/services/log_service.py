@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """日志服务。"""
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 

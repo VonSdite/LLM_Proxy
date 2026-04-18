@@ -227,6 +227,16 @@ class TranslatorRegistryTests(unittest.TestCase):
 
 
 class ProxyServicePipelineTests(unittest.TestCase):
+    @staticmethod
+    def _collect_response_body(response) -> bytes:
+        assert response is not None
+        chunks = response.response
+        assert chunks is not None
+        return b"".join(
+            chunk if isinstance(chunk, bytes) else chunk.encode("utf-8")
+            for chunk in chunks
+        )
+
     def _build_service(self):
         app = Flask(__name__)
         ctx = AppContext(
@@ -285,7 +295,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
                 {},
                 forward_stream_usage=True,
             )
-            stream_body = b"".join(response.response)
+            stream_body = self._collect_response_body(response)
 
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
@@ -345,7 +355,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
                 on_complete=captured_meta.update,
                 forward_stream_usage=False,
             )
-            stream_body = b"".join(response.response)
+            stream_body = self._collect_response_body(response)
 
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
@@ -408,7 +418,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
                 {},
                 forward_stream_usage=True,
             )
-            stream_body = b"".join(response.response)
+            stream_body = self._collect_response_body(response)
 
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
@@ -470,7 +480,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
                 {},
                 forward_stream_usage=True,
             )
-            stream_body = b"".join(response.response)
+            stream_body = self._collect_response_body(response)
 
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
@@ -541,7 +551,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
                 {},
                 forward_stream_usage=True,
             )
-            stream_body = b"".join(response.response)
+            stream_body = self._collect_response_body(response)
 
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..application.app_context import AppContext, Logger
-from ..external import LLMProvider
+from ..external.llm_provider import LLMProvider
 from ..hooks import HookModule
 from .provider_config import ProviderConfigSchema, RuntimeProviderSpec
 

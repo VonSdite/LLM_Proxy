@@ -4,11 +4,9 @@
 
 from typing import Any, Iterator, Optional, Tuple
 
-import requests
-
 
 class PrefetchedStreamResponse:
-    def __init__(self, response: requests.Response, first_chunk: bytes):
+    def __init__(self, response: Any, first_chunk: bytes):
         self._response = response
         self._first_chunk = first_chunk
         self.status_code = response.status_code
@@ -25,7 +23,7 @@ class PrefetchedStreamResponse:
 
 
 class BufferedUpstreamResponse:
-    def __init__(self, response: requests.Response, body: bytes):
+    def __init__(self, response: Any, body: bytes):
         self._response = response
         self.content = body
         self.status_code = response.status_code
@@ -42,7 +40,7 @@ def looks_like_sse_chunk(chunk: bytes) -> bool:
     return text.startswith("data:") or text.startswith("event:") or text.startswith(":")
 
 
-def probe_stream_response(upstream_response: requests.Response) -> Tuple[Any, bool]:
+def probe_stream_response(upstream_response: Any) -> Tuple[Any, bool]:
     chunk_iter = upstream_response.iter_content(chunk_size=None)
     first_chunk = b""
     for chunk in chunk_iter:

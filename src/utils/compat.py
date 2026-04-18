@@ -7,43 +7,42 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass as _dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, overload
+from typing import Any, Callable, TypeVar, overload
 
-if TYPE_CHECKING:
-    from enum import StrEnum
+try:
     from typing import Literal, Protocol
+except ImportError:
+    from typing_extensions import Literal, Protocol  # type: ignore
+
+if sys.version_info >= (3, 10):
+    from typing import ParamSpec
+else:
+    from typing_extensions import ParamSpec  # type: ignore
+
+if sys.version_info >= (3, 11):
     from typing import dataclass_transform as _dataclass_transform
 else:
     try:
-        from typing import Literal, Protocol
+        from typing_extensions import dataclass_transform as _dataclass_transform  # type: ignore
     except ImportError:
-        from typing_extensions import Literal, Protocol  # type: ignore
+        def _dataclass_transform(*_args: Any, **_kwargs: Any) -> Callable[[Any], Any]:
+            def decorator(func: Any) -> Any:
+                return func
 
-    try:
-        from typing import dataclass_transform as _dataclass_transform
-    except ImportError:
-        try:
-            from typing_extensions import dataclass_transform as _dataclass_transform  # type: ignore
-        except ImportError:
-            def _dataclass_transform(*_args: Any, **_kwargs: Any) -> Callable[[Any], Any]:
-                def decorator(func: Any) -> Any:
-                    return func
+            return decorator
 
-                return decorator
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    class StrEnum(str, Enum):
+        """Python 3.11 之前的 StrEnum 兼容实现。"""
 
-    try:
-        from enum import StrEnum
-    except ImportError:
-        class StrEnum(str, Enum):
-            """Python 3.11 之前的 StrEnum 兼容实现。"""
-
-            pass
+        pass
 
 
 T = TypeVar("T")
 
 
-@_dataclass_transform()
 @overload
 def dataclass(_cls: type[T], **kwargs: Any) -> type[T]: ...
 
@@ -52,6 +51,7 @@ def dataclass(_cls: type[T], **kwargs: Any) -> type[T]: ...
 def dataclass(_cls: None = None, **kwargs: Any) -> Callable[[type[T]], type[T]]: ...
 
 
+@_dataclass_transform()
 def dataclass(_cls: type[T] | None = None, **kwargs: Any) -> Any:
     """兼容旧版本参数的 dataclass 包装器。"""
 
@@ -62,4 +62,4 @@ def dataclass(_cls: type[T] | None = None, **kwargs: Any) -> Any:
     return _dataclass(_cls, **kwargs)
 
 
-__all__ = ["dataclass", "Literal", "Protocol", "StrEnum"]
+__all__ = ["ParamSpec", "dataclass", "Literal", "Protocol", "StrEnum"]

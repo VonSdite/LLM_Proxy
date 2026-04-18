@@ -4,10 +4,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from urllib.parse import urlparse
 
-from ..utils.compat import dataclass
 from ..utils.net import normalize_proxy_url
 
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 1200
@@ -279,7 +279,7 @@ def validate_auth_entry_fields(config: Mapping[str, Any]) -> None:
         raise ValueError(f"Unsupported auth_entry field(s): {', '.join(unknown_fields)}")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class AuthEntrySchema:
     """Normalized auth entry configuration."""
 
@@ -366,7 +366,7 @@ class AuthEntrySchema:
         return dict(self.headers)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class AuthGroupSchema:
     """Normalized auth group configuration."""
 
@@ -419,7 +419,7 @@ class AuthGroupSchema:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ProviderConfigSchema:
     """Normalized provider configuration schema."""
 
@@ -536,7 +536,7 @@ class ProviderConfigSchema:
         return self.to_mapping()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RuntimeProviderSpec:
     """Provider runtime specification."""
 
@@ -589,7 +589,7 @@ class RuntimeProviderSpec:
         return self.target_formats[0]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ProviderRuntimeView:
     """Read-only runtime view exposed by ProviderManager."""
 

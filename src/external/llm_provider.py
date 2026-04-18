@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, cast
 
 from ..config.provider_config import (
@@ -11,10 +12,9 @@ from ..config.provider_config import (
     resolve_provider_target_formats,
 )
 from ..hooks import HookContext, HookModule
-from ..utils.compat import dataclass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class LLMProvider:
     """封装 provider 配置与请求阶段 hook 调用。"""
 

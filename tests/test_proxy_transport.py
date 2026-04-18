@@ -308,12 +308,14 @@ class ProviderManagerEnabledTests(unittest.TestCase):
         self.assertIsNone(manager.get_provider_view("disabled-provider"))
         provider_view = manager.get_provider_view("enabled-provider")
         self.assertIsNotNone(provider_view)
+        assert provider_view is not None
         self.assertTrue(provider_view.legacy_api_key)
         self.assertIsNone(provider_view.auth_group)
         runtime_provider = manager.get_provider_for_model(
             "enabled-provider/gpt-4.1-mini"
         )
         self.assertIsNotNone(runtime_provider)
+        assert runtime_provider is not None
         self.assertIsNone(runtime_provider.auth_group)
         self.assertTrue(
             any(
@@ -1316,4 +1318,3 @@ class DashboardTemplateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -8,3 +8,4 @@ logs
 .record
 .vscode
 uv.lock
+*.db
