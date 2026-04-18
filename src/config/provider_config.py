@@ -261,22 +261,43 @@ def resolve_auth_group_strategy(value: Any) -> str:
     return resolved
 
 
-def validate_provider_fields(config: Mapping[str, Any]) -> None:
-    unknown_fields = sorted(str(key) for key in config.keys() if str(key) not in SUPPORTED_PROVIDER_FIELDS)
+def _validate_supported_fields(
+    config: Mapping[str, Any],
+    *,
+    supported_fields: set[str],
+    field_group_name: str,
+) -> None:
+    unknown_fields = sorted(
+        str(key)
+        for key in config.keys()
+        if str(key) not in supported_fields
+    )
     if unknown_fields:
-        raise ValueError(f"Unsupported provider field(s): {', '.join(unknown_fields)}")
+        raise ValueError(f"Unsupported {field_group_name} field(s): {', '.join(unknown_fields)}")
+
+
+def validate_provider_fields(config: Mapping[str, Any]) -> None:
+    _validate_supported_fields(
+        config,
+        supported_fields=SUPPORTED_PROVIDER_FIELDS,
+        field_group_name="provider",
+    )
 
 
 def validate_auth_group_fields(config: Mapping[str, Any]) -> None:
-    unknown_fields = sorted(str(key) for key in config.keys() if str(key) not in SUPPORTED_AUTH_GROUP_FIELDS)
-    if unknown_fields:
-        raise ValueError(f"Unsupported auth_group field(s): {', '.join(unknown_fields)}")
+    _validate_supported_fields(
+        config,
+        supported_fields=SUPPORTED_AUTH_GROUP_FIELDS,
+        field_group_name="auth_group",
+    )
 
 
 def validate_auth_entry_fields(config: Mapping[str, Any]) -> None:
-    unknown_fields = sorted(str(key) for key in config.keys() if str(key) not in SUPPORTED_AUTH_ENTRY_FIELDS)
-    if unknown_fields:
-        raise ValueError(f"Unsupported auth_entry field(s): {', '.join(unknown_fields)}")
+    _validate_supported_fields(
+        config,
+        supported_fields=SUPPORTED_AUTH_ENTRY_FIELDS,
+        field_group_name="auth_entry",
+    )
 
 
 @dataclass(frozen=True)
