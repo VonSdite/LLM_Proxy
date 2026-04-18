@@ -14,10 +14,6 @@ providers:
   api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
   transport: http
   source_format: openai_chat
-  target_formats:
-  - openai_chat
-  - claude_chat
-  - openai_responses
   api_key:
   verify_ssl: false
   model_list:
@@ -33,10 +29,6 @@ providers:
   api: https://api.deepseek.com/v1/chat/completions
   transport: http
   source_format: openai_chat
-  target_formats:
-  - openai_chat
-  - claude_chat
-  - openai_responses
   api_key:
   verify_ssl: false
   model_list:
