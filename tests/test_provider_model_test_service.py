@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import unittest
 from pathlib import Path
@@ -197,9 +199,11 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             }
         )
 
+        headers = captured.get("headers")
+        assert isinstance(headers, dict)
         self.assertEqual(
             "Bearer sk-legacy-demo",
-            captured["headers"]["authorization"],
+            headers["authorization"],
         )
 
     def test_build_provider_ignores_non_provider_test_fields(self) -> None:

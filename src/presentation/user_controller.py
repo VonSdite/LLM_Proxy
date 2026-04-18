@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """用户控制器。"""
 
+from __future__ import annotations
+
 from typing import Any
 
 from flask import jsonify, request

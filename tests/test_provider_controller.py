@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import unittest
 from pathlib import Path
@@ -119,7 +121,8 @@ class FakeProviderModelTestService:
                 "request_headers": dict(request_headers or {}),
             }
         )
-        models = payload.get("models") if isinstance(payload.get("models"), list) else []
+        raw_models = payload.get("models")
+        models = raw_models if isinstance(raw_models, list) else []
         return {
             "results": [
                 {
@@ -399,7 +402,9 @@ class ProviderControllerTestModelsRouteTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual([], self.auth_group_service.entry_header_calls)
         self.assertEqual({}, self.provider_model_test_service.calls[0]["request_headers"])
-        self.assertEqual("sk-legacy-demo", self.provider_model_test_service.calls[0]["payload"]["api_key"])
+        payload = self.provider_model_test_service.calls[0]["payload"]
+        assert isinstance(payload, dict)
+        self.assertEqual("sk-legacy-demo", payload["api_key"])
 
 
 if __name__ == "__main__":

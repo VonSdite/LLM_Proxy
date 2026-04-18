@@ -4,13 +4,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from ..external import LLMProvider
-from ..utils.compat import Protocol, dataclass
+from ..utils.compat import Protocol
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OpenedUpstreamResponse:
     """Opened upstream response with normalized runtime metadata."""
 

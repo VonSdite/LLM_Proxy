@@ -5,18 +5,72 @@
 from __future__ import annotations
 
 from uuid import uuid4
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Sequence
 
 from flask import Response, jsonify, request
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
-from ..config import ConfigManager, ProviderManager
 from ..hooks import HookAbortError
-from ..services import LogService, ProxyService, UserService
 from ..services.proxy_service import ProxyErrorInfo
 from ..utils import normalize_ip
 from ..utils.local_time import now_local_datetime
+from ..utils.compat import Protocol
+
+
+class ConfigManagerLike(Protocol):
+    def is_chat_whitelist_enabled(self) -> bool: ...
+
+
+class ProxyServiceLike(Protocol):
+    def proxy_request(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple[Optional[Response], int, Optional[ProxyErrorInfo]]: ...
+
+
+class UserServiceLike(Protocol):
+    def get_user_by_ip(
+        self,
+        ip_address: str,
+        require_whitelist_access: bool = True,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def can_user_access_model(
+        self,
+        user: Optional[Dict[str, Any]],
+        model_name: str,
+        available_models: Optional[Sequence[str]] = None,
+    ) -> bool: ...
+
+    def get_accessible_models_for_user(
+        self,
+        user: Optional[Dict[str, Any]],
+        available_models: Optional[Sequence[str]] = None,
+    ) -> list[str]: ...
+
+
+class LogServiceLike(Protocol):
+    def log_request(
+        self,
+        request_model: str,
+        response_model: Optional[str],
+        total_tokens: int,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        start_time: Any = None,
+        end_time: Any = None,
+        ip_address: Optional[str] = None,
+    ) -> Optional[int]: ...
+
+
+class ProviderManagerLike(Protocol):
+    def get_provider_for_model(self, model_name: str) -> Any: ...
+
+    def list_model_names(self) -> Iterable[str]: ...
+
+    def get_provider_view(self, provider_name: str) -> Any: ...
 
 
 class ProxyController:
@@ -25,20 +79,90 @@ class ProxyController:
     def __init__(
         self,
         ctx: AppContext,
-        proxy_service: ProxyService,
-        user_service: UserService,
-        log_service: LogService,
-        provider_manager: ProviderManager,
+        proxy_service: ProxyServiceLike,
+        user_service: UserServiceLike,
+        log_service: LogServiceLike,
+        provider_manager: ProviderManagerLike,
     ):
         self._ctx = ctx
         self._app = ctx.flask_app
         self._logger = ctx.logger
-        self._config_manager: ConfigManager = ctx.config_manager
+        self._config_manager: ConfigManagerLike = ctx.config_manager
         self._proxy_service = proxy_service
         self._user_service = user_service
         self._log_service = log_service
         self._provider_manager = provider_manager
         self._register_routes()
+
+    def _log_downstream_request_trace_safe(
+        self,
+        *,
+        trace_id: Optional[str],
+        start_line: str,
+        headers: Dict[str, Any],
+        payload: Any,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        request_model: Optional[str] = None,
+        target_format: Optional[str] = None,
+    ) -> None:
+        try:
+            trace_method = getattr(self._proxy_service, "log_downstream_request_trace")
+            trace_method(
+                trace_id=trace_id,
+                start_line=start_line,
+                headers=headers,
+                payload=payload,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider_name,
+                request_model=request_model,
+                target_format=target_format,
+            )
+        except AttributeError:
+            return
+        except Exception as exc:
+            self._logger.warning(
+                "Proxy trace logging skipped: method=log_downstream_request_trace error=%s",
+                exc,
+            )
+
+    def _log_downstream_response_trace_safe(
+        self,
+        *,
+        trace_id: Optional[str],
+        status_code: int,
+        headers: Dict[str, Any],
+        payload: Any,
+        route_name: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        request_model: Optional[str] = None,
+        target_format: Optional[str] = None,
+        error_type: Optional[str] = None,
+    ) -> None:
+        try:
+            trace_method = getattr(self._proxy_service, "log_downstream_response_trace")
+            trace_method(
+                trace_id=trace_id,
+                status_code=status_code,
+                headers=headers,
+                payload=payload,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider_name,
+                request_model=request_model,
+                target_format=target_format,
+                error_type=error_type,
+            )
+        except AttributeError:
+            return
+        except Exception as exc:
+            self._logger.warning(
+                "Proxy trace logging skipped: method=log_downstream_response_trace error=%s",
+                exc,
+            )
 
     def _register_routes(self) -> None:
         self._app.route("/v1/chat/completions", methods=["POST"])(self.chat_completions)
@@ -126,7 +250,7 @@ class ProxyController:
             code=code,
             error_format=error_format,
         )
-        self._proxy_service.log_downstream_response_trace(
+        self._log_downstream_response_trace_safe(
             trace_id=trace_id,
             status_code=status_code,
             headers={"Content-Type": "application/json; charset=utf-8"},
@@ -281,7 +405,7 @@ class ProxyController:
                 and not self._user_service.can_user_access_model(
                     user,
                     model_name,
-                    available_models=self._provider_manager.list_model_names(),
+                    available_models=tuple(self._provider_manager.list_model_names()),
                 )
             ):
                 self._logger.warning(
@@ -347,7 +471,9 @@ class ProxyController:
                     code="ambiguous_target_formats",
                     error_format=resolved_error_format,
                 )
-            resolved_target_format = matched_target_formats[0]
+            resolved_target_format = next(iter(matched_target_formats), None)
+            if resolved_target_format is None:
+                raise RuntimeError("resolved_target_format must not be empty")
             provider_name = getattr(provider, "name", None)
 
             client_requested_usage_chunk = False
@@ -358,7 +484,7 @@ class ProxyController:
                 )
 
             trace_id = uuid4().hex
-            self._proxy_service.log_downstream_request_trace(
+            self._log_downstream_request_trace_safe(
                 trace_id=trace_id,
                 start_line=self._build_request_start_line(request.method, request.full_path),
                 headers=self._copy_headers(request.headers),

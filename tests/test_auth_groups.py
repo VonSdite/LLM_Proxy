@@ -3,16 +3,20 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from flask import Flask
 import yaml
+from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
 from src.config import build_auth_group_schemas, build_provider_schemas
-from src.config.auth_group_manager import AuthGroupManager, AuthGroupSelectionError
-from src.config.provider_config import AuthEntrySchema, AuthGroupSchema, ProviderConfigSchema
+from src.config.auth_group_manager import AuthGroupManager
 from src.config.config_manager import ConfigManager
+from src.config.provider_config import (
+    AuthEntrySchema,
+    AuthGroupSchema,
+    ProviderConfigSchema,
+)
 from src.repositories import AuthGroupRepository
 from src.services.auth_group_service import AuthGroupService
 from src.utils.database import create_connection_factory
@@ -35,7 +39,9 @@ class FakeLogger:
 
 class AuthGroupConfigTests(unittest.TestCase):
     def test_provider_rejects_multiple_auth_bindings(self) -> None:
-        with self.assertRaisesRegex(ValueError, "either auth_group or api_key, not both"):
+        with self.assertRaisesRegex(
+            ValueError, "either auth_group or api_key, not both"
+        ):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "demo",
@@ -46,7 +52,9 @@ class AuthGroupConfigTests(unittest.TestCase):
                 }
             )
 
-    def test_provider_allows_empty_auth_binding_for_hook_or_public_upstream(self) -> None:
+    def test_provider_allows_empty_auth_binding_for_hook_or_public_upstream(
+        self,
+    ) -> None:
         schema = ProviderConfigSchema.from_mapping(
             {
                 "name": "demo",
@@ -58,7 +66,9 @@ class AuthGroupConfigTests(unittest.TestCase):
         self.assertIsNone(schema.auth_group)
         self.assertIsNone(schema.api_key)
 
-    def test_build_provider_schemas_rejects_unknown_auth_group_even_when_no_groups_exist(self) -> None:
+    def test_build_provider_schemas_rejects_unknown_auth_group_even_when_no_groups_exist(
+        self,
+    ) -> None:
         with self.assertRaisesRegex(ValueError, "unknown auth_group: pool-a"):
             build_provider_schemas(
                 [
@@ -123,6 +133,8 @@ class AuthGroupManagerTests(unittest.TestCase):
     def test_least_inflight_selection_uses_rotation_to_spread_equal_load(self) -> None:
         first = self.manager.acquire("pool-a")
         second = self.manager.acquire("pool-a")
+        assert first is not None
+        assert second is not None
 
         self.assertEqual("key-a", first.entry_id)
         self.assertEqual("key-b", second.entry_id)
@@ -158,7 +170,9 @@ class AuthGroupManagerTests(unittest.TestCase):
         )
 
         runtime = self.manager.get_auth_group_runtime("pool-a")
-        cooled_entry = next(item for item in runtime["entries"] if item["id"] == "key-a")
+        cooled_entry = next(
+            item for item in runtime["entries"] if item["id"] == "key-a"
+        )
         other_entry = next(item for item in runtime["entries"] if item["id"] == "key-b")
 
         self.assertEqual("cooldown", cooled_entry["status"])
@@ -167,6 +181,7 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.assertEqual("available", other_entry["status"])
 
         next_selection = self.manager.acquire("pool-a")
+        assert next_selection is not None
         self.assertEqual("key-b", next_selection.entry_id)
 
     def test_clear_entry_cooldown_restores_entry_to_available(self) -> None:
@@ -192,28 +207,37 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.manager.finish(selection, status_code=401, error_message="bad key")
 
         runtime = self.manager.get_auth_group_runtime("pool-a")
-        disabled_entry = next(item for item in runtime["entries"] if item["id"] == "key-a")
+        disabled_entry = next(
+            item for item in runtime["entries"] if item["id"] == "key-a"
+        )
         self.assertEqual("disabled", disabled_entry["status"])
 
         next_selection = self.manager.acquire("pool-a")
+        assert next_selection is not None
         self.assertEqual("key-b", next_selection.entry_id)
 
         self.manager.restore_entry("pool-a", "key-a")
         restored_runtime = self.manager.get_auth_group_runtime("pool-a")
-        restored_entry = next(item for item in restored_runtime["entries"] if item["id"] == "key-a")
+        restored_entry = next(
+            item for item in restored_runtime["entries"] if item["id"] == "key-a"
+        )
         self.assertEqual("available", restored_entry["status"])
 
     def test_manual_disable_and_enable_entry_updates_runtime_status(self) -> None:
         self.manager.set_entry_disabled("pool-a", "key-a", disabled=True)
         disabled_runtime = self.manager.get_auth_group_runtime("pool-a")
-        disabled_entry = next(item for item in disabled_runtime["entries"] if item["id"] == "key-a")
+        disabled_entry = next(
+            item for item in disabled_runtime["entries"] if item["id"] == "key-a"
+        )
 
         self.assertEqual("disabled", disabled_entry["status"])
         self.assertEqual("manual_disabled", disabled_entry["disabled_reason"])
 
         self.manager.set_entry_disabled("pool-a", "key-a", disabled=False)
         enabled_runtime = self.manager.get_auth_group_runtime("pool-a")
-        enabled_entry = next(item for item in enabled_runtime["entries"] if item["id"] == "key-a")
+        enabled_entry = next(
+            item for item in enabled_runtime["entries"] if item["id"] == "key-a"
+        )
 
         self.assertEqual("available", enabled_entry["status"])
         self.assertIsNone(enabled_entry["disabled_reason"])
@@ -232,7 +256,9 @@ class AuthGroupManagerTests(unittest.TestCase):
         )
 
         before_reset = self.manager.get_auth_group_runtime("pool-a")
-        before_entry = next(item for item in before_reset["entries"] if item["id"] == "key-a")
+        before_entry = next(
+            item for item in before_reset["entries"] if item["id"] == "key-a"
+        )
         self.assertEqual(1, before_entry["minute_request_count"])
         self.assertEqual(15, before_entry["minute_total_tokens"])
         self.assertEqual(1, before_entry["day_request_count"])
@@ -240,7 +266,9 @@ class AuthGroupManagerTests(unittest.TestCase):
 
         self.manager.reset_entry_minute_usage("pool-a", "key-a")
         after_reset = self.manager.get_auth_group_runtime("pool-a")
-        after_entry = next(item for item in after_reset["entries"] if item["id"] == "key-a")
+        after_entry = next(
+            item for item in after_reset["entries"] if item["id"] == "key-a"
+        )
 
         self.assertEqual(0, after_entry["minute_request_count"])
         self.assertEqual(0, after_entry["minute_total_tokens"])
@@ -259,7 +287,9 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.manager.set_entry_disabled("pool-a", "key-a", disabled=True)
 
         before_reset = self.manager.get_auth_group_runtime("pool-a")
-        before_entry = next(item for item in before_reset["entries"] if item["id"] == "key-a")
+        before_entry = next(
+            item for item in before_reset["entries"] if item["id"] == "key-a"
+        )
         self.assertEqual("disabled", before_entry["status"])
         self.assertEqual("manual_disabled", before_entry["disabled_reason"])
         self.assertIsNotNone(before_entry["cooldown_until"])
@@ -271,7 +301,9 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.manager.reset_entry_runtime("pool-a", "key-a")
 
         after_reset = self.manager.get_auth_group_runtime("pool-a")
-        after_entry = next(item for item in after_reset["entries"] if item["id"] == "key-a")
+        after_entry = next(
+            item for item in after_reset["entries"] if item["id"] == "key-a"
+        )
         self.assertEqual("available", after_entry["status"])
         self.assertFalse(after_entry["disabled"])
         self.assertIsNone(after_entry["disabled_reason"])
@@ -307,7 +339,9 @@ class AuthGroupServiceTests(unittest.TestCase):
             self.reload_count += 1
             self.config_manager.reload()
             raw = self.config_manager.get_raw_config()
-            self.manager.load_auth_groups(build_auth_group_schemas(raw.get("auth_groups", []) or []))
+            self.manager.load_auth_groups(
+                build_auth_group_schemas(raw.get("auth_groups", []) or [])
+            )
 
         self.reload_callback = reload_callback
         self.service = AuthGroupService(self.ctx, self.reload_callback, self.manager)
@@ -447,7 +481,9 @@ entries:
                     {
                         "name": "pool-a",
                         "strategy": "least_inflight",
-                        "entries": [{"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}],
+                        "entries": [
+                            {"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}
+                        ],
                     }
                 ],
                 "providers": [
@@ -467,7 +503,9 @@ entries:
             {
                 "name": "pool-b",
                 "strategy": "least_inflight",
-                "entries": [{"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}],
+                "entries": [
+                    {"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}
+                ],
             },
         )
 
@@ -482,7 +520,9 @@ entries:
                     {
                         "name": "pool-a",
                         "strategy": "least_inflight",
-                        "entries": [{"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}],
+                        "entries": [
+                            {"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}
+                        ],
                     }
                 ],
                 "providers": [

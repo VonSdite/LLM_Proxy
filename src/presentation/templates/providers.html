@@ -660,6 +660,7 @@
                     <ul>
                         <li><strong>适合</strong>：同一个上游需要多个 key / token 做轮换、并发控制、429 冷却或配额管理。</li>
                         <li><strong>和 Legacy API Key 的关系</strong>：二选一。选了 <code>Auth Group</code> 就不要再填 <code>Legacy API Key</code>。</li>
+                        <li><strong>快速测试</strong>：如果只是想先验证连通性，可以先用所选 Auth Group 的第一个 entry，之后再切换到指定 entry 做精细排查。</li>
                     </ul>
                     <p>如果只是单个 key，继续用 <code>Legacy API Key</code> 就够了。</p>
                 `,

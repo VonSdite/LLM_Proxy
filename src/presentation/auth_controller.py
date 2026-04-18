@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """认证控制器。"""
 
+from __future__ import annotations
+
 from typing import Any
 
 from flask import jsonify, make_response, redirect, render_template, request

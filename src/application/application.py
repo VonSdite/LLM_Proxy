@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import annotations
+
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path

@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Dict, Optional, cast
 
 import requests
 import websocket
@@ -54,21 +55,43 @@ class FakeConfigManager:
 class FakeUserService:
     _UNSET = object()
 
-    def __init__(self, *, user=_UNSET, accessible_models=None) -> None:
-        self._user = {"username": "tester", "model_permissions": "*"} if user is self._UNSET else user
+    def __init__(
+        self,
+        *,
+        user: Optional[dict[str, Any]] | object = _UNSET,
+        accessible_models: Optional[list[str]] = None,
+    ) -> None:
+        self._user: Optional[dict[str, Any]] = (
+            {"username": "tester", "model_permissions": "*"}
+            if user is self._UNSET
+            else cast(Optional[Dict[str, Any]], user)
+        )
         self._accessible_models = None if accessible_models is None else list(accessible_models)
 
-    def get_user_by_ip(self, ip_address: str, require_whitelist_access: bool = True):
+    def get_user_by_ip(
+        self,
+        ip_address: str,
+        require_whitelist_access: bool = True,
+    ) -> Optional[dict[str, Any]]:
         del ip_address, require_whitelist_access
         return self._user
 
-    def can_user_access_model(self, user, model_name: str, available_models=None) -> bool:
+    def can_user_access_model(
+        self,
+        user: Optional[dict[str, Any]],
+        model_name: str,
+        available_models=None,
+    ) -> bool:
         del user
         if self._accessible_models is None:
             return True
         return model_name in set(self._accessible_models)
 
-    def get_accessible_models_for_user(self, user, available_models=None):
+    def get_accessible_models_for_user(
+        self,
+        user: Optional[dict[str, Any]],
+        available_models=None,
+    ) -> list[str]:
         del user
         if self._accessible_models is None:
             return list(available_models or [])
@@ -80,8 +103,26 @@ class FakeUserService:
 
 class FakeLogService:
     @staticmethod
-    def log_request(**kwargs) -> None:
-        del kwargs
+    def log_request(
+        request_model: str,
+        response_model: str | None,
+        total_tokens: int,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        start_time=None,
+        end_time=None,
+        ip_address: str | None = None,
+    ) -> None:
+        del (
+            request_model,
+            response_model,
+            total_tokens,
+            prompt_tokens,
+            completion_tokens,
+            start_time,
+            end_time,
+            ip_address,
+        )
 
 
 class FakeProviderManager:
@@ -675,6 +716,7 @@ class ProxyServiceErrorLoggingTests(unittest.TestCase):
         self.assertIsNone(failure_info)
         self.assertEqual(429, status_code)
         self.assertIsNotNone(response)
+        assert response is not None
         self.assertIn("Rate limit reached", response.get_data(as_text=True))
         self.assertTrue(
             any(

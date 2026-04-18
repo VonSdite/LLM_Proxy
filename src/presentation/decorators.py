@@ -3,12 +3,13 @@
 """认证装饰器。"""
 
 from functools import wraps
-from typing import Callable, ParamSpec
+from typing import Callable
 
 from flask import jsonify, redirect, request
 from flask.typing import ResponseReturnValue
 
 from ..services import AuthenticationService
+from ..utils.compat import ParamSpec
 
 P = ParamSpec("P")
 

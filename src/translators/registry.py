@@ -4,12 +4,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import time
 from typing import Any, Dict, Optional
 
 from ..proxy_core.contracts import DownstreamChunk, StreamEvent
-from ..utils.compat import Protocol, dataclass
+from ..utils.compat import Protocol
 from .claude_bridge import (
     convert_claude_request_to_openai_chat_request as _convert_claude_request_to_openai_chat_request,
     convert_openai_chat_response_to_claude as _convert_openai_chat_response_to_claude,
@@ -55,7 +56,7 @@ class Translator(Protocol):
         ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OpenAIChatTranslator:
     source_format: str = "openai_chat"
     target_format: str = "openai_chat"
@@ -95,7 +96,7 @@ class OpenAIChatTranslator:
         return payload
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OpenAIResponsesTranslator:
     source_format: str = "openai_responses"
     target_format: str = "openai_chat"
@@ -367,7 +368,7 @@ class OpenAIResponsesTranslator:
         return result
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OpenAIResponsesPassthroughTranslator:
     source_format: str = "openai_responses"
     target_format: str = "openai_responses"
@@ -407,7 +408,7 @@ class OpenAIResponsesPassthroughTranslator:
         return payload
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OpenAIChatResponsesTranslator:
     source_format: str = "openai_chat"
     target_format: str = "openai_responses"
@@ -446,7 +447,7 @@ class OpenAIChatResponsesTranslator:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ClaudeChatTranslator:
     source_format: str = "claude_chat"
     target_format: str = "openai_chat"
@@ -744,7 +745,7 @@ class ClaudeChatTranslator:
         return response
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ClaudePassthroughTranslator:
     source_format: str = "claude_chat"
     target_format: str = "claude_chat"
@@ -784,7 +785,7 @@ class ClaudePassthroughTranslator:
         return payload
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OpenAIChatClaudeTranslator:
     source_format: str = "openai_chat"
     target_format: str = "claude_chat"
@@ -823,7 +824,7 @@ class OpenAIChatClaudeTranslator:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class CodexChatTranslator:
     source_format: str = "codex"
     target_format: str = "openai_chat"
@@ -863,7 +864,7 @@ class CodexChatTranslator:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class CodexPassthroughTranslator:
     source_format: str = "codex"
     target_format: str = "codex"
@@ -900,7 +901,7 @@ class CodexPassthroughTranslator:
         return _unwrap_codex_nonstream_payload(payload)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OpenAIChatCodexTranslator:
     source_format: str = "openai_chat"
     target_format: str = "codex"
@@ -939,7 +940,7 @@ class OpenAIChatCodexTranslator:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ComposedTranslator:
     source_format: str
     target_format: str

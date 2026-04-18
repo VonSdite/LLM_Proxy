@@ -4,12 +4,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from ..utils.compat import Literal, dataclass
+from ..utils.compat import Literal
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class NormalizedRequest:
     """Downstream request shape before provider-specific translation."""
 
@@ -19,7 +20,7 @@ class NormalizedRequest:
     stream: bool
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class StreamEvent:
     """A decoded upstream stream event."""
 
@@ -29,7 +30,7 @@ class StreamEvent:
     event: Optional[str] = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class DownstreamChunk:
     """A normalized downstream stream chunk before SSE encoding."""
 

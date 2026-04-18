@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """请求日志仓储。"""
 
+from __future__ import annotations
+
 import sqlite3
 from typing import Any, Dict, List, Optional, Sequence
 

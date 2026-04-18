@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """Provider 管理 API。"""
 
+from __future__ import annotations
+
 from typing import Any
 
 from flask import jsonify, request

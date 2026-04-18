@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """页面与统计控制器。"""
 
+from __future__ import annotations
+
 from flask import jsonify, make_response, render_template, request
 from flask.typing import ResponseReturnValue
 
