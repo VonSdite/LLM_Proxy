@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
-from urllib.parse import urlparse
 
 import requests
 import websocket
@@ -30,6 +29,7 @@ from ..translators import Translator, build_default_translator_registry
 from ..utils.net import build_requests_proxies
 from .proxy_response_builder import ProxyResponseBuilder
 from .proxy_trace_logger import ProxyTraceLogger
+from .proxy_transport_gateway import ProxyTransportGateway
 from .upstream_request_builder import build_upstream_request
 
 
@@ -55,6 +55,7 @@ class ProxyService:
         self._executor_registry = build_default_executor_registry(self._logger)
         self._translator_registry = build_default_translator_registry()
         self._trace = ProxyTraceLogger(self._config_manager, self._trace_logger)
+        self._transport = ProxyTransportGateway(self._executor_registry)
         self._response_builder = ProxyResponseBuilder(
             logger=self._logger,
             trace=self._trace,
@@ -233,7 +234,7 @@ class ProxyService:
                 self._trace.log_entry(
                     stage="upstream_request",
                     trace_id=trace_id,
-                    start_line=self._build_upstream_request_start_line(
+                    start_line=self._transport.build_upstream_request_start_line(
                         provider.transport,
                         target_url,
                     ),
@@ -264,7 +265,7 @@ class ProxyService:
                     )
                 )
 
-                if self._should_retry_status_code(opened.status_code) and attempt < max_retries - 1:
+                if self._transport.should_retry_status_code(opened.status_code) and attempt < max_retries - 1:
                     previous_status_code = opened.status_code
                     previous_error_type = None
                     raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
@@ -381,7 +382,7 @@ class ProxyService:
                 return None, exc.status_code, last_error
             except requests.exceptions.RequestException as exc:
                 previous_status_code = None
-                previous_error_type = self._classify_request_error(exc)
+                previous_error_type = self._transport.classify_request_error(exc)
                 last_error = self._build_transport_error_info("HTTP", exc, max_retries)
                 self._logger.error(
                     "HTTP upstream request error (attempt %s/%s): provider=%s error=%s",
@@ -398,7 +399,7 @@ class ProxyService:
                     continue
             except (websocket.WebSocketException, OSError) as exc:
                 previous_status_code = None
-                previous_error_type = self._classify_websocket_error(exc)
+                previous_error_type = self._transport.classify_websocket_error(exc)
                 last_error = self._build_transport_error_info("WebSocket", exc, max_retries)
                 self._logger.error(
                     "WebSocket upstream request error (attempt %s/%s): provider=%s error=%s",
@@ -438,8 +439,7 @@ class ProxyService:
         verify_ssl: bool,
     ) -> OpenedUpstreamResponse:
         del target_url
-        executor = self._executor_registry.get(provider.transport)
-        return executor.execute(
+        return self._transport.open_upstream_response(
             provider=provider,
             headers=headers,
             body=body,
@@ -451,20 +451,7 @@ class ProxyService:
 
     @staticmethod
     def _coerce_opened_response(result: Any) -> OpenedUpstreamResponse:
-        if isinstance(result, OpenedUpstreamResponse):
-            return result
-        if isinstance(result, tuple) and len(result) == 3:
-            response, is_stream, status_code = result
-            headers = getattr(response, "headers", {}) or {}
-            content_type = (headers.get("Content-Type") or "").lower()
-            return OpenedUpstreamResponse(
-                response=response,
-                status_code=int(status_code),
-                content_type=content_type,
-                is_stream=bool(is_stream),
-                stream_format="sse_json" if is_stream else "nonstream",
-            )
-        raise TypeError(f"Unsupported upstream response result: {type(result)!r}")
+        return ProxyTransportGateway.coerce_opened_response(result)
 
     @staticmethod
     def _build_transport_error_info(
@@ -472,9 +459,13 @@ class ProxyService:
         exc: Exception,
         max_retries: int,
     ) -> ProxyErrorInfo:
-        attempt_label = "attempt" if max_retries == 1 else "attempts"
+        _, message = ProxyTransportGateway.build_transport_error_info(
+            transport,
+            exc,
+            max_retries,
+        )
         return ProxyErrorInfo(
-            message=f"{transport} upstream request failed after {max_retries} {attempt_label}: {exc}",
+            message=message,
             status_code=502,
             error_type="upstream_error",
             error_code="upstream_request_failed",
@@ -517,22 +508,15 @@ class ProxyService:
 
     @staticmethod
     def _should_retry_status_code(status_code: int) -> bool:
-        retryable_status_codes = {408, 409, 425, 429, 500, 502, 503, 504}
-        return status_code in retryable_status_codes
+        return ProxyTransportGateway.should_retry_status_code(status_code)
 
     @staticmethod
     def _classify_request_error(exc: requests.exceptions.RequestException) -> HookErrorType:
-        if isinstance(exc, requests.exceptions.Timeout):
-            return HookErrorType.TIMEOUT
-        if isinstance(exc, requests.exceptions.ConnectionError):
-            return HookErrorType.CONNECTION_ERROR
-        return HookErrorType.TRANSPORT_ERROR
+        return ProxyTransportGateway.classify_request_error(exc)
 
     @staticmethod
     def _classify_websocket_error(exc: Exception) -> HookErrorType:
-        if isinstance(exc, websocket.WebSocketException):
-            return HookErrorType.WEBSOCKET_ERROR
-        return HookErrorType.TRANSPORT_ERROR
+        return ProxyTransportGateway.classify_websocket_error(exc)
 
     @staticmethod
     def _iter_stream_chunks_with_trace(
@@ -574,15 +558,3 @@ class ProxyService:
     @staticmethod
     def _coerce_trace_bytes(payload: Any) -> bytes:
         return ProxyTraceLogger.coerce_trace_bytes(payload)
-
-    @staticmethod
-    def _build_upstream_request_start_line(transport: str, target_url: str) -> str:
-        normalized_transport = str(transport or "").strip().lower()
-        if normalized_transport == "websocket":
-            parsed = urlparse(str(target_url or "").strip())
-            if parsed.scheme.lower() == "http":
-                parsed = parsed._replace(scheme="ws")
-            elif parsed.scheme.lower() == "https":
-                parsed = parsed._replace(scheme="wss")
-            return f"CONNECT {parsed.geturl()} HTTP/1.1"
-        return f"POST {target_url} HTTP/1.1"
