@@ -21,7 +21,6 @@ class UserService:
     MODEL_PERMISSIONS_ALL = UserRepository.MODEL_PERMISSIONS_ALL
 
     def __init__(self, ctx: AppContext, repository: UserRepository):
-        self._ctx = ctx
         self._logger = ctx.logger
         self._config_manager = getattr(ctx, "config_manager", None)
         self._repository = repository

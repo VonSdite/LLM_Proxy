@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Auth group configuration and runtime management."""
+"""Auth Group 配置与运行时管理服务。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from ..config.provider_config import (
 
 
 class AuthGroupService:
-    """Manage auth group config and expose runtime state."""
+    """管理 Auth Group 配置并对外暴露运行时状态。"""
 
     def __init__(
         self,
@@ -35,10 +35,7 @@ class AuthGroupService:
         config = self._config_manager.get_raw_config()
         auth_groups = self._extract_auth_groups(config)
         providers = self._extract_providers(config)
-        summaries = {
-            item["name"]: item
-            for item in self._auth_group_manager.list_auth_group_summaries()
-        }
+        summaries = self._build_auth_group_summary_map()
         provider_counts = self._count_providers_by_auth_group(providers)
         result: List[Dict[str, Any]] = []
         for auth_group in auth_groups:
@@ -56,10 +53,7 @@ class AuthGroupService:
         if target is None:
             return None
         normalized = AuthGroupSchema.from_mapping(target).to_mapping()
-        summaries = {
-            item["name"]: item
-            for item in self._auth_group_manager.list_auth_group_summaries()
-        }
+        summaries = self._build_auth_group_summary_map()
         normalized["summary"] = summaries.get(normalized["name"], {}).get("summary", {})
         normalized["provider_count"] = self._count_providers_by_auth_group(providers).get(normalized["name"], 0)
         return normalized
@@ -139,41 +133,17 @@ class AuthGroupService:
         self._auth_group_manager.reset_entry_runtime(auth_group_name, entry_id)
 
     def get_first_entry_headers(self, name: str) -> Dict[str, str]:
-        auth_group = self.get_auth_group(name)
-        if auth_group is None:
-            raise ValueError(f"Auth group not found: {name}")
-
-        entries = auth_group.get("entries")
-        if not isinstance(entries, list) or not entries:
-            raise ValueError(f"Auth group '{auth_group['name']}' must define at least one entry")
-
+        auth_group_name, entries = self._get_auth_group_entries(name)
         first_entry = entries[0]
         if not isinstance(first_entry, Mapping):
-            raise ValueError(f"Auth group '{auth_group['name']}' first entry is invalid")
-
-        headers = first_entry.get("headers")
-        if not isinstance(headers, Mapping) or not headers:
-            raise ValueError(f"Auth group '{auth_group['name']}' first entry must define headers")
-
-        normalized_headers: Dict[str, str] = {}
-        for raw_key, raw_value in headers.items():
-            header_name = str(raw_key or "").strip()
-            if not header_name:
-                continue
-            normalized_headers[header_name] = "" if raw_value is None else str(raw_value)
-        if not normalized_headers:
-            raise ValueError(f"Auth group '{auth_group['name']}' first entry must define headers")
-        return normalized_headers
+            raise ValueError(f"Auth group '{auth_group_name}' first entry is invalid")
+        return self._normalize_entry_headers(
+            first_entry.get("headers"),
+            error_label=f"Auth group '{auth_group_name}' first entry",
+        )
 
     def get_entry_headers(self, name: str, entry_id: str) -> Dict[str, str]:
-        auth_group = self.get_auth_group(name)
-        if auth_group is None:
-            raise ValueError(f"Auth group not found: {name}")
-
-        entries = auth_group.get("entries")
-        if not isinstance(entries, list) or not entries:
-            raise ValueError(f"Auth group '{auth_group['name']}' must define at least one entry")
-
+        auth_group_name, entries = self._get_auth_group_entries(name)
         normalized_entry_id = str(entry_id or "").strip()
         if not normalized_entry_id:
             raise ValueError("Auth entry id is required")
@@ -187,21 +157,11 @@ class AuthGroupService:
             None,
         )
         if target_entry is None:
-            raise ValueError(f"Auth entry not found: {auth_group['name']}/{normalized_entry_id}")
-
-        headers = target_entry.get("headers")
-        if not isinstance(headers, Mapping) or not headers:
-            raise ValueError(f"Auth entry '{auth_group['name']}/{normalized_entry_id}' must define headers")
-
-        normalized_headers: Dict[str, str] = {}
-        for raw_key, raw_value in headers.items():
-            header_name = str(raw_key or "").strip()
-            if not header_name:
-                continue
-            normalized_headers[header_name] = "" if raw_value is None else str(raw_value)
-        if not normalized_headers:
-            raise ValueError(f"Auth entry '{auth_group['name']}/{normalized_entry_id}' must define headers")
-        return normalized_headers
+            raise ValueError(f"Auth entry not found: {auth_group_name}/{normalized_entry_id}")
+        return self._normalize_entry_headers(
+            target_entry.get("headers"),
+            error_label=f"Auth entry '{auth_group_name}/{normalized_entry_id}'",
+        )
 
     def import_auth_entries(self, yaml_text: str) -> List[Dict[str, Any]]:
         raw_text = str(yaml_text or "").strip()
@@ -226,6 +186,37 @@ class AuthGroupService:
             seen_entry_ids.add(entry.id)
             normalized_entries.append(entry.to_mapping())
         return normalized_entries
+
+    def _build_auth_group_summary_map(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            item["name"]: item
+            for item in self._auth_group_manager.list_auth_group_summaries()
+        }
+
+    def _get_auth_group_entries(self, name: str) -> tuple[str, list[Any]]:
+        auth_group = self.get_auth_group(name)
+        if auth_group is None:
+            raise ValueError(f"Auth group not found: {name}")
+
+        entries = auth_group.get("entries")
+        if not isinstance(entries, list) or not entries:
+            raise ValueError(f"Auth group '{auth_group['name']}' must define at least one entry")
+        return str(auth_group["name"]), entries
+
+    @staticmethod
+    def _normalize_entry_headers(headers: Any, *, error_label: str) -> Dict[str, str]:
+        if not isinstance(headers, Mapping) or not headers:
+            raise ValueError(f"{error_label} must define headers")
+
+        normalized_headers: Dict[str, str] = {}
+        for raw_key, raw_value in headers.items():
+            header_name = str(raw_key or "").strip()
+            if not header_name:
+                continue
+            normalized_headers[header_name] = "" if raw_value is None else str(raw_value)
+        if not normalized_headers:
+            raise ValueError(f"{error_label} must define headers")
+        return normalized_headers
 
     def _save_auth_groups(
         self,

@@ -1218,7 +1218,7 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
             base_admin_html.index('href="/statistics">统计概览</a>'),
         )
         self.assertIn('self._app.route("/")(auth(self.home))', web_controller_py)
-        self.assertIn('self._app.route("/statistics")(auth(self.index))', web_controller_py)
+        self.assertIn('self._app.route("/statistics")(auth(self.statistics_page))', web_controller_py)
         self.assertIn('def home(self) -> str:', web_controller_py)
 
     def test_ui_message_formatter_appends_upstream_original_error(self) -> None:
