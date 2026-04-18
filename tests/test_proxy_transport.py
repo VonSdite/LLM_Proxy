@@ -567,6 +567,52 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
         self.assertEqual(12, captured["timeout"])
         self.assertTrue(captured["verify"])
 
+    def test_fetch_models_preview_replaces_case_insensitive_header_duplicates(self) -> None:
+        logger = FakeLogger()
+        ctx = AppContext(
+            logger=logger,
+            config_manager=None,  # type: ignore[arg-type]
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=Flask(__name__),
+        )
+        service = ModelDiscoveryService(ctx)
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            status_code = 200
+
+            @staticmethod
+            def json() -> dict[str, object]:
+                return {"data": [{"id": "demo-model"}]}
+
+        class FakeSession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                del exc_type, exc, tb
+                return False
+
+            def get(self, url, headers=None, proxies=None, timeout=None, verify=None):
+                del url, proxies, timeout, verify
+                captured["headers"] = dict(headers or {})
+                return FakeResponse()
+
+        with patch("src.services.model_discovery_service.requests.Session", return_value=FakeSession()):
+            service.fetch_models_preview(
+                api="https://example.com/v1/chat/completions",
+                api_key="sk-legacy",
+                request_headers={"Authorization": "Bearer sk-auth-group"},
+            )
+
+        self.assertEqual(
+            {
+                "accept": "application/json",
+                "Authorization": "Bearer sk-auth-group",
+            },
+            captured["headers"],
+        )
+
 
 class ProviderTemplateTransportTests(unittest.TestCase):
     def test_provider_template_contains_clean_provider_fields_and_help(self) -> None:

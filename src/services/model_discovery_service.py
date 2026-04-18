@@ -11,6 +11,7 @@ import requests
 
 from ..application.app_context import AppContext
 from ..config.provider_config import clean_optional_string, parse_optional_bool, parse_optional_positive_int
+from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_requests_proxies, normalize_proxy_url
 
 
@@ -58,19 +59,7 @@ class ModelDiscoveryService:
         headers = {'accept': 'application/json'}
         if api_key:
             headers['authorization'] = f'Bearer {api_key}'
-        if request_headers:
-            for raw_key, raw_value in request_headers.items():
-                header_name = str(raw_key or '').strip()
-                if not header_name:
-                    continue
-                duplicated_keys = [
-                    existing_key
-                    for existing_key in headers
-                    if existing_key.lower() == header_name.lower() and existing_key != header_name
-                ]
-                for duplicated_key in duplicated_keys:
-                    headers.pop(duplicated_key, None)
-                headers[header_name] = '' if raw_value is None else str(raw_value).strip()
+        headers = merge_http_headers(headers, request_headers)
         proxies = build_requests_proxies(proxy)
 
         candidates = self._build_model_endpoint_candidates(api)

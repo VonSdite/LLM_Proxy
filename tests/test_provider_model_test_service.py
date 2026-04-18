@@ -206,6 +206,39 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             headers["authorization"],
         )
 
+    def test_request_headers_replace_case_insensitive_default_headers(self) -> None:
+        captured: dict[str, object] = {}
+        fake_response = FakeBufferedResponse(
+            b'{"id":"chatcmpl_1","object":"chat.completion","model":"demo-model","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}]}'
+        )
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            del provider, body, kwargs
+            captured["headers"] = dict(headers)
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="application/json",
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        self.service.test_models(
+            {
+                "api": "https://example.com/v1/chat/completions",
+                "source_format": "openai_chat",
+                "transport": "http",
+                "models": ["demo-model"],
+            },
+            request_headers={"Content-Type": "application/custom+json"},
+        )
+
+        headers = captured.get("headers")
+        assert isinstance(headers, dict)
+        self.assertEqual({"Content-Type": "application/custom+json"}, headers)
+
     def test_build_provider_ignores_non_provider_test_fields(self) -> None:
         provider = self.service._build_provider(
             {

@@ -19,6 +19,7 @@ from ..executors import OpenedUpstreamResponse, build_default_executor_registry
 from ..hooks import HookContext, HookErrorType
 from ..proxy_core import decode_stream_events
 from ..translators import build_default_translator_registry
+from ..utils.http_headers import merge_http_headers, normalize_http_headers
 from ..utils.net import build_requests_proxies
 from .upstream_usage import ensure_upstream_usage_capture
 
@@ -70,16 +71,7 @@ class ProviderModelTestService:
 
     @staticmethod
     def _normalize_request_headers(request_headers: Optional[Mapping[str, str]]) -> Dict[str, str]:
-        if not isinstance(request_headers, Mapping):
-            return {}
-
-        normalized_headers: Dict[str, str] = {}
-        for raw_key, raw_value in request_headers.items():
-            header_name = str(raw_key or "").strip()
-            if not header_name:
-                continue
-            normalized_headers[header_name] = "" if raw_value is None else str(raw_value)
-        return normalized_headers
+        return normalize_http_headers(request_headers)
 
     def _build_provider(self, payload: Dict[str, Any], models: List[str]):
         provider_payload = {
@@ -229,7 +221,7 @@ class ProviderModelTestService:
 
         headers = {"content-type": "application/json"}
         if request_headers:
-            headers.update(request_headers)
+            headers = merge_http_headers(headers, request_headers)
         elif provider.api_key:
             headers["authorization"] = f"Bearer {provider.api_key}"
         headers = provider.apply_header_hook(request_ctx, headers)
