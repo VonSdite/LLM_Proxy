@@ -234,10 +234,18 @@ class AuthGroupService:
     @staticmethod
     def _find_auth_group(auth_groups: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
         normalized_name = str(name).strip()
-        for auth_group in auth_groups:
-            if str(auth_group.get("name", "")).strip() == normalized_name:
-                return auth_group
-        return None
+        auth_group_indexes = AuthGroupService._build_auth_group_indexes_by_name(auth_groups)
+        auth_group_index = auth_group_indexes.get(normalized_name)
+        if auth_group_index is None:
+            return None
+        return auth_groups[auth_group_index]
+
+    @staticmethod
+    def _build_auth_group_indexes_by_name(auth_groups: List[Dict[str, Any]]) -> Dict[str, int]:
+        return {
+            str(auth_group.get("name", "")).strip(): index
+            for index, auth_group in enumerate(auth_groups)
+        }
 
     @staticmethod
     def _count_providers_by_auth_group(providers: List[Dict[str, Any]]) -> Dict[str, int]:
