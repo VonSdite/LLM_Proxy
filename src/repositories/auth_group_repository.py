@@ -74,6 +74,19 @@ class AuthGroupRepository:
             "updated_at": None,
         }
 
+    @staticmethod
+    def _empty_usage() -> Dict[str, int]:
+        return {
+            "minute_request_count": 0,
+            "day_request_count": 0,
+            "minute_prompt_tokens": 0,
+            "day_prompt_tokens": 0,
+            "minute_completion_tokens": 0,
+            "day_completion_tokens": 0,
+            "minute_total_tokens": 0,
+            "day_total_tokens": 0,
+        }
+
     def get_entry_runtime_state(self, auth_group_name: str, entry_id: str) -> Dict[str, Any]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -377,16 +390,7 @@ class AuthGroupRepository:
         minute_bucket = self._minute_bucket_start(when)
         day_bucket = self._day_bucket_start(when)
 
-        usage = {
-            "minute_request_count": 0,
-            "day_request_count": 0,
-            "minute_prompt_tokens": 0,
-            "day_prompt_tokens": 0,
-            "minute_completion_tokens": 0,
-            "day_completion_tokens": 0,
-            "minute_total_tokens": 0,
-            "day_total_tokens": 0,
-        }
+        usage = self._empty_usage()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -415,7 +419,49 @@ class AuthGroupRepository:
         entry_ids: Iterable[str],
         when: datetime,
     ) -> Dict[str, Dict[str, int]]:
-        usage_by_entry: Dict[str, Dict[str, int]] = {}
-        for entry_id in entry_ids:
-            usage_by_entry[str(entry_id)] = self.get_current_usage(auth_group_name, str(entry_id), when)
+        normalized_entry_ids = [
+            str(entry_id).strip()
+            for entry_id in entry_ids
+            if str(entry_id).strip()
+        ]
+        if not normalized_entry_ids:
+            return {}
+
+        minute_bucket = self._minute_bucket_start(when)
+        day_bucket = self._day_bucket_start(when)
+        usage_by_entry: Dict[str, Dict[str, int]] = {
+            entry_id: self._empty_usage()
+            for entry_id in normalized_entry_ids
+        }
+
+        placeholders = ", ".join("?" for _ in normalized_entry_ids)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT entry_id, bucket_type, request_count, prompt_tokens, completion_tokens, total_tokens
+                FROM auth_entry_usage_buckets
+                WHERE auth_group_name = ?
+                  AND entry_id IN ({placeholders})
+                  AND ((bucket_type = 'minute' AND bucket_start = ?)
+                    OR (bucket_type = 'day' AND bucket_start = ?))
+                """,
+                (
+                    auth_group_name,
+                    *normalized_entry_ids,
+                    minute_bucket,
+                    day_bucket,
+                ),
+            )
+            rows = cursor.fetchall()
+
+        for row in rows:
+            entry_usage = usage_by_entry.get(str(row["entry_id"]))
+            if entry_usage is None:
+                continue
+            prefix = "minute" if row["bucket_type"] == "minute" else "day"
+            entry_usage[f"{prefix}_request_count"] = int(row["request_count"] or 0)
+            entry_usage[f"{prefix}_prompt_tokens"] = int(row["prompt_tokens"] or 0)
+            entry_usage[f"{prefix}_completion_tokens"] = int(row["completion_tokens"] or 0)
+            entry_usage[f"{prefix}_total_tokens"] = int(row["total_tokens"] or 0)
         return usage_by_entry

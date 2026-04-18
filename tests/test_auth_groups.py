@@ -167,6 +167,54 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.assertEqual(1, entry["minute_request_count"])
         self.assertEqual(20, entry["minute_total_tokens"])
 
+    def test_repository_list_current_usage_batches_without_single_entry_fallback(self) -> None:
+        self.repository.increment_request_usage("pool-a", "key-a", datetime(2026, 4, 18, 12, 0, 0))
+        self.repository.increment_token_usage(
+            "pool-a",
+            "key-a",
+            datetime(2026, 4, 18, 12, 0, 0),
+            prompt_tokens=12,
+            completion_tokens=8,
+            total_tokens=20,
+        )
+
+        def fail_get_current_usage(*args, **kwargs):
+            raise AssertionError("list_current_usage should not call get_current_usage per entry")
+
+        self.repository.get_current_usage = fail_get_current_usage  # type: ignore[assignment]
+
+        usage_by_entry = self.repository.list_current_usage(
+            "pool-a",
+            ("key-a", "key-b"),
+            datetime(2026, 4, 18, 12, 0, 0),
+        )
+
+        self.assertEqual(1, usage_by_entry["key-a"]["minute_request_count"])
+        self.assertEqual(20, usage_by_entry["key-a"]["minute_total_tokens"])
+        self.assertEqual(0, usage_by_entry["key-b"]["minute_request_count"])
+
+    def test_acquire_does_not_query_missing_runtime_rows_individually(self) -> None:
+        def fail_get_entry_runtime_state(*args, **kwargs):
+            raise AssertionError("acquire should not query missing runtime rows individually")
+
+        self.repository.get_entry_runtime_state = fail_get_entry_runtime_state  # type: ignore[assignment]
+
+        selection = self.manager.acquire("pool-a")
+
+        assert selection is not None
+        self.assertEqual("key-a", selection.entry_id)
+
+    def test_get_runtime_does_not_query_missing_runtime_rows_individually(self) -> None:
+        def fail_get_entry_runtime_state(*args, **kwargs):
+            raise AssertionError("get_auth_group_runtime should not query missing runtime rows individually")
+
+        self.repository.get_entry_runtime_state = fail_get_entry_runtime_state  # type: ignore[assignment]
+
+        runtime = self.manager.get_auth_group_runtime("pool-a")
+
+        self.assertEqual("pool-a", runtime["name"])
+        self.assertEqual(2, len(runtime["entries"]))
+
     def test_429_cools_down_only_current_entry_using_retry_after_priority(self) -> None:
         selection = self.manager.acquire("pool-a")
         self.manager.mark_request_dispatched(selection)
