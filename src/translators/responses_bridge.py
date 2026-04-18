@@ -600,7 +600,20 @@ def _build_output_items(state: Dict[str, Any]) -> list[Dict[str, Any]]:
 
 def _extract_echo_fields(original_request: Dict[str, Any]) -> Dict[str, Any]:
     echoed: Dict[str, Any] = {}
-    for field in ("instructions", "max_output_tokens", "model", "parallel_tool_calls", "temperature", "top_p", "metadata", "user", "tools", "tool_choice"):
+    for field in (
+        "instructions",
+        "max_output_tokens",
+        "model",
+        "store",
+        "include",
+        "parallel_tool_calls",
+        "temperature",
+        "top_p",
+        "metadata",
+        "user",
+        "tools",
+        "tool_choice",
+    ):
         if field in original_request:
             echoed[field] = original_request.get(field)
     return echoed

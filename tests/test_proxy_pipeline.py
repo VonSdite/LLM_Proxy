@@ -118,6 +118,9 @@ class TranslatorTests(unittest.TestCase):
                     {"role": "user", "content": "Hello"},
                 ],
                 "max_tokens": 128,
+                "store": False,
+                "include": ["reasoning.encrypted_content"],
+                "parallel_tool_calls": True,
             },
             True,
         )
@@ -129,6 +132,9 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual("user", translated["input"][0]["role"])
         self.assertEqual("Hello", translated["input"][0]["content"][0]["text"])
         self.assertEqual(128, translated["max_output_tokens"])
+        self.assertFalse(translated["store"])
+        self.assertEqual(["reasoning.encrypted_content"], translated["include"])
+        self.assertTrue(translated["parallel_tool_calls"])
 
     def test_claude_chat_translator_maps_chat_request(self) -> None:
         translator = ClaudeChatTranslator()
@@ -150,12 +156,39 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual("Hello", translated["messages"][0]["content"][0]["text"])
         self.assertTrue(translated["stream"])
 
+    def test_openai_chat_claude_translator_preserves_responses_extension_fields(self) -> None:
+        translator = OpenAIChatClaudeTranslator()
+
+        translated = translator.translate_request(
+            "gpt-5-codex",
+            {
+                "max_tokens": 256,
+                "messages": [
+                    {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
+                ],
+                "store": False,
+                "include": ["reasoning.encrypted_content"],
+                "parallel_tool_calls": True,
+            },
+            True,
+        )
+
+        self.assertEqual("gpt-5-codex", translated["model"])
+        self.assertEqual(256, translated["max_tokens"])
+        self.assertFalse(translated["store"])
+        self.assertEqual(["reasoning.encrypted_content"], translated["include"])
+        self.assertTrue(translated["parallel_tool_calls"])
+
     def test_openai_chat_responses_translator_maps_nonstream_payload(self) -> None:
         translator = OpenAIChatResponsesTranslator()
 
         translated = translator.translate_nonstream_response(
             "gpt-4.1",
-            {"instructions": "Be brief"},
+            {
+                "instructions": "Be brief",
+                "store": False,
+                "include": ["reasoning.encrypted_content"],
+            },
             {"model": "gpt-4.1"},
             {
                 "id": "chatcmpl_1",
@@ -178,6 +211,8 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual("Hello from chat", translated["output"][0]["content"][0]["text"])
         self.assertEqual({"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}, translated["usage"])
         self.assertEqual("Be brief", translated["instructions"])
+        self.assertFalse(translated["store"])
+        self.assertEqual(["reasoning.encrypted_content"], translated["include"])
 
     def test_openai_responses_passthrough_translator_normalizes_response_done_event(self) -> None:
         translator = OpenAIResponsesPassthroughTranslator()
@@ -306,6 +341,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
                         {"role": "system", "content": "Be brief"},
                         {"role": "user", "content": "Hello"},
                     ],
+                    "store": False,
+                    "include": ["reasoning.encrypted_content"],
+                    "parallel_tool_calls": True,
                     "stream": True,
                 },
                 {},
@@ -317,6 +355,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(200, status_code)
         self.assertEqual("Be brief", captured["body"]["instructions"])
         self.assertEqual("Hello", captured["body"]["input"][0]["content"][0]["text"])
+        self.assertFalse(captured["body"]["store"])
+        self.assertEqual(["reasoning.encrypted_content"], captured["body"]["include"])
+        self.assertTrue(captured["body"]["parallel_tool_calls"])
         self.assertIn(b"Hello from Responses", stream_body)
         self.assertIn(b'"prompt_tokens": 3', stream_body)
         self.assertIn(b'"completion_tokens": 2', stream_body)
@@ -725,6 +766,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
                     "messages": [
                         {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
                     ],
+                    "store": False,
+                    "include": ["reasoning.encrypted_content"],
+                    "parallel_tool_calls": True,
                     "stream": True,
                 },
                 {},
@@ -737,6 +781,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(200, status_code)
         self.assertEqual("user", captured["body"]["input"][0]["role"])
         self.assertEqual("Hello", captured["body"]["input"][0]["content"][0]["text"])
+        self.assertFalse(captured["body"]["store"])
+        self.assertEqual(["reasoning.encrypted_content"], captured["body"]["include"])
+        self.assertTrue(captured["body"]["parallel_tool_calls"])
         self.assertIn(b"event: message_start", stream_body)
         self.assertIn(b"event: content_block_start", stream_body)
         self.assertIn(b"event: content_block_delta", stream_body)

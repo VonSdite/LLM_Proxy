@@ -30,6 +30,12 @@ def convert_claude_request_to_openai_chat_request(
         translated["temperature"] = body.get("temperature")
     elif body.get("top_p") is not None:
         translated["top_p"] = body.get("top_p")
+    if body.get("store") is not None:
+        translated["store"] = body.get("store")
+    if body.get("include") is not None:
+        translated["include"] = body.get("include")
+    if body.get("parallel_tool_calls") is not None:
+        translated["parallel_tool_calls"] = body.get("parallel_tool_calls")
 
     stop_sequences = body.get("stop_sequences")
     if isinstance(stop_sequences, list):
