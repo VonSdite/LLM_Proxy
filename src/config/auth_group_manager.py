@@ -94,7 +94,7 @@ class AuthGroupManager:
 
         candidates: list[tuple[int, int, int, AuthEntrySchema]] = []
         for index, entry in enumerate(group.entries):
-            runtime_state = runtime_states.get(entry.id) or self._repository.get_entry_runtime_state(group.name, entry.id)
+            runtime_state = runtime_states.get(entry.id) or self._default_runtime_state(group.name, entry.id)
             usage = usage_by_entry.get(entry.id) or {}
             if not self._is_entry_available(group, entry, runtime_state, usage, now):
                 continue
@@ -236,7 +236,7 @@ class AuthGroupManager:
             self._build_entry_runtime_view(
                 group,
                 entry,
-                runtime_states.get(entry.id) or self._repository.get_entry_runtime_state(group.name, entry.id),
+                runtime_states.get(entry.id) or self._default_runtime_state(group.name, entry.id),
                 usage_by_entry.get(entry.id) or {},
                 now,
             )
@@ -475,6 +475,20 @@ class AuthGroupManager:
     def _rotation_distance(self, group_name: str, index: int, size: int) -> int:
         cursor = self._rotation_cursor_by_group.get(group_name, 0)
         return (index - cursor) % max(size, 1)
+
+    @staticmethod
+    def _default_runtime_state(auth_group_name: str, entry_id: str) -> Dict[str, Any]:
+        return {
+            "auth_group_name": auth_group_name,
+            "entry_id": entry_id,
+            "disabled": False,
+            "disabled_reason": None,
+            "cooldown_until": None,
+            "last_status_code": None,
+            "last_error_type": None,
+            "last_error_message": None,
+            "updated_at": None,
+        }
 
     @staticmethod
     def _find_entry(group: AuthGroupSchema, entry_id: str) -> Optional[AuthEntrySchema]:
