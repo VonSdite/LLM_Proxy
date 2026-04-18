@@ -984,6 +984,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .provider-order-actions {", css)
         self.assertIn(".providers-page .provider-order-stepper {", css)
         self.assertIn(".providers-page .provider-order-step {", css)
+        self.assertIn(".providers-page .provider-list-table col.provider-select-col {", css)
         self.assertIn(".providers-page .drag-handle-button {", css)
         self.assertIn(".providers-page .providers-table tbody tr.is-drag-over-before td {", css)
         self.assertIn(".providers-page .providers-table tbody tr.is-drag-over-after td {", css)
