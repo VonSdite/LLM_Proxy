@@ -105,7 +105,7 @@ class ProviderService:
         return provider_config.to_mapping()
 
     def batch_set_provider_enabled(self, names: List[str], enabled: bool) -> Dict[str, Any]:
-        normalized_names = self._normalize_provider_names(names)
+        normalized_names = self._normalize_provider_names(names, reject_duplicates=False)
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
         target_indexes = self._find_provider_indexes(providers, normalized_names)
@@ -124,7 +124,7 @@ class ProviderService:
         }
 
     def reorder_providers(self, names: List[str]) -> Dict[str, Any]:
-        normalized_names = self._normalize_provider_order_names(names)
+        normalized_names = self._normalize_provider_names(names, reject_duplicates=True)
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
         current_names = self._list_provider_names(providers)
@@ -151,7 +151,7 @@ class ProviderService:
         }
 
     def batch_delete_providers(self, names: List[str]) -> Dict[str, Any]:
-        normalized_names = self._normalize_provider_names(names)
+        normalized_names = self._normalize_provider_names(names, reject_duplicates=False)
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
         self._find_provider_indexes(providers, normalized_names)
@@ -190,29 +190,13 @@ class ProviderService:
         )
 
     @staticmethod
-    def _normalize_provider_names(names: Any) -> List[str]:
+    def _normalize_provider_names(
+        names: Any,
+        *,
+        reject_duplicates: bool,
+    ) -> List[str]:
         if not isinstance(names, list):
             raise ValueError('Provider names must be a non-empty list')
-
-        normalized_names: List[str] = []
-        seen_names = set()
-        for raw_name in names:
-            name = str(raw_name or '').strip()
-            if not name:
-                raise ValueError('Provider names must not be empty')
-            if name in seen_names:
-                continue
-            seen_names.add(name)
-            normalized_names.append(name)
-
-        if not normalized_names:
-            raise ValueError('Provider names must be a non-empty list')
-        return normalized_names
-
-    @staticmethod
-    def _normalize_provider_order_names(names: Any) -> List[str]:
-        if not isinstance(names, list):
-            raise ValueError("Provider names must be a non-empty list")
 
         normalized_names: List[str] = []
         seen_names = set()
@@ -221,7 +205,9 @@ class ProviderService:
             if not name:
                 raise ValueError("Provider names must not be empty")
             if name in seen_names:
-                raise ValueError(f"Duplicate provider name in order list: {name}")
+                if reject_duplicates:
+                    raise ValueError(f"Duplicate provider name in order list: {name}")
+                continue
             seen_names.add(name)
             normalized_names.append(name)
 
