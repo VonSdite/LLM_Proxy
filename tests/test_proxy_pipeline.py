@@ -322,6 +322,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertIn(b'"completion_tokens": 2', stream_body)
         self.assertIn(b'"total_tokens": 5', stream_body)
         self.assertIn(b"data: [DONE]", stream_body)
+        self.assertEqual(1, stream_body.count(b"data: [DONE]\n\n"))
         self.assertTrue(fake_response.closed)
 
     def test_proxy_service_collects_usage_when_openai_chat_usage_chunk_is_suppressed(self) -> None:
@@ -680,6 +681,75 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertIn(b"event: message_stop", stream_body)
         self.assertNotIn(b"[DONE]", stream_body)
         self.assertTrue(fake_response.closed)
+
+    def test_proxy_service_translates_openai_responses_stream_to_claude_messages_without_upstream_done_and_preserves_response_model(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="responses-upstream",
+            api="https://example.com/v1/responses",
+            transport="http",
+            source_format="openai_responses",
+            target_formats=("claude_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        captured = {}
+        captured_meta = {}
+        fake_response = FakeStreamResponse(
+            [
+                b'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","created_at":123,"model":"gpt-4.1"}}\n\n',
+                b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg_resp_1_0","output_index":0,"delta":"Hi from responses"}\n\n',
+                b'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_1","created_at":123,"model":"gpt-5.4","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n',
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/messages"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "responses-upstream/gpt-4.1",
+                    "max_tokens": 256,
+                    "messages": [
+                        {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
+                    ],
+                    "stream": True,
+                },
+                {},
+                forward_stream_usage=True,
+                on_complete=captured_meta.update,
+            )
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual("user", captured["body"]["messages"][0]["role"])
+        self.assertEqual("Hello", captured["body"]["messages"][0]["content"])
+        self.assertIn(b"event: message_start", stream_body)
+        self.assertIn(b"event: content_block_start", stream_body)
+        self.assertIn(b"event: content_block_delta", stream_body)
+        self.assertIn(b"event: message_delta", stream_body)
+        self.assertIn(b"event: message_stop", stream_body)
+        self.assertIn(b'"model": "gpt-4.1"', stream_body)
+        self.assertNotIn(b"[DONE]", stream_body)
+        self.assertEqual("gpt-5.4", captured_meta["response_model"])
+        self.assertEqual(3, captured_meta["prompt_tokens"])
+        self.assertEqual(2, captured_meta["completion_tokens"])
+        self.assertEqual(5, captured_meta["total_tokens"])
+        self.assertTrue(fake_response.closed)
+
 
     def test_proxy_service_normalizes_response_done_to_response_completed(self) -> None:
         app, service = self._build_service()

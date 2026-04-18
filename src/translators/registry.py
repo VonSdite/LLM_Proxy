@@ -321,6 +321,9 @@ class OpenAIResponsesTranslator:
                 )
                 if usage_chunk is not None:
                     outputs.append(usage_chunk)
+            # 某些 Responses 流在 response.completed 后不会再补一个 [DONE]，这里显式触发一次内部收尾。
+            # 下游响应构建层会去重重复的终止块，避免 openai_chat 出现双 [DONE]。
+            outputs.append(DownstreamChunk(kind="done"))
             return outputs
 
         if event_type == "response.failed":

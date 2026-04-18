@@ -180,6 +180,10 @@ def translate_openai_chat_stream_payload_to_claude(
         state["completed"] = True
         return outputs
 
+    response_model = payload.get("model")
+    if response_model not in (None, ""):
+        state["model"] = str(response_model)
+
     usage = payload.get("usage")
     if isinstance(usage, dict):
         state["usage"] = {

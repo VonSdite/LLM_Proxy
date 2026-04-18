@@ -123,13 +123,17 @@ class ProxyResponseBuilder:
                         event,
                         state,
                     )
+                    self._update_meta_from_stream_state(meta, state)
                     for downstream_chunk in downstream_chunks:
                         guarded_chunk = self._guard_stream_chunk(provider, request_ctx, downstream_chunk)
                         if guarded_chunk is None:
                             continue
+                        terminal_already_sent = terminal_sent
                         if is_terminal_chunk(guarded_chunk, downstream_target_format):
                             terminal_sent = True
                         if guarded_chunk.kind == "done":
+                            if terminal_already_sent:
+                                continue
                             encoded_terminal = encode_downstream_chunk(guarded_chunk, downstream_target_format)
                             if encoded_terminal:
                                 self._extend_trace_buffer(downstream_payload_buffer, encoded_terminal)
@@ -601,6 +605,12 @@ class ProxyResponseBuilder:
             meta["response_model"] = model
         if payload.get("modelVersion") is not None:
             meta["response_model"] = payload.get("modelVersion")
+        message = payload.get("message")
+        if isinstance(message, dict):
+            if message.get("model") is not None:
+                meta["response_model"] = message.get("model")
+            if message.get("modelVersion") is not None:
+                meta["response_model"] = message.get("modelVersion")
         usage = payload.get("usage")
         usage_metadata = payload.get("usageMetadata")
         response = payload.get("response")
@@ -634,6 +644,39 @@ class ProxyResponseBuilder:
         meta["total_tokens"] = int(
             usage_metadata.get("totalTokenCount") or (meta["prompt_tokens"] + meta["completion_tokens"])
         )
+
+    @classmethod
+    def _update_meta_from_stream_state(cls, meta: Dict[str, Any], state: Dict[str, Any]) -> None:
+        """从 translator 内部状态补充不会显式出现在下游 payload 中的元数据。"""
+        response_model = cls._extract_response_model_from_stream_state(state)
+        if response_model:
+            meta["response_model"] = response_model
+
+    @classmethod
+    def _extract_response_model_from_stream_state(cls, state: Any) -> Optional[str]:
+        if not isinstance(state, dict):
+            return None
+
+        candidate_paths = (
+            ("response_model",),
+            ("chat_state", "response_model"),
+            ("claude_bridge", "model"),
+            ("target_state", "claude_bridge", "model"),
+        )
+        for path in candidate_paths:
+            value = cls._get_nested_mapping_value(state, *path)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    @staticmethod
+    def _get_nested_mapping_value(payload: Any, *path: str) -> Any:
+        current = payload
+        for key in path:
+            if not isinstance(current, dict):
+                return None
+            current = current.get(key)
+        return current
 
     @staticmethod
     def _is_usage_only_stream_chunk(payload: Any) -> bool:
