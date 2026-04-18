@@ -17,7 +17,7 @@ providers:
   target_formats:
   - openai_chat
   - claude_chat
-  - codex
+  - openai_responses
   api_key:
   verify_ssl: false
   model_list:
@@ -36,7 +36,7 @@ providers:
   target_formats:
   - openai_chat
   - claude_chat
-  - codex
+  - openai_responses
   api_key:
   verify_ssl: false
   model_list:
