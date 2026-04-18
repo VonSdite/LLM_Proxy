@@ -301,7 +301,21 @@
         showMessage(formatActionErrorMessage(actionLabel, errorLike, options), "error", options);
     }
 
+    function redirectToLogin() {
+        window.location.href = "/login";
+    }
+
+    function handleUnauthorizedResponse(response) {
+        if (response && response.status === 401) {
+            redirectToLogin();
+            return true;
+        }
+        return false;
+    }
+
     window.formatActionErrorMessage = formatActionErrorMessage;
     window.showActionError = showActionError;
     window.showMessage = showMessage;
+    window.redirectToLogin = redirectToLogin;
+    window.handleUnauthorizedResponse = handleUnauthorizedResponse;
 })();
