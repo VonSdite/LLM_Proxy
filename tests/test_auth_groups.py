@@ -1,7 +1,9 @@
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 from flask import Flask
@@ -105,6 +107,11 @@ class AuthGroupManagerTests(unittest.TestCase):
         )
         self.repository = AuthGroupRepository(create_connection_factory(db_path))
         self.manager = AuthGroupManager(self.ctx, self.repository)
+        self._now_patcher = patch(
+            "src.config.auth_group_manager.now_local_datetime",
+            return_value=datetime(2026, 4, 18, 12, 0, 0),
+        )
+        self._now_patcher.start()
         self.group = AuthGroupSchema.from_mapping(
             {
                 "name": "pool-a",
@@ -128,6 +135,7 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.manager.load_auth_groups((self.group,))
 
     def tearDown(self) -> None:
+        self._now_patcher.stop()
         self.temp_dir.cleanup()
 
     def test_least_inflight_selection_uses_rotation_to_spread_equal_load(self) -> None:
