@@ -738,6 +738,12 @@ class ProviderTemplateTransportTests(unittest.TestCase):
             'id="providerModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"',
             html,
         )
+        self.assertIn('id="providerModalTabBtn_basic"', html)
+        self.assertIn('id="providerModalTabBtn_models"', html)
+        self.assertIn('id="providerModalTabPanel_basic"', html)
+        self.assertIn('id="providerModalTabPanel_models"', html)
+        self.assertIn("function switchProviderModalTab(tabName)", html)
+        self.assertIn("function syncProviderModalTabUi()", html)
         self.assertIn(
             'id="authGroupModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"',
             html,
@@ -804,6 +810,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("const providerTargetFormatConflictGroups = [", html)
         self.assertIn("function setProviderTargetFormatValues(", html)
         self.assertIn("target_formats: normalizedTargetFormats,", html)
+        self.assertIn("switchProviderModalTab('basic');", html)
         self.assertNotIn('id="selectedProviderCount"', html)
         self.assertNotIn('id="enableSelectedProvidersBtn"', html)
         self.assertNotIn('id="disableSelectedProvidersBtn"', html)
@@ -969,6 +976,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .provider-group-title {", css)
         self.assertIn(".providers-page #providersContainer.providers-table-shell {", css)
         self.assertIn(':root[data-theme="dark"] .providers-page .provider-group-card {', css)
+        self.assertIn(".providers-page .provider-modal-tabs {", css)
+        self.assertIn(".providers-page .provider-modal-tab-btn {", css)
+        self.assertIn(".providers-page .provider-modal-tab-panel[hidden] {", css)
         self.assertIn(".providers-page .provider-list-table col.provider-select-col {", css)
         self.assertIn(".providers-page .drag-handle-button {", css)
         self.assertIn(".providers-page .drag-handle-placeholder {", css)
