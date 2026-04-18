@@ -984,9 +984,13 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .provider-order-actions {", css)
         self.assertIn(".providers-page .provider-order-stepper {", css)
         self.assertIn(".providers-page .provider-order-step {", css)
+        self.assertIn(".providers-page .drag-handle-button {", css)
+        self.assertIn(".providers-page .providers-table tbody tr.is-drag-over-before td {", css)
+        self.assertIn(".providers-page .providers-table tbody tr.is-drag-over-after td {", css)
         self.assertIn(".providers-page .btn-action:disabled {", css)
         self.assertIn(".providers-page .provider-order-step:disabled {", css)
         self.assertIn(':root[data-theme="dark"] .providers-page .provider-order-step:disabled {', css)
+        self.assertIn(':root[data-theme="dark"] .providers-page .drag-handle-button {', css)
         self.assertIn(".providers-page .field-label-with-help {", css)
         self.assertIn(".providers-page .field-mode-badge {", css)
         self.assertNotIn(".providers-page .field-inline-note {", css)
@@ -1432,6 +1436,12 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn("function refreshModelTestRowDisplay(rowId, inputElement)", providers_html)
         self.assertIn("function updateModelTestTableSummaryAndControls()", providers_html)
         self.assertIn("onchange=\"handleModelTestRowChange(${row.rowId}, this.value, this)\"", providers_html)
+        self.assertIn("function buildDroppedModelTestRows(dragRowId, targetRowId, placeAfter)", providers_html)
+        self.assertIn("function handleModelTestRowDragStart(rowId, event)", providers_html)
+        self.assertIn("function buildDroppedProviderOrderNames(name, targetName, placeAfter)", providers_html)
+        self.assertIn("function handleProviderRowDragStart(name, groupKey, event)", providers_html)
+        self.assertIn('class="drag-handle-button model-test-drag-handle"', providers_html)
+        self.assertIn('class="drag-handle-button provider-drag-handle"', providers_html)
         self.assertNotIn(
             "function handleModelTestRowChange(rowId, value) {\n"
             "            const row = modelTestRows.find(item => item.rowId === rowId);\n"
@@ -1444,6 +1454,64 @@ class DashboardTemplateTests(unittest.TestCase):
             "        }",
             providers_html,
         )
+
+    def test_provider_drag_drop_helper_keeps_group_boundary(self) -> None:
+        template_path = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "presentation"
+            / "templates"
+            / "providers.html"
+        )
+        html = template_path.read_text(encoding="utf-8")
+        script_start = html.index("function isProviderEnabled")
+        script_end = html.index("function getProviderTabButton")
+        script = html[script_start:script_end]
+
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{
+  console,
+  providers: [
+    {{ name: "enabled-a", enabled: true }},
+    {{ name: "enabled-b", enabled: true }},
+    {{ name: "disabled-a", enabled: false }},
+    {{ name: "disabled-b", enabled: false }},
+  ],
+  providerBatchActionInFlight: false,
+  providerOrderActionInFlight: false,
+  togglingProviderNames: new Set(),
+  deletingProviderName: null,
+  providerDragState: null,
+  providerDragTargetElement: null,
+  modelTestDragState: null,
+  modelTestDragTargetElement: null,
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+process.stdout.write(JSON.stringify({{
+  dropEnabled: sandbox.buildDroppedProviderOrderNames("enabled-a", "enabled-b", true),
+  dropDisabled: sandbox.buildDroppedProviderOrderNames("disabled-b", "disabled-a", false),
+  crossGroup: sandbox.buildDroppedProviderOrderNames("enabled-a", "disabled-a", true),
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual(
+            ["enabled-b", "enabled-a", "disabled-a", "disabled-b"],
+            payload["dropEnabled"],
+        )
+        self.assertEqual(
+            ["enabled-a", "enabled-b", "disabled-b", "disabled-a"],
+            payload["dropDisabled"],
+        )
+        self.assertIsNone(payload["crossGroup"])
 
 
 if __name__ == "__main__":
