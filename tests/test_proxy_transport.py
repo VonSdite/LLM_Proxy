@@ -191,7 +191,7 @@ class ProviderTransportTests(unittest.TestCase):
                 }
             )
 
-    def test_provider_defaults_source_and_target_formats(self) -> None:
+    def test_provider_defaults_source_and_internal_target_formats(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
             {
                 "name": "demo",
@@ -203,25 +203,25 @@ class ProviderTransportTests(unittest.TestCase):
 
         self.assertEqual("openai_chat", schema.source_format)
         self.assertEqual("openai_chat", schema.target_format)
-        self.assertEqual(("openai_chat",), schema.target_formats)
+        self.assertEqual(("openai_chat", "openai_responses", "claude_chat"), schema.target_formats)
         runtime = RuntimeProviderSpec.from_schema(schema)
         self.assertEqual("openai_chat", runtime.source_format)
         self.assertEqual("openai_chat", runtime.primary_target_format)
-        self.assertEqual(("openai_chat",), runtime.target_formats)
+        self.assertEqual(("openai_chat", "openai_responses", "claude_chat"), runtime.target_formats)
 
-    def test_provider_schema_accepts_multiple_target_formats(self) -> None:
-        schema = ProviderConfigSchema.from_mapping(
-            {
-                "name": "demo",
-                "api": "https://example.com/v1/chat/completions",
-                "api_key": "demo-key",
-                "target_formats": ["openai_chat", "claude_chat"],
-                "model_list": ["gpt-4.1"],
-            }
-        )
-
-        self.assertEqual("openai_chat", schema.target_format)
-        self.assertEqual(("openai_chat", "claude_chat"), schema.target_formats)
+    def test_provider_schema_rejects_target_formats_field(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported provider field\\(s\\): target_formats"
+        ):
+            ProviderConfigSchema.from_mapping(
+                {
+                    "name": "demo",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "demo-key",
+                    "target_formats": ["openai_chat", "claude_chat"],
+                    "model_list": ["gpt-4.1"],
+                }
+            )
 
     def test_provider_schema_rejects_removed_codex_protocol(self) -> None:
         with self.assertRaisesRegex(
@@ -706,12 +706,12 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         self.assertIn('id="providerTransport"', html)
         self.assertIn('id="providerSourceFormat"', html)
-        self.assertIn('id="providerTargetFormat"', html)
+        self.assertNotIn('id="providerTargetFormat"', html)
         self.assertNotIn('data-multi-select-badge="多选"', html)
-        self.assertIn(
+        self.assertNotIn(
             'data-multi-select-hint="可多选，点击已选项可取消；互斥项会自动替换"', html
         )
-        self.assertIn('class="field-mode-badge">多选</span>', html)
+        self.assertNotIn('class="field-mode-badge">多选</span>', html)
         self.assertNotIn(
             'class="field-inline-note">可多选；点击已选项可取消，互斥项会自动替换。</div>',
             html,
@@ -762,7 +762,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
 
         self.assertIn('data-provider-help-topic="transport"', html)
         self.assertIn('data-provider-help-topic="source_format"', html)
-        self.assertIn('data-provider-help-topic="target_format"', html)
+        self.assertNotIn('data-provider-help-topic="target_format"', html)
         self.assertIn('data-provider-help-topic="auth_group_field"', html)
         self.assertIn('data-provider-help-topic="auth_groups_overview"', html)
         self.assertIn('data-provider-help-topic="auth_group_strategy"', html)
@@ -796,20 +796,20 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("setupCustomSelect('authGroupStrategy');", html)
         self.assertIn("setupCustomSelect('providerTransport');", html)
         self.assertIn("setupCustomSelect('providerSourceFormat');", html)
-        self.assertIn("setupCustomSelect('providerTargetFormat');", html)
+        self.assertNotIn("setupCustomSelect('providerTargetFormat');", html)
         self.assertIn("setupCustomSelect('providerVerifySsl');", html)
         self.assertIn("function buildMultiSelectTriggerMarkup(", html)
         self.assertNotIn("custom-select-trigger-badge", html)
         self.assertNotIn("已选 ${selectedLabels.length} 项", html)
         self.assertIn("custom-select-option custom-select-option-multi", html)
         self.assertIn("custom-select-menu-hint", html)
-        self.assertIn(
+        self.assertNotIn(
             "const defaultNewProviderTargetFormats = ['openai_chat', 'openai_responses', 'claude_chat'];",
             html,
         )
-        self.assertIn("const providerTargetFormatConflictGroups = [];", html)
-        self.assertIn("function setProviderTargetFormatValues(", html)
-        self.assertIn("target_formats: normalizedTargetFormats,", html)
+        self.assertNotIn("const providerTargetFormatConflictGroups = [];", html)
+        self.assertNotIn("function setProviderTargetFormatValues(", html)
+        self.assertNotIn("target_formats:", html)
         self.assertIn("switchProviderModalTab('basic');", html)
         self.assertNotIn('id="selectedProviderCount"', html)
         self.assertNotIn('id="enableSelectedProvidersBtn"', html)
@@ -1052,8 +1052,6 @@ const sandbox = {{
   authGroups: [],
   modelTestRows: [],
   modelTestRowSequence: 0,
-  providerTargetFormatOptions: ["openai_chat", "openai_responses", "claude_chat"],
-  providerTargetFormatConflictGroups: [],
   escapeHtml(value) {{
     return String(value ?? "");
   }},
@@ -1081,14 +1079,6 @@ const sandbox = {{
       modelTestSelectAllCheckbox: {{ checked: false, indeterminate: false }},
       providerTransport: {{ value: "http" }},
       providerSourceFormat: {{ value: "openai_chat" }},
-      providerTargetFormat: {{
-        multiple: true,
-        options: [
-          {{ value: "openai_chat", textContent: "openai_chat", selected: true }},
-          {{ value: "openai_responses", textContent: "openai_responses", selected: false }},
-          {{ value: "claude_chat", textContent: "claude_chat", selected: false }},
-        ],
-      }},
       providerApiKey: {{ value: " secret " }},
       providerProxy: {{ value: "" }},
       providerTimeout: {{ value: "" }},
@@ -1113,12 +1103,10 @@ const collectedAfter = sandbox.collectFormData();
 
 process.stdout.write(JSON.stringify({{
   beforeModelList: collectedBefore.model_list,
-  beforeTargetFormats: collectedBefore.target_formats,
   beforeAuthGroup: collectedBefore.auth_group,
   beforeApiKey: collectedBefore.api_key,
   afterRows: sandbox.modelTestRows.map(row => row.model),
   afterModelList: collectedAfter.model_list,
-  afterTargetFormats: collectedAfter.target_formats,
   afterAuthGroup: collectedAfter.auth_group,
   afterApiKey: collectedAfter.api_key,
   countText: sandbox.document.elements.modelTestSummary.textContent,
@@ -1134,12 +1122,10 @@ process.stdout.write(JSON.stringify({{
         payload = json.loads(completed.stdout.decode("utf-8"))
 
         self.assertEqual("beta\nAlpha\nalpha\nBeta", payload["beforeModelList"])
-        self.assertEqual(["openai_chat"], payload["beforeTargetFormats"])
         self.assertEqual("shared-pool", payload["beforeAuthGroup"])
         self.assertEqual("", payload["beforeApiKey"])
         self.assertEqual(["Alpha", "Beta", "alpha", "beta"], payload["afterRows"])
         self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterModelList"])
-        self.assertEqual(["openai_chat"], payload["afterTargetFormats"])
         self.assertEqual("shared-pool", payload["afterAuthGroup"])
         self.assertEqual("", payload["afterApiKey"])
         self.assertIn("4", payload["countText"])

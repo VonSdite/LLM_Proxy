@@ -373,7 +373,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             any("upstream_error=HTTP upstream request failed after 2 attempts: dial tcp timeout" in msg for msg in logger.messages("error"))
         )
 
-    def test_responses_route_rejects_target_format_mismatch(self) -> None:
+    def test_responses_route_resolves_target_format_from_route(self) -> None:
         provider = LLMProvider(
             name="demo",
             api="https://example.com/v1/chat/completions",
@@ -387,9 +387,20 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             root_path=Path(__file__).resolve().parents[1],
             flask_app=app,
         )
+        proxy_service = RecordingProxyService(
+            (
+                app.response_class(
+                    '{"id":"resp_1","object":"response"}',
+                    status=200,
+                    mimetype="application/json",
+                ),
+                200,
+                None,
+            )
+        )
         ProxyController(
             ctx,
-            StubProxyService((None, 200, None)),
+            proxy_service,
             FakeUserService(),
             FakeLogService(),
             FakeProviderManager(provider),
@@ -401,18 +412,10 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             environ_base={"REMOTE_ADDR": "127.0.0.1"},
         )
 
-        self.assertEqual(400, response.status_code)
-        self.assertEqual(
-            {
-                "error": {
-                    "message": "Model demo/gpt-4.1 is configured for downstream formats openai_chat, not openai_responses",
-                    "type": "invalid_request_error",
-                    "param": None,
-                    "code": "target_format_mismatch",
-                }
-            },
-            response.get_json(),
-        )
+        self.assertEqual(200, response.status_code)
+        self.assertIsNotNone(proxy_service.last_kwargs)
+        assert proxy_service.last_kwargs is not None
+        self.assertEqual("openai_responses", proxy_service.last_kwargs["resolved_target_format"])
 
     def test_responses_route_allows_openai_responses_target(self) -> None:
         provider = LLMProvider(
@@ -455,12 +458,12 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual('{"id":"resp_1","object":"response"}', response.get_data(as_text=True))
 
-    def test_chat_route_resolves_target_format_from_multi_target_provider(self) -> None:
+    def test_chat_route_resolves_target_format_from_route(self) -> None:
         provider = LLMProvider(
             name="demo",
             api="https://example.com/v1/chat/completions",
             model_list=("gpt-4.1",),
-            target_formats=("openai_chat", "claude_chat"),
+            target_formats=("claude_chat",),
         )
         app = Flask(__name__)
         ctx = AppContext(
@@ -540,7 +543,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual('{"id":"resp_1","object":"response"}', response.get_data(as_text=True))
 
-    def test_messages_route_rejects_target_format_mismatch(self) -> None:
+    def test_messages_route_resolves_target_format_from_route(self) -> None:
         provider = LLMProvider(
             name="demo",
             api="https://example.com/v1/chat/completions",
@@ -554,9 +557,20 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             root_path=Path(__file__).resolve().parents[1],
             flask_app=app,
         )
+        proxy_service = RecordingProxyService(
+            (
+                app.response_class(
+                    '{"id":"msg_1","type":"message"}',
+                    status=200,
+                    mimetype="application/json",
+                ),
+                200,
+                None,
+            )
+        )
         ProxyController(
             ctx,
-            StubProxyService((None, 200, None)),
+            proxy_service,
             FakeUserService(),
             FakeLogService(),
             FakeProviderManager(provider),
@@ -568,17 +582,10 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             environ_base={"REMOTE_ADDR": "127.0.0.1"},
         )
 
-        self.assertEqual(400, response.status_code)
-        self.assertEqual(
-            {
-                "type": "error",
-                "error": {
-                    "type": "invalid_request_error",
-                    "message": "Model demo/gpt-4.1 is configured for downstream formats openai_chat, not claude_chat",
-                },
-            },
-            response.get_json(),
-        )
+        self.assertEqual(200, response.status_code)
+        self.assertIsNotNone(proxy_service.last_kwargs)
+        assert proxy_service.last_kwargs is not None
+        self.assertEqual("claude_chat", proxy_service.last_kwargs["resolved_target_format"])
 
     def test_messages_route_allows_claude_target(self) -> None:
         provider = LLMProvider(

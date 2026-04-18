@@ -53,8 +53,6 @@ providers:
     api: https://api.openai.com/v1/chat/completions
     transport: http
     source_format: openai_chat
-    target_formats:
-      - openai_chat
     auth_group: openai-shared
     verify_ssl: true
     timeout_seconds: 1200
@@ -68,8 +66,6 @@ providers:
     api: https://api.openai.com/v1/responses
     transport: http
     source_format: openai_responses
-    target_formats:
-      - openai_chat
     auth_group: openai-shared
     verify_ssl: true
     timeout_seconds: 1200
@@ -81,8 +77,6 @@ providers:
     api: https://api.anthropic.com/v1/messages
     transport: http
     source_format: claude_chat
-    target_formats:
-      - claude_chat
     api_key: sk-ant-your-anthropic-key
     verify_ssl: true
     timeout_seconds: 1200
@@ -94,8 +88,6 @@ providers:
     api: https://api.openai.com/v1/responses
     transport: http
     source_format: openai_responses
-    target_formats:
-      - openai_responses
     api_key: sk-your-openai-key
     verify_ssl: true
     timeout_seconds: 1200
@@ -103,27 +95,15 @@ providers:
     model_list:
       - gpt-5-codex
 
-  # OpenCode / Cherry Studio (OpenAI provider) commonly use:
-  #   target_formats:
-  #     - openai_chat
-  #
-  # Claude Code / Cherry Studio (Anthropic provider) commonly use:
-  #   target_formats:
-  #     - claude_chat
-  #
-  # Responses API clients (including Codex CLI) commonly use:
-  #   target_formats:
-  #     - openai_responses
-  #
-  # A single provider can expose multiple downstream formats, for example:
-  #   target_formats:
-  #     - openai_chat
-  #     - claude_chat
-  #
   # Common upstream choices:
   #   /v1/chat/completions -> source_format: openai_chat
   #   /v1/responses       -> source_format: openai_responses
   #   /v1/messages        -> source_format: claude_chat
+  #
+  # Downstream compatibility is built in:
+  #   /v1/chat/completions
+  #   /v1/responses
+  #   /v1/messages
   #
   # There is no public stream_format field.
   # The proxy auto-detects upstream responses internally:

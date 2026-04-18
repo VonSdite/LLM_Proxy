@@ -146,7 +146,6 @@ class ProxyService:
         last_error: Optional[ProxyErrorInfo] = None
         previous_status_code: Optional[int] = None
         previous_error_type: Optional[HookErrorType] = None
-        self._ensure_supported_target_format(downstream_target_format)
 
         def build_request(
             attempt: int,
@@ -477,15 +476,6 @@ class ProxyService:
         if requested_model_name.startswith(prefix):
             return requested_model_name[len(prefix):]
         return requested_model_name
-
-    @staticmethod
-    def _ensure_supported_target_format(target_format: str) -> None:
-        if str(target_format or "").strip().lower() not in {
-            "openai_chat",
-            "openai_responses",
-            "claude_chat",
-        }:
-            raise ValueError(f"Unsupported downstream target_format: {target_format}")
 
     @staticmethod
     def _resolve_downstream_target_format(

@@ -68,7 +68,7 @@ class ProviderServiceTests(unittest.TestCase):
         current_config = self.config_manager.get_raw_config()
         return [item["name"] for item in current_config["providers"]]
 
-    def test_config_manager_migrates_legacy_target_format_on_load(self) -> None:
+    def test_config_manager_removes_legacy_target_format_on_load(self) -> None:
         self._write_config(
             {
                 "auth_groups": [],
@@ -89,13 +89,13 @@ class ProviderServiceTests(unittest.TestCase):
         current_config = migrated_manager.get_raw_config()
         provider = current_config["providers"][0]
         self.assertNotIn("target_format", provider)
-        self.assertEqual(["claude_chat"], provider["target_formats"])
+        self.assertNotIn("target_formats", provider)
 
         with open(self.config_path, "r", encoding="utf-8") as handle:
             persisted = yaml.safe_load(handle)
         persisted_provider = persisted["providers"][0]
         self.assertNotIn("target_format", persisted_provider)
-        self.assertEqual(["claude_chat"], persisted_provider["target_formats"])
+        self.assertNotIn("target_formats", persisted_provider)
 
     def test_config_manager_normalizes_legacy_codex_protocol_aliases_on_load(self) -> None:
         self._write_config(
@@ -118,13 +118,13 @@ class ProviderServiceTests(unittest.TestCase):
 
         provider = migrated_manager.get_raw_config()["providers"][0]
         self.assertEqual("openai_responses", provider["source_format"])
-        self.assertEqual(["openai_responses"], provider["target_formats"])
+        self.assertNotIn("target_formats", provider)
 
         with open(self.config_path, "r", encoding="utf-8") as handle:
             persisted = yaml.safe_load(handle)
         persisted_provider = persisted["providers"][0]
         self.assertEqual("openai_responses", persisted_provider["source_format"])
-        self.assertEqual(["openai_responses"], persisted_provider["target_formats"])
+        self.assertNotIn("target_formats", persisted_provider)
 
     def test_update_provider_preserves_enabled_when_payload_omits_enabled(self) -> None:
         self._seed_providers(
@@ -153,13 +153,13 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(updated["enabled"])
         self.assertEqual("example_hook.py", updated["hook"])
         self.assertNotIn("target_format", updated)
-        self.assertEqual(["openai_chat"], updated["target_formats"])
+        self.assertNotIn("target_formats", updated)
         self.assertEqual(1, self.reload_count)
         current_config = self.config_manager.get_raw_config()
         self.assertFalse(current_config["providers"][0]["enabled"])
         self.assertEqual("example_hook.py", current_config["providers"][0]["hook"])
         self.assertNotIn("target_format", current_config["providers"][0])
-        self.assertEqual(["openai_chat"], current_config["providers"][0]["target_formats"])
+        self.assertNotIn("target_formats", current_config["providers"][0])
 
     def test_set_provider_enabled_updates_config(self) -> None:
         self._seed_providers(
@@ -177,11 +177,12 @@ class ProviderServiceTests(unittest.TestCase):
 
         self.assertFalse(updated["enabled"])
         self.assertNotIn("target_format", updated)
-        self.assertEqual(["openai_chat"], updated["target_formats"])
+        self.assertNotIn("target_formats", updated)
         self.assertEqual(1, self.reload_count)
         current_config = self.config_manager.get_raw_config()
         self.assertFalse(current_config["providers"][0]["enabled"])
         self.assertNotIn("target_format", current_config["providers"][0])
+        self.assertNotIn("target_formats", current_config["providers"][0])
 
     def test_create_provider_inserts_enabled_provider_before_disabled_group(self) -> None:
         self._seed_providers(
@@ -317,6 +318,7 @@ class ProviderServiceTests(unittest.TestCase):
         current_config = self.config_manager.get_raw_config()
         self.assertEqual([True, True], [item["enabled"] for item in current_config["providers"]])
         self.assertTrue(all("target_format" not in item for item in current_config["providers"]))
+        self.assertTrue(all("target_formats" not in item for item in current_config["providers"]))
 
     def test_batch_disable_providers_preserves_stable_relative_order(self) -> None:
         self._seed_providers(

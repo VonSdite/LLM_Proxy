@@ -16,7 +16,7 @@
   - `POST /v1/messages`
   - `GET /v1/models`
 
-这个版本不保留 Gemini / Antigravity。配置加载阶段会把旧字段 `target_format` 规范化为 `target_formats`，这段弃用兼容逻辑后续会删除；除此之外不再继续扩展旧字段兼容逻辑。
+这个版本不保留 Gemini / Antigravity。配置加载阶段会清理少量历史废弃字段并回写配置文件；除此之外不再继续扩展旧字段兼容逻辑。
 
 ## 2. Logical View
 
@@ -46,8 +46,7 @@ downstream request
 ### 2.2 Major Components
 
 - `ProxyController`
-  - 校验下游 route 和 `target_formats`
-  - 根据 route family 解析本次请求命中的 `target_format`
+  - 根据当前 route family 选择下游接口协议
   - 构造标准错误体
 - `WebController`
   - 提供统计页面与系统设置页面
@@ -61,7 +60,7 @@ downstream request
   - 持久化冷却、禁用与配额运行态
 - `ProxyService`
   - 组装整条代理链路
-  - 使用本次解析出的 `target_format` 选择 translator 和 encoder
+  - 根据当前请求所处接口选择 translator 和 encoder
   - 在开启 `logging.llm_request_debug_enabled` 时输出独立 trace
 - `ProviderModelTestService`
   - 复用 translator / executor / request-side hook
@@ -79,7 +78,7 @@ downstream request
 - `Decoder`
   - 将上游流拆成统一事件
 - `TranslatorRegistry`
-  - 负责 `source_format -> target_format` 协议适配
+  - 负责协议适配
 - `Encoder`
   - 将统一 chunk 编码成下游协议
 - `Hook`
@@ -105,22 +104,17 @@ Hook 组件除了 header / guard，还会收到最小重试上下文：
 
 ### 3.1 Downstream Route Contract
 
-`target_formats` 和 route family 强绑定：
+route family 直接决定当前请求的下游接口协议：
 
-| route | allowed target_formats |
+| route | downstream protocol |
 | --- | --- |
 | `/v1/chat/completions` | `openai_chat` |
 | `/v1/responses` | `openai_responses` |
 | `/v1/messages` | `claude_chat` |
 
-controller 会根据 route 在 `target_formats` 里解析出本次请求实际命中的 `target_format`。
-
-- 不匹配时，controller 直接返回 400，不会继续请求上游
-
 `GET /v1/models` 除了模型 id，还会返回模型所属 provider 的：
 
 - `source_format`
-- `target_formats`
 - `transport`
 
 ### 3.2 Control-Plane Settings Contract
@@ -179,13 +173,12 @@ controller 会根据 route 在 `target_formats` 里解析出本次请求实际�
 
 ### 3.3 Provider Runtime Contract
 
-Provider 公共运行时字段只有：
+Provider 公共配置字段只有：
 
 - `name`
 - `api`
 - `transport`
 - `source_format`
-- `target_formats`
 - `api_key`
 - `auth_group`
 - `proxy`
@@ -199,8 +192,6 @@ Provider 公共运行时字段只有：
 
 - `source_format`
   - 上游真实协议
-- `target_formats`
-  - 当前 provider 对下游暴露的协议集合
 - `transport`
   - HTTP 或 WebSocket
 
@@ -348,7 +339,7 @@ provider editor form snapshot
 - [src/translators/registry.py](../src/translators/registry.py)
   - 4x4 translator registry
 - [src/presentation/templates/providers.html](../src/presentation/templates/providers.html)
-  - Provider 页面、多选 `target_formats` 与互斥说明
+  - Provider 页面与 `source_format` / Auth Group 编辑
 - [src/presentation/templates/settings.html](../src/presentation/templates/settings.html)
   - 系统设置页面与帮助说明
 
@@ -443,4 +434,3 @@ Gemini / Antigravity 这类协议面会显著增加配置复杂度，但对当�
 - 上游通过 HTTP 还是 WebSocket 连接
 
 上游到底是 SSE、NDJSON 还是非流式，由 executor / decoder 自动判断。
-

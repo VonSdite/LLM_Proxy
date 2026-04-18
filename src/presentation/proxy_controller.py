@@ -275,37 +275,24 @@ class ProxyController:
             if str(item or "").strip()
         )
 
-    @staticmethod
-    def _format_provider_target_formats(target_formats: Iterable[str]) -> str:
-        normalized = [
-            str(item or "").strip().lower()
-            for item in target_formats
-            if str(item or "").strip()
-        ]
-        if not normalized:
-            return "<empty>"
-        if len(normalized) == 1:
-            return normalized[0]
-        return ", ".join(normalized)
-
     def chat_completions(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
             route_name="chat_completions",
-            expected_target_formats=("openai_chat",),
+            target_format="openai_chat",
             inspect_stream_usage=True,
         )
 
     def responses(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
             route_name="responses",
-            expected_target_formats=("openai_responses",),
+            target_format="openai_responses",
             inspect_stream_usage=False,
         )
 
     def messages(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
             route_name="messages",
-            expected_target_formats=("claude_chat",),
+            target_format="claude_chat",
             inspect_stream_usage=False,
         )
 
@@ -313,23 +300,18 @@ class ProxyController:
         self,
         *,
         route_name: str,
-        expected_target_formats: Iterable[str],
+        target_format: str,
         inspect_stream_usage: bool,
         error_format: Optional[str] = None,
     ) -> ResponseReturnValue:
-        normalized_expected_target_formats = tuple(
-            str(item or "").strip().lower()
-            for item in expected_target_formats
-            if str(item or "").strip()
-        )
-        if not normalized_expected_target_formats:
-            raise ValueError("expected_target_formats must not be empty")
-        resolved_error_format = error_format or normalized_expected_target_formats[0]
+        resolved_target_format = str(target_format or "").strip().lower()
+        if not resolved_target_format:
+            raise ValueError("target_format must not be empty")
+        resolved_error_format = error_format or resolved_target_format
         client_ip = normalize_ip(request.remote_addr)
         trace_id: Optional[str] = None
         model_name: Optional[str] = None
         provider_name: Optional[str] = None
-        resolved_target_format: Optional[str] = None
         try:
             self._logger.info(
                 "Proxy request received: route=%s ip=%s", route_name, client_ip
@@ -408,58 +390,6 @@ class ProxyController:
                     error_format=resolved_error_format,
                 )
 
-            provider_target_formats = self._get_provider_target_formats(provider)
-            matched_target_formats = tuple(
-                item
-                for item in provider_target_formats
-                if item in normalized_expected_target_formats
-            )
-            if not matched_target_formats:
-                self._logger.warning(
-                    "Proxy rejected: model=%s configured for target_formats=%s route=%s",
-                    model_name,
-                    self._format_provider_target_formats(provider_target_formats),
-                    route_name,
-                )
-                if len(normalized_expected_target_formats) == 1:
-                    expected_hint = normalized_expected_target_formats[0]
-                    mismatch_message = (
-                        f"Model {model_name} is configured for downstream formats "
-                        f"{self._format_provider_target_formats(provider_target_formats)}, not {expected_hint}"
-                    )
-                else:
-                    expected_hint = ", ".join(normalized_expected_target_formats)
-                    mismatch_message = (
-                        f"Model {model_name} is configured for downstream formats "
-                        f"{self._format_provider_target_formats(provider_target_formats)}, not one of {expected_hint}"
-                    )
-                return self._error_response(
-                    mismatch_message,
-                    400,
-                    error_type="invalid_request_error",
-                    code="target_format_mismatch",
-                    error_format=resolved_error_format,
-                )
-            if len(matched_target_formats) > 1:
-                self._logger.warning(
-                    "Proxy rejected: model=%s matched multiple target_formats=%s route=%s",
-                    model_name,
-                    self._format_provider_target_formats(matched_target_formats),
-                    route_name,
-                )
-                return self._error_response(
-                    (
-                        f"Model {model_name} matches multiple downstream formats on route {route_name}: "
-                        f"{self._format_provider_target_formats(matched_target_formats)}"
-                    ),
-                    400,
-                    error_type="invalid_request_error",
-                    code="ambiguous_target_formats",
-                    error_format=resolved_error_format,
-                )
-            resolved_target_format = next(iter(matched_target_formats), None)
-            if resolved_target_format is None:
-                raise RuntimeError("resolved_target_format must not be empty")
             provider_name = getattr(provider, "name", None)
 
             client_requested_usage_chunk = False

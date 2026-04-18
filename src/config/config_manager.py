@@ -11,8 +11,6 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import yaml
 
-from .provider_config import normalize_provider_target_formats
-
 LOGGER = logging.getLogger("app")
 
 
@@ -136,15 +134,15 @@ class ConfigManager:
                 continue
 
             normalized_provider = dict(provider)
-            # TODO: 兼容历史配置里仍在使用 `target_format` 的旧版本。
-            # 当前公开配置与 API 只保留 `target_formats`，待完成几个版本的迁移窗口后删除这段兼容逻辑。
-            legacy_target_format = normalized_provider.pop("target_format", None)
-            if legacy_target_format is not None:
+            # TODO: 兼容历史配置里仍在使用 `target_format` / `target_formats` 的旧版本。
+            # 当前公开配置与 API 已移除这两个字段，先在加载阶段自动删除并回写配置，
+            # 待完成几个版本的迁移窗口后删除这段兼容逻辑。
+            if "target_format" in normalized_provider:
+                normalized_provider.pop("target_format", None)
                 changed = True
-                if not cls._has_target_formats_value(
-                    normalized_provider.get("target_formats")
-                ):
-                    normalized_provider["target_formats"] = [legacy_target_format]
+            if "target_formats" in normalized_provider:
+                normalized_provider.pop("target_formats", None)
+                changed = True
 
             # TODO: 兼容历史本地配置里仍在使用已移除的 `codex` 协议值。
             # 先在启动加载阶段自动修正并落盘，让旧版本配置可以平滑启动；待完成几个版本的迁移窗口后删除这段兼容逻辑。
@@ -152,50 +150,11 @@ class ConfigManager:
             if isinstance(source_format, str) and source_format.strip().lower() == "codex":
                 normalized_provider["source_format"] = "openai_responses"
                 changed = True
-
-            if "target_formats" in normalized_provider:
-                raw_target_formats = normalized_provider.get("target_formats")
-                if isinstance(raw_target_formats, str):
-                    candidate_target_formats = raw_target_formats.replace(",", "\n").splitlines()
-                elif isinstance(raw_target_formats, (list, tuple)):
-                    candidate_target_formats = list(raw_target_formats)
-                else:
-                    candidate_target_formats = raw_target_formats
-
-                if isinstance(candidate_target_formats, list):
-                    candidate_target_formats = [
-                        "openai_responses"
-                        if isinstance(item, str) and item.strip().lower() == "codex"
-                        else item
-                        for item in candidate_target_formats
-                    ]
-                elif isinstance(candidate_target_formats, str) and candidate_target_formats.strip().lower() == "codex":
-                    candidate_target_formats = ["openai_responses"]
-
-                normalized_target_formats = list(
-                    normalize_provider_target_formats(
-                        candidate_target_formats,
-                        field_name="target_formats",
-                    )
-                )
-                if normalized_target_formats != list(normalized_provider.get("target_formats") or []):
-                    normalized_provider["target_formats"] = normalized_target_formats
-                    changed = True
             normalized_providers.append(normalized_provider)
 
         if changed:
             normalized["providers"] = normalized_providers
         return normalized, changed
-
-    @staticmethod
-    def _has_target_formats_value(value: Any) -> bool:
-        if value is None:
-            return False
-        if isinstance(value, str):
-            return bool(value.strip())
-        if isinstance(value, (list, tuple)):
-            return any(str(item or "").strip() for item in value)
-        return True
 
     def _read_bool(self, key: str, default: bool = False) -> bool:
         value = self.get(key, default)

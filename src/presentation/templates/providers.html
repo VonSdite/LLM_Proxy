@@ -146,25 +146,6 @@
                                 </select>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label field-label-with-help">
-                                    <span>下游格式</span>
-                                    <span class="field-mode-badge">多选</span>
-                                    <button type="button" class="field-help-button" data-provider-help-topic="target_format" onclick="toggleProviderHelp('target_format', event)" aria-label="查看下游格式说明">?</button>
-                                </label>
-                                <select
-                                    class="form-control"
-                                    id="providerTargetFormat"
-                                    multiple
-                                    data-custom-select="true"
-                                    data-placeholder="请选择下游格式"
-                                    data-multi-select-hint="可多选，点击已选项可取消；互斥项会自动替换"
-                                >
-                                    <option value="openai_chat">openai_chat</option>
-                                    <option value="openai_responses">openai_responses</option>
-                                    <option value="claude_chat">claude_chat</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
                                 <label class="form-label">Auth 方式</label>
                                 <select class="form-control" id="providerAuthMode" data-custom-select="true" onchange="updateProviderAuthModeFields()">
                                     <option value="legacy_api_key">Legacy API Key</option>
@@ -634,9 +615,6 @@
         let providerDragTargetElement = null;
         let modelTestDragState = null;
         let modelTestDragTargetElement = null;
-        const providerTargetFormatOptions = ['openai_chat', 'openai_responses', 'claude_chat'];
-        const defaultNewProviderTargetFormats = ['openai_chat', 'openai_responses', 'claude_chat'];
-        const providerTargetFormatConflictGroups = [];
         const providerHelpTopics = {
             transport: {
                 title: '上游传输怎么选',
@@ -659,18 +637,6 @@
                         <li><strong>claude_chat</strong>：上游是 <code>/v1/messages</code>。</li>
                     </ul>
                     <p>常见例子：vLLM、OpenRouter、Ollama 的 OpenAI 兼容层通常选 <code>openai_chat</code>；Anthropic Messages 选 <code>claude_chat</code>。</p>
-                `,
-            },
-            target_format: {
-                title: '下游格式怎么选',
-                html: `
-                    <p>下游 = 调用这个代理的客户端或工具。现在可以多选，同一个 provider 可以同时暴露多个下游协议。</p>
-                    <ul>
-                        <li><strong>openai_chat</strong>：下游走 <code>/v1/chat/completions</code>。适合 OpenCode、Cherry Studio 的 OpenAI provider。</li>
-                        <li><strong>openai_responses</strong>：下游走 <code>/v1/responses</code>。适合 Responses API 客户端。</li>
-                        <li><strong>claude_chat</strong>：下游走 <code>/v1/messages</code>。适合 Claude Code 和 Anthropic 兼容客户端。</li>
-                    </ul>
-                    <p>如果同一个 provider 需要同时服务不同客户端，可以按需组合 <code>openai_chat</code>、<code>openai_responses</code> 和 <code>claude_chat</code>。</p>
                 `,
             },
             auth_group_field: {
@@ -730,7 +696,7 @@
                     <p><strong>WebSocket</strong> 地址会先把 <code>ws://</code> / <code>wss://</code> 转成对应的 <code>http://</code> / <code>https://</code> 再请求。</p>
                     <p><strong>Legacy API Key 模式</strong> 会自动带上当前表单里的 Bearer Token。</p>
                     <p><strong>Auth Group 模式</strong> 必须显式选择一个 <code>Auth Entry</code>，并把这条 entry 的 headers 原样带去请求上游模型接口。</p>
-                    <p>这一步只是帮你发现可选模型，不会修改上游协议，也不会自动替你决定 <code>source_format</code> 或 <code>target_formats</code>。</p>
+                    <p>这一步只是帮你发现可选模型，不会修改上游协议，也不会自动替你决定 <code>source_format</code>。</p>
                 `,
             },
             model_test_auth_entry: {
@@ -2818,74 +2784,7 @@
                 .map(option => option.value);
         }
 
-        function normalizeProviderTargetFormatValues(values, preferredValue = '') {
-            const normalizedPreferredValue = String(preferredValue ?? '').trim();
-            const requestedValues = Array.isArray(values) ? values : [values];
-            const selectedValues = new Set();
-
-            requestedValues.forEach(value => {
-                const normalizedValue = String(value ?? '').trim();
-                if (!normalizedValue || !providerTargetFormatOptions.includes(normalizedValue)) {
-                    return;
-                }
-                selectedValues.add(normalizedValue);
-            });
-
-            providerTargetFormatConflictGroups.forEach(group => {
-                const conflictingValues = group.filter(value => selectedValues.has(value));
-                if (conflictingValues.length <= 1) {
-                    return;
-                }
-                const keptValue = conflictingValues.includes(normalizedPreferredValue)
-                    ? normalizedPreferredValue
-                    : conflictingValues[conflictingValues.length - 1];
-                conflictingValues.forEach(value => {
-                    if (value !== keptValue) {
-                        selectedValues.delete(value);
-                    }
-                });
-            });
-
-            if (!selectedValues.size) {
-                selectedValues.add('openai_chat');
-            }
-
-            return providerTargetFormatOptions.filter(value => selectedValues.has(value));
-        }
-
-        function setProviderTargetFormatValues(values, preferredValue = '', options = {}) {
-            const select = document.getElementById('providerTargetFormat');
-            if (!select) {
-                return [];
-            }
-            const { dispatchChange = false } = options || {};
-            const normalizedValues = normalizeProviderTargetFormatValues(values, preferredValue);
-            Array.from(select.options).forEach(option => {
-                option.selected = normalizedValues.includes(option.value);
-            });
-            if (dispatchChange) {
-                select.dispatchEvent(new Event('change', { bubbles: true }));
-            } else {
-                syncCustomSelectValue('providerTargetFormat');
-            }
-            return normalizedValues;
-        }
-
-        function getProviderTargetFormats(provider) {
-            const rawValues = Array.isArray(provider?.target_formats)
-                ? provider.target_formats
-                // DEPRECATED compatibility path for legacy payloads that still
-                // expose `target_format`. New backend responses should only
-                // provide `target_formats`, and this fallback can be removed later.
-                : [provider?.target_format];
-            return normalizeProviderTargetFormatValues(rawValues);
-        }
-
         function collectFormData() {
-            const targetFormatInput = document.getElementById('providerTargetFormat');
-            const normalizedTargetFormats = targetFormatInput
-                ? normalizeProviderTargetFormatValues(getSelectedOptionValues(targetFormatInput))
-                : ['openai_chat'];
             const normalizedModelList = buildModelListValue(getNormalizedModelListItemsFromRows());
             const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
             const authGroup = authMode === 'auth_group'
@@ -2899,7 +2798,6 @@
                 api: document.getElementById('providerApi').value.trim(),
                 transport: document.getElementById('providerTransport').value,
                 source_format: document.getElementById('providerSourceFormat').value.trim() || 'openai_chat',
-                target_formats: normalizedTargetFormats,
                 auth_group: authGroup,
                 api_key: apiKey,
                 proxy: document.getElementById('providerProxy').value.trim(),
@@ -3002,14 +2900,10 @@
                         const nextValues = currentValues.includes(option.value)
                             ? currentValues.filter(value => value !== option.value)
                             : currentValues.concat(option.value);
-                        if (selectId === 'providerTargetFormat') {
-                            setProviderTargetFormatValues(nextValues, option.value, { dispatchChange: true });
-                        } else {
-                            Array.from(nativeSelect.options).forEach(selectOption => {
-                                selectOption.selected = nextValues.includes(selectOption.value);
-                            });
-                            nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
+                        Array.from(nativeSelect.options).forEach(selectOption => {
+                            selectOption.selected = nextValues.includes(selectOption.value);
+                        });
+                        nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
                         return;
                     }
                     if (nativeSelect.value !== option.value) {
@@ -3092,15 +2986,11 @@
                 const desiredValues = Array.isArray(desiredValue) ? desiredValue : [desiredValue];
                 const fallbackValues = Array.isArray(fallbackValue) ? fallbackValue : [fallbackValue];
                 const resolvedValues = desiredValues.filter(value => value !== undefined && value !== null && value !== '');
-                if (elementId === 'providerTargetFormat') {
-                    setProviderTargetFormatValues(resolvedValues.length ? resolvedValues : fallbackValues);
-                } else {
-                    const nextValues = resolvedValues.length ? resolvedValues : fallbackValues;
-                    Array.from(select.options).forEach(option => {
-                        option.selected = nextValues.includes(option.value);
-                    });
-                    syncCustomSelectValue(elementId);
-                }
+                const nextValues = resolvedValues.length ? resolvedValues : fallbackValues;
+                Array.from(select.options).forEach(option => {
+                    option.selected = nextValues.includes(option.value);
+                });
+                syncCustomSelectValue(elementId);
                 return;
             }
             const resolvedFallback = fallbackValue ?? '';
@@ -3124,7 +3014,6 @@
             document.getElementById('providerApi').value = provider?.api || '';
             setSelectValueOrFallback('providerTransport', resolvedTransport, inferredTransport);
             setSelectValueOrFallback('providerSourceFormat', provider?.source_format, 'openai_chat');
-            setProviderTargetFormatValues(provider ? getProviderTargetFormats(provider) : defaultNewProviderTargetFormats);
             setSelectValueOrFallback('providerAuthMode', authMode, 'legacy_api_key');
             renderProviderAuthGroupOptions(provider?.auth_group || '');
             document.getElementById('providerApiKey').value = provider?.api_key || '';
@@ -3490,10 +3379,6 @@
                             </div>
                       `
                     : '';
-                const providerTargetFormats = getProviderTargetFormats(provider);
-                const targetFormatChips = providerTargetFormats
-                    .map(format => `<span class="provider-chip provider-chip-target">${escapeHtml(format)}</span>`)
-                    .join('');
 
                 html += `
                     <tr
@@ -3540,7 +3425,6 @@
                             <div class="provider-meta-line">
                                 <span class="provider-chip">${escapeHtml(provider.transport || 'http')}</span>
                                 <span class="provider-chip">${escapeHtml(provider.source_format || 'openai_chat')}</span>
-                                ${targetFormatChips}
                                 ${provider.auth_group ? `<span class="provider-chip provider-chip-hook">auth_group:${escapeHtml(provider.auth_group)}</span>` : ''}
                                 ${provider.api_key ? '<span class="provider-chip provider-chip-muted">legacy api_key</span>' : ''}
                                 ${provider.hook ? `<span class="provider-chip provider-chip-hook">${escapeHtml(provider.hook)}</span>` : ''}
@@ -4940,7 +4824,6 @@
             setupCustomSelect('modelTestAuthEntry');
             setupCustomSelect('providerTransport');
             setupCustomSelect('providerSourceFormat');
-            setupCustomSelect('providerTargetFormat');
             setupCustomSelect('providerVerifySsl');
             setupCustomSelect('authGroupStrategy');
             const modalElement = document.getElementById('providerModal');
