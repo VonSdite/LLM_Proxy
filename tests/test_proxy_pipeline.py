@@ -254,7 +254,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             api="https://example.com/v1/responses",
             transport="http",
             source_format="openai_responses",
-            target_format="openai_chat",
+            target_formats=("openai_chat",),
             model_list=("gpt-4.1",),
             max_retries=1,
         )
@@ -315,7 +315,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             api="https://example.com/v1/responses",
             transport="http",
             source_format="openai_responses",
-            target_format="openai_chat",
+            target_formats=("openai_chat",),
             model_list=("gpt-4.1",),
             max_retries=1,
         )
@@ -374,7 +374,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             api="https://example.com/v1/chat/completions",
             transport="http",
             source_format="openai_chat",
-            target_format="openai_responses",
+            target_formats=("openai_responses",),
             model_list=("gpt-4.1",),
             max_retries=1,
         )
@@ -440,7 +440,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             api="https://example.com/v1/chat/completions",
             transport="http",
             source_format="openai_chat",
-            target_format="claude_chat",
+            target_formats=("claude_chat",),
             model_list=("gpt-4.1",),
             max_retries=1,
         )
@@ -502,7 +502,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             api="https://example.com/v1/responses",
             transport="http",
             source_format="codex",
-            target_format="openai_responses",
+            target_formats=("openai_responses",),
             model_list=("gpt-5-codex",),
             max_retries=1,
         )
