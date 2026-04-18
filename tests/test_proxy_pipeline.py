@@ -43,7 +43,11 @@ class FakeLogger:
 
 
 class FakeConfigManager:
-    pass
+    def __init__(self, *, llm_request_debug_enabled: bool = False) -> None:
+        self._llm_request_debug_enabled = llm_request_debug_enabled
+
+    def is_llm_request_debug_enabled(self) -> bool:
+        return self._llm_request_debug_enabled
 
 
 class FakeStreamResponse:
@@ -237,11 +241,11 @@ class ProxyServicePipelineTests(unittest.TestCase):
             for chunk in chunks
         )
 
-    def _build_service(self):
+    def _build_service(self, *, llm_request_debug_enabled: bool = False):
         app = Flask(__name__)
         ctx = AppContext(
             logger=FakeLogger(),
-            config_manager=FakeConfigManager(),
+            config_manager=FakeConfigManager(llm_request_debug_enabled=llm_request_debug_enabled),
             root_path=Path(__file__).resolve().parents[1],
             flask_app=app,
         )
@@ -366,6 +370,64 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(2, captured_meta["completion_tokens"])
         self.assertEqual(5, captured_meta["total_tokens"])
         self.assertTrue(fake_response.closed)
+
+    def test_proxy_service_skips_trace_buffering_when_debug_logging_disabled(self) -> None:
+        app, service = self._build_service(llm_request_debug_enabled=False)
+        provider = LLMProvider(
+            name="responses-upstream",
+            api="https://example.com/v1/responses",
+            transport="http",
+            source_format="openai_responses",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","created_at":123,"model":"gpt-4.1"}}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, body, args, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        coerce_calls: list[bytes] = []
+
+        def record_trace_bytes(payload):
+            coerce_calls.append(payload if isinstance(payload, bytes) else str(payload).encode("utf-8"))
+            return payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
+
+        original_coerce_trace_bytes = ProxyService._coerce_trace_bytes
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+        ProxyService._coerce_trace_bytes = staticmethod(record_trace_bytes)  # type: ignore[assignment]
+        try:
+            with app.test_request_context("/v1/chat/completions"):
+                response, status_code, failure_info = service.proxy_request(
+                    provider,
+                    {
+                        "model": "responses-upstream/gpt-4.1",
+                        "messages": [{"role": "user", "content": "Hello"}],
+                        "stream": True,
+                    },
+                    {},
+                    trace_id="trace-disabled",
+                )
+                stream_body = self._collect_response_body(response)
+        finally:
+            ProxyService._coerce_trace_bytes = original_coerce_trace_bytes  # type: ignore[assignment]
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual([], coerce_calls)
+        self.assertIn(b"data: [DONE]", stream_body)
 
     def test_proxy_service_translates_openai_chat_stream_to_openai_responses(self) -> None:
         app, service = self._build_service()
