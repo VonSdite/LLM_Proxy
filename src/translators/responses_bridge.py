@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict
 
 from ..proxy_core.contracts import DownstreamChunk
+from .event_chunk_utils import build_json_event_chunk
 from .tool_result_utils import normalize_tool_result_content
 
 
@@ -649,7 +650,7 @@ def convert_openai_chat_response_to_responses(
 
 
 def _emit_event(event_name: str, payload: Dict[str, Any]) -> DownstreamChunk:
-    return DownstreamChunk(kind="json", payload=payload, event=event_name)
+    return build_json_event_chunk(event_name, payload)
 
 
 def _next_sequence(state: Dict[str, Any]) -> int:
