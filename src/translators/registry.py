@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from ..proxy_core.contracts import DownstreamChunk, StreamEvent
 from ..utils.compat import Protocol
+from .event_chunk_utils import build_json_event_chunk
 from .claude_bridge import (
     convert_claude_request_to_openai_chat_request as _convert_claude_request_to_openai_chat_request,
     convert_openai_chat_response_to_claude as _convert_openai_chat_response_to_claude,
@@ -68,7 +69,7 @@ def _translate_passthrough_stream_event(
         event_name = event.event
         if not event_name and isinstance(event.payload, dict):
             event_name = str(event.payload.get("type") or "").strip() or None
-        return [DownstreamChunk(kind="json", payload=event.payload, event=event_name)]
+        return [build_json_event_chunk(event_name, event.payload)]
     return [DownstreamChunk(kind="text", payload=event.payload, event=event.event)]
 
 
