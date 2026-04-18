@@ -2,6 +2,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from typing import Any
 
 from flask import Flask
 
@@ -10,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.application.app_context import AppContext
 from src.executors import OpenedUpstreamResponse
 from src.external import LLMProvider
+from src.hooks import BaseHook, HookAbortError
 from src.proxy_core import decode_stream_events
 from src.services.proxy_service import ProxyService
 from src.translators import (
@@ -63,6 +65,21 @@ class FakeStreamResponse:
 
     def close(self) -> None:
         self.closed = True
+
+
+class AbortOnResponseHook(BaseHook):
+    def __init__(self, *, message: str, status_code: int, error_type: str) -> None:
+        self._message = message
+        self._status_code = status_code
+        self._error_type = error_type
+
+    def response_guard(self, ctx: Any, body: Any) -> Any:
+        del ctx, body
+        raise HookAbortError(
+            self._message,
+            status_code=self._status_code,
+            error_type=self._error_type,
+        )
 
 
 class StreamDecoderTests(unittest.TestCase):
@@ -428,6 +445,118 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(200, status_code)
         self.assertEqual([], coerce_calls)
         self.assertIn(b"data: [DONE]", stream_body)
+
+    def test_stream_hook_abort_emits_openai_chat_error_chunk_and_done(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="responses-upstream",
+            api="https://example.com/v1/responses",
+            transport="http",
+            source_format="openai_responses",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            hook=AbortOnResponseHook(
+                message="blocked by response guard",
+                status_code=451,
+                error_type="hook_blocked",
+            ),
+        )
+        captured_meta: dict[str, object] = {}
+        fake_response = FakeStreamResponse(
+            [
+                b'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","created_at":123,"model":"gpt-4.1"}}\n\n',
+                b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg_resp_1_0","output_index":0,"delta":"Hello"}\n\n',
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, body, args, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "responses-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+                on_complete=captured_meta.update,
+            )
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(b'"message": "blocked by response guard"', stream_body)
+        self.assertIn(b'"type": "hook_blocked"', stream_body)
+        self.assertIn(b"data: [DONE]", stream_body)
+        self.assertEqual("gpt-4.1", captured_meta["response_model"])
+        self.assertTrue(fake_response.closed)
+
+    def test_stream_hook_abort_emits_responses_failed_event(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("openai_responses",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            hook=AbortOnResponseHook(
+                message="blocked by response guard",
+                status_code=451,
+                error_type="hook_blocked",
+            ),
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":123,"model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}\n\n',
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, body, args, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/responses"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "instructions": "Be brief",
+                    "input": "Hello",
+                    "stream": True,
+                },
+                {},
+            )
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(b"event: response.failed", stream_body)
+        self.assertIn(b'"status": "failed"', stream_body)
+        self.assertIn(b'"message": "blocked by response guard"', stream_body)
+        self.assertNotIn(b"[DONE]", stream_body)
+        self.assertTrue(fake_response.closed)
 
     def test_proxy_service_translates_openai_chat_stream_to_openai_responses(self) -> None:
         app, service = self._build_service()
