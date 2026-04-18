@@ -13,7 +13,6 @@ class AuthenticationService:
     """处理管理员登录与内存会话管理。"""
 
     def __init__(self, ctx: AppContext):
-        self._ctx = ctx
         self._config_manager = ctx.config_manager
         self._logger: Logger = ctx.logger
         self._sessions: Dict[str, Dict[str, Any]] = {}
@@ -47,27 +46,15 @@ class AuthenticationService:
         self._cleanup_expired_sessions()
 
         session_token = secrets.token_urlsafe(32)
-        expires = datetime.now() + timedelta(seconds=self._session_max_age)
+        expires_at = datetime.now() + timedelta(seconds=self._session_max_age)
 
-        self._sessions[session_token] = {"username": username, "expires": expires}
+        self._sessions[session_token] = {"username": username, "expires": expires_at}
         self._logger.info(f"Created session for user={username!r}")
         return session_token
 
     def validate_session(self, session_token: Optional[str]) -> bool:
         """校验会话是否存在且未过期。"""
-        if not session_token:
-            return False
-
-        session = self._sessions.get(session_token)
-        if not session:
-            return False
-
-        if datetime.now() > session["expires"]:
-            del self._sessions[session_token]
-            self._logger.info("Session expired and removed")
-            return False
-
-        return True
+        return self._get_active_session(session_token) is not None
 
     def destroy_session(self, session_token: str) -> None:
         """销毁指定会话。"""
@@ -83,18 +70,9 @@ class AuthenticationService:
 
     def get_session_username(self, session_token: Optional[str]) -> Optional[str]:
         """根据 session token 获取当前登录用户名。"""
-        if not session_token:
+        session = self._get_active_session(session_token)
+        if session is None:
             return None
-
-        session = self._sessions.get(session_token)
-        if not session:
-            return None
-
-        if datetime.now() > session["expires"]:
-            del self._sessions[session_token]
-            self._logger.info("Session expired and removed")
-            return None
-
         username = session.get("username")
         return str(username) if username else None
 
@@ -115,3 +93,19 @@ class AuthenticationService:
             del self._sessions[token]
         if expired:
             self._logger.info(f"Expired sessions cleaned: count={len(expired)}")
+
+    def _get_active_session(self, session_token: Optional[str]) -> Optional[Dict[str, Any]]:
+        """读取有效会话；过期会话会被顺手清理。"""
+        if not session_token:
+            return None
+
+        session = self._sessions.get(session_token)
+        if not session:
+            return None
+
+        if datetime.now() > session["expires"]:
+            del self._sessions[session_token]
+            self._logger.info("Session expired and removed")
+            return None
+
+        return session

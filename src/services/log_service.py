@@ -16,7 +16,6 @@ class LogService:
     """封装请求日志相关业务逻辑。"""
 
     def __init__(self, ctx: AppContext, repository: LogRepository):
-        self._ctx = ctx
         self._logger = ctx.logger
         self._repository = repository
 

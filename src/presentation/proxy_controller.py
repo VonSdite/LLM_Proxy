@@ -84,7 +84,6 @@ class ProxyController:
         log_service: LogServiceLike,
         provider_manager: ProviderManagerLike,
     ):
-        self._ctx = ctx
         self._app = ctx.flask_app
         self._logger = ctx.logger
         self._config_manager: ConfigManagerLike = ctx.config_manager

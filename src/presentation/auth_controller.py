@@ -4,31 +4,22 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from flask import jsonify, make_response, redirect, render_template, request
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..services import AuthenticationService
+from .controller_utils import get_json_object
 
 
 class AuthenticationController:
     """处理登录/登出相关路由。"""
 
     def __init__(self, ctx: AppContext, auth_service: AuthenticationService):
-        self._ctx = ctx
         self._app = ctx.flask_app
         self._logger = ctx.logger
         self._auth_service = auth_service
         self._register_routes()
-
-    @staticmethod
-    def _get_request_payload() -> dict[str, Any]:
-        payload = request.get_json(silent=True)
-        if isinstance(payload, dict):
-            return dict(payload)
-        return {}
 
     def _register_routes(self) -> None:
         self._app.route('/login')(self.login_page)
@@ -50,7 +41,7 @@ class AuthenticationController:
         if not self._auth_service.is_auth_enabled():
             return jsonify({'message': 'Authentication not enabled'}), 200
 
-        data = self._get_request_payload()
+        data = get_json_object()
         username = data.get('username')
         password = data.get('password')
 

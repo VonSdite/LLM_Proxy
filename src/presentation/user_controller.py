@@ -4,14 +4,13 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from flask import jsonify, request
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..services import AuthenticationService, UserService
 from ..utils import is_valid_ip, normalize_ip
+from .controller_utils import build_value_error_response, get_json_object
 from .decorators import require_authentication
 
 
@@ -19,20 +18,12 @@ class UserController:
     """处理用户管理 API。"""
 
     def __init__(self, ctx: AppContext, user_service: UserService, auth_service: AuthenticationService):
-        self._ctx = ctx
         self._app = ctx.flask_app
         self._logger = ctx.logger
         self._config_manager = ctx.config_manager
         self._user_service = user_service
         self._auth_service = auth_service
         self._register_routes()
-
-    @staticmethod
-    def _get_request_payload() -> dict[str, Any]:
-        payload = request.get_json(silent=True)
-        if isinstance(payload, dict):
-            return dict(payload)
-        return {}
 
     def _register_routes(self) -> None:
         auth = require_authentication(self._auth_service)
@@ -88,7 +79,7 @@ class UserController:
 
     def create_user(self) -> ResponseReturnValue:
         try:
-            data = self._get_request_payload()
+            data = get_json_object()
             username = data.get('username')
             ip_address = data.get('ip_address')
 
@@ -123,7 +114,7 @@ class UserController:
 
     def update_user(self, user_id: int) -> ResponseReturnValue:
         try:
-            data = self._get_request_payload()
+            data = get_json_object()
             if not data:
                 self._logger.warning('Update user rejected: no payload, user_id=%s', user_id)
                 return jsonify({'error': 'No data provided'}), 400
@@ -164,14 +155,14 @@ class UserController:
             self._logger.info('Update user succeeded: user_id=%s', user_id)
             return jsonify({'message': 'User updated successfully'})
         except ValueError as exc:
-            return jsonify({'error': str(exc)}), 400
+            return build_value_error_response(exc)
         except Exception as exc:
             self._logger.error('Error updating user: %s', exc)
             return jsonify({'error': str(exc)}), 500
 
     def batch_users(self) -> ResponseReturnValue:
         try:
-            payload = self._get_request_payload()
+            payload = get_json_object()
             action = str(payload.get('action') or '').strip().lower()
             if action != 'set_model_permissions':
                 raise ValueError(f'Unsupported user batch action: {action or "<empty>"}')
@@ -187,9 +178,7 @@ class UserController:
             )
             return jsonify(result)
         except ValueError as exc:
-            message = str(exc)
-            status_code = 404 if 'not found' in message.lower() else 400
-            return jsonify({'error': message}), status_code
+            return build_value_error_response(exc)
         except Exception as exc:
             self._logger.error('Error applying user batch action: %s', exc)
             return jsonify({'error': str(exc)}), 500

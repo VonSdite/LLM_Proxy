@@ -4,11 +4,14 @@
 
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from flask import jsonify, make_response, render_template, request
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..services import AuthenticationService, LogService, SettingsService
+from .controller_utils import require_json_object
 from .decorators import require_authentication
 
 
@@ -22,7 +25,6 @@ class WebController:
         settings_service: SettingsService,
         auth_service: AuthenticationService,
     ):
-        self._ctx = ctx
         self._app = ctx.flask_app
         self._logger = ctx.logger
         self._config_manager = ctx.config_manager
@@ -37,7 +39,7 @@ class WebController:
         self._app.route("/")(auth(self.home))
         self._app.route("/providers")(auth(self.providers_page))
         self._app.route("/users")(auth(self.users_page))
-        self._app.route("/statistics")(auth(self.index))
+        self._app.route("/statistics")(auth(self.statistics_page))
         self._app.route("/settings")(auth(self.settings_page))
 
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
@@ -64,7 +66,7 @@ class WebController:
     def home(self) -> str:
         return self.providers_page()
 
-    def index(self) -> str:
+    def statistics_page(self) -> str:
         return render_template(
             "index.html",
             active_page="index",
@@ -186,20 +188,23 @@ class WebController:
             self._logger.error("Error getting system settings: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
+    def _apply_settings_update(
+        self,
+        update_func: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> ResponseReturnValue:
+        payload = require_json_object()
+        result = update_func(payload)
+        if result.get("auth_config_changed"):
+            self._auth_service.clear_sessions()
+
+        response = make_response(jsonify(result))
+        if result.get("auth_config_changed"):
+            response.delete_cookie("session_token")
+        return response
+
     def update_system_settings(self) -> ResponseReturnValue:
         try:
-            payload = request.get_json(silent=True)
-            if not isinstance(payload, dict):
-                return jsonify({"error": "Request body must be a JSON object"}), 400
-
-            result = self._settings_service.update_system_settings(payload)
-            if result.get("auth_config_changed"):
-                self._auth_service.clear_sessions()
-
-            response = make_response(jsonify(result))
-            if result.get("auth_config_changed"):
-                response.delete_cookie("session_token")
-            return response
+            return self._apply_settings_update(self._settings_service.update_system_settings)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -208,18 +213,7 @@ class WebController:
 
     def update_basic_settings(self) -> ResponseReturnValue:
         try:
-            payload = request.get_json(silent=True)
-            if not isinstance(payload, dict):
-                return jsonify({"error": "Request body must be a JSON object"}), 400
-
-            result = self._settings_service.update_basic_settings(payload)
-            if result.get("auth_config_changed"):
-                self._auth_service.clear_sessions()
-
-            response = make_response(jsonify(result))
-            if result.get("auth_config_changed"):
-                response.delete_cookie("session_token")
-            return response
+            return self._apply_settings_update(self._settings_service.update_basic_settings)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -228,9 +222,7 @@ class WebController:
 
     def update_debug_settings(self) -> ResponseReturnValue:
         try:
-            payload = request.get_json(silent=True)
-            if not isinstance(payload, dict):
-                return jsonify({"error": "Request body must be a JSON object"}), 400
+            payload = require_json_object()
             return jsonify(self._settings_service.update_debug_settings(payload))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
