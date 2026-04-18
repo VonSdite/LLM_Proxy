@@ -19,7 +19,7 @@ from ..application.app_context import AppContext
 from ..config.auth_group_manager import AuthGroupManager, AuthGroupSelectionError, SelectedAuthEntry
 from ..executors import OpenedUpstreamResponse, build_default_executor_registry
 from ..external import LLMProvider
-from ..hooks import HookContext, HookErrorType
+from ..hooks import HookAbortError, HookContext, HookErrorType
 from ..proxy_core import (
     DownstreamChunk,
     decode_stream_events,
@@ -458,19 +458,29 @@ class ProxyService:
             *,
             error_type: Optional[HookErrorType] = None,
             error_message: Optional[str] = None,
+            hook_abort: Optional[HookAbortError] = None,
         ) -> None:
             nonlocal completed
             if completed:
                 return
             completed = True
             if finalize_attempt is not None:
-                finalize_attempt(
-                    status_code=(opened.status_code if error_type is None else None),
-                    error_type=error_type,
-                    error_message=error_message,
-                    usage=(meta if error_type is None else None),
-                )
-            if on_complete and error_type is None:
+                if hook_abort is not None:
+                    if meta.get("response_model") is None:
+                        meta["response_model"] = request_ctx.upstream_model or request_ctx.request_model
+                    finalize_attempt(
+                        status_code=opened.status_code,
+                        error_message=hook_abort.message,
+                        usage=meta,
+                    )
+                else:
+                    finalize_attempt(
+                        status_code=(opened.status_code if error_type is None else None),
+                        error_type=error_type,
+                        error_message=error_message,
+                        usage=(meta if error_type is None else None),
+                    )
+            if on_complete and (error_type is None or hook_abort is not None):
                 try:
                     on_complete(meta)
                 except Exception as exc:
@@ -480,7 +490,9 @@ class ProxyService:
             nonlocal terminal_sent
             state: Dict[str, Any] = {}
             completion_error_type: Optional[HookErrorType] = None
+            completion_trace_error_type: Optional[str] = None
             completion_error_message: Optional[str] = None
+            completion_hook_abort: Optional[HookAbortError] = None
             try:
                 upstream_chunks = self._iter_stream_chunks_with_trace(
                     response.iter_content(chunk_size=None),
@@ -528,18 +540,44 @@ class ProxyService:
                     if encoded_terminal:
                         self._extend_trace_buffer(downstream_payload_buffer, encoded_terminal)
                         yield encoded_terminal
+            except HookAbortError as exc:
+                completion_hook_abort = exc
+                completion_error_message = exc.message
+                completion_trace_error_type = exc.error_type
+                self._logger.warning(
+                    "Stream aborted by hook: provider=%s type=%s status=%s message=%s",
+                    provider.name,
+                    exc.error_type,
+                    exc.status_code,
+                    exc.message,
+                )
+                for abort_chunk in self._build_stream_hook_abort_chunks(
+                    request_ctx=request_ctx,
+                    downstream_target_format=downstream_target_format,
+                    message=exc.message,
+                    error_type=exc.error_type,
+                ):
+                    if is_terminal_chunk(abort_chunk, downstream_target_format):
+                        terminal_sent = True
+                    encoded_chunk = encode_downstream_chunk(abort_chunk, downstream_target_format)
+                    if encoded_chunk:
+                        self._extend_trace_buffer(downstream_payload_buffer, encoded_chunk)
+                        yield encoded_chunk
             except requests.exceptions.RequestException as exc:
                 completion_error_type = self._classify_request_error(exc)
+                completion_trace_error_type = completion_error_type.value
                 completion_error_message = str(exc)
                 self._logger.error("Streamed HTTP upstream error: provider=%s error=%s", provider.name, exc)
                 raise
             except (websocket.WebSocketException, OSError) as exc:
                 completion_error_type = self._classify_websocket_error(exc)
+                completion_trace_error_type = completion_error_type.value
                 completion_error_message = str(exc)
                 self._logger.error("Streamed WebSocket upstream error: provider=%s error=%s", provider.name, exc)
                 raise
             except Exception as exc:
                 completion_error_type = HookErrorType.TRANSPORT_ERROR
+                completion_trace_error_type = completion_error_type.value
                 completion_error_message = str(exc)
                 self._logger.error("Streamed upstream processing error: provider=%s error=%s", provider.name, exc)
                 raise
@@ -568,12 +606,8 @@ class ProxyService:
                             target_format=downstream_target_format,
                             status_code=opened.status_code,
                             stream=True,
-                            completed=completion_error_type is None,
-                            error_type=(
-                                completion_error_type.value
-                                if completion_error_type is not None
-                                else None
-                            ),
+                            completed=completion_trace_error_type is None,
+                            error_type=completion_trace_error_type,
                         )
                         self._log_trace_entry(
                             stage="downstream_response",
@@ -592,16 +626,13 @@ class ProxyService:
                             target_format=downstream_target_format,
                             status_code=opened.status_code,
                             stream=True,
-                            completed=completion_error_type is None,
-                            error_type=(
-                                completion_error_type.value
-                                if completion_error_type is not None
-                                else None
-                            ),
+                            completed=completion_trace_error_type is None,
+                            error_type=completion_trace_error_type,
                         )
                     safe_on_complete(
                         error_type=completion_error_type,
                         error_message=completion_error_message,
+                        hook_abort=completion_hook_abort,
                     )
 
         return Response(
@@ -807,6 +838,65 @@ class ProxyService:
         if isinstance(payload, (dict, list)):
             return DownstreamChunk(kind="json", payload=payload, event=chunk.event)
         return DownstreamChunk(kind="text", payload=payload, event=chunk.event)
+
+    @staticmethod
+    def _build_stream_hook_abort_chunks(
+        *,
+        request_ctx: HookContext,
+        downstream_target_format: str,
+        message: str,
+        error_type: str,
+    ) -> list[DownstreamChunk]:
+        normalized_target_format = str(downstream_target_format or "").strip().lower()
+        if normalized_target_format == "claude_chat":
+            return [
+                DownstreamChunk(
+                    kind="json",
+                    event="error",
+                    payload={
+                        "type": "error",
+                        "error": {
+                            "type": error_type,
+                            "message": message,
+                        },
+                    },
+                )
+            ]
+        if normalized_target_format in {"openai_responses", "codex"}:
+            return [
+                DownstreamChunk(
+                    kind="json",
+                    event="response.failed",
+                    payload={
+                        "type": "response.failed",
+                        "response": {
+                            "id": f"hook_abort_{request_ctx.provider_name}",
+                            "object": "response",
+                            "status": "failed",
+                            "error": {
+                                "message": message,
+                                "type": error_type,
+                                "code": error_type,
+                            },
+                            "model": request_ctx.upstream_model or request_ctx.request_model,
+                        },
+                    },
+                )
+            ]
+        return [
+            DownstreamChunk(
+                kind="json",
+                payload={
+                    "error": {
+                        "message": message,
+                        "type": error_type,
+                        "param": None,
+                        "code": error_type,
+                    }
+                },
+            ),
+            DownstreamChunk(kind="done"),
+        ]
 
     def _open_upstream_response(
         self,
