@@ -1322,6 +1322,10 @@
     gap: 0 16px;
 }
 
+.providers-page .provider-editor-modal .provider-form-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .providers-page .auth-group-base-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1330,6 +1334,10 @@
 
 .providers-page .modal-dialog {
     max-width: min(1040px, calc(100vw - 32px));
+}
+
+.providers-page .provider-editor-modal .modal-dialog {
+    max-width: min(1240px, calc(100vw - 32px));
 }
 
 .providers-page .auth-entry-yaml-modal-dialog {
@@ -1382,77 +1390,7 @@
 }
 
 .providers-page .provider-editor-modal .provider-model-list-section {
-    margin-bottom: 8px !important;
-}
-
-.providers-page .provider-modal-tabs {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 3px;
-    margin-bottom: 12px;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 12px;
-    background: rgba(15, 23, 42, 0.05);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
-}
-
-.providers-page .provider-modal-tab-btn {
-    min-width: 98px;
-    min-height: 32px;
-    padding: 0 14px;
-    border: 1px solid transparent;
-    border-radius: 9px;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
-    box-shadow: none;
-    transition: background-color var(--transition), color var(--transition), border-color var(--transition), box-shadow var(--transition), transform var(--transition);
-}
-
-.providers-page .provider-modal-tab-btn:hover,
-.providers-page .provider-modal-tab-btn:focus-visible {
-    color: var(--nav-tab-hover-text);
-    background: rgba(58, 127, 237, 0.08);
-    border-color: rgba(58, 127, 237, 0.18);
-    outline: none;
-}
-
-.providers-page .provider-modal-tab-btn.is-active {
-    color: #fff;
-    background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 92%, white 8%), var(--primary));
-    border-color: rgba(58, 127, 237, 0.95);
-    box-shadow: 0 4px 10px rgba(58, 127, 237, 0.18);
-}
-
-.providers-page .provider-modal-tab-panel[hidden] {
-    display: none !important;
-}
-
-:root[data-theme="dark"] .providers-page .provider-modal-tabs {
-    border-color: rgba(72, 88, 108, 0.72);
-    background: rgba(8, 12, 18, 0.78);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-
-:root[data-theme="dark"] .providers-page .provider-modal-tab-btn {
-    color: #b2bdca;
-}
-
-:root[data-theme="dark"] .providers-page .provider-modal-tab-btn:hover,
-:root[data-theme="dark"] .providers-page .provider-modal-tab-btn:focus-visible {
-    color: var(--nav-tab-hover-text);
-    background: rgba(88, 166, 255, 0.1);
-    border-color: rgba(88, 166, 255, 0.16);
-}
-
-:root[data-theme="dark"] .providers-page .provider-modal-tab-btn.is-active {
-    color: #fff;
-    background: linear-gradient(180deg, rgba(64, 132, 240, 0.95), rgba(43, 107, 214, 0.95));
-    border-color: rgba(88, 166, 255, 0.54);
-    box-shadow: 0 8px 18px rgba(21, 37, 61, 0.45);
+    margin: 2px 0 8px !important;
 }
 
 .providers-page .modal-title {
@@ -2849,6 +2787,12 @@
 
     .providers-page .providers-table {
         min-width: 980px;
+    }
+}
+
+@media (min-width: 961px) and (max-width: 1240px) {
+    .providers-page .provider-editor-modal .provider-form-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
