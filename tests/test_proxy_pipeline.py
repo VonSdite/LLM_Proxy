@@ -2,7 +2,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
 from flask import Flask
 
@@ -14,6 +14,7 @@ from src.external import LLMProvider
 from src.hooks import BaseHook, HookAbortError
 from src.proxy_core import decode_stream_events
 from src.services.proxy_service import ProxyService
+from src.services.upstream_request_builder import build_upstream_request
 from src.translators import (
     ClaudeChatTranslator,
     ClaudePassthroughTranslator,
@@ -77,6 +78,17 @@ class AbortOnResponseHook(BaseHook):
             status_code=self._status_code,
             error_type=self._error_type,
         )
+
+
+class RewriteRequestModelHook(BaseHook):
+    def __init__(self, target_model: str) -> None:
+        self._target_model = target_model
+
+    def request_guard(self, ctx: Any, body: Dict[str, Any]) -> Dict[str, Any]:
+        del ctx
+        guarded_body = dict(body)
+        guarded_body["model"] = self._target_model
+        return guarded_body
 
 
 class StreamDecoderTests(unittest.TestCase):
@@ -297,6 +309,91 @@ class ProxyServicePipelineTests(unittest.TestCase):
             flask_app=app,
         )
         return app, ProxyService(ctx)
+
+    def test_build_upstream_request_uses_model_rewritten_by_request_guard(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            hook=RewriteRequestModelHook("demo/rewritten-model"),
+        )
+
+        built_request = build_upstream_request(
+            root_path=Path(__file__).resolve().parents[1],
+            logger=FakeLogger(),
+            provider=provider,
+            request_model="demo/original-model",
+            upstream_model="original-model",
+            provider_target_format="openai_chat",
+            request_data={
+                "model": "demo/original-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": True,
+            },
+            request_headers={"content-type": "application/json"},
+            translator=OpenAIChatTranslator(),
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+            auth_group_name=None,
+            auth_entry_id=None,
+        )
+
+        self.assertEqual("demo/rewritten-model", built_request.guarded_body["model"])
+        self.assertEqual("rewritten-model", built_request.translated_body["model"])
+        self.assertEqual("rewritten-model", built_request.request_ctx.upstream_model)
+
+    def test_proxy_service_sends_model_rewritten_by_request_guard_upstream(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("original-model", "rewritten-model"),
+            max_retries=1,
+            hook=RewriteRequestModelHook("demo/rewritten-model"),
+        )
+        captured: dict[str, Any] = {}
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/original-model",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+            )
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual("rewritten-model", captured["body"]["model"])
+        self.assertIn(b"data: [DONE]", stream_body)
+        self.assertTrue(fake_response.closed)
 
     def test_proxy_service_translates_openai_responses_stream_to_openai_chat(self) -> None:
         app, service = self._build_service()

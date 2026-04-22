@@ -217,13 +217,15 @@ class ProxyService:
 
                 headers, guarded_body, translated_body, request_ctx = build_request(attempt, selected_auth)
                 requested_stream = request_ctx.stream
+                effective_upstream_model = request_ctx.upstream_model
+                translated_upstream_model = translated_body["model"]
                 self._logger.info(
                     "Proxying upstream request: provider=%s transport=%s source=%s target=%s model=%s attempt=%s/%s stream=%s auth_group=%s auth_entry=%s",
                     provider.name,
                     provider.transport,
                     provider.source_format,
                     downstream_target_format,
-                    translated_body.get("model"),
+                    translated_upstream_model,
                     attempt + 1,
                     max_retries,
                     requested_stream,
@@ -243,7 +245,7 @@ class ProxyService:
                     client_ip=client_ip,
                     provider_name=provider.name,
                     request_model=requested_model,
-                    upstream_model=str(translated_body.get("model") or upstream_model),
+                    upstream_model=translated_upstream_model,
                     target_format=downstream_target_format,
                     stream=requested_stream,
                     attempt=attempt + 1,
@@ -276,7 +278,7 @@ class ProxyService:
                         route_name=route_name,
                         client_ip=client_ip,
                         request_model=requested_model,
-                        upstream_model=upstream_model,
+                        upstream_model=effective_upstream_model,
                     )
                     finalize_attempt(
                         status_code=opened.status_code,
@@ -313,7 +315,7 @@ class ProxyService:
                         route_name=route_name,
                         client_ip=client_ip,
                         request_model=requested_model,
-                        upstream_model=upstream_model,
+                        upstream_model=effective_upstream_model,
                     )
                     finalize_attempt(
                         status_code=opened.status_code,
