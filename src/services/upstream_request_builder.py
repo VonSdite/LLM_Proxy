@@ -63,11 +63,22 @@ def build_upstream_request(
 
     headers = provider.apply_header_hook(request_ctx, dict(request_headers))
     guarded_body = provider.apply_request_guard(request_ctx, dict(request_data))
+    guarded_upstream_model = _resolve_guarded_upstream_model(
+        provider.name,
+        guarded_body,
+        upstream_model,
+    )
+    if guarded_upstream_model != request_ctx.upstream_model:
+        request_ctx = replace(request_ctx, upstream_model=guarded_upstream_model)
     guarded_stream = bool(guarded_body.get("stream", False))
     if guarded_stream != request_ctx.stream:
         request_ctx = replace(request_ctx, stream=guarded_stream)
 
-    translated_body = translator.translate_request(upstream_model, guarded_body, guarded_stream)
+    translated_body = translator.translate_request(
+        guarded_upstream_model,
+        guarded_body,
+        guarded_stream,
+    )
     ensure_upstream_usage_capture(provider.source_format, translated_body, guarded_stream)
     return BuiltUpstreamRequest(
         headers=headers,
@@ -75,3 +86,23 @@ def build_upstream_request(
         translated_body=translated_body,
         request_ctx=request_ctx,
     )
+
+
+def _resolve_guarded_upstream_model(
+    provider_name: str,
+    guarded_body: Dict[str, Any],
+    fallback_model: str,
+) -> str:
+    """解析 request_guard 修改后的实际上游模型名。"""
+    guarded_model_value = guarded_body.get("model")
+    if not isinstance(guarded_model_value, str):
+        return fallback_model
+
+    normalized_guarded_model = guarded_model_value.strip()
+    if not normalized_guarded_model:
+        return fallback_model
+
+    provider_prefix = f"{provider_name}/"
+    if normalized_guarded_model.startswith(provider_prefix):
+        return normalized_guarded_model[len(provider_prefix):]
+    return normalized_guarded_model
