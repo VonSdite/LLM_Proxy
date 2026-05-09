@@ -15,6 +15,7 @@
   - `POST /v1/responses`
   - `POST /v1/messages`
   - `GET /v1/models`
+  - `OPTIONS /v1/*` CORS 预检
 
 这个版本不保留 Gemini / Antigravity。配置加载阶段会清理少量历史废弃字段并回写配置文件；除此之外不再继续扩展旧字段兼容逻辑。
 
@@ -26,6 +27,7 @@
 
 ```text
 downstream request
+  -> data-plane CORS preflight / response headers
   -> controller
   -> provider lookup
   -> header_hook / request_guard
@@ -48,6 +50,9 @@ downstream request
 - `ProxyController`
   - 根据当前 route family 选择下游接口协议
   - 构造标准错误体
+- `DataPlaneCors`
+  - 只为 `/v1/*` 数据平面添加 CORS 响应头
+  - 直接处理 `OPTIONS /v1/*` 预检请求
 - `WebController`
   - 提供统计页面与系统设置页面
   - 暴露系统设置读取与保存接口
@@ -116,6 +121,8 @@ route family 直接决定当前请求的下游接口协议：
 
 - `source_format`
 - `transport`
+
+`OPTIONS /v1/*` 由表现层 CORS 钩子直接返回 `204`，用于支持浏览器、Obsidian 插件等第三方应用的跨域预检，不进入 provider lookup、白名单校验或上游代理链路。实际 `/v1/*` 响应也会附加 CORS 响应头；后台 `/api/*` 和管理页面不开放跨域。
 
 ### 3.2 Control-Plane Settings Contract
 
