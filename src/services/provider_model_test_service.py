@@ -304,7 +304,7 @@ class ProviderModelTestService:
                 for chunk in translated_chunks:
                     if chunk.kind == "json" and isinstance(chunk.payload, dict):
                         self._update_meta_from_payload(meta, chunk.payload)
-                        if first_token_at is None and self._has_openai_chat_text_delta(chunk.payload):
+                        if first_token_at is None and self._has_openai_chat_output_delta(chunk.payload):
                             first_token_at = time.perf_counter()
                         error_message = self._extract_error_message(chunk.payload)
                         if error_message:
@@ -457,7 +457,7 @@ class ProviderModelTestService:
             meta["total_tokens"] = int(meta["prompt_tokens"]) + int(meta["completion_tokens"])
 
     @staticmethod
-    def _has_openai_chat_text_delta(payload: Dict[str, Any]) -> bool:
+    def _has_openai_chat_output_delta(payload: Dict[str, Any]) -> bool:
         choices = payload.get("choices")
         if not isinstance(choices, list):
             return False
@@ -467,9 +467,10 @@ class ProviderModelTestService:
             delta = choice.get("delta")
             if not isinstance(delta, dict):
                 continue
-            content = delta.get("content")
-            if isinstance(content, str) and content:
-                return True
+            for field_name in ("content", "reasoning_content"):
+                content = delta.get(field_name)
+                if isinstance(content, str) and content:
+                    return True
         return False
 
     @staticmethod

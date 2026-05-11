@@ -2022,11 +2022,22 @@
         }
 
         function formatModelTestMetric(value, suffix) {
+            if (value === null || value === undefined || value === '') {
+                return '--';
+            }
             const numericValue = Number(value);
             if (!Number.isFinite(numericValue)) {
                 return '--';
             }
             return `${numericValue.toFixed(2)} ${suffix}`;
+        }
+
+        function normalizeModelTestMetricValue(value) {
+            if (value === null || value === undefined || value === '') {
+                return null;
+            }
+            const numericValue = Number(value);
+            return Number.isFinite(numericValue) ? numericValue : null;
         }
 
         function formatModelTestInlineError(errorText) {
@@ -2455,12 +2466,8 @@
             }
 
             row.available = result.available === true;
-            row.firstTokenLatencyMs = Number.isFinite(Number(result.first_token_latency_ms))
-                ? Number(result.first_token_latency_ms)
-                : null;
-            row.tps = Number.isFinite(Number(result.tps))
-                ? Number(result.tps)
-                : null;
+            row.firstTokenLatencyMs = normalizeModelTestMetricValue(result.first_token_latency_ms);
+            row.tps = normalizeModelTestMetricValue(result.tps);
             row.responseModel = typeof result.response_model === 'string' ? result.response_model : '';
             row.error = typeof result.error === 'string' ? result.error : '';
         }
