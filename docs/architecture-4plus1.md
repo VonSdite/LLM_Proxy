@@ -392,6 +392,7 @@ sequenceDiagram
     Executor-->>Service: stream events
     Service->>Translator: translate stream events
     Translator-->>Service: openai_chat chunks
+    Service->>Service: encode downstream chunks; reasoning_content -> reasoning
     Service-->>Controller: SSE response
     Controller-->>Client: chat.completion.chunk stream
 ```
