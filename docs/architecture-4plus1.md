@@ -105,6 +105,8 @@ Hook 组件除了 header / guard，还会收到最小重试上下文：
 | `openai_responses` | OpenAI Responses 语义 |
 | `claude_chat` | Anthropic Messages 语义 |
 
+OpenAI Chat SSE 下游编码会移除空的 `choices[].delta.tool_calls`，避免兼容客户端把空列表误判为工具调用开始；非空工具调用保持原样。
+
 ## 3. Process View
 
 ### 3.1 Downstream Route Contract
@@ -392,6 +394,7 @@ sequenceDiagram
     Executor-->>Service: stream events
     Service->>Translator: translate stream events
     Translator-->>Service: openai_chat chunks
+    Service->>Service: 编码下游块并移除空 delta.tool_calls
     Service-->>Controller: SSE response
     Controller-->>Client: chat.completion.chunk stream
 ```
