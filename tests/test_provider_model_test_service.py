@@ -105,6 +105,40 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertIsNotNone(result["results"][0]["first_token_latency_ms"])
         self.assertIsNotNone(result["results"][0]["tps"])
 
+    def test_openai_chat_stream_reasoning_delta_counts_as_first_token(self) -> None:
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"demo-model","choices":[{"delta":{"content":null,"reasoning_content":"The"},"index":0}],"usage":{"prompt_tokens":12,"completion_tokens":1,"total_tokens":13}}\n\n',
+                b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"demo-model","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            del provider, headers, body, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        result = self.service.test_models(
+            {
+                "api": "https://example.com/v1/chat/completions",
+                "source_format": "openai_chat",
+                "transport": "http",
+                "models": ["demo-model"],
+            }
+        )
+
+        self.assertTrue(result["results"][0]["available"])
+        self.assertIsNotNone(result["results"][0]["first_token_latency_ms"])
+        self.assertIsNotNone(result["results"][0]["tps"])
+
     def test_stream_success_without_usage_returns_null_tps(self) -> None:
         fake_response = FakeStreamResponse(
             [
