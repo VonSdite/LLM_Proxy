@@ -395,6 +395,62 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertIn(b"data: [DONE]", stream_body)
         self.assertTrue(fake_response.closed)
 
+    def test_proxy_service_rewrites_openai_chat_reasoning_content_to_reasoning(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("reasoning-model",),
+            max_retries=1,
+        )
+        fake_response = FakeStreamResponse(
+            [
+                (
+                    b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"reasoning-model",'
+                    b'"choices":[{"index":0,"delta":{"content":null,"reasoning_content":"The"},'
+                    b'"finish_reason":null}]}\n\n'
+                ),
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, body, args, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/reasoning-model",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+            )
+            stream_body = self._collect_response_body(response)
+
+        events = list(decode_stream_events([stream_body], "sse_json"))
+        delta = events[0].payload["choices"][0]["delta"]
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual("The", delta["reasoning"])
+        self.assertNotIn("reasoning_content", delta)
+        self.assertIn(b"data: [DONE]", stream_body)
+        self.assertTrue(fake_response.closed)
+
     def test_proxy_service_translates_openai_responses_stream_to_openai_chat(self) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
