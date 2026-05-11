@@ -24,9 +24,7 @@ def encode_openai_chunk(chunk: DownstreamChunk) -> bytes:
 
 
 def encode_downstream_response_body(payload: Any, target_format: str) -> bytes:
-    normalized_target = str(target_format or "").strip().lower()
-    if normalized_target == "openai_chat":
-        payload = _normalize_openai_chat_reasoning_payload(payload)
+    del target_format
     if isinstance(payload, bytes):
         return payload
     if isinstance(payload, str):
@@ -62,10 +60,7 @@ def _encode_openai_chat_chunk(chunk: DownstreamChunk) -> bytes:
         return b"data: [DONE]\n\n"
 
     if chunk.kind == "json":
-        data = json.dumps(
-            _normalize_openai_chat_reasoning_payload(chunk.payload),
-            ensure_ascii=False,
-        )
+        data = json.dumps(chunk.payload, ensure_ascii=False)
     elif isinstance(chunk.payload, bytes):
         data = chunk.payload.decode("utf-8", errors="ignore")
     else:
@@ -128,37 +123,3 @@ def _encode_claude_chunk(chunk: DownstreamChunk) -> bytes:
         lines.append(f"event: {event_name}")
     lines.append(f"data: {data}")
     return ("\n".join(lines) + "\n\n").encode("utf-8")
-
-
-def _normalize_openai_chat_reasoning_payload(payload: Any) -> Any:
-    """将旧版 reasoning_content 字段改写为新版 reasoning 字段。"""
-    if isinstance(payload, dict):
-        has_reasoning = "reasoning" in payload
-        changed = False
-        normalized: dict[str, Any] = {}
-
-        for key, value in payload.items():
-            if key == "reasoning_content":
-                changed = True
-                if not has_reasoning:
-                    normalized["reasoning"] = _normalize_openai_chat_reasoning_payload(value)
-                continue
-
-            normalized_value = _normalize_openai_chat_reasoning_payload(value)
-            if normalized_value is not value:
-                changed = True
-            normalized[key] = normalized_value
-
-        return normalized if changed else payload
-
-    if isinstance(payload, list):
-        changed = False
-        normalized_items = []
-        for item in payload:
-            normalized_item = _normalize_openai_chat_reasoning_payload(item)
-            if normalized_item is not item:
-                changed = True
-            normalized_items.append(normalized_item)
-        return normalized_items if changed else payload
-
-    return payload
