@@ -60,7 +60,10 @@ def _encode_openai_chat_chunk(chunk: DownstreamChunk) -> bytes:
         return b"data: [DONE]\n\n"
 
     if chunk.kind == "json":
-        data = json.dumps(chunk.payload, ensure_ascii=False)
+        data = json.dumps(
+            _drop_empty_openai_chat_delta_tool_calls(chunk.payload),
+            ensure_ascii=False,
+        )
     elif isinstance(chunk.payload, bytes):
         data = chunk.payload.decode("utf-8", errors="ignore")
     else:
@@ -123,3 +126,44 @@ def _encode_claude_chunk(chunk: DownstreamChunk) -> bytes:
         lines.append(f"event: {event_name}")
     lines.append(f"data: {data}")
     return ("\n".join(lines) + "\n\n").encode("utf-8")
+
+
+def _drop_empty_openai_chat_delta_tool_calls(payload: Any) -> Any:
+    """移除 OpenAI Chat 流式增量里的空 tool_calls，避免客户端误判工具流开始。"""
+    if not isinstance(payload, dict):
+        return payload
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return payload
+
+    changed = False
+    normalized_choices = []
+    for choice in choices:
+        if not isinstance(choice, dict):
+            normalized_choices.append(choice)
+            continue
+
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            normalized_choices.append(choice)
+            continue
+
+        tool_calls = delta.get("tool_calls")
+        if not isinstance(tool_calls, list) or len(tool_calls) > 0:
+            normalized_choices.append(choice)
+            continue
+
+        normalized_delta = dict(delta)
+        del normalized_delta["tool_calls"]
+        normalized_choice = dict(choice)
+        normalized_choice["delta"] = normalized_delta
+        normalized_choices.append(normalized_choice)
+        changed = True
+
+    if not changed:
+        return payload
+
+    normalized_payload = dict(payload)
+    normalized_payload["choices"] = normalized_choices
+    return normalized_payload
