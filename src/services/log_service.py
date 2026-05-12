@@ -76,6 +76,8 @@ class LogService:
         end_date: Optional[str] = None,
         username: Optional[str | Sequence[str]] = None,
         request_model: Optional[str | Sequence[str]] = None,
+        sort_key: Optional[str] = None,
+        sort_direction: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """获取统计聚合数据。"""
         try:
@@ -84,6 +86,8 @@ class LogService:
                 end_date,
                 username=username,
                 request_model=request_model,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
             )
             result = [
                 {
@@ -99,11 +103,13 @@ class LogService:
                 for row in rows
             ]
             self._logger.debug(
-                "Statistics queried: start_date=%s end_date=%s username=%s request_model=%s rows=%s",
+                "Statistics queried: start_date=%s end_date=%s username=%s request_model=%s sort_key=%s sort_direction=%s rows=%s",
                 start_date,
                 end_date,
                 username,
                 request_model,
+                sort_key,
+                sort_direction,
                 len(result),
             )
             return result
@@ -119,6 +125,8 @@ class LogService:
         end_date: Optional[str] = None,
         username: Optional[str | Sequence[str]] = None,
         request_model: Optional[str | Sequence[str]] = None,
+        sort_key: Optional[str] = None,
+        sort_direction: Optional[str] = None,
     ) -> Dict[str, Any]:
         """获取请求日志分页数据。"""
         try:
@@ -129,6 +137,8 @@ class LogService:
                 end_date,
                 username=username,
                 request_model=request_model,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
             )
             result["logs"] = [
                 self._normalize_log_timestamps(log) for log in result.get("logs", [])

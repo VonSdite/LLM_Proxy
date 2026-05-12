@@ -19,6 +19,30 @@ from ..utils.local_time import (
 class LogRepository:
     """负责 request_logs 与 daily_request_stats 的数据访问。"""
 
+    _STATISTICS_SORT_COLUMNS = {
+        "ip_address": "COALESCE(d.ip_address, '')",
+        "username": "COALESCE(u.username, '-')",
+        "request_model": "d.request_model",
+        "response_model": "NULLIF(d.response_model, '')",
+        "request_count": "COALESCE(SUM(d.request_count), 0)",
+        "total_tokens": "COALESCE(SUM(d.total_tokens), 0)",
+        "prompt_tokens": "COALESCE(SUM(d.prompt_tokens), 0)",
+        "completion_tokens": "COALESCE(SUM(d.completion_tokens), 0)",
+    }
+
+    _LOG_SORT_COLUMNS = {
+        "ip_address": "COALESCE(l.ip_address, '')",
+        "username": "COALESCE(u.username, '-')",
+        "request_model": "l.request_model",
+        "response_model": "COALESCE(l.response_model, '')",
+        "total_tokens": "COALESCE(l.total_tokens, 0)",
+        "prompt_tokens": "COALESCE(l.prompt_tokens, 0)",
+        "completion_tokens": "COALESCE(l.completion_tokens, 0)",
+        "start_time": "l.start_time",
+        "end_time": "COALESCE(l.end_time, '')",
+        "duration": "MAX(COALESCE((julianday(l.end_time) - julianday(l.start_time)) * 86400.0, 0), 0)",
+    }
+
     def __init__(self, get_connection: ConnectionFactory):
         self._get_connection = get_connection
         self._ensure_table()
@@ -181,12 +205,42 @@ class LogRepository:
         conditions.append(f"{column_name} IN ({placeholders})")
         params.extend(normalized_values)
 
+    @staticmethod
+    def _normalize_sort_direction(
+        sort_direction: Optional[str],
+        default_direction: str = "desc",
+    ) -> str:
+        """标准化排序方向，仅允许 asc/desc。"""
+        normalized = str(sort_direction or default_direction).strip().lower()
+        if normalized not in {"asc", "desc"}:
+            normalized = default_direction
+        return normalized.upper()
+
+    @classmethod
+    def _build_order_clause(
+        cls,
+        sort_columns: dict[str, str],
+        sort_key: Optional[str],
+        sort_direction: Optional[str],
+        default_key: str,
+        tie_breaker: str,
+    ) -> str:
+        """基于白名单字段构造 ORDER BY 子句。"""
+        normalized_key = str(sort_key or default_key).strip()
+        if normalized_key not in sort_columns:
+            normalized_key = default_key
+
+        direction = cls._normalize_sort_direction(sort_direction)
+        return f"ORDER BY {sort_columns[normalized_key]} {direction}, {tie_breaker}"
+
     def get_statistics(
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         username: Optional[str | Sequence[str]] = None,
         request_model: Optional[str | Sequence[str]] = None,
+        sort_key: Optional[str] = None,
+        sort_direction: Optional[str] = None,
     ) -> List[sqlite3.Row]:
         """按条件查询聚合统计。"""
         with self._get_connection() as conn:
@@ -207,6 +261,13 @@ class LogRepository:
             )
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
+            order_clause = self._build_order_clause(
+                self._STATISTICS_SORT_COLUMNS,
+                sort_key,
+                sort_direction,
+                "total_tokens",
+                "COALESCE(d.ip_address, '') ASC, d.request_model ASC, NULLIF(d.response_model, '') ASC",
+            )
             query = f"""
                 SELECT
                     d.ip_address,
@@ -221,7 +282,7 @@ class LogRepository:
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
                 GROUP BY d.ip_address, u.username, d.request_model, d.response_model
-                ORDER BY total_tokens DESC
+                {order_clause}
             """
             cursor.execute(query, params)
             return cursor.fetchall()
@@ -234,6 +295,8 @@ class LogRepository:
         end_date: Optional[str] = None,
         username: Optional[str | Sequence[str]] = None,
         request_model: Optional[str | Sequence[str]] = None,
+        sort_key: Optional[str] = None,
+        sort_direction: Optional[str] = None,
     ) -> Dict[str, Any]:
         """按条件分页查询原始请求日志。"""
         offset = (page - 1) * page_size
@@ -264,6 +327,13 @@ class LogRepository:
             cursor.execute(count_query, params)
             total = cursor.fetchone()["total"]
 
+            order_clause = self._build_order_clause(
+                self._LOG_SORT_COLUMNS,
+                sort_key,
+                sort_direction,
+                "start_time",
+                "l.id DESC",
+            )
             data_query = f"""
                 SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens,
@@ -271,7 +341,7 @@ class LogRepository:
                 FROM request_logs l
                 LEFT JOIN users u ON l.ip_address = u.ip_address
                 WHERE {where_clause}
-                ORDER BY l.start_time DESC
+                {order_clause}
                 LIMIT ? OFFSET ?
             """
             cursor.execute(data_query, params + [page_size, offset])

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -196,6 +196,63 @@ class DashboardFilterApiTests(unittest.TestCase):
             {("alice", "model-a"), ("bob", "model-b")},
             {(item["username"], item["request_model"]) for item in payload["logs"]},
         )
+
+    def test_statistics_api_sorts_on_server(self) -> None:
+        response = self.client.get(
+            "/api/statistics",
+            query_string={
+                "sort_key": "total_tokens",
+                "sort_direction": "asc",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual([10, 20, 30, 40], [item["total_tokens"] for item in payload])
+
+    def test_request_logs_api_sorts_before_pagination(self) -> None:
+        response = self.client.get(
+            "/api/request-logs",
+            query_string={
+                "page": "1",
+                "page_size": "1",
+                "sort_key": "total_tokens",
+                "sort_direction": "asc",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(4, payload["total"])
+        self.assertEqual(10, payload["logs"][0]["total_tokens"])
+
+    def test_request_logs_api_sorts_duration_before_pagination(self) -> None:
+        start_time = datetime(2026, 4, 7, 8, 0, 0)
+        self.log_service.log_request(
+            request_model="model-duration",
+            response_model="resp-duration",
+            total_tokens=50,
+            prompt_tokens=25,
+            completion_tokens=25,
+            start_time=start_time,
+            end_time=start_time + timedelta(seconds=5),
+            ip_address="10.0.0.2",
+        )
+
+        response = self.client.get(
+            "/api/request-logs",
+            query_string={
+                "page": "1",
+                "page_size": "1",
+                "sort_key": "duration",
+                "sort_direction": "desc",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(5, payload["total"])
+        self.assertEqual("model-duration", payload["logs"][0]["request_model"])
 
 
 if __name__ == "__main__":

@@ -131,6 +131,8 @@ class WebController:
                 request.args.get("end_date"),
                 usernames or None,
                 request_models or None,
+                sort_key=request.args.get("sort_key"),
+                sort_direction=request.args.get("sort_direction"),
             )
             return jsonify(stats)
         except Exception as exc:
@@ -154,6 +156,8 @@ class WebController:
                 request.args.get("end_date"),
                 usernames or None,
                 request_models or None,
+                sort_key=request.args.get("sort_key"),
+                sort_direction=request.args.get("sort_direction"),
             )
             return jsonify(logs)
         except ValueError:

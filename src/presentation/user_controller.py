@@ -41,14 +41,28 @@ class UserController:
             page = request.args.get('page', 1, type=int)
             page_size = request.args.get('page_size', 50, type=int)
             keyword = (request.args.get('keyword', '', type=str) or '').strip()
+            sort_key = (
+                request.args.get("sort_key", "total_tokens", type=str) or "total_tokens"
+            ).strip() or "total_tokens"
+            sort_direction = (
+                request.args.get("sort_direction", "desc", type=str) or "desc"
+            ).strip() or "desc"
             self._logger.debug(
-                'List users requested: page=%s, page_size=%s, keyword=%r',
+                "List users requested: page=%s, page_size=%s, keyword=%r, sort_key=%r, sort_direction=%r",
                 page,
                 page_size,
                 keyword,
+                sort_key,
+                sort_direction,
             )
 
-            users = self._user_service.get_users(page=page, page_size=page_size, keyword=keyword)
+            users = self._user_service.get_users(
+                page=page,
+                page_size=page_size,
+                keyword=keyword,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
+            )
             total = self._user_service.get_total_users_count(keyword=keyword)
 
             return jsonify(
@@ -59,6 +73,8 @@ class UserController:
                     'page_size': page_size,
                     'total_pages': (total + page_size - 1) // page_size,
                     'keyword': keyword,
+                    "sort_key": sort_key,
+                    "sort_direction": sort_direction,
                     'available_models': self._user_service.get_available_models(),
                 }
             )

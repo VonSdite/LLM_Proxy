@@ -329,11 +329,6 @@
             return `<span class="numeric-value" title="${full}">${display}</span>`;
         }
 
-        function normalizeSortNumber(value) {
-            const n = Number(value);
-            return Number.isFinite(n) ? n : 0;
-        }
-
         function parseLocalDateTime(value) {
             if (value instanceof Date) {
                 return Number.isFinite(value.getTime()) ? value : null;
@@ -368,12 +363,6 @@
             return Number.isFinite(date.getTime()) ? date : null;
         }
 
-        function normalizeSortDate(value) {
-            const date = parseLocalDateTime(value);
-            const t = date ? date.getTime() : Number.NaN;
-            return Number.isFinite(t) ? t : 0;
-        }
-
         function calculateDurationSeconds(startValue, endValue) {
             const startTime = parseLocalDateTime(startValue);
             const endTime = parseLocalDateTime(endValue);
@@ -381,31 +370,6 @@
                 return 0;
             }
             return Math.max(0, (endTime.getTime() - startTime.getTime()) / 1000);
-        }
-
-        function compareSortValues(leftValue, rightValue, type) {
-            if (type === 'number' || type === 'date') {
-                return leftValue - rightValue;
-            }
-            return String(leftValue).localeCompare(String(rightValue), 'zh-CN', {
-                sensitivity: 'base',
-                numeric: true
-            });
-        }
-
-        function sortByState(items, state, valueGetter) {
-            return items
-                .map((item, index) => ({ item, index }))
-                .sort((left, right) => {
-                    const leftValue = valueGetter(left.item, state.key, state.type);
-                    const rightValue = valueGetter(right.item, state.key, state.type);
-                    const result = compareSortValues(leftValue, rightValue, state.type);
-                    if (result !== 0) {
-                        return state.direction === 'asc' ? result : -result;
-                    }
-                    return left.index - right.index;
-                })
-                .map(entry => entry.item);
         }
 
         function getIndicator(direction, isActive) {
@@ -439,31 +403,6 @@
             }
         }
 
-        function getStatsSortValue(stat, key, type) {
-            const value = stat?.[key];
-            if (type === 'number') return normalizeSortNumber(value);
-            if (type === 'date') return normalizeSortDate(value);
-            return value ?? '';
-        }
-
-        function getLogSortValue(log, key, type) {
-            if (key === 'duration') {
-                return normalizeSortNumber(calculateDurationSeconds(log?.start_time, log?.end_time));
-            }
-            const value = log?.[key];
-            if (type === 'number') return normalizeSortNumber(value);
-            if (type === 'date') return normalizeSortDate(value);
-            return value ?? '';
-        }
-
-        function applyStatsSort() {
-            statsData = sortByState(statsData, statsSortState, getStatsSortValue);
-        }
-
-        function applyLogsSort() {
-            logsData = sortByState(logsData, logsSortState, getLogSortValue);
-        }
-
         function toggleStatsSort(key, type) {
             if (statsSortState.key === key) {
                 statsSortState.direction = statsSortState.direction === 'asc' ? 'desc' : 'asc';
@@ -472,8 +411,7 @@
                 statsSortState.type = type;
                 statsSortState.direction = type === 'string' ? 'asc' : 'desc';
             }
-            applyStatsSort();
-            renderStatistics();
+            loadStatistics();
         }
 
         function toggleLogsSort(key, type) {
@@ -484,8 +422,8 @@
                 logsSortState.type = type;
                 logsSortState.direction = type === 'string' ? 'asc' : 'desc';
             }
-            applyLogsSort();
-            renderLogs(logsData);
+            currentPage = 1;
+            loadLogs();
         }
 
         function getSelectedOptionValues(nativeSelect) {
@@ -934,7 +872,10 @@
             document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="loading">加载统计数据...</td></tr>';
 
             try {
-                const params = buildDashboardSearchParams();
+                const params = buildDashboardSearchParams({
+                    sort_key: statsSortState.key,
+                    sort_direction: statsSortState.direction,
+                });
                 const response = await fetch(`/api/statistics?${params}`, { cache: 'no-store' });
                 if (handleUnauthorizedResponse(response)) return;
                 const data = await response.json();
@@ -944,7 +885,6 @@
                 if (requestToken !== statsRequestToken) return;
                 statsData = data;
                 if (!Array.isArray(statsData)) statsData = [];
-                applyStatsSort();
                 renderStatistics();
             } catch (error) {
                 if (requestToken !== statsRequestToken) return;
@@ -1064,6 +1004,8 @@
                 const params = buildDashboardSearchParams({
                     page: currentPage,
                     page_size: pageSize,
+                    sort_key: logsSortState.key,
+                    sort_direction: logsSortState.direction,
                 });
 
                 const response = await fetch(`/api/request-logs?${params}`, { cache: 'no-store' });
@@ -1075,7 +1017,6 @@
                 if (requestToken !== logsRequestToken) return;
 
                 logsData = Array.isArray(data.logs) ? data.logs : [];
-                applyLogsSort();
                 renderLogs(logsData);
                 updatePagination(data);
             } catch (error) {
@@ -1245,9 +1186,6 @@
         }
     </script>
 {% endblock %}
-
-
-
 
 
 
