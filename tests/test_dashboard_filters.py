@@ -96,6 +96,11 @@ class FakeSettingsService:
 
 
 class DashboardFilterApiTests(unittest.TestCase):
+    DATE_FILTER = {
+        "start_date": "2026-04-01",
+        "end_date": "2026-04-30",
+    }
+
     def setUp(self) -> None:
         self.root_path = Path(__file__).resolve().parents[1]
         self.db_path = self.root_path / f"dashboard-filters-{uuid4().hex}.db"
@@ -162,6 +167,8 @@ class DashboardFilterApiTests(unittest.TestCase):
         response = self.client.get(
             "/api/statistics",
             query_string=[
+                ("start_date", self.DATE_FILTER["start_date"]),
+                ("end_date", self.DATE_FILTER["end_date"]),
                 ("username", "alice"),
                 ("username", "bob"),
                 ("request_model", "model-a"),
@@ -182,6 +189,8 @@ class DashboardFilterApiTests(unittest.TestCase):
             query_string=[
                 ("page", "1"),
                 ("page_size", "50"),
+                ("start_date", self.DATE_FILTER["start_date"]),
+                ("end_date", self.DATE_FILTER["end_date"]),
                 ("username", "alice"),
                 ("username", "bob"),
                 ("request_model", "model-a"),
@@ -201,6 +210,7 @@ class DashboardFilterApiTests(unittest.TestCase):
         response = self.client.get(
             "/api/statistics",
             query_string={
+                **self.DATE_FILTER,
                 "sort_key": "total_tokens",
                 "sort_direction": "asc",
             },
@@ -216,6 +226,7 @@ class DashboardFilterApiTests(unittest.TestCase):
             query_string={
                 "page": "1",
                 "page_size": "1",
+                **self.DATE_FILTER,
                 "sort_key": "total_tokens",
                 "sort_direction": "asc",
             },
@@ -244,6 +255,8 @@ class DashboardFilterApiTests(unittest.TestCase):
             query_string={
                 "page": "1",
                 "page_size": "1",
+                "start_date": "2026-04-01",
+                "end_date": "2026-04-30",
                 "sort_key": "duration",
                 "sort_direction": "desc",
             },
@@ -253,6 +266,32 @@ class DashboardFilterApiTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(5, payload["total"])
         self.assertEqual("model-duration", payload["logs"][0]["request_model"])
+
+    def test_statistics_api_rejects_missing_date_range(self) -> None:
+        response = self.client.get("/api/statistics")
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            {"error": "start_date and end_date are required"},
+            response.get_json(),
+        )
+
+    def test_request_logs_api_rejects_date_range_over_one_year(self) -> None:
+        response = self.client.get(
+            "/api/request-logs",
+            query_string={
+                "page": "1",
+                "page_size": "50",
+                "start_date": "2025-01-01",
+                "end_date": "2026-01-02",
+            },
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(
+            {"error": "date range must not exceed one year"},
+            response.get_json(),
+        )
 
 
 if __name__ == "__main__":
