@@ -22,7 +22,7 @@
                     <div class="date-preset-group" role="group" aria-label="常用时间范围">
                         <button type="button" class="date-preset-btn" data-date-preset="today" onclick="applyDatePreset('today')">今天</button>
                         <button type="button" class="date-preset-btn" data-date-preset="last7" onclick="applyDatePreset('last7')">近7天</button>
-                        <button type="button" class="date-preset-btn" data-date-preset="all" onclick="applyDatePreset('all')">全部时间</button>
+                        <button type="button" class="date-preset-btn" data-date-preset="last30" onclick="applyDatePreset('last30')">近30天</button>
                     </div>
                 </div>
                 <div class="filter-group filter-group-select">
@@ -242,16 +242,40 @@
             return `${year}-${month}-${day}`;
         }
 
-        function buildDatePresetRange(preset) {
-            if (preset === 'all') {
-                return { startDate: '', endDate: '' };
+        function parseDateInputValue(value) {
+            const text = String(value || '').trim();
+            const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (!match) {
+                return null;
             }
 
+            const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+            if (
+                date.getFullYear() !== Number(match[1])
+                || date.getMonth() !== Number(match[2]) - 1
+                || date.getDate() !== Number(match[3])
+            ) {
+                return null;
+            }
+            return date;
+        }
+
+        function addYearsClamped(date, years) {
+            const target = new Date(date.getFullYear() + years, date.getMonth(), date.getDate());
+            if (target.getMonth() !== date.getMonth()) {
+                return new Date(date.getFullYear() + years, date.getMonth() + 1, 0);
+            }
+            return target;
+        }
+
+        function buildDatePresetRange(preset) {
             const end = new Date();
             const start = new Date(end);
 
             if (preset === 'last7') {
                 start.setDate(end.getDate() - 6);
+            } else if (preset === 'last30') {
+                start.setDate(end.getDate() - 29);
             }
 
             return {
@@ -261,10 +285,6 @@
         }
 
         function detectDatePreset(startDate, endDate) {
-            if (!startDate && !endDate) {
-                return 'all';
-            }
-
             const today = buildDatePresetRange('today');
             if (startDate === today.startDate && endDate === today.endDate) {
                 return 'today';
@@ -273,6 +293,11 @@
             const last7 = buildDatePresetRange('last7');
             if (startDate === last7.startDate && endDate === last7.endDate) {
                 return 'last7';
+            }
+
+            const last30 = buildDatePresetRange('last30');
+            if (startDate === last30.startDate && endDate === last30.endDate) {
+                return 'last30';
             }
 
             return null;
@@ -293,10 +318,64 @@
             const { startDate, endDate } = buildDatePresetRange(preset);
             document.getElementById('startDate').value = startDate;
             document.getElementById('endDate').value = endDate;
+            syncDateRangeInputLimits();
             updateDatePresetUi();
             if (shouldApplyFilters) {
                 applyFilters();
             }
+        }
+
+        function syncDateRangeInputLimits() {
+            const startInput = document.getElementById('startDate');
+            const endInput = document.getElementById('endDate');
+            const startDate = parseDateInputValue(startInput?.value);
+            const endDate = parseDateInputValue(endInput?.value);
+
+            if (startInput) {
+                if (endDate) {
+                    startInput.min = toDateInput(addYearsClamped(endDate, -1));
+                    startInput.max = toDateInput(endDate);
+                } else {
+                    startInput.removeAttribute('min');
+                    startInput.removeAttribute('max');
+                }
+            }
+
+            if (endInput) {
+                if (startDate) {
+                    endInput.min = toDateInput(startDate);
+                    endInput.max = toDateInput(addYearsClamped(startDate, 1));
+                } else {
+                    endInput.removeAttribute('min');
+                    endInput.removeAttribute('max');
+                }
+            }
+        }
+
+        function validateDateRangeForQuery(startDateValue, endDateValue) {
+            if (!startDateValue || !endDateValue) {
+                showMessage('请选择开始日期和结束日期', 'warning');
+                return false;
+            }
+
+            const startDate = parseDateInputValue(startDateValue);
+            const endDate = parseDateInputValue(endDateValue);
+            if (!startDate || !endDate) {
+                showMessage('日期格式无效，请重新选择', 'warning');
+                return false;
+            }
+
+            if (endDate < startDate) {
+                showMessage('结束日期不能早于开始日期', 'warning');
+                return false;
+            }
+
+            if (endDate > addYearsClamped(startDate, 1)) {
+                showMessage('时间范围不能超过一年', 'warning');
+                return false;
+            }
+
+            return true;
         }
 
         function escapeHtml(value) {
@@ -848,8 +927,14 @@
                     }, 450);
                 });
             }
-            document.getElementById('startDate')?.addEventListener('change', updateDatePresetUi);
-            document.getElementById('endDate')?.addEventListener('change', updateDatePresetUi);
+            document.getElementById('startDate')?.addEventListener('change', function() {
+                syncDateRangeInputLimits();
+                updateDatePresetUi();
+            });
+            document.getElementById('endDate')?.addEventListener('change', function() {
+                syncDateRangeInputLimits();
+                updateDatePresetUi();
+            });
         }
 
         initDashboardPage();
@@ -1132,17 +1217,20 @@
 
         // 应用过滤
         function applyFilters() {
-            currentFilters = {};
-
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
             const usernames = getSelectedOptionValues(document.getElementById('username'));
             const requestModels = getSelectedOptionValues(document.getElementById('requestModel'));
 
+            syncDateRangeInputLimits();
             updateDatePresetUi();
+            if (!validateDateRangeForQuery(startDate, endDate)) {
+                return;
+            }
 
-            if (startDate) currentFilters.start_date = startDate;
-            if (endDate) currentFilters.end_date = endDate;
+            currentFilters = {};
+            currentFilters.start_date = startDate;
+            currentFilters.end_date = endDate;
             if (usernames.length) currentFilters.username = usernames;
             if (requestModels.length) currentFilters.request_model = requestModels;
 
@@ -1158,6 +1246,7 @@
                 start_date: defaultRange.startDate,
                 end_date: defaultRange.endDate,
             };
+            syncDateRangeInputLimits();
             updateDatePresetUi();
         }
 
@@ -1186,9 +1275,6 @@
         }
     </script>
 {% endblock %}
-
-
-
 
 
 

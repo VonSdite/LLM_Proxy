@@ -27,7 +27,11 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
         html = self.render_dashboard()
 
         self.assertIn('data-date-preset="today"', html)
+        self.assertIn('data-date-preset="last30"', html)
         self.assertIn("今天</button>", html)
+        self.assertIn("近30天</button>", html)
+        self.assertNotIn("全部时间</button>", html)
+        self.assertNotIn('data-date-preset="all"', html)
         self.assertNotIn("近3天</button>", html)
 
     def test_dashboard_defaults_date_range_to_today(self) -> None:
@@ -35,6 +39,13 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
 
         self.assertIn("const defaultRange = buildDatePresetRange('today');", html)
         self.assertNotIn("const defaultRange = buildDatePresetRange('last3');", html)
+
+    def test_dashboard_limits_date_range_to_one_year(self) -> None:
+        html = self.render_dashboard()
+
+        self.assertIn("function validateDateRangeForQuery(", html)
+        self.assertIn("时间范围不能超过一年", html)
+        self.assertIn("syncDateRangeInputLimits();", html)
 
 
 if __name__ == "__main__":

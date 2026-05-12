@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Callable
 
 from flask import jsonify, make_response, render_template, request
@@ -115,8 +116,44 @@ class WebController:
             if isinstance(value, str) and value.strip()
         ]
 
+    @staticmethod
+    def _parse_dashboard_date(value: str | None, field_name: str) -> datetime:
+        """解析统计筛选日期。"""
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("start_date and end_date are required")
+
+        try:
+            return datetime.strptime(normalized, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError(f"{field_name} must use YYYY-MM-DD") from exc
+
+    @classmethod
+    def _validate_dashboard_date_range(
+        cls,
+        start_date: str | None,
+        end_date: str | None,
+    ) -> None:
+        """校验统计查询日期范围，避免无边界或超大范围查询。"""
+        start = cls._parse_dashboard_date(start_date, "start_date")
+        end = cls._parse_dashboard_date(end_date, "end_date")
+
+        if end < start:
+            raise ValueError("end_date must be on or after start_date")
+
+        try:
+            max_end = start.replace(year=start.year + 1)
+        except ValueError:
+            max_end = start.replace(year=start.year + 1, day=28)
+        if end > max_end:
+            raise ValueError("date range must not exceed one year")
+
     def get_statistics(self) -> ResponseReturnValue:
         try:
+            self._validate_dashboard_date_range(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+            )
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
             self._logger.debug(
@@ -135,6 +172,8 @@ class WebController:
                 sort_direction=request.args.get("sort_direction"),
             )
             return jsonify(stats)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error getting statistics: %s", exc)
             return jsonify({"error": str(exc)}), 500
@@ -143,8 +182,16 @@ class WebController:
         try:
             page = max(int(request.args.get("page", 1)), 1)
             page_size = min(max(int(request.args.get("page_size", 50)), 1), 200)
+        except ValueError:
+            return jsonify({"error": "page and page_size must be integers"}), 400
+
+        try:
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
+            self._validate_dashboard_date_range(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+            )
             self._logger.debug(
                 "Request logs queried: page=%s, page_size=%s", page, page_size
             )
@@ -160,8 +207,8 @@ class WebController:
                 sort_direction=request.args.get("sort_direction"),
             )
             return jsonify(logs)
-        except ValueError:
-            return jsonify({"error": "page and page_size must be integers"}), 400
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error getting request logs: %s", exc)
             return jsonify({"error": str(exc)}), 500
