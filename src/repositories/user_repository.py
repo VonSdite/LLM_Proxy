@@ -14,6 +14,17 @@ class UserRepository:
     """负责 users 表的数据访问。"""
 
     MODEL_PERMISSIONS_ALL = "*"
+    _SORT_COLUMNS = {
+        "id": "u.id",
+        "username": "u.username",
+        "ip_address": "u.ip_address",
+        "whitelist_access_enabled": "u.whitelist_access_enabled",
+        "created_at": "u.created_at",
+        "total_request_count": "COALESCE(s.total_request_count, 0)",
+        "total_tokens": "COALESCE(s.total_tokens, 0)",
+        "prompt_tokens": "COALESCE(s.prompt_tokens, 0)",
+        "completion_tokens": "COALESCE(s.completion_tokens, 0)",
+    }
 
     def __init__(self, get_connection: ConnectionFactory):
         self._get_connection = get_connection
@@ -95,12 +106,46 @@ class UserRepository:
             [like_keyword, like_keyword],
         )
 
-    def get(self, page: int = 1, page_size: int = 50, keyword: Optional[str] = None) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _normalize_sort_direction(
+        sort_direction: Optional[str],
+        default_direction: str = "desc",
+    ) -> str:
+        """标准化排序方向，仅允许 asc/desc。"""
+        normalized = str(sort_direction or default_direction).strip().lower()
+        if normalized not in {"asc", "desc"}:
+            normalized = default_direction
+        return normalized.upper()
+
+    @classmethod
+    def _build_order_clause(
+        cls,
+        sort_key: Optional[str],
+        sort_direction: Optional[str],
+        default_key: str = "created_at",
+    ) -> str:
+        """基于白名单字段构造 ORDER BY 子句。"""
+        normalized_key = str(sort_key or default_key).strip()
+        if normalized_key not in cls._SORT_COLUMNS:
+            normalized_key = default_key
+
+        direction = cls._normalize_sort_direction(sort_direction)
+        return f"ORDER BY {cls._SORT_COLUMNS[normalized_key]} {direction}, u.id ASC"
+
+    def get(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        keyword: Optional[str] = None,
+        sort_key: Optional[str] = None,
+        sort_direction: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """分页查询用户及其聚合统计。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             offset = (page - 1) * page_size
             where_clause, search_params = self._build_search_clause(keyword, table_alias="u")
+            order_clause = self._build_order_clause(sort_key, sort_direction)
             cursor.execute(
                 f"""
                 SELECT
@@ -127,7 +172,7 @@ class UserRepository:
                     GROUP BY ip_address
                 ) s ON u.ip_address = s.ip_address
                 {where_clause}
-                ORDER BY u.created_at DESC
+                {order_clause}
                 LIMIT ? OFFSET ?
                 """,
                 (*search_params, page_size, offset),

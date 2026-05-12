@@ -834,7 +834,9 @@
 
                 const params = new URLSearchParams({
                     page: currentPage,
-                    page_size: pageSize
+                    page_size: pageSize,
+                    sort_key: usersSortState.key,
+                    sort_direction: usersSortState.direction
                 });
                 if (currentSearchKeyword) {
                     params.set('keyword', currentSearchKeyword);
@@ -852,7 +854,6 @@
                 }
 
                 syncUserSelectionsToCurrentPage();
-                applyUsersSort();
                 updateUserSearchUi();
                 renderUsers();
                 updatePagination();
@@ -863,11 +864,6 @@
                 document.getElementById('tableFooter').style.display = 'none';
                 updateBatchToolbar();
             }
-        }
-
-        function normalizeSortNumber(value) {
-            const n = Number(value);
-            return Number.isFinite(n) ? n : 0;
         }
 
         function parseLocalDateTime(value) {
@@ -904,29 +900,6 @@
             return Number.isFinite(date.getTime()) ? date : null;
         }
 
-        function normalizeSortDate(value) {
-            const date = parseLocalDateTime(value);
-            const t = date ? date.getTime() : Number.NaN;
-            return Number.isFinite(t) ? t : 0;
-        }
-
-        function compareSortValues(leftValue, rightValue, type) {
-            if (type === 'number' || type === 'date') {
-                return leftValue - rightValue;
-            }
-            return String(leftValue).localeCompare(String(rightValue), 'zh-CN', {
-                sensitivity: 'base',
-                numeric: true
-            });
-        }
-
-        function getUserSortValue(user, key, type) {
-            const value = user?.[key];
-            if (type === 'number') return normalizeSortNumber(value);
-            if (type === 'date') return normalizeSortDate(value);
-            return value ?? '';
-        }
-
         function getSortIndicator(activeKey, activeDirection, key) {
             if (activeKey !== key) return '';
             return activeDirection === 'asc' ? '&uarr;' : '&darr;';
@@ -937,22 +910,6 @@
             return activeDirection === 'asc' ? 'ascending' : 'descending';
         }
 
-        function applyUsersSort() {
-            const { key, direction, type } = usersSortState;
-            users = users
-                .map((user, index) => ({ user, index }))
-                .sort((left, right) => {
-                    const leftValue = getUserSortValue(left.user, key, type);
-                    const rightValue = getUserSortValue(right.user, key, type);
-                    const result = compareSortValues(leftValue, rightValue, type);
-                    if (result !== 0) {
-                        return direction === 'asc' ? result : -result;
-                    }
-                    return left.index - right.index;
-                })
-                .map(item => item.user);
-        }
-
         function toggleUsersSort(key, type) {
             if (usersSortState.key === key) {
                 usersSortState.direction = usersSortState.direction === 'asc' ? 'desc' : 'asc';
@@ -961,8 +918,8 @@
                 usersSortState.type = type;
                 usersSortState.direction = type === 'string' ? 'asc' : 'desc';
             }
-            applyUsersSort();
-            renderUsers();
+            currentPage = 1;
+            loadUsers();
         }
 
         function renderModelPermissionSummary(user) {
