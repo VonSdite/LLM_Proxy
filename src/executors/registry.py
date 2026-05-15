@@ -25,6 +25,7 @@ from ..external import (
 )
 from ..external.stream_probe import BufferedUpstreamResponse
 from ..proxy_core import resolve_stream_format
+from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_websocket_connect_options
 from .contracts import Executor, OpenedUpstreamResponse
 
@@ -198,9 +199,10 @@ class WebSocketExecutor:
             "connection",
             "upgrade",
         }
+        normalized_headers = merge_http_headers({}, headers)
         return {
             key: value
-            for key, value in headers.items()
+            for key, value in normalized_headers.items()
             if key.lower() not in excluded
         }
 
