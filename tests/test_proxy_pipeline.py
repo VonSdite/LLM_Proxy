@@ -91,6 +91,17 @@ class RewriteRequestModelHook(BaseHook):
         return guarded_body
 
 
+class HeaderRecordingHook(BaseHook):
+    def __init__(self) -> None:
+        self.headers: list[Dict[str, str]] = []
+
+    def header_hook(self, ctx: Any, headers: Dict[str, str]) -> Dict[str, str]:
+        del ctx
+        self.headers.append(dict(headers))
+        headers["x-hook-stage"] = "after-auth"
+        return headers
+
+
 class StreamDecoderTests(unittest.TestCase):
     def test_sse_json_decoder_handles_split_utf8_and_done(self) -> None:
         chunks = [
@@ -309,6 +320,115 @@ class ProxyServicePipelineTests(unittest.TestCase):
             flask_app=app,
         )
         return app, ProxyService(ctx)
+
+    def test_websocket_provider_api_key_replaces_client_authorization_before_header_hook(self) -> None:
+        app, service = self._build_service()
+        hook = HeaderRecordingHook()
+        provider = LLMProvider(
+            name="demo",
+            api="wss://example.com/v1/chat/completions",
+            transport="websocket",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            api_key="sk-provider",
+            max_retries=1,
+            hook=hook,
+        )
+        captured: dict[str, Any] = {}
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, body, args, kwargs
+            captured["headers"] = dict(headers)
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {"Authorization": "Bearer user-token"},
+            )
+            stream_body = self._collect_response_body(response)
+
+        headers = captured["headers"]
+        authorization_headers = [key for key in headers if key.lower() == "authorization"]
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual(["authorization"], authorization_headers)
+        self.assertEqual("Bearer sk-provider", headers["authorization"])
+        self.assertEqual("after-auth", headers["x-hook-stage"])
+        self.assertEqual("Bearer sk-provider", hook.headers[0]["authorization"])
+        self.assertNotIn("Authorization", hook.headers[0])
+        self.assertIn(b"data: [DONE]", stream_body)
+
+    def test_websocket_without_provider_api_key_keeps_client_authorization(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="wss://example.com/v1/chat/completions",
+            transport="websocket",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        captured: dict[str, Any] = {}
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, body, args, kwargs
+            captured["headers"] = dict(headers)
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {"Authorization": "Bearer user-token"},
+            )
+            self._collect_response_body(response)
+
+        headers = captured["headers"]
+        authorization_headers = [key for key in headers if key.lower() == "authorization"]
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual(["Authorization"], authorization_headers)
+        self.assertEqual("Bearer user-token", headers["Authorization"])
 
     def test_build_upstream_request_uses_model_rewritten_by_request_guard(self) -> None:
         provider = LLMProvider(

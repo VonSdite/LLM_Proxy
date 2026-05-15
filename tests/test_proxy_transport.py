@@ -22,7 +22,7 @@ from src.config.provider_config import (
     RuntimeProviderSpec,
 )
 from src.config.provider_manager import ProviderManager
-from src.executors import HttpExecutor
+from src.executors import HttpExecutor, WebSocketExecutor
 from src.external.stream_probe import probe_stream_response
 from src.external.upstream_websocket import (
     WebSocketUpstreamResponse,
@@ -123,6 +123,24 @@ class ProviderTransportTests(unittest.TestCase):
 
         self.assertEqual(1, fake_session.cookies.clear_calls)
         self.assertEqual(1, len(fake_session.post_calls))
+
+    def test_websocket_handshake_headers_deduplicate_authorization_like_http(self) -> None:
+        headers = WebSocketExecutor._build_websocket_handshake_headers(
+            {
+                "Authorization": "Bearer user-token",
+                "content-type": "application/json",
+                "authorization": "Bearer provider-token",
+                "X-Trace": "trace-1",
+            }
+        )
+
+        self.assertEqual(
+            {
+                "authorization": "Bearer provider-token",
+                "X-Trace": "trace-1",
+            },
+            headers,
+        )
 
     def test_provider_enabled_defaults_to_true(self) -> None:
         schema = ProviderConfigSchema.from_mapping(

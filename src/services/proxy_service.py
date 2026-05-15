@@ -26,6 +26,7 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..translators import Translator, build_default_translator_registry
+from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_requests_proxies
 from .proxy_response_builder import ProxyResponseBuilder
 from .proxy_trace_logger import ProxyTraceLogger
@@ -154,9 +155,12 @@ class ProxyService:
             headers = dict(request_headers)
             headers["content-type"] = "application/json"
             if selected_auth is not None:
-                headers.update(selected_auth.headers_mapping())
+                headers = merge_http_headers(headers, selected_auth.headers_mapping())
             elif provider.api_key:
-                headers["authorization"] = f"Bearer {provider.api_key}"
+                headers = merge_http_headers(
+                    headers,
+                    {"authorization": f"Bearer {provider.api_key}"},
+                )
             built_request = build_upstream_request(
                 root_path=self._root_path,
                 logger=self._logger,
