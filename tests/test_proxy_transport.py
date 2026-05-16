@@ -142,6 +142,43 @@ class ProviderTransportTests(unittest.TestCase):
             headers,
         )
 
+    def test_websocket_responses_request_body_uses_response_create_event(self) -> None:
+        provider = type("Provider", (), {"source_format": "openai_responses"})()
+
+        body = WebSocketExecutor._build_websocket_request_body(
+            provider,  # type: ignore[arg-type]
+            {
+                "model": "gpt-5.5",
+                "input": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+        )
+
+        self.assertEqual(
+            {
+                "type": "response.create",
+                "model": "gpt-5.5",
+                "input": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+            body,
+        )
+
+    def test_websocket_non_responses_request_body_stays_raw(self) -> None:
+        provider = type("Provider", (), {"source_format": "openai_chat"})()
+        request_body = {
+            "model": "gpt-4.1",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        }
+
+        body = WebSocketExecutor._build_websocket_request_body(
+            provider,  # type: ignore[arg-type]
+            request_body,
+        )
+
+        self.assertIs(request_body, body)
+
     def test_provider_enabled_defaults_to_true(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
             {
@@ -490,6 +527,27 @@ class WebSocketProxyBridgeTests(unittest.TestCase):
             chunks,
         )
         response.close()
+        self.assertTrue(connection.closed)
+
+    def test_stream_response_closes_after_terminal_responses_event(self) -> None:
+        connection = FakeWebSocketConnection(
+            [
+                (ABNF.OPCODE_TEXT, b'{"type":"response.output_text.delta","delta":"hi"}'),
+                (ABNF.OPCODE_TEXT, b'{"type":"response.completed","response":{"id":"resp_1"}}'),
+                (ABNF.OPCODE_TEXT, b'{"type":"response.output_text.delta","delta":"late"}'),
+            ]
+        )
+        response = WebSocketUpstreamResponse(connection)
+
+        chunks = list(response.iter_content())
+
+        self.assertEqual(
+            [
+                b'{"type":"response.output_text.delta","delta":"hi"}',
+                b'{"type":"response.completed","response":{"id":"resp_1"}}',
+            ],
+            chunks,
+        )
         self.assertTrue(connection.closed)
 
     def test_collect_non_stream_websocket_body_uses_terminal_payload(self) -> None:

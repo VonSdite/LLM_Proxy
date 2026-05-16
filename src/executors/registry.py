@@ -161,7 +161,8 @@ class WebSocketExecutor:
                 stream_format="nonstream",
             )
 
-        connection.send(json.dumps(body, ensure_ascii=False))
+        websocket_body = self._build_websocket_request_body(provider, body)
+        connection.send(json.dumps(websocket_body, ensure_ascii=False))
         if requested_stream:
             stream_response = WebSocketUpstreamResponse(connection)
             stream_format = resolve_stream_format(None, "", provider.transport)
@@ -204,6 +205,22 @@ class WebSocketExecutor:
             key: value
             for key, value in normalized_headers.items()
             if key.lower() not in excluded
+        }
+
+    @staticmethod
+    def _build_websocket_request_body(provider: LLMProvider, body: Dict[str, Any]) -> Dict[str, Any]:
+        """构造上游 WebSocket 首帧请求体。"""
+        source_format = str(getattr(provider, "source_format", "") or "").strip().lower()
+        if source_format != "openai_responses":
+            return body
+
+        payload_type = str(body.get("type") or "").strip()
+        if payload_type:
+            return body
+
+        return {
+            "type": "response.create",
+            **body,
         }
 
     @staticmethod

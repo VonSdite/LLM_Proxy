@@ -227,6 +227,8 @@ Hook 运行时上下文还会暴露最小重试状态：
 
 - `transport = websocket`
   - 按 WebSocket JSON 消息处理
+  - OpenAI Responses 上游首帧封装为 `response.create` 事件
+  - 收到 `response.completed` / `response.done` 等终止消息后关闭本次上游连接
 - HTTP `Content-Type = text/event-stream`
   - 按 SSE JSON 处理
 - HTTP `Content-Type` 含 `ndjson/jsonl`
@@ -390,7 +392,8 @@ sequenceDiagram
     Controller->>Service: proxy_request()
     Service->>Translator: openai_responses -> openai_chat
     Translator-->>Service: translated upstream request
-    Service->>Executor: execute HTTP request
+    Service->>Executor: execute HTTP / WebSocket request
+    Executor->>Executor: WebSocket Responses 首帧封装为 response.create
     Executor-->>Service: stream events
     Service->>Translator: translate stream events
     Translator-->>Service: openai_chat chunks
