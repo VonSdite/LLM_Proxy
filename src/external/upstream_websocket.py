@@ -60,6 +60,10 @@ class WebSocketUpstreamResponse:
             normalized = normalize_websocket_message(payload)
             if normalized is not None:
                 yield normalized
+                terminal_payload = extract_websocket_payload(normalized) or normalized
+                if is_terminal_websocket_payload(terminal_payload):
+                    self.close()
+                    return
 
     def close(self) -> None:
         self._connection.close()
