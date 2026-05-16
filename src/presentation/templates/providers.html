@@ -575,6 +575,7 @@
         let fetchedModelCandidates = [];
         let fetchedModelSelection = new Set();
         let fetchedModelExistingSelection = new Set();
+        let fetchModelsAbortController = null;
         let activeCustomSelect = null;
         let activeProviderHelpTopic = null;
         let activeProviderHelpTrigger = null;
@@ -4747,9 +4748,14 @@
             button.dataset.loading = 'true';
             button.disabled = true;
             button.textContent = '拉取中...';
+            fetchModelsAbortController?.abort();
+            const abortController = new AbortController();
+            fetchModelsAbortController = abortController;
 
             try {
-                const response = await fetch(`/api/providers/fetch-models?${params.toString()}`);
+                const response = await fetch(`/api/providers/fetch-models?${params.toString()}`, {
+                    signal: abortController.signal,
+                });
                 const result = await response.json();
                 if (!response.ok) {
                     throw new Error(result.error || '拉取模型失败');
@@ -4757,13 +4763,23 @@
                 const fetchedCount = openFetchModelPicker(result.fetched_models);
                 showMessage(`已获取到 ${fetchedCount} 个模型`, 'success');
             } catch (error) {
+                if (error?.name === 'AbortError') {
+                    return;
+                }
                 console.error('拉取模型失败:', error);
                 showActionError('拉取模型', error, { fallback: '拉取模型失败' });
             } finally {
-                button.dataset.loading = 'false';
-                button.textContent = originalText;
-                updateFetchModelsButtonState();
+                if (fetchModelsAbortController === abortController) {
+                    fetchModelsAbortController = null;
+                    button.dataset.loading = 'false';
+                    button.textContent = originalText;
+                    updateFetchModelsButtonState();
+                }
             }
+        }
+
+        function cancelFetchModelsRequest() {
+            fetchModelsAbortController?.abort();
         }
 
         function initProvidersPage() {
@@ -4778,6 +4794,7 @@
             const modalElement = document.getElementById('providerModal');
             providerModalInstance = new bootstrap.Modal(modalElement);
             modalElement.addEventListener('hidden.bs.modal', function() {
+                cancelFetchModelsRequest();
                 closeAllCustomSelects();
                 hideProviderHelpPopover();
                 if (fetchModelPickerModalInstance) {

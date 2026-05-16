@@ -701,6 +701,42 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
         self.assertEqual(12, captured["timeout"])
         self.assertTrue(captured["verify"])
 
+    def test_fetch_models_preview_defaults_to_ten_second_timeout(self) -> None:
+        logger = FakeLogger()
+        ctx = AppContext(
+            logger=logger,
+            config_manager=None,  # type: ignore[arg-type]
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=Flask(__name__),
+        )
+        service = ModelDiscoveryService(ctx)
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            status_code = 200
+
+            @staticmethod
+            def json() -> dict[str, object]:
+                return {"data": [{"id": "demo-model"}]}
+
+        class FakeSession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                del exc_type, exc, tb
+                return False
+
+            def get(self, url, headers=None, proxies=None, timeout=None, verify=None):
+                del url, headers, proxies, verify
+                captured["timeout"] = timeout
+                return FakeResponse()
+
+        with patch("src.services.model_discovery_service.requests.Session", return_value=FakeSession()):
+            service.fetch_models_preview(api="https://example.com/v1/chat/completions")
+
+        self.assertEqual(10, captured["timeout"])
+
     def test_fetch_models_preview_replaces_case_insensitive_header_duplicates(self) -> None:
         logger = FakeLogger()
         ctx = AppContext(
@@ -1269,6 +1305,105 @@ process.stdout.write(JSON.stringify({{
         self.assertEqual("", payload["authGroupTitle"])
         self.assertTrue(payload["missingGroupDisabled"])
         self.assertFalse(payload["legacyDisabled"])
+
+    def test_fetch_models_request_is_aborted_when_modal_closes(self) -> None:
+        template_path = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "presentation"
+            / "templates"
+            / "providers.html"
+        )
+        html = template_path.read_text(encoding="utf-8")
+
+        script = "\n".join(
+            [
+                "let fetchModelsAbortController = null;",
+                (
+                    "function collectFormData() { return { api: 'https://example.com/v1/chat/completions', "
+                    "api_key: '', auth_group: '', proxy: '', timeout_seconds: '', verify_ssl: '' }; }"
+                ),
+                html[html.index("function canFetchModels()"): html.index("function openCreateModal()")],
+                html[html.index("async function fetchModels()"): html.index("function initProvidersPage()")],
+            ]
+        )
+
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{
+  console,
+  URLSearchParams,
+  AbortController,
+  aborted: false,
+  actionErrorCalls: 0,
+  document: {{
+    elements: {{
+      providerApi: {{ value: "https://example.com/v1/chat/completions" }},
+      providerAuthMode: {{ value: "legacy_api_key" }},
+      providerAuthGroup: {{ value: "" }},
+      modelTestAuthEntry: {{ value: "" }},
+      fetchModelsBtn: {{ disabled: false, dataset: {{}}, title: "", textContent: "拉取模型" }},
+    }},
+    getElementById(id) {{
+      return this.elements[id] || null;
+    }},
+  }},
+  fetch(url, options) {{
+    sandbox.fetchUrl = url;
+    sandbox.fetchSignalAttached = !!options?.signal;
+    return new Promise((resolve, reject) => {{
+      options.signal.addEventListener("abort", () => {{
+        sandbox.aborted = true;
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      }});
+    }});
+  }},
+  showMessage() {{}},
+  showActionError() {{
+    sandbox.actionErrorCalls += 1;
+  }},
+  openFetchModelPicker() {{
+    sandbox.pickerOpened = true;
+    return 0;
+  }},
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+(async () => {{
+  const promise = sandbox.fetchModels();
+  sandbox.cancelFetchModelsRequest();
+  await promise;
+  process.stdout.write(JSON.stringify({{
+    aborted: sandbox.aborted,
+    fetchSignalAttached: sandbox.fetchSignalAttached,
+    actionErrorCalls: sandbox.actionErrorCalls,
+    loading: sandbox.document.elements.fetchModelsBtn.dataset.loading,
+    disabled: sandbox.document.elements.fetchModelsBtn.disabled,
+    text: sandbox.document.elements.fetchModelsBtn.textContent,
+    pickerOpened: !!sandbox.pickerOpened,
+  }}));
+}})().catch(error => {{
+  console.error(error);
+  process.exit(1);
+}});
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertTrue(payload["fetchSignalAttached"])
+        self.assertTrue(payload["aborted"])
+        self.assertEqual(0, payload["actionErrorCalls"])
+        self.assertEqual("false", payload["loading"])
+        self.assertFalse(payload["disabled"])
+        self.assertEqual("拉取模型", payload["text"])
+        self.assertFalse(payload["pickerOpened"])
 
     def test_provider_drag_drop_helpers_keep_enabled_group_before_disabled_group(
         self,
