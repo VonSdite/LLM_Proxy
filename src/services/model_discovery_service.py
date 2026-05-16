@@ -38,7 +38,7 @@ class ModelDiscoveryService:
             api_key=clean_optional_string(api_key),
             request_headers=request_headers,
             proxy=normalize_proxy_url(proxy),
-            timeout_seconds=parse_optional_positive_int(timeout_seconds, default=30) or 30,
+            timeout_seconds=parse_optional_positive_int(timeout_seconds, default=10) or 10,
             verify_ssl=parse_optional_bool(verify_ssl, default=False) or False,
         )
 
