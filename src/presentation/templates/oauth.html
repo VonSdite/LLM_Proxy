@@ -307,6 +307,52 @@
             }
         }
 
+        function copyTextWithTextarea(text) {
+            const textarea = document.createElement('textarea');
+            const activeElement = document.activeElement;
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.top = '-1000px';
+            textarea.style.left = '-1000px';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            textarea.setSelectionRange(0, textarea.value.length);
+            try {
+                return typeof document.execCommand === 'function' && document.execCommand('copy');
+            } catch (error) {
+                console.error('Fallback clipboard copy failed:', error);
+                return false;
+            } finally {
+                document.body.removeChild(textarea);
+                if (activeElement && typeof activeElement.focus === 'function') {
+                    try {
+                        activeElement.focus({ preventScroll: true });
+                    } catch (error) {
+                        activeElement.focus();
+                    }
+                }
+            }
+        }
+
+        async function copyTextToClipboard(text) {
+            const normalizedText = String(text || '');
+            if (!normalizedText) return;
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                try {
+                    await navigator.clipboard.writeText(normalizedText);
+                    return;
+                } catch (error) {
+                    if (copyTextWithTextarea(normalizedText)) return;
+                    throw error;
+                }
+            }
+            if (copyTextWithTextarea(normalizedText)) return;
+            throw new Error('当前浏览器不支持自动复制，请手动选中内容复制');
+        }
+
         async function refreshCodexAuthLink() {
             codexAuthState.loading = true;
             syncCodexAuthControls();
@@ -334,7 +380,7 @@
         async function copyCodexAuthLink() {
             if (!codexAuthState.authorizationUrl) return;
             try {
-                await navigator.clipboard.writeText(codexAuthState.authorizationUrl);
+                await copyTextToClipboard(codexAuthState.authorizationUrl);
                 showMessage('授权链接已复制', 'success');
             } catch (error) {
                 console.error('复制授权链接失败:', error);
@@ -547,7 +593,7 @@
             const normalizedModelName = String(modelName || '').trim();
             if (!normalizedModelName) return;
             try {
-                await navigator.clipboard.writeText(normalizedModelName);
+                await copyTextToClipboard(normalizedModelName);
                 showMessage('模型名已复制', 'success');
             } catch (error) {
                 console.error('复制模型名失败:', error);
