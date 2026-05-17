@@ -10,7 +10,7 @@
             visibility: hidden;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/settings.css?v=20260412-9" id="settingsPageStyles">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260517-1" id="settingsPageStyles">
     <script>
         (function () {
             const root = document.documentElement;
@@ -867,6 +867,11 @@
             const popover = document.getElementById("settingsHelpPopover");
             if (popover) {
                 popover.hidden = true;
+                popover.style.removeProperty("top");
+                popover.style.removeProperty("left");
+                popover.style.removeProperty("visibility");
+                popover.style.removeProperty("--popover-arrow-left");
+                popover.dataset.placement = "bottom";
             }
             activeSettingsHelpTrigger?.setAttribute("aria-expanded", "false");
             activeSettingsHelpTrigger = null;
@@ -879,32 +884,35 @@
             }
 
             const triggerRect = trigger.getBoundingClientRect();
-            const scrollY = window.scrollY || window.pageYOffset;
-            const scrollX = window.scrollX || window.pageXOffset;
 
             popover.hidden = false;
             popover.style.visibility = "hidden";
             popover.style.left = "0";
             popover.style.top = "0";
+            popover.style.removeProperty("--popover-arrow-left");
 
             const popoverRect = popover.getBoundingClientRect();
-            const viewportPadding = 14;
-            const centeredLeft = triggerRect.left + scrollX + (triggerRect.width / 2) - (popoverRect.width / 2);
-            const maxLeft = scrollX + window.innerWidth - popoverRect.width - viewportPadding;
-            const minLeft = scrollX + viewportPadding;
+            const viewportPadding = 12;
+            const offset = 12;
+            const centeredLeft = triggerRect.left + (triggerRect.width / 2) - (popoverRect.width / 2);
+            const maxLeft = window.innerWidth - popoverRect.width - viewportPadding;
+            const minLeft = viewportPadding;
             const left = Math.max(minLeft, Math.min(centeredLeft, maxLeft));
 
-            let top = triggerRect.bottom + scrollY + 12;
-            let placement = "bottom";
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
 
-            if (top + popoverRect.height > scrollY + window.innerHeight - viewportPadding) {
-                top = triggerRect.top + scrollY - popoverRect.height - 12;
-                placement = "top";
-            }
-
-            popover.dataset.placement = placement;
+            popover.dataset.placement = shouldPlaceBottom ? "bottom" : "top";
             popover.style.left = `${left}px`;
-            popover.style.top = `${Math.max(scrollY + viewportPadding, top)}px`;
+            popover.style.top = `${top}px`;
+            popover.style.setProperty("--popover-arrow-left", `${arrowLeft}px`);
             popover.style.visibility = "visible";
         }
 
