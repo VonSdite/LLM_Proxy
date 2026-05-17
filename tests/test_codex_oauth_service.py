@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from typing import Any
@@ -420,6 +421,69 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertEqual(0.0, exhausted_quota["windows"][0]["remaining_percent"])
         self.assertEqual(75.0, available_quota["windows"][0]["remaining_percent"])
         self.assertNotIn("codex-demo.json", service._quota_cooldowns)
+
+    def test_get_auth_file_quota_skips_duplicate_refresh_for_same_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            request_started = threading.Event()
+            release_request = threading.Event()
+            errors: list[BaseException] = []
+            first_result: dict[str, Any] = {}
+            call_count = 0
+
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None):
+                nonlocal call_count
+                del url, headers, timeout, proxies, verify
+                call_count += 1
+                request_started.set()
+                release_request.wait(2)
+                return FakeResponse(
+                    {
+                        "rate_limit": {
+                            "primary_window": {
+                                "used_percent": 25,
+                                "reset_after_seconds": 3600,
+                            }
+                        }
+                    }
+                )
+
+            def run_first_refresh() -> None:
+                try:
+                    first_result.update(service.get_auth_file_quota("codex-demo.json"))
+                except BaseException as exc:
+                    errors.append(exc)
+
+            with patch("src.services.codex_oauth_service.requests.get", side_effect=fake_get):
+                worker = threading.Thread(target=run_first_refresh)
+                worker.start()
+                try:
+                    self.assertTrue(request_started.wait(1))
+                    duplicate_result = service.get_auth_file_quota("codex-demo.json")
+                finally:
+                    release_request.set()
+                    worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual([], errors)
+        self.assertEqual(1, call_count)
+        self.assertTrue(duplicate_result["skipped"])
+        self.assertEqual("quota_refresh_in_progress", duplicate_result["reason"])
+        self.assertEqual(75.0, first_result["windows"][0]["remaining_percent"])
 
     def test_expired_auth_file_without_refresh_token_is_still_a_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

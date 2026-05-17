@@ -315,6 +315,55 @@
     gap: 12px;
 }
 
+.oauth-page .oauth-auth-file-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: -4px 0 12px;
+}
+
+.oauth-page .oauth-auth-file-filters[hidden] {
+    display: none !important;
+}
+
+.oauth-page .oauth-auth-file-filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    padding: 5px 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface-soft);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.oauth-page .oauth-auth-file-filter-pill strong {
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.oauth-page .oauth-auth-file-filter-pill:hover,
+.oauth-page .oauth-auth-file-filter-pill:focus-visible {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.oauth-page .oauth-auth-file-filter-pill.is-active {
+    border-color: var(--primary);
+    background: rgba(45, 108, 223, 0.12);
+    color: var(--primary);
+}
+
+.oauth-page .oauth-auth-file-filter-pill.is-active strong {
+    color: var(--primary);
+}
+
 .oauth-page .oauth-auth-file-toolbar {
     display: flex;
     align-items: center;
@@ -893,11 +942,24 @@
 :root[data-theme="dark"] .oauth-page .oauth-auth-url-box,
 :root[data-theme="dark"] .oauth-page .empty-state,
 :root[data-theme="dark"] .oauth-page .error,
+:root[data-theme="dark"] .oauth-page .oauth-auth-file-filter-pill,
 :root[data-theme="dark"] .oauth-page .oauth-model-item,
 :root[data-theme="dark"] .oauth-page .oauth-auth-file-toolbar,
 :root[data-theme="dark"] .oauth-page .oauth-auth-file-item {
     border-color: #30363d;
     background: #0d1117;
+}
+
+:root[data-theme="dark"] .oauth-page .oauth-auth-file-filter-pill:hover,
+:root[data-theme="dark"] .oauth-page .oauth-auth-file-filter-pill:focus-visible {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+:root[data-theme="dark"] .oauth-page .oauth-auth-file-filter-pill.is-active {
+    border-color: var(--primary);
+    background: rgba(82, 151, 255, 0.16);
+    color: var(--primary);
 }
 
 :root[data-theme="dark"] .oauth-page .oauth-status-line {
