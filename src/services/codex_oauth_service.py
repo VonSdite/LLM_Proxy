@@ -259,11 +259,7 @@ class CodexOAuthService:
                 continue
             if self._is_quota_cooling_down(candidate.name):
                 continue
-            if self._is_candidate_quota_exhausted(candidate):
-                continue
-            refreshed_candidate = self._build_auth_candidate(path)
-            if refreshed_candidate is not None:
-                candidates.append(refreshed_candidate)
+            candidates.append(candidate)
         return candidates
 
     def mark_auth_file_quota_exhausted(
@@ -667,17 +663,6 @@ class CodexOAuthService:
             plan_type=self._normalize_codex_plan_type(payload.get("plan_type")),
             payload=payload,
         )
-
-    def _is_candidate_quota_exhausted(self, candidate: CodexAuthCandidate) -> bool:
-        try:
-            quota = self.get_auth_file_quota(candidate.name)
-        except Exception as exc:
-            self._logger.warning("Codex quota check skipped: file=%s error=%s", candidate.name, exc)
-            return False
-        if not self._is_quota_exhausted(quota):
-            return False
-        self.mark_auth_file_quota_exhausted(candidate.name, retry_after_seconds=self._quota_retry_after_seconds(quota))
-        return True
 
     @staticmethod
     def _normalize_codex_plan_type(value: Any) -> str:

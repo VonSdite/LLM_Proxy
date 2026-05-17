@@ -440,8 +440,9 @@ class CodexOAuthServiceTests(unittest.TestCase):
             service = self._build_service(root)
             service.add_model("gpt-5.4")
 
-            with patch.object(service, "get_auth_file_quota", return_value={"windows": []}):
+            with patch.object(service, "get_auth_file_quota") as quota_mock:
                 candidates = service.iter_auth_candidates_for_model("gpt-5.4")
+                quota_mock.assert_not_called()
             auth_file = service.list_auth_files()["files"][0]
 
         self.assertEqual(["codex-demo.json"], [candidate.name for candidate in candidates])
@@ -684,7 +685,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertEqual(["gpt-custom"], added_payload)
         self.assertEqual([], deleted_payload)
 
-    def test_iter_auth_candidates_skips_exhausted_account(self) -> None:
+    def test_iter_auth_candidates_does_not_precheck_quota(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             auth_dir = root / "data" / "oauth" / "codex"
@@ -720,29 +721,55 @@ class CodexOAuthServiceTests(unittest.TestCase):
             service = self._build_service(root)
             service.add_model("gpt-5.4")
 
-            def fake_quota(name: str) -> dict[str, Any]:
-                if name == "codex-first.json":
-                    return {
-                        "windows": [
-                            {
-                                "label": "Codex 5 小时",
-                                "used_percent": 100,
-                                "remaining_percent": 0,
-                            }
-                        ]
-                    }
-                return {
-                    "windows": [
-                        {
-                            "label": "Codex 5 小时",
-                            "used_percent": 25,
-                            "remaining_percent": 75,
-                        }
-                    ]
-                }
-
-            with patch.object(service, "get_auth_file_quota", side_effect=fake_quota):
+            with patch.object(service, "get_auth_file_quota") as quota_mock:
                 candidates = service.iter_auth_candidates_for_model("gpt-5.4")
+                quota_mock.assert_not_called()
+
+        self.assertEqual(
+            ["codex-first.json", "codex-second.json"],
+            [candidate.name for candidate in candidates],
+        )
+
+    def test_iter_auth_candidates_skips_quota_cooling_account(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            first = auth_dir / "codex-first.json"
+            second = auth_dir / "codex-second.json"
+            first.write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "first@example.com",
+                        "access_token": "access-first",
+                        "plan_type": "pro",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            second.write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "second@example.com",
+                        "access_token": "access-second",
+                        "plan_type": "pro",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            os.utime(second, (1000, 1000))
+            os.utime(first, (2000, 2000))
+            service = self._build_service(root)
+            service.add_model("gpt-5.4")
+            service.mark_auth_file_quota_exhausted("codex-first.json", retry_after_seconds=60)
+
+            with patch.object(service, "get_auth_file_quota") as quota_mock:
+                candidates = service.iter_auth_candidates_for_model("gpt-5.4")
+                quota_mock.assert_not_called()
 
         self.assertEqual(["codex-second.json"], [candidate.name for candidate in candidates])
 

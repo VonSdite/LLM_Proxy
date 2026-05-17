@@ -147,7 +147,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(field, body)
 
-    def test_codex_body_defaults_keep_priority_tier_and_developer_role(self) -> None:
+    def test_codex_body_defaults_keep_allowed_tiers_fields_and_developer_role(self) -> None:
         body: dict[str, Any] = {
             "input": [
                 {
@@ -156,13 +156,52 @@ class CodexProxyServiceTests(unittest.TestCase):
                     "content": [{"type": "input_text", "text": "rules"}],
                 }
             ],
-            "service_tier": "priority",
+            "service_tier": "fast",
+            "prompt_cache_retention": "24h",
+            "safety_identifier": "user-123",
         }
 
         CodexProxyService._apply_codex_body_defaults(body, "gpt-5.4")
 
         self.assertEqual("developer", body["input"][0]["role"])
-        self.assertEqual("priority", body["service_tier"])
+        self.assertEqual("fast", body["service_tier"])
+        self.assertEqual("24h", body["prompt_cache_retention"])
+        self.assertEqual("user-123", body["safety_identifier"])
+
+        priority_body: dict[str, Any] = {"service_tier": "priority"}
+        CodexProxyService._apply_codex_body_defaults(priority_body, "gpt-5.4")
+        self.assertEqual("priority", priority_body["service_tier"])
+
+    def test_codex_body_defaults_normalize_builtin_tool_aliases(self) -> None:
+        body: dict[str, Any] = {
+            "tools": [
+                {"type": "web_search_preview"},
+                {"type": "web_search_preview_2025_03_11"},
+                {"type": "function", "name": "demo"},
+            ],
+            "tool_choice": {
+                "type": "allowed_tools",
+                "tools": [
+                    {"type": "web_search_preview"},
+                    {"type": "web_search_preview_2025_03_11"},
+                ],
+            },
+        }
+
+        CodexProxyService._apply_codex_body_defaults(body, "gpt-5.4")
+
+        self.assertEqual("web_search", body["tools"][0]["type"])
+        self.assertEqual("web_search", body["tools"][1]["type"])
+        self.assertEqual("function", body["tools"][2]["type"])
+        self.assertEqual("allowed_tools", body["tool_choice"]["type"])
+        self.assertEqual("web_search", body["tool_choice"]["tools"][0]["type"])
+        self.assertEqual("web_search", body["tool_choice"]["tools"][1]["type"])
+
+        direct_choice_body: dict[str, Any] = {
+            "tool_choice": {"type": "web_search_preview_2025_03_11"}
+        }
+        CodexProxyService._apply_codex_body_defaults(direct_choice_body, "gpt-5.4")
+        self.assertEqual("web_search", direct_choice_body["tool_choice"]["type"])
 
     def test_nonstream_request_falls_back_to_next_account_after_upstream_400(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -178,18 +217,6 @@ class CodexProxyServiceTests(unittest.TestCase):
             oauth_service.add_model("gpt-5.4")
             proxy_service = CodexProxyService(ctx, oauth_service)
             captured_authorizations: list[str] = []
-
-            def fake_quota(name: str) -> dict[str, Any]:
-                del name
-                return {
-                    "windows": [
-                        {
-                            "label": "Codex 5 小时",
-                            "used_percent": 1,
-                            "remaining_percent": 99,
-                        }
-                    ]
-                }
 
             def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
                 del json, timeout, kwargs
@@ -210,7 +237,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                     ],
                 )
 
-            with patch.object(oauth_service, "get_auth_file_quota", side_effect=fake_quota):
+            with patch.object(oauth_service, "get_auth_file_quota") as quota_mock:
                 with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
                     response, status_code, failure = proxy_service.proxy_request(
                         {
@@ -228,6 +255,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                         {"Authorization": "Bearer downstream-token"},
                         resolved_target_format="openai_chat",
                     )
+                quota_mock.assert_not_called()
 
             self.assertIsNone(failure)
             self.assertEqual(200, status_code)
@@ -262,18 +290,6 @@ class CodexProxyServiceTests(unittest.TestCase):
             captured_headers: list[dict[str, str]] = []
             captured_bodies: list[dict[str, Any]] = []
 
-            def fake_quota(name: str) -> dict[str, Any]:
-                del name
-                return {
-                    "windows": [
-                        {
-                            "label": "Codex 5 小时",
-                            "used_percent": 1,
-                            "remaining_percent": 99,
-                        }
-                    ]
-                }
-
             def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
                 self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
                 self.assertTrue(stream)
@@ -294,7 +310,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                     ],
                 )
 
-            with patch.object(oauth_service, "get_auth_file_quota", side_effect=fake_quota):
+            with patch.object(oauth_service, "get_auth_file_quota") as quota_mock:
                 with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
                     response, status_code, failure = proxy_service.proxy_request(
                         {
@@ -305,6 +321,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                         {"Authorization": "Bearer downstream-token"},
                         resolved_target_format="openai_chat",
                     )
+                quota_mock.assert_not_called()
 
             self.assertIsNone(failure)
             self.assertEqual(200, status_code)
@@ -355,18 +372,6 @@ class CodexProxyServiceTests(unittest.TestCase):
             proxy_service = CodexProxyService(ctx, oauth_service)
             captured_authorizations: list[str] = []
 
-            def fake_quota(name: str) -> dict[str, Any]:
-                del name
-                return {
-                    "windows": [
-                        {
-                            "label": "Codex 5 小时",
-                            "used_percent": 1,
-                            "remaining_percent": 99,
-                        }
-                    ]
-                }
-
             def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
                 del json, timeout, kwargs
                 self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
@@ -386,7 +391,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                     ],
                 )
 
-            with patch.object(oauth_service, "get_auth_file_quota", side_effect=fake_quota):
+            with patch.object(oauth_service, "get_auth_file_quota") as quota_mock:
                 with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
                     response, status_code, failure = proxy_service.proxy_request(
                         {
@@ -398,6 +403,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                         resolved_target_format="openai_chat",
                     )
                 next_candidates = oauth_service.iter_auth_candidates_for_model("gpt-5.4")
+                quota_mock.assert_not_called()
             auth_entries = {
                 entry["name"]: entry
                 for entry in oauth_service.list_auth_files()["files"]

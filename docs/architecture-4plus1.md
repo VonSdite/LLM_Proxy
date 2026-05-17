@@ -68,7 +68,7 @@ downstream request
   - 读取认证文件状态，并按需刷新 token 后查询 Codex 配额
   - 持久化认证文件最近一次配额快照、配额刷新错误与 Codex 模型代理使用状态
   - 维护本地手动 Codex OAuth 模型目录
-  - 按本地模型目录和配额窗口提供 Codex 请求候选账号
+  - 按本地模型目录、本地冷却和认证失败状态提供 Codex 请求候选账号
 - `CodexProxyService`
   - 代理下游直接使用的 Codex 普通模型名
   - 使用 `data/oauth/codex/*.json` 中的 OAuth access token 请求 Codex backend
@@ -527,7 +527,7 @@ sequenceDiagram
     Client->>Controller: POST /v1/chat/completions model=gpt-5-codex
     Controller->>Controller: Provider 未命中后查 Codex 模型目录
     Controller->>CodexOAuth: iter_auth_candidates_for_model()
-    CodexOAuth->>CodexOAuth: 按本地模型目录与 quota 过滤认证文件
+    CodexOAuth->>CodexOAuth: 按本地模型目录、本地冷却与认证失败状态过滤认证文件
     Controller->>CodexProxy: proxy_request()
     CodexProxy->>ChatGPT: POST /backend-api/codex/responses
     Note over CodexProxy,ChatGPT: 对齐 Codex backend 要求：stream=true、store=false、parallel_tool_calls=true、include encrypted content，并移除不支持字段
