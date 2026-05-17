@@ -346,7 +346,7 @@
 }
 
 .settings-page .settings-help-popover {
-    position: absolute;
+    position: fixed;
     z-index: 1200;
     width: min(360px, calc(100vw - 24px));
     padding: 14px 16px;
@@ -365,7 +365,8 @@
 .settings-page .settings-help-popover::before {
     content: "";
     position: absolute;
-    left: 24px;
+    left: var(--popover-arrow-left, 24px);
+    transform: translateX(-50%);
     border-left: 8px solid transparent;
     border-right: 8px solid transparent;
 }

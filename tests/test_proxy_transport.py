@@ -1116,10 +1116,13 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function showSettingsHelp(", html)
         self.assertIn("function initSettingsHelpInteractions()", html)
         self.assertIn("scheduleSettingsHelpPopoverHide()", html)
+        self.assertIn('popover.style.setProperty("--popover-arrow-left"', html)
         self.assertIn(".settings-page .oauth-enable-row", css)
         self.assertIn(".settings-page .oauth-details-panel[hidden]", css)
         self.assertIn(".settings-page .oauth-network-toggle", css)
         self.assertIn(".settings-page .settings-grid-oauth {", css)
+        self.assertIn(".settings-page .settings-help-popover {\n    position: fixed;", css)
+        self.assertIn("left: var(--popover-arrow-left, 24px);", css)
         self.assertIn('self._app.route("/api/settings/system/oauth", methods=["PUT"])', web_controller_py)
 
     def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(
