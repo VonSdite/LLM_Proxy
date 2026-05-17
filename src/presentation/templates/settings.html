@@ -325,7 +325,6 @@
         let basicSettingsSaving = false;
         let oauthSettingsSaving = false;
         let pendingOAuthSave = false;
-        let oauthAutoSaveTimer = null;
         let debugSettingsSaving = false;
         let pendingDebugSave = false;
         let currentSettings = null;
@@ -339,7 +338,6 @@
         const settingsSensitiveAutoVisibleIds = new Set();
         const settingsSensitiveRevealTimers = new Map();
         const settingsSensitiveRevealDelayMs = 500;
-        const oauthAutoSaveDelayMs = 650;
 
         const settingsHelpTopics = {
             server_host: {
@@ -510,7 +508,6 @@
 
         function updateSensitiveInputSaveButtonState(inputId) {
             if (inputId === "oauthProxy") {
-                scheduleOAuthSettingsSave();
                 return;
             }
             updateBasicSettingsSaveButtonState();
@@ -518,7 +515,6 @@
 
         function saveSensitiveInputOnBlur(inputId) {
             if (inputId === "oauthProxy") {
-                clearOAuthAutoSaveTimer();
                 saveOAuthSettings();
                 return;
             }
@@ -586,12 +582,16 @@
             currentDebugSettingsSnapshot = JSON.stringify(collectDebugSettingsPayload());
         }
 
-        function fillOAuthSettingsForm(settings) {
+        function fillOAuthSettingsForm(settings, options = {}) {
             const oauthEnabled = Boolean(settings?.oauth?.enabled);
             document.getElementById("oauthEnabled").checked = oauthEnabled;
             document.getElementById("oauthProxy").value = settings?.oauth?.proxy || "";
             document.getElementById("oauthVerifySsl").checked = Boolean(settings?.oauth?.verify_ssl);
-            setSensitiveInputVisibility("oauthProxy", false);
+            if (options.preserveSensitiveVisibility) {
+                syncSensitiveInputToggle("oauthProxy");
+            } else {
+                setSensitiveInputVisibility("oauthProxy", false);
+            }
             syncOAuthDetailsVisibility(oauthEnabled);
             syncOAuthNavLink(oauthEnabled);
             currentOAuthSettingsSnapshot = JSON.stringify(collectOAuthSettingsPayload());
@@ -635,25 +635,6 @@
                 return;
             }
             saveButton.disabled = basicSettingsSaving || !hasBasicSettingsChanged();
-        }
-
-        function clearOAuthAutoSaveTimer() {
-            if (!oauthAutoSaveTimer) {
-                return;
-            }
-            window.clearTimeout(oauthAutoSaveTimer);
-            oauthAutoSaveTimer = null;
-        }
-
-        function scheduleOAuthSettingsSave(delayMs = oauthAutoSaveDelayMs) {
-            clearOAuthAutoSaveTimer();
-            if (!hasOAuthSettingsChanged()) {
-                return;
-            }
-            oauthAutoSaveTimer = window.setTimeout(function () {
-                oauthAutoSaveTimer = null;
-                saveOAuthSettings();
-            }, delayMs);
         }
 
         function syncOAuthDetailsVisibility(enabled) {
@@ -762,7 +743,6 @@
                 return Promise.resolve();
             }
 
-            clearOAuthAutoSaveTimer();
             const payload = collectOAuthSettingsPayload();
             const savedPayloadSnapshot = JSON.stringify(payload);
             oauthSettingsSaving = true;
@@ -786,7 +766,7 @@
 
                 currentSettings = data.settings;
                 if (JSON.stringify(collectOAuthSettingsPayload()) === savedPayloadSnapshot) {
-                    fillOAuthSettingsForm(data.settings);
+                    fillOAuthSettingsForm(data.settings, { preserveSensitiveVisibility: true });
                 } else {
                     currentOAuthSettingsSnapshot = savedPayloadSnapshot;
                     pendingOAuthSave = true;
@@ -797,7 +777,7 @@
                 oauthSettingsSaving = false;
                 if (pendingOAuthSave && hasOAuthSettingsChanged()) {
                     pendingOAuthSave = false;
-                    scheduleOAuthSettingsSave(0);
+                    await saveOAuthSettings();
                 } else {
                     pendingOAuthSave = false;
                 }
@@ -1039,8 +1019,9 @@
                     temporarilyRevealSensitiveInput(inputId);
                     updateSensitiveInputSaveButtonState(inputId);
                 });
-                input.addEventListener("blur", function () {
-                    if (document.activeElement?.closest(`[data-sensitive-toggle-for="${inputId}"]`)) {
+                input.addEventListener("blur", function (event) {
+                    const nextTarget = event.relatedTarget;
+                    if (nextTarget instanceof Element && nextTarget.closest(`[data-sensitive-toggle-for="${inputId}"]`)) {
                         return;
                     }
                     clearSensitiveInputAutoReveal(inputId);
