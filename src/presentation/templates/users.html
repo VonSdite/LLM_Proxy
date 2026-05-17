@@ -233,6 +233,7 @@
         let activePermissionDetailUser = null;
         let activeUsersHelpTrigger = null;
         let activeUsersHelpTopic = null;
+        let usersHelpHideTimer = null;
         let usersSortState = {
             key: 'total_tokens',
             direction: 'desc',
@@ -408,9 +409,24 @@
             return document.getElementById('usersHelpPopover');
         }
 
+        function clearUsersHelpHideTimer() {
+            if (!usersHelpHideTimer) return;
+            clearTimeout(usersHelpHideTimer);
+            usersHelpHideTimer = null;
+        }
+
+        function scheduleUsersHelpPopoverHide() {
+            clearUsersHelpHideTimer();
+            usersHelpHideTimer = setTimeout(function() {
+                hideUsersHelpPopover();
+            }, 160);
+        }
+
         function hideUsersHelpPopover() {
+            clearUsersHelpHideTimer();
             const popover = getUsersHelpPopoverElement();
             if (!popover) return;
+            activeUsersHelpTrigger?.setAttribute('aria-expanded', 'false');
             popover.hidden = true;
             popover.style.removeProperty('top');
             popover.style.removeProperty('left');
@@ -456,22 +472,74 @@
             popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
         }
 
+        function showUsersHelp(topic, trigger) {
+            clearUsersHelpHideTimer();
+            const normalizedTopic = String(topic || '').trim();
+            const nextTrigger = trigger || document.querySelector(`[data-users-help-topic="${normalizedTopic}"]`);
+            if (!nextTrigger || !usersHelpTopics[normalizedTopic]) return;
+
+            if (activeUsersHelpTrigger && activeUsersHelpTrigger !== nextTrigger) {
+                activeUsersHelpTrigger.setAttribute('aria-expanded', 'false');
+            }
+
+            activeUsersHelpTrigger = nextTrigger;
+            activeUsersHelpTopic = normalizedTopic;
+            activeUsersHelpTrigger.setAttribute('aria-expanded', 'true');
+            syncUsersHelpPopover();
+        }
+
         function toggleUsersHelp(topic, event) {
             event?.preventDefault();
             event?.stopPropagation();
+            showUsersHelp(topic, event?.currentTarget || null);
+        }
 
-            const normalizedTopic = String(topic || '').trim();
-            const trigger = event?.currentTarget || document.querySelector(`[data-users-help-topic="${normalizedTopic}"]`);
-            if (!trigger || !usersHelpTopics[normalizedTopic]) return;
+        function isUsersHelpRelatedTargetWithin(element, event) {
+            return element && event.relatedTarget instanceof Node && element.contains(event.relatedTarget);
+        }
 
-            if (activeUsersHelpTrigger === trigger && activeUsersHelpTopic === normalizedTopic) {
-                hideUsersHelpPopover();
-                return;
-            }
+        function getUsersHelpTriggerFromEvent(event) {
+            if (!(event.target instanceof Element)) return null;
+            return event.target.closest('[data-users-help-topic]');
+        }
 
-            activeUsersHelpTrigger = trigger;
-            activeUsersHelpTopic = normalizedTopic;
-            syncUsersHelpPopover();
+        function initUsersHelpInteractions() {
+            document.addEventListener('mouseover', function(event) {
+                const trigger = getUsersHelpTriggerFromEvent(event);
+                if (!trigger || isUsersHelpRelatedTargetWithin(trigger, event)) return;
+                showUsersHelp(trigger.dataset.usersHelpTopic, trigger);
+            });
+
+            document.addEventListener('mouseout', function(event) {
+                const trigger = getUsersHelpTriggerFromEvent(event);
+                if (!trigger || isUsersHelpRelatedTargetWithin(trigger, event)) return;
+                scheduleUsersHelpPopoverHide();
+            });
+
+            document.addEventListener('focusin', function(event) {
+                const trigger = getUsersHelpTriggerFromEvent(event);
+                if (!trigger) return;
+                showUsersHelp(trigger.dataset.usersHelpTopic, trigger);
+            });
+
+            document.addEventListener('focusout', function(event) {
+                const trigger = getUsersHelpTriggerFromEvent(event);
+                const popover = getUsersHelpPopoverElement();
+                if (!trigger || isUsersHelpRelatedTargetWithin(popover, event)) return;
+                scheduleUsersHelpPopoverHide();
+            });
+
+            const popover = getUsersHelpPopoverElement();
+            popover?.addEventListener('mouseover', function(event) {
+                if (isUsersHelpRelatedTargetWithin(popover, event)) return;
+                clearUsersHelpHideTimer();
+            });
+            popover?.addEventListener('mouseout', function(event) {
+                if (isUsersHelpRelatedTargetWithin(popover, event)) return;
+                scheduleUsersHelpPopoverHide();
+            });
+            popover?.addEventListener('focusin', clearUsersHelpHideTimer);
+            popover?.addEventListener('focusout', scheduleUsersHelpPopoverHide);
         }
 
         async function toggleChatWhitelist(enabled) {
@@ -607,6 +675,7 @@
             initThemeToggle();
             updateChatWhitelistUi();
             setupCustomSelect('pageSizeSelect');
+            initUsersHelpInteractions();
             initUserSearch();
             loadUsers();
             document.getElementById('pageSizeSelect').value = pageSize;

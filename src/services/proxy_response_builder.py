@@ -8,7 +8,6 @@ import json
 from typing import Any, Callable, Dict, Iterator, Optional
 
 import requests
-import websocket
 from flask import Response, stream_with_context
 
 from ..executors import OpenedUpstreamResponse
@@ -190,11 +189,11 @@ class ProxyResponseBuilder:
                 completion_error_message = str(exc)
                 self._logger.error("Streamed HTTP upstream error: provider=%s error=%s", provider.name, exc)
                 raise
-            except (websocket.WebSocketException, OSError) as exc:
-                completion_error_type = self._classify_websocket_error(exc)
+            except OSError as exc:
+                completion_error_type = HookErrorType.TRANSPORT_ERROR
                 completion_trace_error_type = completion_error_type.value
                 completion_error_message = str(exc)
-                self._logger.error("Streamed WebSocket upstream error: provider=%s error=%s", provider.name, exc)
+                self._logger.error("Streamed HTTP upstream error: provider=%s error=%s", provider.name, exc)
                 raise
             except Exception as exc:
                 completion_error_type = HookErrorType.TRANSPORT_ERROR
@@ -717,10 +716,4 @@ class ProxyResponseBuilder:
             return HookErrorType.TIMEOUT
         if isinstance(exc, requests.exceptions.ConnectionError):
             return HookErrorType.CONNECTION_ERROR
-        return HookErrorType.TRANSPORT_ERROR
-
-    @staticmethod
-    def _classify_websocket_error(exc: Exception) -> HookErrorType:
-        if isinstance(exc, websocket.WebSocketException):
-            return HookErrorType.WEBSOCKET_ERROR
         return HookErrorType.TRANSPORT_ERROR

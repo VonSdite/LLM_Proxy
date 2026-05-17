@@ -105,10 +105,8 @@ class ModelDiscoveryService:
             raise ValueError('Provider api must be a valid absolute URL')
 
         normalized_scheme = parsed.scheme.lower()
-        if normalized_scheme == 'ws':
-            normalized_scheme = 'http'
-        elif normalized_scheme == 'wss':
-            normalized_scheme = 'https'
+        if normalized_scheme not in {"http", "https"}:
+            raise ValueError("Provider api must use http:// or https://")
 
         root = f'{normalized_scheme}://{parsed.netloc}'
         base_path = ModelDiscoveryService._build_model_endpoint_base_path(parsed.path.rstrip('/'))

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 import requests
-import websocket
 from flask import Response, stream_with_context
 
 from ..application.app_context import AppContext
@@ -402,12 +401,12 @@ class ProxyService:
                 )
                 if attempt < max_retries - 1:
                     continue
-            except (websocket.WebSocketException, OSError) as exc:
+            except OSError as exc:
                 previous_status_code = None
-                previous_error_type = self._transport.classify_websocket_error(exc)
-                last_error = self._build_transport_error_info("WebSocket", exc, max_retries)
+                previous_error_type = HookErrorType.TRANSPORT_ERROR
+                last_error = self._build_transport_error_info("HTTP", exc, max_retries)
                 self._logger.error(
-                    "WebSocket upstream request error (attempt %s/%s): provider=%s error=%s",
+                    "HTTP upstream request error (attempt %s/%s): provider=%s error=%s",
                     attempt + 1,
                     max_retries,
                     provider.name,
@@ -508,10 +507,6 @@ class ProxyService:
     @staticmethod
     def _classify_request_error(exc: requests.exceptions.RequestException) -> HookErrorType:
         return ProxyTransportGateway.classify_request_error(exc)
-
-    @staticmethod
-    def _classify_websocket_error(exc: Exception) -> HookErrorType:
-        return ProxyTransportGateway.classify_websocket_error(exc)
 
     @staticmethod
     def _iter_stream_chunks_with_trace(

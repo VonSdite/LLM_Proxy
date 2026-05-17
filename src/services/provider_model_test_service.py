@@ -9,7 +9,6 @@ import time
 from typing import Any, Dict, List, Mapping, Optional
 
 import requests
-import websocket
 
 from ..application.app_context import AppContext
 from ..config.provider_config import ProviderConfigSchema, SUPPORTED_PROVIDER_FIELDS
@@ -158,12 +157,6 @@ class ProviderModelTestService:
                 )
             except requests.RequestException as exc:
                 previous_error_type = self._classify_request_error(exc)
-                previous_status_code = None
-                last_error_message = str(exc)
-                if attempt + 1 < max_retries:
-                    continue
-            except websocket.WebSocketException as exc:
-                previous_error_type = self._classify_websocket_error(exc)
                 previous_status_code = None
                 last_error_message = str(exc)
                 if attempt + 1 < max_retries:
@@ -546,10 +539,4 @@ class ProviderModelTestService:
             return HookErrorType.TIMEOUT
         if isinstance(exc, requests.exceptions.ConnectionError):
             return HookErrorType.CONNECTION_ERROR
-        return HookErrorType.TRANSPORT_ERROR
-
-    @staticmethod
-    def _classify_websocket_error(exc: Exception) -> HookErrorType:
-        if isinstance(exc, websocket.WebSocketException):
-            return HookErrorType.WEBSOCKET_ERROR
         return HookErrorType.TRANSPORT_ERROR

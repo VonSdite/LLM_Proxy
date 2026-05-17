@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from typing import Any, Dict, Optional, cast
 
 import requests
-import websocket
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -176,6 +175,26 @@ class RecordingProxyService:
         return self._proxy_result
 
 
+class FakeCodexProxyService:
+    def __init__(self, models: tuple[str, ...] = ("gpt-5",)) -> None:
+        self._models = models
+
+    def has_model(self, model_name: str) -> bool:
+        return model_name in self._models
+
+    def list_model_names(self) -> tuple[str, ...]:
+        return self._models
+
+    def proxy_request(self, *args, **kwargs):
+        del args, kwargs
+        return None, 503, ProxyErrorInfo(
+            message="No available Codex OAuth account for model: gpt-5",
+            status_code=503,
+            error_type="upstream_error",
+            error_code="codex_auth_unavailable",
+        )
+
+
 class ContextRecordingHook(BaseHook):
     def __init__(self) -> None:
         self.contexts: list[HookContext] = []
@@ -224,12 +243,44 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
                         "provider_name": "demo",
                         "source_format": "openai_responses",
                         "target_formats": ["openai_responses"],
-                        "transport": "http",
                     }
                 ],
             },
             response.get_json(),
         )
+
+    def test_list_models_includes_codex_models_without_provider_prefix(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("regular",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            codex_proxy_service=FakeCodexProxyService(("gpt-5",)),
+        )
+
+        response = app.test_client().get("/v1/models")
+        payload = response.get_json()
+
+        self.assertEqual(200, response.status_code)
+        model_ids = [item["id"] for item in payload["data"]]
+        self.assertIn("demo/regular", model_ids)
+        self.assertIn("gpt-5", model_ids)
+        codex_entry = next(item for item in payload["data"] if item["id"] == "gpt-5")
+        self.assertEqual("codex", codex_entry["provider_name"])
+        self.assertEqual("openai_responses", codex_entry["source_format"])
 
     def test_list_models_filters_to_models_allowed_for_whitelisted_user(self) -> None:
         provider = LLMProvider(
@@ -867,41 +918,6 @@ class ProxyServiceRetryHookContextTests(unittest.TestCase):
         self.assertEqual(2, len(hook.contexts))
         self.assertIsNone(hook.contexts[1].last_status_code)
         self.assertEqual(HookErrorType.CONNECTION_ERROR, hook.contexts[1].last_error_type)
-
-    def test_hook_sees_websocket_error_type_on_next_attempt(self) -> None:
-        service = self._build_service()
-        hook = ContextRecordingHook()
-        provider = LLMProvider(
-            name="demo",
-            api="wss://example.com/v1/chat/completions",
-            transport="websocket",
-            model_list=("gpt-4.1",),
-            hook=hook,
-            max_retries=2,
-        )
-        calls = {"count": 0}
-
-        def stub_open_upstream_response(*args, **kwargs):
-            del args, kwargs
-            if calls["count"] == 0:
-                calls["count"] += 1
-                raise websocket.WebSocketException("socket closed")
-            return self._success_response()
-
-        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
-
-        response, status_code, failure_info = service.proxy_request(
-            provider,
-            {"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
-            {},
-        )
-
-        self.assertIsNone(failure_info)
-        self.assertEqual(200, status_code)
-        self.assertIsNotNone(response)
-        self.assertEqual(2, len(hook.contexts))
-        self.assertIsNone(hook.contexts[1].last_status_code)
-        self.assertEqual(HookErrorType.WEBSOCKET_ERROR, hook.contexts[1].last_error_type)
 
     def test_non_retryable_status_does_not_trigger_second_attempt(self) -> None:
         service = self._build_service()

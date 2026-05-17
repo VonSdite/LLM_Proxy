@@ -107,16 +107,6 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label field-label-with-help">
-                                <span>上游传输</span>
-                                <button type="button" class="field-help-button" data-provider-help-topic="transport" onclick="toggleProviderHelp('transport', event)" aria-label="查看上游传输说明">?</button>
-                            </label>
-                            <select class="form-control" id="providerTransport" data-custom-select="true">
-                                <option value="http">HTTP</option>
-                                <option value="websocket">WebSocket</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label field-label-with-help">
                                 <span>上游格式</span>
                                 <button type="button" class="field-help-button" data-provider-help-topic="source_format" onclick="toggleProviderHelp('source_format', event)" aria-label="查看上游格式说明">?</button>
                             </label>
@@ -150,12 +140,11 @@
                             <label class="form-label">Legacy API Key</label>
                             <div class="sensitive-input-shell">
                                 <input
-                                    type="password"
+                                    type="text"
                                     class="form-control sensitive-input-control"
                                     id="providerApiKey"
-                                    data-sensitive-masked-type="password"
                                     placeholder="留空则不写入配置"
-                                    autocomplete="new-password"
+                                    autocomplete="off"
                                     spellcheck="false"
                                 >
                                 <button
@@ -232,7 +221,7 @@
                             <input type="number" class="form-control" id="providerRetries" min="1" placeholder="例如 3">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">证书校验（HTTPS/WSS）</label>
+                            <label class="form-label">证书校验</label>
                             <select class="form-control" id="providerVerifySsl" data-custom-select="true">
                                 <option value="true">启用</option>
                                 <option value="false">禁用</option>
@@ -579,12 +568,12 @@
         let activeCustomSelect = null;
         let activeProviderHelpTopic = null;
         let activeProviderHelpTrigger = null;
+        let providerHelpHideTimer = null;
         let activeProviderTab = 'providers';
         let pendingDeleteAuthGroupName = null;
         let deletingAuthGroupName = null;
         let pendingDeleteAuthEntryKey = null;
         let authEntryCardSequence = 0;
-        let providerTransportAutoSyncEnabled = true;
         let authEntryYamlEditor = null;
         let authEntryYamlThemeObserver = null;
         let modelTestRows = [];
@@ -594,17 +583,6 @@
         let modelTestDragState = null;
         let modelTestDragTargetElement = null;
         const providerHelpTopics = {
-            transport: {
-                title: '上游传输怎么选',
-                html: `
-                    <p>上游传输只看代理如何连接真实 API 提供方，不看下游客户端。</p>
-                    <ul>
-                        <li><strong>HTTP</strong>：绝大多数 OpenAI、Responses、Anthropic Messages 接口都选它。</li>
-                        <li><strong>WebSocket</strong>：只有上游明确要求用 ws:// 或 wss:// 持续收发消息时才选它。</li>
-                    </ul>
-                    <p>如果你拿到的地址是 <code>https://...</code>，通常就选 HTTP；如果是 <code>wss://...</code>，通常选 WebSocket。</p>
-                `,
-            },
             source_format: {
                 title: '上游格式怎么选',
                 html: `
@@ -671,7 +649,6 @@
                         <li><code>/v1/models</code></li>
                         <li><code>/models</code></li>
                     </ul>
-                    <p><strong>WebSocket</strong> 地址会先把 <code>ws://</code> / <code>wss://</code> 转成对应的 <code>http://</code> / <code>https://</code> 再请求。</p>
                     <p><strong>Legacy API Key 模式</strong> 会自动带上当前表单里的 Bearer Token。</p>
                     <p><strong>Auth Group 模式</strong> 必须显式选择一个 <code>Auth Entry</code>，并把这条 entry 的 headers 原样带去请求上游模型接口。</p>
                     <p>这一步只是帮你发现可选模型，不会修改上游协议，也不会自动替你决定 <code>source_format</code>。</p>
@@ -928,9 +905,24 @@
             return document.getElementById('providerHelpPopover');
         }
 
+        function clearProviderHelpHideTimer() {
+            if (!providerHelpHideTimer) return;
+            clearTimeout(providerHelpHideTimer);
+            providerHelpHideTimer = null;
+        }
+
+        function scheduleProviderHelpPopoverHide() {
+            clearProviderHelpHideTimer();
+            providerHelpHideTimer = setTimeout(function() {
+                hideProviderHelpPopover();
+            }, 160);
+        }
+
         function hideProviderHelpPopover() {
+            clearProviderHelpHideTimer();
             const popover = getProviderHelpPopoverElement();
             if (!popover) return;
+            activeProviderHelpTrigger?.setAttribute('aria-expanded', 'false');
             popover.hidden = true;
             popover.style.removeProperty('top');
             popover.style.removeProperty('left');
@@ -938,6 +930,22 @@
             popover.dataset.placement = 'bottom';
             activeProviderHelpTopic = null;
             activeProviderHelpTrigger = null;
+        }
+
+        function showProviderHelp(topic, trigger) {
+            clearProviderHelpHideTimer();
+            const normalizedTopic = String(topic || '').trim();
+            const nextTrigger = trigger || document.querySelector(`[data-provider-help-topic="${normalizedTopic}"]`);
+            if (!nextTrigger || !providerHelpTopics[normalizedTopic]) return;
+
+            if (activeProviderHelpTrigger && activeProviderHelpTrigger !== nextTrigger) {
+                activeProviderHelpTrigger.setAttribute('aria-expanded', 'false');
+            }
+
+            activeProviderHelpTopic = normalizedTopic;
+            activeProviderHelpTrigger = nextTrigger;
+            activeProviderHelpTrigger.setAttribute('aria-expanded', 'true');
+            syncProviderHelpPopover();
         }
 
         function syncProviderHelpPopover() {
@@ -985,13 +993,55 @@
             event?.preventDefault();
             event?.stopPropagation();
             const trigger = event?.currentTarget || null;
-            if (activeProviderHelpTopic === topic && activeProviderHelpTrigger === trigger) {
-                hideProviderHelpPopover();
-                return;
-            }
-            activeProviderHelpTopic = topic;
-            activeProviderHelpTrigger = trigger;
-            syncProviderHelpPopover();
+            showProviderHelp(topic, trigger);
+        }
+
+        function isProviderHelpRelatedTargetWithin(element, event) {
+            return element && event.relatedTarget instanceof Node && element.contains(event.relatedTarget);
+        }
+
+        function getProviderHelpTriggerFromEvent(event) {
+            if (!(event.target instanceof Element)) return null;
+            return event.target.closest('[data-provider-help-topic]');
+        }
+
+        function initProviderHelpInteractions() {
+            document.addEventListener('mouseover', function(event) {
+                const trigger = getProviderHelpTriggerFromEvent(event);
+                if (!trigger || isProviderHelpRelatedTargetWithin(trigger, event)) return;
+                showProviderHelp(trigger.dataset.providerHelpTopic, trigger);
+            });
+
+            document.addEventListener('mouseout', function(event) {
+                const trigger = getProviderHelpTriggerFromEvent(event);
+                if (!trigger || isProviderHelpRelatedTargetWithin(trigger, event)) return;
+                scheduleProviderHelpPopoverHide();
+            });
+
+            document.addEventListener('focusin', function(event) {
+                const trigger = getProviderHelpTriggerFromEvent(event);
+                if (!trigger) return;
+                showProviderHelp(trigger.dataset.providerHelpTopic, trigger);
+            });
+
+            document.addEventListener('focusout', function(event) {
+                const trigger = getProviderHelpTriggerFromEvent(event);
+                const popover = getProviderHelpPopoverElement();
+                if (!trigger || isProviderHelpRelatedTargetWithin(popover, event)) return;
+                scheduleProviderHelpPopoverHide();
+            });
+
+            const popover = getProviderHelpPopoverElement();
+            popover?.addEventListener('mouseover', function(event) {
+                if (isProviderHelpRelatedTargetWithin(popover, event)) return;
+                clearProviderHelpHideTimer();
+            });
+            popover?.addEventListener('mouseout', function(event) {
+                if (isProviderHelpRelatedTargetWithin(popover, event)) return;
+                scheduleProviderHelpPopoverHide();
+            });
+            popover?.addEventListener('focusin', clearProviderHelpHideTimer);
+            popover?.addEventListener('focusout', scheduleProviderHelpPopoverHide);
         }
 
         document.addEventListener('click', function(event) {
@@ -2716,6 +2766,20 @@
             input.focus({ preventScroll: true });
         }
 
+        function handleSensitiveInputCopy(event) {
+            const input = event.currentTarget;
+            if (!(input instanceof HTMLInputElement) || !input.classList.contains('is-masked')) {
+                return;
+            }
+            const selectionStart = typeof input.selectionStart === 'number' ? input.selectionStart : 0;
+            const selectionEnd = typeof input.selectionEnd === 'number' ? input.selectionEnd : 0;
+            if (selectionStart === selectionEnd || !event.clipboardData) {
+                return;
+            }
+            event.clipboardData.setData('text/plain', input.value.slice(selectionStart, selectionEnd));
+            event.preventDefault();
+        }
+
         function resetProviderSensitiveInputs() {
             providerSensitiveInputIds.forEach(inputId => {
                 const toggleButton = document.querySelector(`[data-sensitive-toggle-for="${inputId}"]`);
@@ -2748,7 +2812,6 @@
             return {
                 name: document.getElementById('providerName').value.trim(),
                 api: document.getElementById('providerApi').value.trim(),
-                transport: document.getElementById('providerTransport').value,
                 source_format: document.getElementById('providerSourceFormat').value.trim() || 'openai_chat',
                 auth_group: authGroup,
                 api_key: apiKey,
@@ -2957,14 +3020,11 @@
         }
 
         function fillForm(provider) {
-            const inferredTransport = inferTransportFromApi(provider?.api || '');
-            const resolvedTransport = provider?.transport || inferredTransport;
             const authMode = provider
                 ? (provider.auth_group ? 'auth_group' : 'legacy_api_key')
                 : 'legacy_api_key';
             document.getElementById('providerName').value = provider?.name || '';
             document.getElementById('providerApi').value = provider?.api || '';
-            setSelectValueOrFallback('providerTransport', resolvedTransport, inferredTransport);
             setSelectValueOrFallback('providerSourceFormat', provider?.source_format, 'openai_chat');
             setSelectValueOrFallback('providerAuthMode', authMode, 'legacy_api_key');
             renderProviderAuthGroupOptions(provider?.auth_group || '');
@@ -2975,7 +3035,6 @@
             setSelectValueOrFallback('providerVerifySsl', provider?.verify_ssl === true ? 'true' : 'false', 'false');
             setModelTestRowsFromModels(Array.isArray(provider?.model_list) ? provider.model_list : []);
             document.getElementById('providerHook').value = provider?.hook || '';
-            resetProviderTransportAutoSync(provider);
             resetProviderSensitiveInputs();
             updateProviderAuthModeFields();
             updateModelListCount();
@@ -2983,53 +3042,9 @@
             renderModelTestTable();
         }
 
-        function inferExplicitTransportFromApi(apiValue) {
-            const normalized = String(apiValue ?? '').trim().toLowerCase();
-            if (normalized.startsWith('ws://') || normalized.startsWith('wss://')) {
-                return 'websocket';
-            }
-            if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
-                return 'http';
-            }
-            return null;
-        }
-
-        function inferTransportFromApi(apiValue) {
-            return inferExplicitTransportFromApi(apiValue) || 'http';
-        }
-
-        function resetProviderTransportAutoSync(provider) {
-            const explicitTransport = inferExplicitTransportFromApi(provider?.api || '');
-            if (!provider) {
-                providerTransportAutoSyncEnabled = true;
-                return;
-            }
-            providerTransportAutoSyncEnabled = !explicitTransport || provider?.transport === explicitTransport;
-        }
-
-        function syncProviderTransportWithApi(force = false) {
-            const explicitTransport = inferExplicitTransportFromApi(document.getElementById('providerApi')?.value || '');
-            if (!explicitTransport || (!force && !providerTransportAutoSyncEnabled)) {
-                return;
-            }
-            setSelectValueOrFallback('providerTransport', explicitTransport, explicitTransport);
-        }
-
         function handleProviderApiInput() {
-            syncProviderTransportWithApi();
             updateFetchModelsButtonState();
             renderModelTestTable();
-        }
-
-        function handleProviderTransportChange() {
-            const explicitTransport = inferExplicitTransportFromApi(document.getElementById('providerApi')?.value || '');
-            const selectedTransport = document.getElementById('providerTransport')?.value || '';
-            providerTransportAutoSyncEnabled = !explicitTransport || selectedTransport === explicitTransport;
-            updateFetchModelsButtonState();
-        }
-
-        function getEffectiveTransport() {
-            return document.getElementById('providerTransport')?.value || inferTransportFromApi(document.getElementById('providerApi')?.value || '');
         }
 
         function canFetchModels() {
@@ -3373,7 +3388,6 @@
                         <td class="provider-api-cell" title="${escapeHtml(provider.api)}">
                             <span class="provider-api-text">${escapeHtml(provider.api)}</span>
                             <div class="provider-meta-line">
-                                <span class="provider-chip">${escapeHtml(provider.transport || 'http')}</span>
                                 <span class="provider-chip">${escapeHtml(provider.source_format || 'openai_chat')}</span>
                                 ${provider.auth_group ? `<span class="provider-chip provider-chip-hook">auth_group:${escapeHtml(provider.auth_group)}</span>` : ''}
                                 ${provider.api_key ? '<span class="provider-chip provider-chip-muted">legacy api_key</span>' : ''}
@@ -4787,7 +4801,6 @@
             setupCustomSelect('providerAuthMode');
             setupCustomSelect('providerAuthGroup');
             setupCustomSelect('modelTestAuthEntry');
-            setupCustomSelect('providerTransport');
             setupCustomSelect('providerSourceFormat');
             setupCustomSelect('providerVerifySsl');
             setupCustomSelect('authGroupStrategy');
@@ -4909,7 +4922,6 @@
             document.getElementById('modelTestAuthEntry').addEventListener('change', function() {
                 renderModelTestTable();
             });
-            document.getElementById('providerTransport').addEventListener('change', handleProviderTransportChange);
             providerSensitiveInputIds.forEach(inputId => {
                 const input = document.getElementById(inputId);
                 input?.addEventListener('input', function() {
@@ -4922,6 +4934,7 @@
                     clearSensitiveInputAutoReveal(inputId);
                     syncSensitiveInputToggle(inputId);
                 });
+                input?.addEventListener('copy', handleSensitiveInputCopy);
             });
             document.getElementById('fetchModelSearchInput').addEventListener('input', renderFetchModelPicker);
             document.getElementById('modelSearchInput').addEventListener('input', renderModelDetailList);
@@ -4937,6 +4950,7 @@
                 syncAuthEntryCardSummary(card);
             });
             fillAuthGroupForm(null);
+            initProviderHelpInteractions();
             syncProviderTabUi();
             updateModelListCount();
             updateProviderAuthModeFields();

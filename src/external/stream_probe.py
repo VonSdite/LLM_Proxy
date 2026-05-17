@@ -2,7 +2,28 @@
 # -*- coding: utf-8 -*-
 """上游流式响应探测工具。"""
 
-from typing import Any, Iterator, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+
+
+class StaticUpstreamResponse:
+    """为非 requests 响应提供统一元数据与关闭能力。"""
+
+    def __init__(
+        self,
+        status_code: int = 200,
+        headers: Optional[Dict[str, str]] = None,
+        on_close: Optional[Callable[[], None]] = None,
+    ):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._on_close = on_close
+
+    def close(self) -> None:
+        if self._on_close is None:
+            return
+        on_close = self._on_close
+        self._on_close = None
+        on_close()
 
 
 class PrefetchedStreamResponse:

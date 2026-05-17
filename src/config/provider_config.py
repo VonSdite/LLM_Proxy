@@ -24,14 +24,12 @@ SUPPORTED_PROVIDER_PROTOCOLS = (
 DEFAULT_PROVIDER_TARGET_FORMATS = SUPPORTED_PROVIDER_PROTOCOLS
 DEFAULT_AUTH_GROUP_STRATEGY = "least_inflight"
 DEFAULT_AUTH_GROUP_COOLDOWN_SECONDS_ON_429 = 60
-SUPPORTED_PROVIDER_TRANSPORTS = {"http", "websocket"}
-SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https", "ws", "wss"}
+SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https"}
 SUPPORTED_AUTH_GROUP_STRATEGIES = {DEFAULT_AUTH_GROUP_STRATEGY}
 SUPPORTED_PROVIDER_FIELDS = {
     "name",
     "enabled",
     "api",
-    "transport",
     "source_format",
     "api_key",
     "auth_group",
@@ -159,24 +157,10 @@ def normalize_headers(value: Any) -> Dict[str, str]:
     return headers
 
 
-def resolve_provider_transport(api: str, transport: Any = None) -> str:
+def resolve_provider_transport(api: str) -> str:
     scheme = urlparse(api).scheme.lower()
     if scheme not in SUPPORTED_PROVIDER_API_SCHEMES:
-        supported_schemes = ", ".join(sorted(SUPPORTED_PROVIDER_API_SCHEMES))
-        raise ValueError(f"Provider api must use one of: {supported_schemes}")
-
-    normalized_transport = clean_optional_string(transport)
-    if normalized_transport is not None:
-        lowered = normalized_transport.lower()
-        if lowered not in SUPPORTED_PROVIDER_TRANSPORTS:
-            supported = ", ".join(sorted(SUPPORTED_PROVIDER_TRANSPORTS))
-            raise ValueError(f"Provider transport must be one of: {supported}")
-        if lowered == "http" and scheme in {"ws", "wss"}:
-            raise ValueError("Provider transport 'http' requires api to use http:// or https://")
-        return lowered
-
-    if scheme in {"ws", "wss"}:
-        return "websocket"
+        raise ValueError("Provider api must use http:// or https://")
     return DEFAULT_PROVIDER_TRANSPORT
 
 
@@ -471,7 +455,7 @@ class ProviderConfigSchema:
             )
             is not False,
             api=api,
-            transport=resolve_provider_transport(api, config.get("transport")),
+            transport=resolve_provider_transport(api),
             source_format=resolve_provider_protocol(
                 config.get("source_format"),
                 default=DEFAULT_PROVIDER_SOURCE_FORMAT,
@@ -502,7 +486,6 @@ class ProviderConfigSchema:
             "name": self.name,
             "enabled": bool(self.enabled),
             "api": self.api,
-            "transport": self.transport,
             "source_format": self.source_format,
         }
 

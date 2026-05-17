@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import ssl
 import subprocess
 import sys
 import unittest
@@ -10,7 +9,6 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from flask import Flask
-from websocket import ABNF
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -22,35 +20,14 @@ from src.config.provider_config import (
     RuntimeProviderSpec,
 )
 from src.config.provider_manager import ProviderManager
-from src.executors import HttpExecutor, WebSocketExecutor
+from src.executors import HttpExecutor
 from src.external.stream_probe import probe_stream_response
-from src.external.upstream_websocket import (
-    WebSocketUpstreamResponse,
-    collect_websocket_response_body,
-    normalize_websocket_message,
-)
 from src.proxy_core import resolve_stream_format
 from src.repositories import AuthGroupRepository
 from src.services.model_discovery_service import ModelDiscoveryService
 from src.utils.database import create_connection_factory
 from src.utils.local_time import now_local_datetime
-from src.utils.net import build_websocket_connect_options, is_valid_ip, normalize_ip
-
-
-class FakeWebSocketConnection:
-    def __init__(self, frames):
-        self._frames = iter(frames)
-        self.closed = False
-        self.pongs = []
-
-    def recv_data(self, control_frame=True):
-        return next(self._frames)
-
-    def pong(self, payload):
-        self.pongs.append(payload)
-
-    def close(self):
-        self.closed = True
+from src.utils.net import is_valid_ip, normalize_ip
 
 
 class FakeLogger:
@@ -124,61 +101,6 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual(1, fake_session.cookies.clear_calls)
         self.assertEqual(1, len(fake_session.post_calls))
 
-    def test_websocket_handshake_headers_deduplicate_authorization_like_http(self) -> None:
-        headers = WebSocketExecutor._build_websocket_handshake_headers(
-            {
-                "Authorization": "Bearer user-token",
-                "content-type": "application/json",
-                "authorization": "Bearer provider-token",
-                "X-Trace": "trace-1",
-            }
-        )
-
-        self.assertEqual(
-            {
-                "authorization": "Bearer provider-token",
-                "X-Trace": "trace-1",
-            },
-            headers,
-        )
-
-    def test_websocket_responses_request_body_uses_response_create_event(self) -> None:
-        provider = type("Provider", (), {"source_format": "openai_responses"})()
-
-        body = WebSocketExecutor._build_websocket_request_body(
-            provider,  # type: ignore[arg-type]
-            {
-                "model": "gpt-5.5",
-                "input": [{"role": "user", "content": "hi"}],
-                "stream": True,
-            },
-        )
-
-        self.assertEqual(
-            {
-                "type": "response.create",
-                "model": "gpt-5.5",
-                "input": [{"role": "user", "content": "hi"}],
-                "stream": True,
-            },
-            body,
-        )
-
-    def test_websocket_non_responses_request_body_stays_raw(self) -> None:
-        provider = type("Provider", (), {"source_format": "openai_chat"})()
-        request_body = {
-            "model": "gpt-4.1",
-            "messages": [{"role": "user", "content": "hi"}],
-            "stream": True,
-        }
-
-        body = WebSocketExecutor._build_websocket_request_body(
-            provider,  # type: ignore[arg-type]
-            request_body,
-        )
-
-        self.assertIs(request_body, body)
-
     def test_provider_enabled_defaults_to_true(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
             {
@@ -192,18 +114,6 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertTrue(schema.enabled)
         runtime = RuntimeProviderSpec.from_schema(schema)
         self.assertTrue(runtime.enabled)
-
-    def test_provider_transport_defaults_to_websocket_for_ws_scheme(self) -> None:
-        schema = ProviderConfigSchema.from_mapping(
-            {
-                "name": "codex",
-                "api": "wss://example.com/v1/chat/completions",
-                "api_key": "demo-key",
-                "model_list": ["gpt-4.1"],
-            }
-        )
-
-        self.assertEqual("websocket", schema.transport)
 
     def test_provider_timeout_defaults_to_1200_seconds(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
@@ -219,29 +129,29 @@ class ProviderTransportTests(unittest.TestCase):
         runtime = RuntimeProviderSpec.from_schema(schema)
         self.assertEqual(1200, runtime.timeout_seconds)
 
-    def test_provider_transport_allows_explicit_override(self) -> None:
-        schema = ProviderConfigSchema.from_mapping(
-            {
-                "name": "codex",
-                "api": "https://example.com/v1/chat/completions",
-                "api_key": "demo-key",
-                "transport": "websocket",
-                "model_list": ["gpt-4.1"],
-            }
-        )
-
-        self.assertEqual("websocket", schema.transport)
-
-    def test_provider_transport_rejects_http_transport_with_ws_scheme(self) -> None:
+    def test_provider_schema_rejects_transport_field(self) -> None:
         with self.assertRaisesRegex(
-            ValueError, "requires api to use http:// or https://"
+            ValueError, "Unsupported provider field\\(s\\): transport"
+        ):
+            ProviderConfigSchema.from_mapping(
+                {
+                    "name": "bad-provider",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "demo-key",
+                    "transport": "http",
+                    "model_list": ["demo"],
+                }
+            )
+
+    def test_provider_rejects_websocket_api_scheme(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError, "Provider api must use http:// or https://"
         ):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "bad-provider",
                     "api": "wss://example.com/v1/chat/completions",
                     "api_key": "demo-key",
-                    "transport": "http",
                     "model_list": ["demo"],
                 }
             )
@@ -334,7 +244,6 @@ class ProviderTransportTests(unittest.TestCase):
             )
 
     def test_internal_stream_detection_uses_transport_and_content_type(self) -> None:
-        self.assertEqual("ws_json", resolve_stream_format(None, "", "websocket"))
         self.assertEqual(
             "sse_json",
             resolve_stream_format(None, "text/event-stream; charset=utf-8", "http"),
@@ -501,88 +410,7 @@ class AuthGroupLegacyCleanupTests(unittest.TestCase):
                 db_path.unlink()
 
 
-class WebSocketProxyBridgeTests(unittest.TestCase):
-    def test_normalize_websocket_message_preserves_raw_payload(self) -> None:
-        chunk = normalize_websocket_message(b'{"id":"evt_1"}')
-
-        self.assertEqual(b'{"id":"evt_1"}', chunk)
-
-    def test_stream_response_preserves_websocket_message_boundaries(self) -> None:
-        connection = FakeWebSocketConnection(
-            [
-                (ABNF.OPCODE_TEXT, b'{"id":"evt_1"}'),
-                (ABNF.OPCODE_TEXT, b"data: [DONE]\n\n"),
-                (ABNF.OPCODE_CLOSE, b""),
-            ]
-        )
-        response = WebSocketUpstreamResponse(connection)
-
-        chunks = list(response.iter_content())
-
-        self.assertEqual(
-            [
-                b'{"id":"evt_1"}',
-                b"data: [DONE]\n\n",
-            ],
-            chunks,
-        )
-        response.close()
-        self.assertTrue(connection.closed)
-
-    def test_stream_response_closes_after_terminal_responses_event(self) -> None:
-        connection = FakeWebSocketConnection(
-            [
-                (ABNF.OPCODE_TEXT, b'{"type":"response.output_text.delta","delta":"hi"}'),
-                (ABNF.OPCODE_TEXT, b'{"type":"response.completed","response":{"id":"resp_1"}}'),
-                (ABNF.OPCODE_TEXT, b'{"type":"response.output_text.delta","delta":"late"}'),
-            ]
-        )
-        response = WebSocketUpstreamResponse(connection)
-
-        chunks = list(response.iter_content())
-
-        self.assertEqual(
-            [
-                b'{"type":"response.output_text.delta","delta":"hi"}',
-                b'{"type":"response.completed","response":{"id":"resp_1"}}',
-            ],
-            chunks,
-        )
-        self.assertTrue(connection.closed)
-
-    def test_collect_non_stream_websocket_body_uses_terminal_payload(self) -> None:
-        connection = FakeWebSocketConnection(
-            [
-                (ABNF.OPCODE_TEXT, b'{"delta":"hello"}'),
-                (
-                    ABNF.OPCODE_TEXT,
-                    b'{"choices":[],"usage":{"total_tokens":1},"model":"demo"}',
-                ),
-                (ABNF.OPCODE_CLOSE, b""),
-            ]
-        )
-
-        body = collect_websocket_response_body(connection)
-
-        self.assertEqual(
-            b'{"choices":[],"usage":{"total_tokens":1},"model":"demo"}',
-            body,
-        )
-
-    def test_collect_non_stream_websocket_body_extracts_sse_data(self) -> None:
-        connection = FakeWebSocketConnection(
-            [
-                (ABNF.OPCODE_TEXT, b'data: {"id":"evt_1"}\n\ndata: [DONE]\n\n'),
-                (ABNF.OPCODE_CLOSE, b""),
-            ]
-        )
-
-        body = collect_websocket_response_body(connection)
-
-        self.assertEqual(b'{"id":"evt_1"}', body)
-
-
-class WebSocketConnectOptionsTests(unittest.TestCase):
+class NetUtilsTests(unittest.TestCase):
     def test_normalize_ip_strips_ipv6_mapped_prefix(self) -> None:
         self.assertEqual("127.0.0.1", normalize_ip("::ffff:127.0.0.1"))
 
@@ -592,30 +420,13 @@ class WebSocketConnectOptionsTests(unittest.TestCase):
     def test_is_valid_ip_accepts_ipv6_mapped_ipv4(self) -> None:
         self.assertTrue(is_valid_ip("::ffff:127.0.0.1"))
 
-    def test_build_websocket_connect_options_supports_http_proxy(self) -> None:
-        options = build_websocket_connect_options(
-            "http://user:pass@proxy.local:8080", False
-        )
-
-        self.assertEqual("proxy.local", options["http_proxy_host"])
-        self.assertEqual(8080, options["http_proxy_port"])
-        self.assertEqual(("user", "pass"), options["http_proxy_auth"])
-        self.assertEqual(ssl.CERT_NONE, options["sslopt"]["cert_reqs"])
-
 
 class ModelDiscoveryCandidateTests(unittest.TestCase):
-    def test_model_discovery_maps_websocket_scheme_to_https(self) -> None:
-        candidates = ModelDiscoveryService._build_model_endpoint_candidates(
-            "wss://example.com/v1/chat/completions"
-        )
-
-        self.assertEqual(
-            [
-                "https://example.com/v1/models",
-                "https://example.com/models",
-            ],
-            candidates,
-        )
+    def test_model_discovery_rejects_websocket_scheme(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Provider api must use http:// or https://"):
+            ModelDiscoveryService._build_model_endpoint_candidates(
+                "wss://example.com/v1/chat/completions"
+            )
 
     def test_model_discovery_uses_only_base_candidates(self) -> None:
         candidates = ModelDiscoveryService._build_model_endpoint_candidates(
@@ -816,7 +627,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
             html,
             r'/static/css/providers\.css\?v=\d{8}-\d+',
         )
-        self.assertIn('id="providerTransport"', html)
+        self.assertNotIn('id="providerTransport"', html)
         self.assertIn('id="providerSourceFormat"', html)
         self.assertNotIn('id="providerTargetFormat"', html)
         self.assertNotIn('data-multi-select-badge="多选"', html)
@@ -830,16 +641,26 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         self.assertIn('id="providerAuthMode"', html)
         self.assertIn('id="providerAuthGroup"', html)
-        self.assertIn("providerTransportAutoSyncEnabled", html)
-        self.assertIn("syncProviderTransportWithApi", html)
+        self.assertIn('id="providerProxy"', html)
+        self.assertIn(
+            'type="text"\n                                    class="form-control sensitive-input-control"\n                                    id="providerApiKey"',
+            html,
+        )
+        self.assertIn(
+            'type="text"\n                                    class="form-control sensitive-input-control"\n                                    id="providerProxy"',
+            html,
+        )
+        self.assertNotIn('data-sensitive-masked-type="password"', html)
+        self.assertIn('data-sensitive-toggle-for="providerProxy"', html)
+        self.assertIn("function handleSensitiveInputCopy(event)", html)
+        self.assertIn("input?.addEventListener('copy', handleSensitiveInputCopy);", html)
+        self.assertNotIn("providerTransportAutoSyncEnabled", html)
+        self.assertNotIn("syncProviderTransportWithApi", html)
         self.assertIn(
             "document.getElementById('providerApi').addEventListener('input', handleProviderApiInput);",
             html,
         )
-        self.assertIn(
-            "document.getElementById('providerTransport').addEventListener('change', handleProviderTransportChange);",
-            html,
-        )
+        self.assertNotIn("handleProviderTransportChange", html)
         self.assertIn('id="authGroupsContainer"', html)
         self.assertIn('id="authGroupModal"', html)
         self.assertIn('id="authEntryImportModal"', html)
@@ -874,7 +695,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         for removed_value in ("gemini_chat", "gemini_cli", "antigravity"):
             self.assertNotIn(f'value="{removed_value}"', html)
 
-        self.assertIn('data-provider-help-topic="transport"', html)
+        self.assertNotIn('data-provider-help-topic="transport"', html)
         self.assertIn('data-provider-help-topic="source_format"', html)
         self.assertNotIn('data-provider-help-topic="target_format"', html)
         self.assertIn('data-provider-help-topic="auth_group_field"', html)
@@ -885,7 +706,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("所选 Auth Group 的第一个 entry", html)
         self.assertIn('id="providerHelpPopover"', html)
         self.assertIn("function toggleProviderHelp(", html)
+        self.assertIn("function showProviderHelp(", html)
         self.assertIn("function syncProviderHelpPopover()", html)
+        self.assertIn("function initProviderHelpInteractions()", html)
+        self.assertIn("scheduleProviderHelpPopoverHide()", html)
         self.assertIn("function renderAuthGroups()", html)
         self.assertIn("function saveAuthGroup()", html)
         self.assertIn("function saveAuthEntriesFromYaml()", html)
@@ -908,7 +732,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
             html,
         )
         self.assertIn("setupCustomSelect('authGroupStrategy');", html)
-        self.assertIn("setupCustomSelect('providerTransport');", html)
+        self.assertNotIn("setupCustomSelect('providerTransport');", html)
         self.assertIn("setupCustomSelect('providerSourceFormat');", html)
         self.assertNotIn("setupCustomSelect('providerTargetFormat');", html)
         self.assertIn("setupCustomSelect('providerVerifySsl');", html)
@@ -1126,9 +950,177 @@ class ProviderTemplateTransportTests(unittest.TestCase):
 
         self.assertNotIn('id="chatWhitelistToggle"', html)
         self.assertIn('id="chatWhitelistToggle"', users_html)
+        self.assertIn("function showUsersHelp(", users_html)
+        self.assertIn("function initUsersHelpInteractions()", users_html)
+        self.assertIn("scheduleUsersHelpPopoverHide()", users_html)
         self.assertIn("function parseLocalDateTime(value)", users_html)
         self.assertNotIn("new Date(user.created_at)", users_html)
         self.assertIn("formatDateTime(user.created_at)", users_html)
+
+    def test_oauth_template_contains_codex_oauth_workflow(self) -> None:
+        template_path = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "presentation"
+            / "templates"
+            / "oauth.html"
+        )
+        html = template_path.read_text(encoding="utf-8")
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "presentation"
+            / "static"
+            / "css"
+            / "oauth.css"
+        )
+        css = css_path.read_text(encoding="utf-8")
+
+        self.assertIn("Codex OAuth", html)
+        self.assertIn('class="oauth-toolbar-section" hidden', html)
+        self.assertIn("class=\"oauth-toolbar-card\"", html)
+        self.assertIn("id=\"oauthTopTabBtn_codex\"", html)
+        self.assertIn("id=\"codexRefreshAuthLinkBtn\"", html)
+        self.assertIn("Codex 可用模型", html)
+        self.assertNotIn("id=\"codexRefreshModelsBtn\"", html)
+        self.assertNotIn("刷新模型", html)
+        self.assertIn('id="codexModelIdInput"', html)
+        self.assertIn('id="codexAddModelBtn"', html)
+        self.assertIn("id=\"codexModelList\"", html)
+        self.assertIn("https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json", html)
+        self.assertIn("https://models.router-for.me/models.json", html)
+        self.assertIn("<ul>", html)
+        self.assertNotIn("function groupCodexModels", html)
+        self.assertNotIn("display_name", html)
+        self.assertNotIn("modelsUpdatedAt", html)
+        self.assertNotIn("modelsSource", html)
+        self.assertNotIn("oauth-model-group-title", html)
+        self.assertNotIn("最近刷新：", html)
+        self.assertNotIn(".oauth-page .oauth-model-group-title", css)
+        self.assertNotIn("查看本地生成的 Codex OAuth 认证文件", html)
+        self.assertNotIn("codexRefreshAuthFilesBtn", html)
+        self.assertIn('id="codexAuthFileToolbar"', html)
+        self.assertIn('id="codexSelectAllAuthFiles"', html)
+        self.assertIn('id="codexRefreshSelectedQuotaBtn"', html)
+        self.assertIn('aria-label="刷新选中额度"', html)
+        self.assertIn('id="codexDeleteSelectedAuthFilesBtn"', html)
+        self.assertIn('aria-label="删除选中认证文件"', html)
+        self.assertIn('id="codexBatchDeletePopover"', html)
+        self.assertIn('id="codexAuthFilePagination"', html)
+        self.assertIn("authFilePageSize: 50", html)
+        self.assertIn("selectedAuthFiles: new Set()", html)
+        self.assertIn("batchDeleteConfirm: false", html)
+        self.assertIn("batchDeleting: false", html)
+        self.assertIn("已选择 ${selectedSize} 个", html)
+        self.assertNotIn("已选择 ${selectedSize} 个 / 共", html)
+        self.assertIn("function renderCodexQuotaProgress", html)
+        self.assertIn("function renderTrashIcon", html)
+        self.assertIn("function addCodexModel", html)
+        self.assertIn("modelDeleteConfirmId: ''", html)
+        self.assertIn("function toggleCodexModelDeleteConfirm", html)
+        self.assertIn("function deleteCodexModel", html)
+        self.assertNotIn("Codex 模型已添加", html)
+        self.assertNotIn("Codex 模型已删除", html)
+        self.assertIn("function deleteSelectedCodexAuthFiles", html)
+        self.assertIn("function requestDeleteCodexAuthFile", html)
+        self.assertIn("function deleteCodexAuthFile", html)
+        self.assertIn("method: 'DELETE'", html)
+        self.assertIn("function normalizeCodexAvailabilityStatus", html)
+        self.assertIn("function getCodexAuthFileInfo", html)
+        self.assertIn("查看 Codex 可用模型说明", html)
+        self.assertIn("查看 Codex 认证文件状态说明", html)
+        self.assertIn("POST /v1/chat/completions", html)
+        self.assertIn("POST /v1/responses", html)
+        self.assertIn("POST /v1/messages", html)
+        self.assertIn("https://chatgpt.com/backend-api/codex/responses", html)
+        self.assertIn("认证失败", html)
+        self.assertIn("配额已耗尽", html)
+        self.assertNotIn("“信息”只显示最近一次非 success 的数据面错误摘要", html)
+        self.assertIn('class="oauth-auth-file-status"', html)
+        self.assertIn('class="oauth-auth-file-info"', html)
+        self.assertIn('class="oauth-status-text ${availabilityClass}"', html)
+        self.assertIn("<span>信息：</span>", html)
+        self.assertNotIn("formatCodexUsageStatusLabel", html)
+        self.assertNotIn("oauth-auth-file-error", html)
+        self.assertIn('class="oauth-icon-button"', html)
+        self.assertNotIn("oauth-icon-button-primary", html)
+        self.assertIn("return `${percent.text} 剩余", html)
+        self.assertNotIn("return `${escapeHtml(window.label || 'Codex')}：${percent.text}", html)
+        self.assertIn('class="btn btn-primary" id="codexSubmitCallbackBtn"', html)
+        self.assertIn('id="codexCallbackSection" hidden', html)
+        self.assertIn("id=\"codexCallbackUrlInput\"", html)
+        self.assertIn("callbackSection.hidden = !hasAuthorizationUrl", html)
+        self.assertIn("/api/oauth/codex/session", html)
+        self.assertIn("/api/oauth/codex/callback", html)
+        self.assertIn("/api/oauth/codex/auth-files", html)
+        self.assertIn("/api/oauth/codex/models", html)
+        self.assertNotIn("/api/oauth/codex/models/refresh", html)
+        self.assertIn(".oauth-page .oauth-toolbar-card", css)
+        self.assertIn(".oauth-page .oauth-tabs", css)
+        self.assertIn(".oauth-page .oauth-model-editor", css)
+        self.assertIn(".oauth-page .oauth-model-summary:empty", css)
+        self.assertIn(".oauth-page .oauth-model-delete-wrap", css)
+        self.assertIn(".oauth-page .oauth-model-grid", css)
+        self.assertIn(".oauth-page .oauth-model-item", css)
+        self.assertIn(".oauth-page .oauth-title-with-help", css)
+        self.assertIn(".oauth-page .oauth-help-button", css)
+        self.assertIn(".oauth-page .oauth-help-popover", css)
+        self.assertIn(".oauth-page .oauth-auth-file-item", css)
+        self.assertIn(".oauth-page .oauth-auth-file-toolbar", css)
+        self.assertIn(".oauth-page .oauth-auth-file-status", css)
+        self.assertIn(".oauth-page .oauth-auth-file-info", css)
+        self.assertIn(".oauth-page .oauth-toolbar-action-wrap", css)
+        self.assertIn(".oauth-page .oauth-icon-button", css)
+        self.assertNotIn(".oauth-page .oauth-icon-button-primary", css)
+        self.assertIn(".oauth-page .oauth-icon-button-danger", css)
+        self.assertIn(".oauth-page .oauth-quota-progress", css)
+        self.assertIn(".oauth-page .oauth-delete-popover", css)
+        self.assertIn(".oauth-page .oauth-status-text", css)
+        self.assertNotIn(".oauth-page .oauth-auth-file-error", css)
+        self.assertIn(".oauth-page .oauth-pagination", css)
+        self.assertIn(':root[data-theme="dark"] .oauth-page .btn-secondary', css)
+
+    def test_settings_template_contains_oauth_network_settings(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "src" / "presentation"
+        html = (root / "templates" / "settings.html").read_text(encoding="utf-8")
+        css = (root / "static" / "css" / "settings.css").read_text(encoding="utf-8")
+        web_controller_py = (root / "web_controller.py").read_text(encoding="utf-8")
+
+        self.assertIn("OAuth", html)
+        self.assertIn('id="oauthEnabled"', html)
+        self.assertIn('id="oauthProxy"', html)
+        self.assertIn(
+            'type="text"\n                                        class="form-control sensitive-input-control"\n                                        id="oauthProxy"',
+            html,
+        )
+        self.assertIn('class="form-control sensitive-input-control"', html)
+        self.assertIn('data-sensitive-toggle-for="oauthProxy"', html)
+        self.assertIn('data-sensitive-label="代理服务"', html)
+        self.assertIn('const settingsSensitiveInputIds = ["adminPassword", "oauthProxy"];', html)
+        self.assertIn("function handleSensitiveInputCopy(event)", html)
+        self.assertIn('input.addEventListener("copy", handleSensitiveInputCopy);', html)
+        self.assertIn("function updateSensitiveInputSaveButtonState(inputId)", html)
+        self.assertIn("function saveSensitiveInputOnBlur(inputId)", html)
+        self.assertIn('id="oauthVerifySsl"', html)
+        self.assertIn('id="oauthDetailsPanel" hidden', html)
+        self.assertNotIn('id="saveOAuthSettingsBtn"', html)
+        self.assertIn("function collectOAuthSettingsPayload()", html)
+        self.assertIn("function scheduleOAuthSettingsSave(", html)
+        self.assertIn("function syncOAuthDetailsVisibility(enabled)", html)
+        self.assertIn("function syncOAuthNavLink(enabled)", html)
+        self.assertIn("function saveOAuthSettings()", html)
+        self.assertIn('fetch("/api/settings/system/oauth"', html)
+        self.assertIn('data-settings-help-topic="oauth_enabled"', html)
+        self.assertIn('data-settings-help-topic="oauth_proxy"', html)
+        self.assertIn('data-settings-help-topic="oauth_verify_ssl"', html)
+        self.assertIn("function showSettingsHelp(", html)
+        self.assertIn("function initSettingsHelpInteractions()", html)
+        self.assertIn("scheduleSettingsHelpPopoverHide()", html)
+        self.assertIn(".settings-page .oauth-enable-row", css)
+        self.assertIn(".settings-page .oauth-details-panel[hidden]", css)
+        self.assertIn(".settings-page .oauth-network-toggle", css)
+        self.assertIn(".settings-page .settings-grid-oauth {", css)
+        self.assertIn('self._app.route("/api/settings/system/oauth", methods=["PUT"])', web_controller_py)
 
     def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(
         self,
@@ -1190,7 +1182,6 @@ const sandbox = {{
       deleteSelectedModelTestsBtn: {{ disabled: false }},
       tidyModelListBtn: {{ disabled: false }},
       modelTestSelectAllCheckbox: {{ checked: false, indeterminate: false }},
-      providerTransport: {{ value: "http" }},
       providerSourceFormat: {{ value: "openai_chat" }},
       providerApiKey: {{ value: " secret " }},
       providerProxy: {{ value: "" }},
@@ -1254,7 +1245,7 @@ process.stdout.write(JSON.stringify({{
         )
         html = template_path.read_text(encoding="utf-8")
 
-        script_start = html.index("function getEffectiveTransport")
+        script_start = html.index("function canFetchModels")
         script_end = html.index("function openCreateModal")
         script = html[script_start:script_end]
 
@@ -1501,7 +1492,7 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn("/static/js/ui-message.js?v=20260319-1", login_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", users_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", index_html)
-        self.assertIn("/static/css/admin-base.css?v=20260319-3", base_page_html)
+        self.assertIn("/static/css/admin-base.css?v=20260517-1", base_page_html)
         self.assertIn("/static/js/theme.js?v=20260319-1", base_page_html)
         self.assertIn("showActionError('登录'", login_html)
         self.assertIn("showActionError('创建用户'", users_html)
@@ -1509,10 +1500,18 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn("showActionError('删除用户'", users_html)
         self.assertNotIn("Toggle theme", theme_js)
         self.assertIn('href="/">Provider 管理</a>', base_admin_html)
+        self.assertIn("{% if oauth_enabled %}", base_admin_html)
+        oauth_link_snippet = 'href="/oauth" data-nav-page="oauth">OAuth</a>'
+        self.assertIn(oauth_link_snippet, base_admin_html)
+        self.assertIn('data-nav-page="oauth"', base_admin_html)
         self.assertIn('href="/users">用户管理</a>', base_admin_html)
         self.assertIn('href="/statistics">统计概览</a>', base_admin_html)
         self.assertLess(
             base_admin_html.index('href="/">Provider 管理</a>'),
+            base_admin_html.index(oauth_link_snippet),
+        )
+        self.assertLess(
+            base_admin_html.index(oauth_link_snippet),
             base_admin_html.index('href="/users">用户管理</a>'),
         )
         self.assertLess(
@@ -1522,6 +1521,7 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn('self._app.route("/")(auth(self.home))', web_controller_py)
         self.assertIn('self._app.route("/statistics")(auth(self.statistics_page))', web_controller_py)
         self.assertIn('def home(self) -> str:', web_controller_py)
+        self.assertIn('oauth_enabled=self._is_oauth_enabled()', web_controller_py)
 
     def test_ui_message_formatter_appends_upstream_original_error(self) -> None:
         script_path = (
@@ -1616,6 +1616,11 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn(".dashboard-page .custom-select-menu-action.is-checked,", index_css)
         self.assertIn(".dashboard-page .custom-select-menu-action.is-checked .custom-select-menu-action-box,", index_css)
         self.assertIn("--nav-tab-hover-bg:", admin_base_css)
+        self.assertIn("body.app-page .field-help-button,", admin_base_css)
+        self.assertIn("body.app-page .oauth-help-button", admin_base_css)
+        self.assertIn(".provider-help-popover-body", admin_base_css)
+        self.assertIn(".oauth-help-popover", admin_base_css)
+        self.assertIn("color: #c2185b;", admin_base_css)
 
     def test_provider_template_keeps_model_row_change_from_rebuilding_table(self) -> None:
         providers_html = (

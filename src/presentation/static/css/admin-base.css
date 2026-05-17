@@ -786,6 +786,83 @@ html.js .app-page select[data-custom-select]:not(.native-select-hidden) {
     font-size: 13px;
 }
 
+/* 全局帮助说明按钮与接口高亮，供 Provider、用户、设置和 OAuth 页面复用。 */
+body.app-page .field-help-button,
+body.app-page .oauth-help-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--surface-soft);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1;
+    text-decoration: none;
+    cursor: help;
+    transition: border-color var(--transition), color var(--transition), background-color var(--transition), box-shadow var(--transition);
+}
+
+body.app-page .field-help-button:hover,
+body.app-page .field-help-button:focus-visible,
+body.app-page .oauth-help-button:hover,
+body.app-page .oauth-help-button:focus-visible {
+    border-color: var(--primary);
+    background: #fff;
+    color: var(--primary);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(95, 143, 190, 0.14);
+}
+
+body.app-page :is(
+    .provider-help-popover-body,
+    .settings-help-popover-body,
+    .users-help-popover-body,
+    .oauth-help-popover
+) code {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #c2185b;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.7;
+}
+
+:root[data-theme="dark"] body.app-page .field-help-button,
+:root[data-theme="dark"] body.app-page .oauth-help-button {
+    border-color: #3d444d;
+    background: #0d1117;
+    color: #9da7b3;
+}
+
+:root[data-theme="dark"] body.app-page .field-help-button:hover,
+:root[data-theme="dark"] body.app-page .field-help-button:focus-visible,
+:root[data-theme="dark"] body.app-page .oauth-help-button:hover,
+:root[data-theme="dark"] body.app-page .oauth-help-button:focus-visible {
+    border-color: var(--primary);
+    background: #111820;
+    color: var(--primary);
+}
+
+:root[data-theme="dark"] body.app-page :is(
+    .provider-help-popover-body,
+    .settings-help-popover-body,
+    .users-help-popover-body,
+    .oauth-help-popover
+) code {
+    background: rgba(108, 167, 255, 0.14);
+    color: #ff8ac2;
+}
+
 @media (max-width: 900px) {
     body.app-page {
         padding: 14px;

@@ -15,7 +15,7 @@
         ["failed to delete user", "删除用户失败"],
         ["provider api must be a valid absolute url", "API 地址必须是完整 URL"],
         ["provider proxy must be a valid absolute url", "代理地址必须是完整 URL"],
-        ["websocket upstream currently only supports http/https proxy", "WebSocket 上游当前仅支持 HTTP/HTTPS 代理"],
+        ["provider api must use http:// or https://", "Provider API 地址仅支持 http:// 或 https://"],
         ["model_list must be a list or newline-separated string", "模型列表格式无效，请使用数组或按行分隔的文本"],
         ["model test models must be a non-empty list", "请至少选择一个要测试的模型"],
         ["model test must use either auth_group or api_key, not both", "模型测试时 Auth Group 与 API Key 只能二选一"],
@@ -166,28 +166,19 @@
         matched = normalizedMessage.match(/^Provider entry at index (\d+) must be an object$/i);
         if (matched) return buildTranslatedError(`第 ${Number.parseInt(matched[1], 10) + 1} 个 Provider 配置必须是对象`);
 
-        matched = normalizedMessage.match(/^Provider api must use one of:\s*(.+)$/i);
-        if (matched) return buildTranslatedError(`API 地址协议不受支持，支持：${matched[1]}`);
-
-        matched = normalizedMessage.match(/^Provider transport must be one of:\s*(.+)$/i);
-        if (matched) return buildTranslatedError(`传输方式无效，支持：${matched[1]}`);
-
-        matched = normalizedMessage.match(/^Provider transport 'http' requires api to use http:\/\/ or https:\/\/$/i);
-        if (matched) return buildTranslatedError("HTTP 传输仅支持 http:// 或 https:// 地址");
-
         matched = normalizedMessage.match(/^Configuration file not found:\s*(.+)$/i);
         if (matched) return buildTranslatedError(`配置文件不存在：${matched[1]}`);
 
-        matched = normalizedMessage.match(/^(https?:\/\/\S+|wss?:\/\/\S+) returned (\d{3})$/i);
+        matched = normalizedMessage.match(/^(https?:\/\/\S+) returned (\d{3})$/i);
         if (matched) return buildTranslatedError(formatStatusErrorMessage(matched[2]), true);
 
-        matched = normalizedMessage.match(/^(https?:\/\/\S+|wss?:\/\/\S+) returned no models$/i);
+        matched = normalizedMessage.match(/^(https?:\/\/\S+) returned no models$/i);
         if (matched) return buildTranslatedError("上游未返回可用模型列表", true);
 
-        matched = normalizedMessage.match(/^(https?:\/\/\S+|wss?:\/\/\S+) returned invalid json: (.+)$/i);
+        matched = normalizedMessage.match(/^(https?:\/\/\S+) returned invalid json: (.+)$/i);
         if (matched) return buildTranslatedError("上游返回的数据格式无效，无法解析模型列表", true);
 
-        matched = normalizedMessage.match(/^(https?:\/\/\S+|wss?:\/\/\S+) request failed: (.+)$/i);
+        matched = normalizedMessage.match(/^(https?:\/\/\S+) request failed: (.+)$/i);
         if (matched) return buildTranslatedError(formatRequestFailureMessage(matched[2]), true);
 
         matched = normalizedMessage.match(/^Log level must be one of:\s*(.+)$/i);

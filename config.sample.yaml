@@ -51,7 +51,6 @@ providers:
   - name: openai-chat
     # enabled: true  # optional, defaults to true; disabled providers are hidden from /v1/models
     api: https://api.openai.com/v1/chat/completions
-    transport: http
     source_format: openai_chat
     auth_group: openai-shared
     verify_ssl: true
@@ -64,7 +63,6 @@ providers:
 
   - name: responses-upstream
     api: https://api.openai.com/v1/responses
-    transport: http
     source_format: openai_responses
     auth_group: openai-shared
     verify_ssl: true
@@ -75,7 +73,6 @@ providers:
 
   - name: claude-messages
     api: https://api.anthropic.com/v1/messages
-    transport: http
     source_format: claude_chat
     api_key: sk-ant-your-anthropic-key
     verify_ssl: true
@@ -86,7 +83,6 @@ providers:
 
   - name: responses-codex
     api: https://api.openai.com/v1/responses
-    transport: http
     source_format: openai_responses
     api_key: sk-your-openai-key
     verify_ssl: true
@@ -105,9 +101,8 @@ providers:
   #   /v1/responses
   #   /v1/messages
   #
-  # There is no public stream_format field.
+  # There is no public transport or stream_format field.
   # The proxy auto-detects upstream responses internally:
   #   HTTP text/event-stream -> SSE JSON
-  #   WebSocket             -> JSON messages
   #   application/x-ndjson  -> NDJSON
   #   other HTTP responses  -> non-stream

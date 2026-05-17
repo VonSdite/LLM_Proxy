@@ -1,0 +1,1067 @@
+{% extends "base_admin.html" %}
+
+{% block page_title %}OAuth 管理{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260516-9">{% endblock %}
+{% block body_class %}oauth-page{% endblock %}
+{% block header_title %}OAuth 管理{% endblock %}
+{% block header_subtitle %}管理 CLI/OAuth 类认证文件，并查看账号状态与配额。{% endblock %}
+
+{% block content %}
+    <div class="oauth-page-shell">
+        <section class="oauth-toolbar-section" hidden>
+            <div class="oauth-toolbar-card">
+                <div class="oauth-toolbar-meta">
+                    <div class="oauth-tabs" role="tablist" aria-label="OAuth 视图">
+                        <button
+                            type="button"
+                            class="oauth-tab-btn is-active"
+                            id="oauthTopTabBtn_codex"
+                            onclick="switchOAuthTab('codex')"
+                            role="tab"
+                            aria-selected="true"
+                            aria-controls="oauthTopTabPanel_codex"
+                        >Codex</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="oauth-tab-panel" id="oauthTopTabPanel_codex" role="tabpanel" aria-labelledby="oauthTopTabBtn_codex">
+            <div class="oauth-section">
+                <div class="oauth-card-header">
+                    <div>
+                        <h2>Codex OAuth</h2>
+                        <p>通过 OpenAI Codex OAuth 登录生成本地认证文件。</p>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="codexRefreshAuthLinkBtn" onclick="refreshCodexAuthLink()">刷新授权链接</button>
+                </div>
+
+                <div class="oauth-auth-url-box" id="codexAuthUrlBox" hidden>
+                    <div class="oauth-field-label">授权链接</div>
+                    <div class="oauth-auth-url-value" id="codexAuthUrlValue"></div>
+                    <div class="oauth-action-row">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="copyCodexAuthLink()">复制链接</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openCodexAuthLink()">打开链接</button>
+                    </div>
+                    <div class="oauth-hint">链接 10 分钟内有效；刷新授权链接会生成新的 state 和 PKCE 校验值。</div>
+                </div>
+
+                <div class="oauth-callback-section" id="codexCallbackSection" hidden>
+                    <label class="form-label" for="codexCallbackUrlInput">回调 URL</label>
+                    <div class="oauth-callback-row">
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="codexCallbackUrlInput"
+                            placeholder="http://localhost:1455/auth/callback?code=...&state=..."
+                        >
+                        <button type="button" class="btn btn-primary" id="codexSubmitCallbackBtn" onclick="submitCodexCallbackUrl()">提交回调 URL</button>
+                    </div>
+                    <div class="oauth-hint">远程浏览器模式：登录后复制完整回调 URL 填到这里，提交后会生成认证文件。</div>
+                </div>
+
+                <div class="oauth-status-line" id="codexOAuthStatus" hidden></div>
+            </div>
+
+            <div class="oauth-section">
+                <div class="oauth-card-header">
+                    <div>
+                        <div class="oauth-title-with-help">
+                            <h2>Codex 可用模型</h2>
+                            <div class="oauth-help-wrap">
+                                <button
+                                    type="button"
+                                    class="oauth-help-button"
+                                    aria-label="查看 Codex 可用模型说明"
+                                    aria-describedby="codexModelsHelp"
+                                >?</button>
+                                <div class="oauth-help-popover" id="codexModelsHelp" role="tooltip">
+                                    <p>这里维护的是下游可见的 Codex 模型 ID。</p>
+                                    <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
+                                    <ul>
+                                        <li>模型 ID 由用户手动添加，不会自动从 OpenAI 拉取。</li>
+                                        <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
+                                        <li>命中 Codex 模型后，LLM Proxy 会转换请求格式，并使用 Codex OAuth 认证文件访问 <code>POST https://chatgpt.com/backend-api/codex/responses</code>。</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="oauth-model-editor">
+                    <div class="oauth-model-editor-row">
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="codexModelIdInput"
+                            placeholder="输入模型 ID，例如 gpt-5.5"
+                            onkeydown="handleCodexModelInputKeydown(event)"
+                        >
+                        <button type="button" class="btn btn-primary" id="codexAddModelBtn" onclick="addCodexModel()">添加模型</button>
+                    </div>
+                    <div class="oauth-model-reference-links">
+                        <div>参考：</div>
+                        <ul>
+                            <li><a href="https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json" target="_blank" rel="noopener noreferrer">https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json</a></li>
+                            <li><a href="https://models.router-for.me/models.json" target="_blank" rel="noopener noreferrer">https://models.router-for.me/models.json</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="oauth-model-summary" id="codexModelSummary"></div>
+                <div class="oauth-model-list" id="codexModelList">
+                    <div class="empty-state">正在加载模型...</div>
+                </div>
+            </div>
+
+            <div class="oauth-section">
+                <div class="oauth-card-header">
+                    <div>
+                        <div class="oauth-title-with-help">
+                            <h2>Codex 认证文件</h2>
+                            <div class="oauth-help-wrap">
+                                <button
+                                    type="button"
+                                    class="oauth-help-button"
+                                    aria-label="查看 Codex 认证文件状态说明"
+                                    aria-describedby="codexAuthFilesHelp"
+                                >?</button>
+                                <div class="oauth-help-popover" id="codexAuthFilesHelp" role="tooltip">
+                                    <p>状态来自认证文件内容、最近一次数据面请求结果和已保存的配额快照。</p>
+                                    <ul>
+                                        <li><strong>可用</strong>：未命中过滤条件，或最近一次请求成功。</li>
+                                        <li><strong>待刷新</strong>：access_token 已过期，但有 refresh_token，请求前会自动刷新。</li>
+                                        <li><strong>待验证</strong>：access_token 已过期且缺少 refresh_token，会先用当前 access_token 真实请求一次。</li>
+                                        <li><strong>认证失败</strong>：上游认证错误、缺少 access_token 或 refresh_token 刷新失败；会跳过，直到重新登录、刷新 token 成功或后续请求成功。</li>
+                                        <li><strong>配额冷却中</strong>：上游返回配额限制，冷却期间优先跳过该文件。</li>
+                                        <li><strong>配额已耗尽</strong>：最近一次配额刷新显示 Codex 窗口无剩余额度。</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="oauth-auth-file-toolbar" id="codexAuthFileToolbar" hidden>
+                    <label class="oauth-checkline" for="codexSelectAllAuthFiles">
+                        <input
+                            type="checkbox"
+                            id="codexSelectAllAuthFiles"
+                            onchange="toggleCodexSelectAllAuthFiles(this.checked)"
+                        >
+                        <span>全选</span>
+                    </label>
+                    <span class="oauth-selected-count" id="codexSelectedAuthFileCount">已选择 0 个</span>
+                    <button
+                        type="button"
+                        class="oauth-icon-button"
+                        id="codexRefreshSelectedQuotaBtn"
+                        title="刷新选中额度"
+                        aria-label="刷新选中额度"
+                        onclick="refreshSelectedCodexQuotas()"
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M20 11a8 8 0 0 0-14.5-4.7L4 8"></path>
+                            <path d="M4 4v4h4"></path>
+                            <path d="M4 13a8 8 0 0 0 14.5 4.7L20 16"></path>
+                            <path d="M20 20v-4h-4"></path>
+                        </svg>
+                    </button>
+                    <div class="oauth-toolbar-action-wrap">
+                        <button
+                            type="button"
+                            class="oauth-icon-button oauth-icon-button-danger"
+                            id="codexDeleteSelectedAuthFilesBtn"
+                            title="删除选中认证文件"
+                            aria-label="删除选中认证文件"
+                            onclick="toggleCodexBatchDeleteConfirm()"
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M3 6h18"></path>
+                                <path d="M8 6V4h8v2"></path>
+                                <path d="M19 6l-1 14H6L5 6"></path>
+                                <path d="M10 11v5"></path>
+                                <path d="M14 11v5"></path>
+                            </svg>
+                        </button>
+                        <div class="oauth-delete-popover" id="codexBatchDeletePopover" role="dialog" aria-label="确认批量删除认证文件" hidden>
+                            <div class="oauth-delete-popover-title">删除选中的认证文件？</div>
+                            <div class="oauth-delete-popover-actions">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="cancelCodexBatchDelete()">取消</button>
+                                <button type="button" class="btn btn-danger btn-sm" onclick="deleteSelectedCodexAuthFiles()">删除</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="oauth-auth-file-list" id="codexAuthFileList">
+                    <div class="empty-state">正在加载认证文件...</div>
+                </div>
+                <div class="oauth-pagination" id="codexAuthFilePagination" hidden></div>
+            </div>
+        </section>
+    </div>
+{% endblock %}
+
+{% block page_scripts %}
+    <script src="/static/js/ui-message.js?v=20260319-1"></script>
+    <script>
+        let activeOAuthTab = 'codex';
+        let codexAuthState = {
+            authorizationUrl: '',
+            state: '',
+            loading: false,
+            submitting: false,
+            authFiles: [],
+            quotaByFile: {},
+            quotaLoadingByFile: {},
+            selectedAuthFiles: new Set(),
+            authFilePage: 1,
+            authFilePageSize: 50,
+            deleteConfirmName: '',
+            deletingAuthFileName: '',
+            batchDeleteConfirm: false,
+            batchDeleting: false,
+            models: [],
+            modelsLoading: false,
+            modelsError: '',
+            modelsSaving: false,
+            deletingModelId: '',
+            modelDeleteConfirmId: '',
+        };
+
+        function switchOAuthTab(tabName) {
+            activeOAuthTab = tabName;
+            document.querySelectorAll('.oauth-tab-btn').forEach(button => {
+                const isActive = button.id === `oauthTopTabBtn_${tabName}`;
+                button.classList.toggle('is-active', isActive);
+                button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            document.querySelectorAll('.oauth-tab-panel').forEach(panel => {
+                panel.hidden = panel.id !== `oauthTopTabPanel_${tabName}`;
+            });
+        }
+
+        function setCodexOAuthStatus(message, type = '') {
+            const element = document.getElementById('codexOAuthStatus');
+            if (!element) return;
+            const normalizedMessage = String(message || '').trim();
+            element.hidden = !normalizedMessage;
+            element.textContent = normalizedMessage;
+            element.className = `oauth-status-line${type ? ` ${type}` : ''}`;
+        }
+
+        function syncCodexAuthControls() {
+            const refreshButton = document.getElementById('codexRefreshAuthLinkBtn');
+            const submitButton = document.getElementById('codexSubmitCallbackBtn');
+            if (refreshButton) {
+                refreshButton.disabled = codexAuthState.loading;
+                refreshButton.textContent = codexAuthState.loading ? '生成中...' : '刷新授权链接';
+            }
+            if (submitButton) {
+                submitButton.disabled = codexAuthState.submitting;
+                submitButton.textContent = codexAuthState.submitting ? '提交中...' : '提交回调 URL';
+            }
+            const addModelButton = document.getElementById('codexAddModelBtn');
+            if (addModelButton) {
+                addModelButton.disabled = codexAuthState.modelsSaving;
+                addModelButton.textContent = codexAuthState.modelsSaving ? '添加中...' : '添加模型';
+            }
+            const refreshSelectedQuotaButton = document.getElementById('codexRefreshSelectedQuotaBtn');
+            if (refreshSelectedQuotaButton) {
+                refreshSelectedQuotaButton.disabled = codexAuthState.selectedAuthFiles.size === 0 || codexAuthState.batchDeleting;
+            }
+            const deleteSelectedAuthFilesButton = document.getElementById('codexDeleteSelectedAuthFilesBtn');
+            if (deleteSelectedAuthFilesButton) {
+                deleteSelectedAuthFilesButton.disabled = codexAuthState.selectedAuthFiles.size === 0 || codexAuthState.batchDeleting;
+            }
+            const batchDeletePopover = document.getElementById('codexBatchDeletePopover');
+            if (batchDeletePopover) {
+                batchDeletePopover.hidden = !codexAuthState.batchDeleteConfirm;
+            }
+        }
+
+        function renderCodexAuthUrl() {
+            const box = document.getElementById('codexAuthUrlBox');
+            const value = document.getElementById('codexAuthUrlValue');
+            const callbackSection = document.getElementById('codexCallbackSection');
+            const hasAuthorizationUrl = Boolean(codexAuthState.authorizationUrl);
+            if (!box || !value) return;
+            box.hidden = !hasAuthorizationUrl;
+            value.textContent = codexAuthState.authorizationUrl || '';
+            if (callbackSection) {
+                callbackSection.hidden = !hasAuthorizationUrl;
+            }
+        }
+
+        async function refreshCodexAuthLink() {
+            codexAuthState.loading = true;
+            syncCodexAuthControls();
+            setCodexOAuthStatus('正在生成新的 Codex 授权链接...');
+            try {
+                const response = await fetch('/api/oauth/codex/session', { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '生成授权链接失败');
+                }
+                codexAuthState.authorizationUrl = result.authorization_url || result.auth_url || '';
+                codexAuthState.state = result.state || '';
+                renderCodexAuthUrl();
+                setCodexOAuthStatus('等待用户登录并提交回调 URL。', 'waiting');
+            } catch (error) {
+                console.error('生成 Codex 授权链接失败:', error);
+                setCodexOAuthStatus(error?.message || '生成授权链接失败', 'error');
+                showActionError('生成 Codex 授权链接', error, { fallback: '生成授权链接失败' });
+            } finally {
+                codexAuthState.loading = false;
+                syncCodexAuthControls();
+            }
+        }
+
+        async function copyCodexAuthLink() {
+            if (!codexAuthState.authorizationUrl) return;
+            try {
+                await navigator.clipboard.writeText(codexAuthState.authorizationUrl);
+                showMessage('授权链接已复制', 'success');
+            } catch (error) {
+                console.error('复制授权链接失败:', error);
+                showActionError('复制授权链接', error, { fallback: '复制授权链接失败' });
+            }
+        }
+
+        function openCodexAuthLink() {
+            if (!codexAuthState.authorizationUrl) return;
+            window.open(codexAuthState.authorizationUrl, '_blank', 'noopener,noreferrer');
+        }
+
+        async function submitCodexCallbackUrl() {
+            const input = document.getElementById('codexCallbackUrlInput');
+            const callbackUrl = input?.value?.trim() || '';
+            if (!callbackUrl) {
+                showMessage('请先填写回调 URL', 'error');
+                return;
+            }
+            codexAuthState.submitting = true;
+            syncCodexAuthControls();
+            setCodexOAuthStatus('正在换取 token 并生成认证文件...');
+            try {
+                const response = await fetch('/api/oauth/codex/callback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ callback_url: callbackUrl }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '提交回调 URL 失败');
+                }
+                if (input) input.value = '';
+                codexAuthState.authorizationUrl = '';
+                codexAuthState.state = '';
+                renderCodexAuthUrl();
+                setCodexOAuthStatus(`认证文件已生成：${result.auth_file?.name || ''}`, 'success');
+                showMessage('Codex 认证文件已生成', 'success');
+                await loadCodexAuthFiles();
+                await loadCodexModels();
+            } catch (error) {
+                console.error('提交 Codex 回调 URL 失败:', error);
+                setCodexOAuthStatus(error?.message || '提交回调 URL 失败', 'error');
+                showActionError('提交 Codex 回调 URL', error, { fallback: '提交回调 URL 失败' });
+            } finally {
+                codexAuthState.submitting = false;
+                syncCodexAuthControls();
+            }
+        }
+
+        function renderCodexModels() {
+            const container = document.getElementById('codexModelList');
+            const summary = document.getElementById('codexModelSummary');
+            if (!container) return;
+            const models = Array.isArray(codexAuthState.models) ? codexAuthState.models : [];
+            if (summary) {
+                summary.textContent = '';
+            }
+            if (codexAuthState.modelsLoading) {
+                container.innerHTML = '<div class="empty-state">正在加载模型...</div>';
+                return;
+            }
+            if (codexAuthState.modelsError) {
+                container.innerHTML = `<div class="error">${escapeHtml(codexAuthState.modelsError)}</div>`;
+                return;
+            }
+            if (!models.length) {
+                container.innerHTML = '<div class="empty-state">暂无可用 Codex 模型。</div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="oauth-model-grid">
+                    ${models.map(model => {
+                        const encodedModelId = encodeURIComponent(model.id || '');
+                        const isDeleting = codexAuthState.deletingModelId === (model.id || '');
+                        const isConfirmingDelete = codexAuthState.modelDeleteConfirmId === (model.id || '');
+                        return `
+                            <article class="oauth-model-item">
+                                <button type="button" class="oauth-model-main" onclick="copyCodexModelName(decodeURIComponent('${encodedModelId}'))">
+                                    <span class="oauth-model-id">${escapeHtml(model.id || '')}</span>
+                                </button>
+                                <div class="oauth-model-delete-wrap">
+                                    <button
+                                        type="button"
+                                        class="oauth-icon-button oauth-icon-button-danger"
+                                        title="删除模型"
+                                        aria-label="删除模型 ${escapeHtml(model.id || '')}"
+                                        onclick="toggleCodexModelDeleteConfirm(decodeURIComponent('${encodedModelId}'))"
+                                        ${isDeleting ? 'disabled' : ''}
+                                    >${renderTrashIcon()}</button>
+                                    ${isConfirmingDelete ? `
+                                        <div class="oauth-delete-popover" role="dialog" aria-label="确认删除模型">
+                                            <div class="oauth-delete-popover-title">删除这个模型？</div>
+                                            <div class="oauth-delete-popover-actions">
+                                                <button type="button" class="btn btn-secondary btn-sm" onclick="cancelCodexModelDelete()">取消</button>
+                                                <button type="button" class="btn btn-danger btn-sm" onclick="deleteCodexModel(decodeURIComponent('${encodedModelId}'))" ${isDeleting ? 'disabled' : ''}>删除</button>
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </article>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        async function loadCodexModels() {
+            codexAuthState.modelsLoading = true;
+            syncCodexAuthControls();
+            renderCodexModels();
+            try {
+                const response = await fetch('/api/oauth/codex/models', { cache: 'no-store' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '加载模型失败');
+                }
+                codexAuthState.models = Array.isArray(result.models) ? result.models : [];
+                codexAuthState.modelsError = '';
+            } catch (error) {
+                console.error('加载 Codex 模型失败:', error);
+                codexAuthState.modelsError = error?.message || '加载模型失败';
+            } finally {
+                codexAuthState.modelsLoading = false;
+                syncCodexAuthControls();
+                renderCodexModels();
+            }
+        }
+
+        function handleCodexModelInputKeydown(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addCodexModel();
+            }
+        }
+
+        async function addCodexModel() {
+            const input = document.getElementById('codexModelIdInput');
+            const modelId = input?.value?.trim() || '';
+            if (!modelId) {
+                showMessage('请先填写模型 ID', 'error');
+                return;
+            }
+            codexAuthState.modelsSaving = true;
+            syncCodexAuthControls();
+            try {
+                const response = await fetch('/api/oauth/codex/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_id: modelId }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '添加模型失败');
+                }
+                codexAuthState.models = Array.isArray(result.models) ? result.models : [];
+                codexAuthState.modelsError = '';
+                if (input) input.value = '';
+            } catch (error) {
+                console.error('添加 Codex 模型失败:', error);
+                showActionError('添加 Codex 模型', error, { fallback: '添加模型失败' });
+            } finally {
+                codexAuthState.modelsSaving = false;
+                syncCodexAuthControls();
+                renderCodexModels();
+            }
+        }
+
+        function toggleCodexModelDeleteConfirm(modelId) {
+            const normalizedModelId = String(modelId || '').trim();
+            codexAuthState.modelDeleteConfirmId = codexAuthState.modelDeleteConfirmId === normalizedModelId
+                ? ''
+                : normalizedModelId;
+            renderCodexModels();
+        }
+
+        function cancelCodexModelDelete() {
+            codexAuthState.modelDeleteConfirmId = '';
+            renderCodexModels();
+        }
+
+        async function deleteCodexModel(modelId) {
+            const normalizedModelId = String(modelId || '').trim();
+            if (!normalizedModelId || codexAuthState.deletingModelId) return;
+            codexAuthState.deletingModelId = normalizedModelId;
+            renderCodexModels();
+            try {
+                const response = await fetch(`/api/oauth/codex/models/${encodeURIComponent(normalizedModelId)}`, {
+                    method: 'DELETE',
+                    cache: 'no-store',
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '删除模型失败');
+                }
+                codexAuthState.models = Array.isArray(result.models) ? result.models : [];
+                codexAuthState.modelsError = '';
+                codexAuthState.modelDeleteConfirmId = '';
+            } catch (error) {
+                console.error('删除 Codex 模型失败:', error);
+                showActionError('删除 Codex 模型', error, { fallback: '删除模型失败' });
+            } finally {
+                codexAuthState.deletingModelId = '';
+                renderCodexModels();
+            }
+        }
+
+        async function copyCodexModelName(modelName) {
+            const normalizedModelName = String(modelName || '').trim();
+            if (!normalizedModelName) return;
+            try {
+                await navigator.clipboard.writeText(normalizedModelName);
+                showMessage('模型名已复制', 'success');
+            } catch (error) {
+                console.error('复制模型名失败:', error);
+                showActionError('复制模型名', error, { fallback: '复制模型名失败' });
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatTimestamp(value) {
+            if (!value) return '-';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return String(value);
+            return date.toLocaleString();
+        }
+
+        function renderCodexAuthFiles() {
+            const container = document.getElementById('codexAuthFileList');
+            if (!container) return;
+            const files = codexAuthState.authFiles || [];
+            const toolbar = document.getElementById('codexAuthFileToolbar');
+            const selectAll = document.getElementById('codexSelectAllAuthFiles');
+            const selectedCount = document.getElementById('codexSelectedAuthFileCount');
+            const existingNames = new Set(files.map(file => file.name).filter(Boolean));
+            Array.from(codexAuthState.selectedAuthFiles).forEach(name => {
+                if (!existingNames.has(name)) {
+                    codexAuthState.selectedAuthFiles.delete(name);
+                }
+            });
+            if (codexAuthState.selectedAuthFiles.size === 0) {
+                codexAuthState.batchDeleteConfirm = false;
+            }
+            if (!files.length) {
+                if (toolbar) toolbar.hidden = true;
+                const pagination = document.getElementById('codexAuthFilePagination');
+                if (pagination) pagination.hidden = true;
+                container.innerHTML = '<div class="empty-state">还没有 Codex 认证文件，请先完成 OAuth 登录。</div>';
+                syncCodexAuthControls();
+                return;
+            }
+
+            const pageSize = codexAuthState.authFilePageSize || 50;
+            const pageCount = Math.max(1, Math.ceil(files.length / pageSize));
+            if (codexAuthState.authFilePage > pageCount) {
+                codexAuthState.authFilePage = pageCount;
+            }
+            if (codexAuthState.authFilePage < 1) {
+                codexAuthState.authFilePage = 1;
+            }
+            const selectedSize = codexAuthState.selectedAuthFiles.size;
+            if (toolbar) toolbar.hidden = false;
+            if (selectAll) {
+                selectAll.checked = files.length > 0 && selectedSize === files.length;
+                selectAll.indeterminate = selectedSize > 0 && selectedSize < files.length;
+            }
+            if (selectedCount) {
+                selectedCount.textContent = `已选择 ${selectedSize} 个`;
+            }
+
+            const startIndex = (codexAuthState.authFilePage - 1) * pageSize;
+            const pageFiles = files.slice(startIndex, startIndex + pageSize);
+            container.innerHTML = pageFiles.map(file => {
+                const encodedName = encodeURIComponent(file.name || '');
+                const quota = getCodexAuthFileQuota(file);
+                const isLoadingQuota = codexAuthState.quotaLoadingByFile[file.name || ''] === true;
+                const isDeleting = codexAuthState.deletingAuthFileName === (file.name || '') || codexAuthState.batchDeleting;
+                const isConfirmingDelete = codexAuthState.deleteConfirmName === (file.name || '');
+                const isSelected = codexAuthState.selectedAuthFiles.has(file.name || '');
+                const availabilityStatus = normalizeCodexAvailabilityStatus(file);
+                const availabilityClass = availabilityStatus.replace(/_/g, '-');
+                const availabilityLabel = formatCodexAvailabilityStatusLabel(file, availabilityStatus);
+                const usageInfo = getCodexAuthFileInfo(file);
+                return `
+                    <article class="oauth-auth-file-item">
+                        <div class="oauth-auth-file-main">
+                            <label class="oauth-auth-file-select" aria-label="选择 ${escapeHtml(file.name || '')}">
+                                <input
+                                    type="checkbox"
+                                    ${isSelected ? 'checked' : ''}
+                                    onchange="toggleCodexAuthFileSelection('${encodedName}', this.checked)"
+                                >
+                            </label>
+                            <div class="oauth-auth-file-body">
+                                <div class="oauth-auth-file-title-row">
+                                    <div class="oauth-auth-file-name">${escapeHtml(file.name || '')}</div>
+                                    <div class="oauth-auth-file-title-actions">
+                                        <button
+                                            type="button"
+                                            class="oauth-icon-button oauth-icon-button-danger"
+                                            title="删除认证文件"
+                                            aria-label="删除 ${escapeHtml(file.name || '')}"
+                                            onclick="toggleCodexAuthFileDeleteConfirm('${encodedName}')"
+                                            ${isDeleting ? 'disabled' : ''}
+                                        >${renderTrashIcon()}</button>
+                                        ${isConfirmingDelete ? `
+                                            <div class="oauth-delete-popover" role="dialog" aria-label="确认删除认证文件">
+                                                <div class="oauth-delete-popover-title">删除这个认证文件？</div>
+                                                <div class="oauth-delete-popover-actions">
+                                                    <button type="button" class="btn btn-secondary btn-sm" onclick="cancelCodexAuthFileDelete()">取消</button>
+                                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteCodexAuthFile('${encodedName}')" ${isDeleting ? 'disabled' : ''}>删除</button>
+                                                </div>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                                <div class="oauth-auth-file-fields">
+                                    <div><span>邮箱：</span>${escapeHtml(file.email || '-')}</div>
+                                    <div><span>过期时间：</span>${escapeHtml(formatTimestamp(file.expired))}</div>
+                                    <div><span>Plan：</span>${escapeHtml(file.plan_type || '-')}</div>
+                                    <div class="oauth-auth-file-status">
+                                        <span>状态：</span>
+                                        <strong class="oauth-status-text ${availabilityClass}">${escapeHtml(availabilityLabel)}</strong>
+                                    </div>
+                                    ${usageInfo ? `<div class="oauth-auth-file-info"><span>信息：</span>${escapeHtml(usageInfo)}</div>` : ''}
+                                </div>
+                                <div class="oauth-quota-block">
+                                    <div class="oauth-quota-heading">
+                                        <span class="oauth-quota-label">额度：</span>
+                                        <button
+                                            type="button"
+                                            class="oauth-icon-button"
+                                            title="刷新额度"
+                                            aria-label="刷新 ${escapeHtml(file.name || '')} 额度"
+                                            onclick="loadCodexQuota('${encodedName}')"
+                                            ${isLoadingQuota ? 'disabled' : ''}
+                                        >${renderRefreshIcon()}</button>
+                                    </div>
+                                    <div class="oauth-quota-text">${renderCodexQuotaSummary(quota, isLoadingQuota)}</div>
+                                    ${renderCodexQuotaProgress(quota, isLoadingQuota)}
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+                `;
+            }).join('');
+            renderCodexAuthFilePagination(files.length, pageCount);
+            syncCodexAuthControls();
+        }
+
+        function getCodexAuthFileQuota(file) {
+            const name = file?.name || '';
+            if (Object.prototype.hasOwnProperty.call(codexAuthState.quotaByFile, name)) {
+                return codexAuthState.quotaByFile[name];
+            }
+            if (file?.quota_error) return { error: file.quota_error };
+            return file?.quota || null;
+        }
+
+        function normalizeCodexAvailabilityStatus(file) {
+            const status = String(file?.availability_status || '').trim().toLowerCase();
+            if ([
+                'available',
+                'refresh_required',
+                'auth_check_required',
+                'auth_failed',
+                'quota_cooldown',
+                'quota_exhausted',
+                'filtered',
+            ].includes(status)) {
+                return status;
+            }
+            return 'unknown';
+        }
+
+        function formatCodexAvailabilityStatusLabel(file, status) {
+            const message = String(file?.availability_status_message || '').trim();
+            if (message) return message;
+            if (status === 'available') return '可用';
+            if (status === 'refresh_required') return '待刷新';
+            if (status === 'auth_check_required') return '待验证';
+            if (status === 'auth_failed') return '认证失败';
+            if (status === 'quota_cooldown') return '配额冷却中';
+            if (status === 'quota_exhausted') return '配额已耗尽';
+            if (status === 'filtered') return '已过滤';
+            return '-';
+        }
+
+        function getCodexAuthFileInfo(file) {
+            const message = String(file?.usage_status_message || '').trim();
+            if (!message || message === 'success') return '';
+            return message;
+        }
+
+        function renderRefreshIcon() {
+            return `
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M20 11a8 8 0 0 0-14.5-4.7L4 8"></path>
+                    <path d="M4 4v4h4"></path>
+                    <path d="M4 13a8 8 0 0 0 14.5 4.7L20 16"></path>
+                    <path d="M20 20v-4h-4"></path>
+                </svg>
+            `;
+        }
+
+        function renderTrashIcon() {
+            return `
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M3 6h18"></path>
+                    <path d="M8 6V4h8v2"></path>
+                    <path d="M19 6l-1 14H6L5 6"></path>
+                    <path d="M10 11v5"></path>
+                    <path d="M14 11v5"></path>
+                </svg>
+            `;
+        }
+
+        function getCodexQuotaVisibleWindows(quota) {
+            if (!quota || quota.error) return [];
+            const windows = Array.isArray(quota.windows) ? quota.windows : [];
+            const codexWindows = windows.filter(window => String(window?.label || '').toLowerCase().startsWith('codex'));
+            return codexWindows.length ? codexWindows : windows.slice(0, 1);
+        }
+
+        function formatCodexQuotaPercent(window) {
+            const remaining = Number.isFinite(Number(window?.remaining_percent))
+                ? Math.max(0, Math.min(100, Number(window.remaining_percent)))
+                : null;
+            if (remaining === null) {
+                return {
+                    value: 0,
+                    text: '--',
+                    known: false,
+                };
+            }
+            return {
+                value: remaining,
+                text: `${Number.isInteger(remaining) ? remaining : remaining.toFixed(1)}%`,
+                known: true,
+            };
+        }
+
+        function renderCodexQuotaSummary(quota, isLoadingQuota = false) {
+            if (isLoadingQuota) {
+                return '刷新中...';
+            }
+            if (!quota) {
+                return '--';
+            }
+            if (quota.error) {
+                return `刷新失败：${escapeHtml(quota.error)}`;
+            }
+            const visibleWindows = getCodexQuotaVisibleWindows(quota);
+            if (!visibleWindows.length) {
+                return '--';
+            }
+            return visibleWindows.map(window => {
+                const percent = formatCodexQuotaPercent(window);
+                const resetAt = window.reset_at || window.resetAt || window.reset_label || '-';
+                return `${percent.text} 剩余，下次刷新：${escapeHtml(formatTimestamp(resetAt))}`;
+            }).join('；');
+        }
+
+        function renderCodexQuotaProgress(quota, isLoadingQuota = false) {
+            if (isLoadingQuota || !quota || quota.error) {
+                return '';
+            }
+            const visibleWindows = getCodexQuotaVisibleWindows(quota);
+            if (!visibleWindows.length) {
+                return '';
+            }
+            return visibleWindows.map(window => {
+                const percent = formatCodexQuotaPercent(window);
+                return `
+                    <div class="oauth-quota-progress-row">
+                        <div class="oauth-quota-progress-meta">
+                            <span>${escapeHtml(window.label || 'Codex')}</span>
+                            <span>${percent.text}</span>
+                        </div>
+                        <div class="oauth-quota-progress" aria-label="${escapeHtml(window.label || 'Codex')} 剩余额度 ${percent.text}">
+                            <span style="width: ${percent.value}%"></span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderCodexAuthFilePagination(total, pageCount) {
+            const pagination = document.getElementById('codexAuthFilePagination');
+            if (!pagination) return;
+            pagination.hidden = total === 0;
+            pagination.innerHTML = `
+                <span>共 ${total} 个</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="goCodexAuthFilePage(${codexAuthState.authFilePage - 1})" ${codexAuthState.authFilePage <= 1 ? 'disabled' : ''}>上一页</button>
+                <span>${codexAuthState.authFilePage} / ${pageCount}</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="goCodexAuthFilePage(${codexAuthState.authFilePage + 1})" ${codexAuthState.authFilePage >= pageCount ? 'disabled' : ''}>下一页</button>
+            `;
+        }
+
+        function goCodexAuthFilePage(page) {
+            const pageSize = codexAuthState.authFilePageSize || 50;
+            const pageCount = Math.max(1, Math.ceil((codexAuthState.authFiles || []).length / pageSize));
+            codexAuthState.authFilePage = Math.min(Math.max(Number(page) || 1, 1), pageCount);
+            renderCodexAuthFiles();
+        }
+
+        function toggleCodexSelectAllAuthFiles(checked) {
+            (codexAuthState.authFiles || []).forEach(file => {
+                if (!file.name) return;
+                if (checked) {
+                    codexAuthState.selectedAuthFiles.add(file.name);
+                } else {
+                    codexAuthState.selectedAuthFiles.delete(file.name);
+                }
+            });
+            if (!checked) {
+                codexAuthState.batchDeleteConfirm = false;
+            }
+            renderCodexAuthFiles();
+        }
+
+        function toggleCodexAuthFileSelection(encodedName, checked) {
+            const name = decodeURIComponent(encodedName);
+            if (!name) return;
+            if (checked) {
+                codexAuthState.selectedAuthFiles.add(name);
+            } else {
+                codexAuthState.selectedAuthFiles.delete(name);
+                if (codexAuthState.selectedAuthFiles.size === 0) {
+                    codexAuthState.batchDeleteConfirm = false;
+                }
+            }
+            renderCodexAuthFiles();
+        }
+
+        async function refreshSelectedCodexQuotas() {
+            const names = Array.from(codexAuthState.selectedAuthFiles);
+            if (!names.length) {
+                showMessage('请先选择认证文件', 'error');
+                return;
+            }
+            let successCount = 0;
+            let failedCount = 0;
+            for (const name of names) {
+                const ok = await refreshCodexQuotaByName(name, { silent: true });
+                if (ok) {
+                    successCount += 1;
+                } else {
+                    failedCount += 1;
+                }
+            }
+            if (failedCount) {
+                showMessage(`已刷新 ${successCount} 个，失败 ${failedCount} 个`, 'error');
+            } else {
+                showMessage(`已刷新 ${successCount} 个认证文件额度`, 'success');
+            }
+        }
+
+        function toggleCodexBatchDeleteConfirm() {
+            if (!codexAuthState.selectedAuthFiles.size) {
+                showMessage('请先选择认证文件', 'error');
+                return;
+            }
+            codexAuthState.deleteConfirmName = '';
+            codexAuthState.batchDeleteConfirm = !codexAuthState.batchDeleteConfirm;
+            syncCodexAuthControls();
+        }
+
+        function cancelCodexBatchDelete() {
+            codexAuthState.batchDeleteConfirm = false;
+            syncCodexAuthControls();
+        }
+
+        async function deleteSelectedCodexAuthFiles() {
+            const names = Array.from(codexAuthState.selectedAuthFiles);
+            if (!names.length || codexAuthState.batchDeleting) return;
+            codexAuthState.batchDeleting = true;
+            codexAuthState.batchDeleteConfirm = false;
+            renderCodexAuthFiles();
+            let successCount = 0;
+            let failedCount = 0;
+            for (const name of names) {
+                try {
+                    await requestDeleteCodexAuthFile(name);
+                    removeCodexAuthFileFromState(name);
+                    successCount += 1;
+                } catch (error) {
+                    console.error('删除 Codex 认证文件失败:', error);
+                    failedCount += 1;
+                }
+            }
+            codexAuthState.batchDeleting = false;
+            renderCodexAuthFiles();
+            if (successCount > 0) {
+                await loadCodexModels();
+            }
+            if (failedCount) {
+                showMessage(`已删除 ${successCount} 个，失败 ${failedCount} 个`, 'error');
+            } else {
+                showMessage(`已删除 ${successCount} 个认证文件`, 'success');
+            }
+        }
+
+        function toggleCodexAuthFileDeleteConfirm(encodedName) {
+            const name = decodeURIComponent(encodedName);
+            codexAuthState.batchDeleteConfirm = false;
+            codexAuthState.deleteConfirmName = codexAuthState.deleteConfirmName === name ? '' : name;
+            renderCodexAuthFiles();
+        }
+
+        function cancelCodexAuthFileDelete() {
+            codexAuthState.deleteConfirmName = '';
+            renderCodexAuthFiles();
+        }
+
+        async function deleteCodexAuthFile(encodedName) {
+            const name = decodeURIComponent(encodedName);
+            if (!name || codexAuthState.deletingAuthFileName) return;
+            codexAuthState.deletingAuthFileName = name;
+            renderCodexAuthFiles();
+            try {
+                await requestDeleteCodexAuthFile(name);
+                removeCodexAuthFileFromState(name);
+                codexAuthState.deleteConfirmName = '';
+                showMessage('Codex 认证文件已删除', 'success');
+                renderCodexAuthFiles();
+                await loadCodexModels();
+            } catch (error) {
+                console.error('删除 Codex 认证文件失败:', error);
+                showActionError('删除 Codex 认证文件', error, { fallback: '删除认证文件失败' });
+            } finally {
+                codexAuthState.deletingAuthFileName = '';
+                renderCodexAuthFiles();
+            }
+        }
+
+        async function requestDeleteCodexAuthFile(name) {
+            const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}`, {
+                method: 'DELETE',
+                cache: 'no-store',
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || '删除认证文件失败');
+            }
+            return result;
+        }
+
+        function removeCodexAuthFileFromState(name) {
+            codexAuthState.authFiles = (codexAuthState.authFiles || []).filter(file => file.name !== name);
+            codexAuthState.selectedAuthFiles.delete(name);
+            delete codexAuthState.quotaByFile[name];
+            delete codexAuthState.quotaLoadingByFile[name];
+        }
+
+        async function loadCodexAuthFiles() {
+            const container = document.getElementById('codexAuthFileList');
+            if (container) {
+                container.innerHTML = '<div class="empty-state">正在加载认证文件...</div>';
+            }
+            try {
+                const response = await fetch('/api/oauth/codex/auth-files', { cache: 'no-store' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '加载认证文件失败');
+                }
+                codexAuthState.authFiles = Array.isArray(result.files) ? result.files : [];
+                codexAuthState.quotaByFile = {};
+                renderCodexAuthFiles();
+            } catch (error) {
+                console.error('加载 Codex 认证文件失败:', error);
+                if (container) {
+                    container.innerHTML = `<div class="error">${escapeHtml(error?.message || '加载认证文件失败')}</div>`;
+                }
+            }
+        }
+
+        async function loadCodexQuota(encodedName) {
+            const name = decodeURIComponent(encodedName);
+            await refreshCodexQuotaByName(name);
+        }
+
+        async function refreshCodexQuotaByName(name, options = {}) {
+            const silent = options.silent === true;
+            codexAuthState.quotaLoadingByFile[name] = true;
+            renderCodexAuthFiles();
+            try {
+                const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/quota`, { cache: 'no-store' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '刷新配额失败');
+                }
+                codexAuthState.quotaByFile[name] = result;
+                updateCodexAuthFileQuotaState(name, result, '');
+                if (!silent) {
+                    showMessage('Codex 配额已刷新', 'success');
+                }
+                return true;
+            } catch (error) {
+                console.error('刷新 Codex 配额失败:', error);
+                const message = error?.message || '刷新配额失败';
+                codexAuthState.quotaByFile[name] = { error: message };
+                updateCodexAuthFileQuotaState(name, null, message);
+                if (!silent) {
+                    showActionError('刷新 Codex 配额', error, { fallback: '刷新配额失败' });
+                }
+                return false;
+            } finally {
+                codexAuthState.quotaLoadingByFile[name] = false;
+                renderCodexAuthFiles();
+            }
+        }
+
+        function updateCodexAuthFileQuotaState(name, quota, errorMessage) {
+            codexAuthState.authFiles = (codexAuthState.authFiles || []).map(file => {
+                if (file.name !== name) return file;
+                return {
+                    ...file,
+                    quota: quota || file.quota || null,
+                    quota_error: errorMessage || '',
+                    quota_refreshed_at: quota?.refreshed_at || file.quota_refreshed_at || '',
+                };
+            });
+        }
+
+        function initOAuthPage() {
+            initThemeToggle();
+            switchOAuthTab('codex');
+            syncCodexAuthControls();
+            renderCodexAuthUrl();
+            loadCodexModels();
+            loadCodexAuthFiles();
+        }
+
+        initOAuthPage();
+    </script>
+{% endblock %}

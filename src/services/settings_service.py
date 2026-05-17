@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from ipaddress import ip_address
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 from ..application.app_context import AppContext
 from ..config.provider_config import parse_optional_bool
@@ -37,6 +38,11 @@ class SettingsService:
                 "path": str(self._config_manager.get_log_path()),
                 "level": self._config_manager.get_log_level(),
                 "llm_request_debug_enabled": self._config_manager.is_llm_request_debug_enabled(),
+            },
+            "oauth": {
+                "enabled": self._config_manager.is_oauth_enabled(),
+                "proxy": self._config_manager.get_oauth_proxy() or "",
+                "verify_ssl": self._config_manager.is_oauth_verify_ssl_enabled(),
             },
             "auth_enabled": self._config_manager.is_auth_enabled(),
         }
@@ -137,6 +143,36 @@ class SettingsService:
             "settings": self.get_system_settings(),
         }
 
+    def update_oauth_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Request payload must be an object")
+
+        oauth_payload = payload.get("oauth")
+        if not isinstance(oauth_payload, dict):
+            raise ValueError("Config field 'oauth' must be an object")
+
+        enabled = parse_optional_bool(
+            oauth_payload.get("enabled"),
+            default=self._config_manager.is_oauth_enabled(),
+        )
+        if enabled is None:
+            raise ValueError("OAuth enabled flag is required")
+        proxy = self._parse_oauth_proxy(oauth_payload.get("proxy"))
+        verify_ssl = parse_optional_bool(oauth_payload.get("verify_ssl"))
+        if verify_ssl is None:
+            raise ValueError("OAuth SSL verify flag is required")
+
+        config = self._config_manager.get_raw_config()
+        oauth_config = self._ensure_mapping(config, "oauth")
+        oauth_config["enabled"] = enabled
+        oauth_config["proxy"] = proxy
+        oauth_config["verify_ssl"] = verify_ssl
+
+        self._config_manager.write_raw_config(config)
+        return {
+            "settings": self.get_system_settings(),
+        }
+
     def update_system_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
@@ -144,6 +180,9 @@ class SettingsService:
         basic_result = self.update_basic_settings(payload)
         debug_result = self.update_debug_settings(payload)
         basic_result["settings"] = debug_result["settings"]
+        if "oauth" in payload:
+            oauth_result = self.update_oauth_settings(payload)
+            basic_result["settings"] = oauth_result["settings"]
         return basic_result
 
     @staticmethod
@@ -193,6 +232,16 @@ class SettingsService:
                 "Log level must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL"
             )
         return log_level
+
+    @staticmethod
+    def _parse_oauth_proxy(value: Any) -> str:
+        proxy = str(value or "").strip()
+        if not proxy:
+            return ""
+        parsed = urlparse(proxy)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("OAuth proxy must be a valid absolute URL")
+        return proxy
 
     @staticmethod
     def _normalize_admin_value(value: Any) -> str:

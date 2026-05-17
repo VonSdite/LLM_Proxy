@@ -22,6 +22,9 @@
                     </button>
                     <nav class="header-nav" aria-label="Main navigation">
                         <a class="header-nav-link{% if active_page == 'providers' %} active{% endif %}" href="/">Provider 管理</a>
+                        {% if oauth_enabled %}
+                        <a class="header-nav-link{% if active_page == 'oauth' %} active{% endif %}" href="/oauth" data-nav-page="oauth">OAuth</a>
+                        {% endif %}
                         <a class="header-nav-link{% if active_page == 'users' %} active{% endif %}" href="/users">用户管理</a>
                         <a class="header-nav-link{% if active_page == 'index' %} active{% endif %}" href="/statistics">统计概览</a>
                         <a class="header-nav-link{% if active_page == 'settings' %} active{% endif %}" href="/settings">系统设置</a>

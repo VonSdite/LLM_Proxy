@@ -17,8 +17,6 @@ KNOWN_STREAM_FORMATS = {
     "sse_text",
     "ndjson",
     "raw_text",
-    "ws_json",
-    "ws_text",
     "nonstream",
 }
 
@@ -30,6 +28,7 @@ def resolve_stream_format(
     content_type: str,
     transport: str,
 ) -> str:
+    del transport
     normalized = str(preferred_format or "").strip().lower() or "auto"
     if normalized not in KNOWN_STREAM_FORMATS:
         raise ValueError(f"Unsupported stream format: {preferred_format}")
@@ -37,8 +36,6 @@ def resolve_stream_format(
         return normalized
 
     lowered_content_type = (content_type or "").lower()
-    if transport == "websocket":
-        return "ws_json"
     if "text/event-stream" in lowered_content_type:
         return "sse_json"
     if "x-ndjson" in lowered_content_type or "ndjson" in lowered_content_type or "jsonl" in lowered_content_type:
@@ -56,11 +53,8 @@ def decode_stream_events(chunks: Iterable[bytes], stream_format: str) -> Iterato
     if normalized == "ndjson":
         yield from _decode_ndjson_events(chunks)
         return
-    if normalized in {"raw_text", "ws_text"}:
+    if normalized == "raw_text":
         yield from _decode_raw_text_events(chunks)
-        return
-    if normalized == "ws_json":
-        yield from _decode_websocket_json_events(chunks)
         return
     raise ValueError(f"Unsupported stream decoder format: {stream_format}")
 
@@ -180,24 +174,3 @@ def _decode_raw_text_events(chunks: Iterable[bytes]) -> Iterator[StreamEvent]:
     tail = decoder.decode(b"", final=True)
     if tail:
         yield StreamEvent(kind="text", payload=tail, raw=tail)
-
-
-def _decode_websocket_json_events(chunks: Iterable[bytes]) -> Iterator[StreamEvent]:
-    for chunk in chunks:
-        if not chunk:
-            continue
-        text = chunk.decode("utf-8", errors="ignore").strip()
-        if not text:
-            continue
-        if text == "[DONE]":
-            yield StreamEvent(kind="done", payload="[DONE]", raw=text)
-            continue
-        if text.startswith("data:") or text.startswith("event:") or text.startswith(":"):
-            yield from _parse_sse_event(text, parse_json=True)
-            continue
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            yield StreamEvent(kind="text", payload=text, raw=text)
-            continue
-        yield StreamEvent(kind="json", payload=payload, raw=text)

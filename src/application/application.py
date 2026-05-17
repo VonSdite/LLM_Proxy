@@ -20,6 +20,7 @@ from ..config import (
 )
 from ..presentation import (
     AuthenticationController,
+    OAuthController,
     ProviderController,
     ProxyController,
     UserController,
@@ -30,6 +31,8 @@ from ..repositories import AuthGroupRepository, LogRepository, UserRepository
 from ..services import (
     AuthGroupService,
     AuthenticationService,
+    CodexOAuthService,
+    CodexProxyService,
     LogService,
     ModelDiscoveryService,
     ProviderModelTestService,
@@ -232,6 +235,8 @@ class Application:
             self._auth_group_manager,
         )
         model_discovery_service = ModelDiscoveryService(self._ctx)
+        codex_oauth_service = CodexOAuthService(self._ctx)
+        codex_proxy_service = CodexProxyService(self._ctx, codex_oauth_service)
         settings_service = SettingsService(
             self._ctx,
             reload_logging_callback=self.reload_logging_settings,
@@ -248,12 +253,18 @@ class Application:
             settings_service,
             auth_service,
         )
+        self._oauth_controller = OAuthController(
+            self._ctx,
+            codex_oauth_service,
+            auth_service,
+        )
         self._proxy_controller = ProxyController(
             self._ctx,
             proxy_service,
             user_service,
             log_service,
             self._provider_manager,
+            codex_proxy_service=codex_proxy_service,
         )
         self._web_controller = WebController(
             self._ctx,
