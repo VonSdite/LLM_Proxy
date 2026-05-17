@@ -66,6 +66,7 @@ downstream request
   - 使用回调 URL 换取 token 并写入本地认证文件
   - 删除本地认证文件时同步清理该文件的本地状态
   - 读取认证文件状态，并按需刷新 token 后查询 Codex 配额
+  - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
   - 持久化认证文件最近一次配额快照、配额刷新错误与 Codex 模型代理使用状态
   - 维护本地手动 Codex OAuth 模型目录
   - 按本地模型目录、本地冷却和认证失败状态提供 Codex 请求候选账号
@@ -224,7 +225,7 @@ Codex OAuth 模型是数据平面的例外路由：
   - 渲染后台页面时读取当前 `oauth.enabled`，用于决定是否输出 OAuth 顶层导航项
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
-  - 维护 OAuth PKCE 临时会话与 Codex 账号配额冷却状态
+  - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
   - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件配额与最近一次模型代理状态
 - `CodexProxyService`
   - 每次 Codex 数据面请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
@@ -389,6 +390,7 @@ OAuth Codex tab
   -> list / manage local Codex model IDs
   -> list auth file token/status/quota snapshot
   -> optional quota refresh to chatgpt.com/backend-api/wham/usage
+  -> skip duplicate quota refresh when the same auth file is already refreshing
   -> persist quota snapshot or quota error
 ```
 
@@ -406,6 +408,7 @@ OAuth Codex tab
 - Codex 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
 - 查询配额时如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
+- 同一个认证文件的配额刷新使用进程内非阻塞锁；重复刷新请求会直接返回跳过结果，不重复访问 Codex 上游
 - 如果认证文件 access token 已过期且缺少 refresh token，请求候选筛选不会直接跳过；系统会先用当前 access token 尝试请求一次，再按上游返回的认证、配额或其他错误决定后续状态
 - 配额刷新会同步内存冷却状态：Codex 窗口耗尽时冷却该认证文件，恢复可用时立即清除冷却
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态

@@ -140,6 +140,7 @@
                         </div>
                     </div>
                 </div>
+                <div class="oauth-auth-file-filters" id="codexAuthFileFilters" hidden></div>
                 <div class="oauth-auth-file-toolbar" id="codexAuthFileToolbar" hidden>
                     <label class="oauth-checkline" for="codexSelectAllAuthFiles">
                         <input
@@ -212,6 +213,9 @@
             authFiles: [],
             quotaByFile: {},
             quotaLoadingByFile: {},
+            batchQuotaRefreshing: false,
+            batchQuotaRefreshingCount: 0,
+            authFileFilter: 'all',
             selectedAuthFiles: new Set(),
             authFilePage: 1,
             authFilePageSize: 50,
@@ -266,11 +270,23 @@
             }
             const refreshSelectedQuotaButton = document.getElementById('codexRefreshSelectedQuotaBtn');
             if (refreshSelectedQuotaButton) {
-                refreshSelectedQuotaButton.disabled = codexAuthState.selectedAuthFiles.size === 0 || codexAuthState.batchDeleting;
+                const selectedNames = getCodexSelectedAuthFileNamesForCurrentFilter();
+                const selectedQuotaLoading = selectedNames.some(name => codexAuthState.quotaLoadingByFile[name] === true);
+                const isBatchRefreshing = codexAuthState.batchQuotaRefreshing === true;
+                const refreshLabel = isBatchRefreshing
+                    ? `正在刷新 ${codexAuthState.batchQuotaRefreshingCount || selectedNames.length} 个认证文件额度`
+                    : '刷新选中额度';
+                refreshSelectedQuotaButton.disabled = selectedNames.length === 0
+                    || codexAuthState.batchDeleting
+                    || isBatchRefreshing
+                    || selectedQuotaLoading;
+                refreshSelectedQuotaButton.title = refreshLabel;
+                refreshSelectedQuotaButton.setAttribute('aria-label', refreshLabel);
             }
             const deleteSelectedAuthFilesButton = document.getElementById('codexDeleteSelectedAuthFilesBtn');
             if (deleteSelectedAuthFilesButton) {
-                deleteSelectedAuthFilesButton.disabled = codexAuthState.selectedAuthFiles.size === 0 || codexAuthState.batchDeleting;
+                deleteSelectedAuthFilesButton.disabled = getCodexSelectedAuthFileNamesForCurrentFilter().length === 0
+                    || codexAuthState.batchDeleting;
             }
             const batchDeletePopover = document.getElementById('codexBatchDeletePopover');
             if (batchDeletePopover) {
@@ -562,6 +578,7 @@
             const toolbar = document.getElementById('codexAuthFileToolbar');
             const selectAll = document.getElementById('codexSelectAllAuthFiles');
             const selectedCount = document.getElementById('codexSelectedAuthFileCount');
+            renderCodexAuthFileFilters(files);
             const existingNames = new Set(files.map(file => file.name).filter(Boolean));
             Array.from(codexAuthState.selectedAuthFiles).forEach(name => {
                 if (!existingNames.has(name)) {
@@ -580,8 +597,9 @@
                 return;
             }
 
+            const filteredFiles = getCodexFilteredAuthFiles(files);
             const pageSize = codexAuthState.authFilePageSize || 50;
-            const pageCount = Math.max(1, Math.ceil(files.length / pageSize));
+            const pageCount = Math.max(1, Math.ceil(filteredFiles.length / pageSize));
             if (codexAuthState.authFilePage > pageCount) {
                 codexAuthState.authFilePage = pageCount;
             }
@@ -589,17 +607,28 @@
                 codexAuthState.authFilePage = 1;
             }
             const selectedSize = codexAuthState.selectedAuthFiles.size;
+            const visibleSelectedSize = filteredFiles.filter(file => codexAuthState.selectedAuthFiles.has(file.name || '')).length;
             if (toolbar) toolbar.hidden = false;
             if (selectAll) {
-                selectAll.checked = files.length > 0 && selectedSize === files.length;
-                selectAll.indeterminate = selectedSize > 0 && selectedSize < files.length;
+                selectAll.checked = filteredFiles.length > 0 && visibleSelectedSize === filteredFiles.length;
+                selectAll.indeterminate = visibleSelectedSize > 0 && visibleSelectedSize < filteredFiles.length;
+                selectAll.disabled = filteredFiles.length === 0;
             }
             if (selectedCount) {
-                selectedCount.textContent = `已选择 ${selectedSize} 个`;
+                selectedCount.textContent = codexAuthState.authFileFilter === 'all'
+                    ? `已选择 ${selectedSize} 个`
+                    : `当前筛选已选择 ${visibleSelectedSize} 个`;
+            }
+            if (!filteredFiles.length) {
+                const pagination = document.getElementById('codexAuthFilePagination');
+                if (pagination) pagination.hidden = true;
+                container.innerHTML = '<div class="empty-state">当前筛选没有认证文件。</div>';
+                syncCodexAuthControls();
+                return;
             }
 
             const startIndex = (codexAuthState.authFilePage - 1) * pageSize;
-            const pageFiles = files.slice(startIndex, startIndex + pageSize);
+            const pageFiles = filteredFiles.slice(startIndex, startIndex + pageSize);
             container.innerHTML = pageFiles.map(file => {
                 const encodedName = encodeURIComponent(file.name || '');
                 const quota = getCodexAuthFileQuota(file);
@@ -674,8 +703,114 @@
                     </article>
                 `;
             }).join('');
-            renderCodexAuthFilePagination(files.length, pageCount);
+            renderCodexAuthFilePagination(filteredFiles.length, pageCount);
             syncCodexAuthControls();
+        }
+
+        function normalizeCodexAuthFileFilter(filter) {
+            if (filter === 'available' || filter === 'unavailable') {
+                return filter;
+            }
+            return 'all';
+        }
+
+        function setCodexAuthFileFilter(filter) {
+            codexAuthState.authFileFilter = normalizeCodexAuthFileFilter(filter);
+            codexAuthState.authFilePage = 1;
+            codexAuthState.batchDeleteConfirm = false;
+            codexAuthState.deleteConfirmName = '';
+            renderCodexAuthFiles();
+        }
+
+        function renderCodexAuthFileFilters(files) {
+            const container = document.getElementById('codexAuthFileFilters');
+            if (!container) return;
+            if (!files.length) {
+                container.hidden = true;
+                container.innerHTML = '';
+                return;
+            }
+            const counts = getCodexAuthFileFilterCounts(files);
+            const currentFilter = normalizeCodexAuthFileFilter(codexAuthState.authFileFilter);
+            codexAuthState.authFileFilter = currentFilter;
+            const filters = [
+                { key: 'all', label: '总数', count: counts.all },
+                { key: 'available', label: '可用', count: counts.available },
+                { key: 'unavailable', label: '不可用', count: counts.unavailable },
+            ];
+            container.hidden = false;
+            container.innerHTML = filters.map(item => {
+                const isActive = currentFilter === item.key;
+                return `
+                    <button
+                        type="button"
+                        class="oauth-auth-file-filter-pill${isActive ? ' is-active' : ''}"
+                        aria-pressed="${isActive ? 'true' : 'false'}"
+                        onclick="setCodexAuthFileFilter('${item.key}')"
+                    >
+                        <span>${item.label}</span>
+                        <strong>${item.count}</strong>
+                    </button>
+                `;
+            }).join('');
+        }
+
+        function getCodexAuthFileFilterCounts(files) {
+            return {
+                all: files.length,
+                available: files.filter(isCodexAuthFileAvailable).length,
+                unavailable: files.filter(isCodexAuthFileUnavailable).length,
+            };
+        }
+
+        function getCodexFilteredAuthFiles(files) {
+            const filter = normalizeCodexAuthFileFilter(codexAuthState.authFileFilter);
+            if (filter === 'available') {
+                return files.filter(isCodexAuthFileAvailable);
+            }
+            if (filter === 'unavailable') {
+                return files.filter(isCodexAuthFileUnavailable);
+            }
+            return files;
+        }
+
+        function getCodexFilteredAuthFileNames() {
+            return new Set(
+                getCodexFilteredAuthFiles(codexAuthState.authFiles || [])
+                    .map(file => file.name)
+                    .filter(Boolean)
+            );
+        }
+
+        function getCodexSelectedAuthFileNamesForCurrentFilter() {
+            const filteredNames = getCodexFilteredAuthFileNames();
+            return Array.from(codexAuthState.selectedAuthFiles).filter(name => filteredNames.has(name));
+        }
+
+        function isCodexAuthFileAvailable(file) {
+            const status = normalizeCodexAvailabilityStatus(file);
+            return ['available', 'refresh_required', 'auth_check_required'].includes(status)
+                && !isCodexAuthFileQuotaExhausted(file);
+        }
+
+        function isCodexAuthFileUnavailable(file) {
+            const status = normalizeCodexAvailabilityStatus(file);
+            return ['auth_failed', 'quota_cooldown', 'quota_exhausted', 'filtered'].includes(status)
+                || isCodexAuthFileQuotaExhausted(file);
+        }
+
+        function isCodexAuthFileQuotaExhausted(file) {
+            const quota = getCodexAuthFileQuota(file);
+            if (!quota || quota.error) return false;
+            const windows = Array.isArray(quota.windows) ? quota.windows : [];
+            const codexWindows = windows.filter(window => String(window?.label || '').toLowerCase().startsWith('codex'));
+            if (!codexWindows.length) return false;
+            return codexWindows.some(window => {
+                const remainingPercent = Number(window?.remaining_percent);
+                const usedPercent = Number(window?.used_percent);
+                return (Number.isFinite(remainingPercent) && remainingPercent <= 0)
+                    || (Number.isFinite(usedPercent) && usedPercent >= 100);
+            });
         }
 
         function getCodexAuthFileQuota(file) {
@@ -829,13 +964,13 @@
 
         function goCodexAuthFilePage(page) {
             const pageSize = codexAuthState.authFilePageSize || 50;
-            const pageCount = Math.max(1, Math.ceil((codexAuthState.authFiles || []).length / pageSize));
+            const pageCount = Math.max(1, Math.ceil(getCodexFilteredAuthFiles(codexAuthState.authFiles || []).length / pageSize));
             codexAuthState.authFilePage = Math.min(Math.max(Number(page) || 1, 1), pageCount);
             renderCodexAuthFiles();
         }
 
         function toggleCodexSelectAllAuthFiles(checked) {
-            (codexAuthState.authFiles || []).forEach(file => {
+            getCodexFilteredAuthFiles(codexAuthState.authFiles || []).forEach(file => {
                 if (!file.name) return;
                 if (checked) {
                     codexAuthState.selectedAuthFiles.add(file.name);
@@ -843,7 +978,7 @@
                     codexAuthState.selectedAuthFiles.delete(file.name);
                 }
             });
-            if (!checked) {
+            if (getCodexSelectedAuthFileNamesForCurrentFilter().length === 0) {
                 codexAuthState.batchDeleteConfirm = false;
             }
             renderCodexAuthFiles();
@@ -856,7 +991,7 @@
                 codexAuthState.selectedAuthFiles.add(name);
             } else {
                 codexAuthState.selectedAuthFiles.delete(name);
-                if (codexAuthState.selectedAuthFiles.size === 0) {
+                if (getCodexSelectedAuthFileNamesForCurrentFilter().length === 0) {
                     codexAuthState.batchDeleteConfirm = false;
                 }
             }
@@ -864,20 +999,43 @@
         }
 
         async function refreshSelectedCodexQuotas() {
-            const names = Array.from(codexAuthState.selectedAuthFiles);
+            const names = getCodexSelectedAuthFileNamesForCurrentFilter();
             if (!names.length) {
                 showMessage('请先选择认证文件', 'error');
                 return;
             }
+            if (codexAuthState.batchQuotaRefreshing) {
+                return;
+            }
+            if (names.some(name => codexAuthState.quotaLoadingByFile[name] === true)) {
+                showMessage('选中的认证文件正在刷新，请稍后再试', 'warning');
+                return;
+            }
+            codexAuthState.batchQuotaRefreshing = true;
+            codexAuthState.batchQuotaRefreshingCount = names.length;
+            names.forEach(name => {
+                codexAuthState.quotaLoadingByFile[name] = true;
+            });
+            renderCodexAuthFiles();
+            showMessage(`正在刷新 ${names.length} 个认证文件额度`, 'success');
             let successCount = 0;
             let failedCount = 0;
-            for (const name of names) {
-                const ok = await refreshCodexQuotaByName(name, { silent: true });
-                if (ok) {
-                    successCount += 1;
-                } else {
-                    failedCount += 1;
+            try {
+                for (const name of names) {
+                    const ok = await refreshCodexQuotaByName(name, { silent: true, markLoading: false });
+                    if (ok) {
+                        successCount += 1;
+                    } else {
+                        failedCount += 1;
+                    }
                 }
+            } finally {
+                names.forEach(name => {
+                    codexAuthState.quotaLoadingByFile[name] = false;
+                });
+                codexAuthState.batchQuotaRefreshing = false;
+                codexAuthState.batchQuotaRefreshingCount = 0;
+                renderCodexAuthFiles();
             }
             if (failedCount) {
                 showMessage(`已刷新 ${successCount} 个，失败 ${failedCount} 个`, 'error');
@@ -887,7 +1045,7 @@
         }
 
         function toggleCodexBatchDeleteConfirm() {
-            if (!codexAuthState.selectedAuthFiles.size) {
+            if (!getCodexSelectedAuthFileNamesForCurrentFilter().length) {
                 showMessage('请先选择认证文件', 'error');
                 return;
             }
@@ -902,7 +1060,7 @@
         }
 
         async function deleteSelectedCodexAuthFiles() {
-            const names = Array.from(codexAuthState.selectedAuthFiles);
+            const names = getCodexSelectedAuthFileNamesForCurrentFilter();
             if (!names.length || codexAuthState.batchDeleting) return;
             codexAuthState.batchDeleting = true;
             codexAuthState.batchDeleteConfirm = false;
@@ -1007,13 +1165,20 @@
 
         async function loadCodexQuota(encodedName) {
             const name = decodeURIComponent(encodedName);
+            if (!name || codexAuthState.quotaLoadingByFile[name] === true) return;
+            showMessage(`正在刷新 ${name} 的配额`, 'success');
             await refreshCodexQuotaByName(name);
         }
 
         async function refreshCodexQuotaByName(name, options = {}) {
             const silent = options.silent === true;
-            codexAuthState.quotaLoadingByFile[name] = true;
-            renderCodexAuthFiles();
+            const markLoading = options.markLoading !== false;
+            if (!name) return false;
+            if (markLoading) {
+                if (codexAuthState.quotaLoadingByFile[name] === true) return false;
+                codexAuthState.quotaLoadingByFile[name] = true;
+                renderCodexAuthFiles();
+            }
             try {
                 const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/quota`, { cache: 'no-store' });
                 const result = await response.json();
@@ -1023,7 +1188,11 @@
                 codexAuthState.quotaByFile[name] = result;
                 updateCodexAuthFileQuotaState(name, result, '');
                 if (!silent) {
-                    showMessage('Codex 配额已刷新', 'success');
+                    if (result?.skipped) {
+                        showMessage(`${name} 的配额正在刷新，已跳过重复请求`, 'info');
+                    } else {
+                        showMessage(`${name} 的配额已刷新`, 'success');
+                    }
                 }
                 return true;
             } catch (error) {
@@ -1036,8 +1205,10 @@
                 }
                 return false;
             } finally {
-                codexAuthState.quotaLoadingByFile[name] = false;
-                renderCodexAuthFiles();
+                if (markLoading) {
+                    codexAuthState.quotaLoadingByFile[name] = false;
+                    renderCodexAuthFiles();
+                }
             }
         }
 

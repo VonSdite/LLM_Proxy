@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -78,6 +79,8 @@ class CodexOAuthService:
         self._state_file = self._auth_dir / ".state" / "auth_files.json"
         self._sessions: Dict[str, _CodexOAuthSession] = {}
         self._quota_cooldowns: Dict[str, float] = {}
+        self._quota_refresh_locks: Dict[str, threading.Lock] = {}
+        self._quota_refresh_lock_guard = threading.RLock()
 
     def start_login(self) -> Dict[str, Any]:
         """生成新的 Codex OAuth 授权链接。"""
@@ -321,6 +324,9 @@ class CodexOAuthService:
     def get_auth_file_quota(self, name: str) -> Dict[str, Any]:
         """查询指定认证文件的 Codex 使用配额。"""
         auth_file = self._resolve_auth_file(name)
+        quota_lock = self._get_quota_refresh_lock(auth_file.name)
+        if not quota_lock.acquire(blocking=False):
+            return self._build_skipped_quota_refresh_result(auth_file.name)
         try:
             payload = self._read_auth_file(auth_file)
             refreshed = False
@@ -388,6 +394,38 @@ class CodexOAuthService:
         except Exception as exc:
             self._store_auth_file_quota_error(auth_file.name, str(exc))
             raise
+        finally:
+            quota_lock.release()
+
+    def _get_quota_refresh_lock(self, name: str) -> threading.Lock:
+        """返回单个认证文件的配额刷新锁。"""
+        with self._quota_refresh_lock_guard:
+            quota_lock = self._quota_refresh_locks.get(name)
+            if quota_lock is None:
+                quota_lock = threading.Lock()
+                self._quota_refresh_locks[name] = quota_lock
+            return quota_lock
+
+    def _build_skipped_quota_refresh_result(self, name: str) -> Dict[str, Any]:
+        """构造重复配额刷新被跳过时的兼容响应。"""
+        state = self._load_auth_file_state()
+        files = state.get("files")
+        file_state = files.get(name) if isinstance(files, dict) else None
+        if not isinstance(file_state, dict):
+            file_state = {}
+        quota = file_state.get("quota") if isinstance(file_state.get("quota"), dict) else {}
+        result = dict(quota)
+        result.update(
+            {
+                "status": "ok",
+                "skipped": True,
+                "reason": "quota_refresh_in_progress",
+                "message": "Quota refresh already in progress",
+                "refreshed_at": result.get("refreshed_at") or str(file_state.get("quota_refreshed_at") or ""),
+            }
+        )
+        result.setdefault("windows", [])
+        return result
 
     def _request_auth_file_quota(self, payload: Dict[str, Any]) -> requests.Response:
         access_token = str(payload.get("access_token") or "").strip()
