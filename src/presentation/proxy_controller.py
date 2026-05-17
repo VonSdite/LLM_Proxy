@@ -12,6 +12,7 @@ from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..hooks import HookAbortError
+from ..services.codex_proxy_service import CODEX_PROVIDER_NAME
 from ..services.proxy_service import ProxyErrorInfo
 from ..utils import normalize_ip
 from ..utils.local_time import now_local_datetime
@@ -23,6 +24,18 @@ class ConfigManagerLike(Protocol):
 
 
 class ProxyServiceLike(Protocol):
+    def proxy_request(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple[Optional[Response], int, Optional[ProxyErrorInfo]]: ...
+
+
+class CodexProxyServiceLike(Protocol):
+    def has_model(self, model_name: str) -> bool: ...
+
+    def list_model_names(self) -> Iterable[str]: ...
+
     def proxy_request(
         self,
         *args: Any,
@@ -83,11 +96,13 @@ class ProxyController:
         user_service: UserServiceLike,
         log_service: LogServiceLike,
         provider_manager: ProviderManagerLike,
+        codex_proxy_service: Optional[CodexProxyServiceLike] = None,
     ):
         self._app = ctx.flask_app
         self._logger = ctx.logger
         self._config_manager: ConfigManagerLike = ctx.config_manager
         self._proxy_service = proxy_service
+        self._codex_proxy_service = codex_proxy_service
         self._user_service = user_service
         self._log_service = log_service
         self._provider_manager = provider_manager
@@ -275,6 +290,16 @@ class ProxyController:
             if str(item or "").strip()
         )
 
+    def _list_available_model_names(self) -> tuple[str, ...]:
+        provider_models = list(self._provider_manager.list_model_names())
+        codex_models: list[str] = []
+        if self._codex_proxy_service is not None:
+            try:
+                codex_models = list(self._codex_proxy_service.list_model_names())
+            except Exception as exc:
+                self._logger.warning("Codex model list skipped: error=%s", exc)
+        return tuple(sorted(dict.fromkeys([*provider_models, *codex_models])))
+
     def chat_completions(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
             route_name="chat_completions",
@@ -356,24 +381,32 @@ class ProxyController:
 
             model_name = model_name_value.strip()
             provider = self._provider_manager.get_provider_for_model(model_name)
+            is_codex_model = False
             if not provider:
-                self._logger.warning(
-                    "Proxy rejected: unknown model=%r route=%s", model_name, route_name
-                )
-                return self._error_response(
-                    f"Unknown model: {model_name}",
-                    400,
-                    error_type="invalid_request_error",
-                    code="unknown_model",
-                    error_format=resolved_error_format,
-                )
+                if (
+                    self._codex_proxy_service is not None
+                    and self._codex_proxy_service.has_model(model_name)
+                ):
+                    is_codex_model = True
+                else:
+                    self._logger.warning(
+                        "Proxy rejected: unknown model=%r route=%s", model_name, route_name
+                    )
+                    return self._error_response(
+                        f"Unknown model: {model_name}",
+                        400,
+                        error_type="invalid_request_error",
+                        code="unknown_model",
+                        error_format=resolved_error_format,
+                    )
 
+            available_model_names = self._list_available_model_names()
             if (
                 self._is_whitelist_required()
                 and not self._user_service.can_user_access_model(
                     user,
                     model_name,
-                    available_models=tuple(self._provider_manager.list_model_names()),
+                    available_models=available_model_names,
                 )
             ):
                 self._logger.warning(
@@ -390,7 +423,7 @@ class ProxyController:
                     error_format=resolved_error_format,
                 )
 
-            provider_name = getattr(provider, "name", None)
+            provider_name = CODEX_PROVIDER_NAME if is_codex_model else getattr(provider, "name", None)
 
             client_requested_usage_chunk = False
             if inspect_stream_usage:
@@ -434,17 +467,29 @@ class ProxyController:
                     ip_address=client_ip,
                 )
 
-            result, status_code, failure_info = self._proxy_service.proxy_request(
-                provider,
-                request_data,
-                headers,
-                on_complete=on_proxy_complete,
-                forward_stream_usage=client_requested_usage_chunk,
-                resolved_target_format=resolved_target_format,
-                trace_id=trace_id,
-                route_name=route_name,
-                client_ip=client_ip,
-            )
+            if is_codex_model:
+                result, status_code, failure_info = self._codex_proxy_service.proxy_request(
+                    request_data,
+                    headers,
+                    on_complete=on_proxy_complete,
+                    forward_stream_usage=client_requested_usage_chunk,
+                    resolved_target_format=resolved_target_format,
+                    trace_id=trace_id,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                )
+            else:
+                result, status_code, failure_info = self._proxy_service.proxy_request(
+                    provider,
+                    request_data,
+                    headers,
+                    on_complete=on_proxy_complete,
+                    forward_stream_usage=client_requested_usage_chunk,
+                    resolved_target_format=resolved_target_format,
+                    trace_id=trace_id,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                )
             if result is None:
                 failure_info = failure_info or ProxyErrorInfo(
                     message="Upstream request failed after retries",
@@ -523,7 +568,7 @@ class ProxyController:
             if denial_response is not None:
                 return denial_response
 
-            model_names = list(self._provider_manager.list_model_names())
+            model_names = list(self._list_available_model_names())
             if self._is_whitelist_required():
                 allowed_models = set(
                     self._user_service.get_accessible_models_for_user(
@@ -538,12 +583,33 @@ class ProxyController:
                 ]
 
             data = []
+            codex_model_names = set()
+            if self._codex_proxy_service is not None:
+                try:
+                    codex_model_names = set(self._codex_proxy_service.list_model_names())
+                except Exception as exc:
+                    self._logger.warning("Codex model list skipped: error=%s", exc)
             for model_key in model_names:
+                if model_key in codex_model_names:
+                    data.append(
+                        {
+                            "id": model_key,
+                            "object": "model",
+                            "owned_by": "openai",
+                            "provider_name": CODEX_PROVIDER_NAME,
+                            "source_format": "openai_responses",
+                            "target_formats": [
+                                "openai_chat",
+                                "openai_responses",
+                                "claude_chat",
+                            ],
+                        }
+                    )
+                    continue
                 provider_name, _, _ = str(model_key).partition("/")
                 provider_view = self._provider_manager.get_provider_view(provider_name)
                 source_format = getattr(provider_view, "source_format", None)
                 target_formats = self._get_provider_target_formats(provider_view)
-                transport = getattr(provider_view, "transport", None)
                 data.append(
                     {
                         "id": model_key,
@@ -552,7 +618,6 @@ class ProxyController:
                         "provider_name": provider_name or "proxy",
                         "source_format": source_format,
                         "target_formats": list(target_formats),
-                        "transport": transport,
                     }
                 )
             return jsonify({"object": "list", "data": data})

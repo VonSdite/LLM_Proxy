@@ -4,6 +4,7 @@
 
 from .app_factory import create_flask_app
 from .auth_controller import AuthenticationController
+from .oauth_controller import OAuthController
 from .provider_controller import ProviderController
 from .proxy_controller import ProxyController
 from .user_controller import UserController
@@ -12,6 +13,7 @@ from .web_controller import WebController
 __all__ = [
     'create_flask_app',
     'AuthenticationController',
+    'OAuthController',
     'ProviderController',
     'ProxyController',
     'UserController',

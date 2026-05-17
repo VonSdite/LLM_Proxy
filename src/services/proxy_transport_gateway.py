@@ -5,10 +5,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
 
 import requests
-import websocket
 
 from ..executors import OpenedUpstreamResponse
 from ..external import LLMProvider
@@ -85,25 +83,12 @@ class ProxyTransportGateway:
         return HookErrorType.TRANSPORT_ERROR
 
     @staticmethod
-    def classify_websocket_error(exc: Exception) -> HookErrorType:
-        if isinstance(exc, websocket.WebSocketException):
-            return HookErrorType.WEBSOCKET_ERROR
-        return HookErrorType.TRANSPORT_ERROR
-
-    @staticmethod
     def classify_request_or_socket_error(exc: Exception) -> HookErrorType:
         if isinstance(exc, requests.exceptions.RequestException):
             return ProxyTransportGateway.classify_request_error(exc)
-        return ProxyTransportGateway.classify_websocket_error(exc)
+        return HookErrorType.TRANSPORT_ERROR
 
     @staticmethod
     def build_upstream_request_start_line(transport: str, target_url: str) -> str:
-        normalized_transport = str(transport or "").strip().lower()
-        if normalized_transport == "websocket":
-            parsed = urlparse(str(target_url or "").strip())
-            if parsed.scheme.lower() == "http":
-                parsed = parsed._replace(scheme="ws")
-            elif parsed.scheme.lower() == "https":
-                parsed = parsed._replace(scheme="wss")
-            return f"CONNECT {parsed.geturl()} HTTP/1.1"
+        del transport
         return f"POST {target_url} HTTP/1.1"

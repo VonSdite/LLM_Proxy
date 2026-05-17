@@ -25,7 +25,6 @@ class HookErrorType(StrEnum):
 
     TIMEOUT = "timeout"
     CONNECTION_ERROR = "connection_error"
-    WEBSOCKET_ERROR = "websocket_error"
     TRANSPORT_ERROR = "transport_error"
 
 

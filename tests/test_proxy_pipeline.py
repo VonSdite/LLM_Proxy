@@ -321,13 +321,12 @@ class ProxyServicePipelineTests(unittest.TestCase):
         )
         return app, ProxyService(ctx)
 
-    def test_websocket_provider_api_key_replaces_client_authorization_before_header_hook(self) -> None:
+    def test_provider_api_key_replaces_client_authorization_before_header_hook(self) -> None:
         app, service = self._build_service()
         hook = HeaderRecordingHook()
         provider = LLMProvider(
             name="demo",
-            api="wss://example.com/v1/chat/completions",
-            transport="websocket",
+            api="https://example.com/v1/chat/completions",
             source_format="openai_chat",
             target_formats=("openai_chat",),
             model_list=("gpt-4.1",),
@@ -379,12 +378,11 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertNotIn("Authorization", hook.headers[0])
         self.assertIn(b"data: [DONE]", stream_body)
 
-    def test_websocket_without_provider_api_key_keeps_client_authorization(self) -> None:
+    def test_provider_without_api_key_keeps_client_authorization(self) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
             name="demo",
-            api="wss://example.com/v1/chat/completions",
-            transport="websocket",
+            api="https://example.com/v1/chat/completions",
             source_format="openai_chat",
             target_formats=("openai_chat",),
             model_list=("gpt-4.1",),

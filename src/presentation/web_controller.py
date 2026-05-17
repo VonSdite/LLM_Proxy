@@ -39,6 +39,7 @@ class WebController:
 
         self._app.route("/")(auth(self.home))
         self._app.route("/providers")(auth(self.providers_page))
+        self._app.route("/oauth")(auth(self.oauth_page))
         self._app.route("/users")(auth(self.users_page))
         self._app.route("/statistics")(auth(self.statistics_page))
         self._app.route("/settings")(auth(self.settings_page))
@@ -63,6 +64,9 @@ class WebController:
         self._app.route("/api/settings/system/debug", methods=["PUT"])(
             auth(self.update_debug_settings)
         )
+        self._app.route("/api/settings/system/oauth", methods=["PUT"])(
+            auth(self.update_oauth_settings)
+        )
 
     def home(self) -> str:
         return self.providers_page()
@@ -73,6 +77,7 @@ class WebController:
             active_page="index",
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
+            oauth_enabled=self._is_oauth_enabled(),
         )
 
     def users_page(self) -> str:
@@ -82,6 +87,16 @@ class WebController:
             chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
+            oauth_enabled=self._is_oauth_enabled(),
+        )
+
+    def oauth_page(self) -> str:
+        return render_template(
+            "oauth.html",
+            active_page="oauth",
+            current_username=self._get_current_username(),
+            auth_enabled=self._auth_service.is_auth_enabled(),
+            oauth_enabled=self._is_oauth_enabled(),
         )
 
     def providers_page(self) -> str:
@@ -91,6 +106,7 @@ class WebController:
             chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
+            oauth_enabled=self._is_oauth_enabled(),
         )
 
     def settings_page(self) -> str:
@@ -99,6 +115,7 @@ class WebController:
             active_page="settings",
             current_username=self._get_current_username(),
             auth_enabled=self._auth_service.is_auth_enabled(),
+            oauth_enabled=self._is_oauth_enabled(),
         )
 
     def _get_current_username(self) -> str:
@@ -107,6 +124,11 @@ class WebController:
 
         session_token = request.cookies.get("session_token")
         return self._auth_service.get_session_username(session_token) or ""
+
+    def _is_oauth_enabled(self) -> bool:
+        if self._config_manager is None:
+            return False
+        return self._config_manager.is_oauth_enabled()
 
     @staticmethod
     def _get_multi_filter_values(name: str) -> list[str]:
@@ -279,4 +301,14 @@ class WebController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error updating debug settings: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def update_oauth_settings(self) -> ResponseReturnValue:
+        try:
+            payload = require_json_object()
+            return jsonify(self._settings_service.update_oauth_settings(payload))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating OAuth settings: %s", exc)
             return jsonify({"error": str(exc)}), 500

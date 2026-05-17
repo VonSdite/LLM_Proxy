@@ -4,6 +4,8 @@
 
 from .authentication_service import AuthenticationService
 from .auth_group_service import AuthGroupService
+from .codex_oauth_service import CodexOAuthService
+from .codex_proxy_service import CodexProxyService
 from .log_service import LogService
 from .model_discovery_service import ModelDiscoveryService
 from .provider_model_test_service import ProviderModelTestService
@@ -15,6 +17,8 @@ from .user_service import UserService
 __all__ = [
     'AuthenticationService',
     'AuthGroupService',
+    'CodexOAuthService',
+    'CodexProxyService',
     'UserService',
     'LogService',
     'ModelDiscoveryService',

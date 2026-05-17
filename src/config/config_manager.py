@@ -51,6 +51,19 @@ class ConfigManager:
     def is_llm_request_debug_enabled(self) -> bool:
         return self._read_bool("logging.llm_request_debug_enabled", default=False)
 
+    def get_oauth_proxy(self) -> Optional[str]:
+        value = self.get("oauth.proxy")
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    def is_oauth_enabled(self) -> bool:
+        return self._read_bool("oauth.enabled", default=False)
+
+    def is_oauth_verify_ssl_enabled(self) -> bool:
+        return self._read_bool("oauth.verify_ssl", default=False)
+
     def get_database_path(self) -> str:
         return self.get("database.path", self._root_path / "data/requests.db")
 
@@ -142,6 +155,13 @@ class ConfigManager:
                 changed = True
             if "target_formats" in normalized_provider:
                 normalized_provider.pop("target_formats", None)
+                changed = True
+
+            # TODO: 兼容历史配置里仍在使用 `transport` 的旧版本。
+            # Provider 上游传输已固定为 HTTP，先在加载阶段自动删除并回写配置；
+            # 待完成几个版本的迁移窗口后删除这段兼容逻辑。
+            if "transport" in normalized_provider:
+                normalized_provider.pop("transport", None)
                 changed = True
 
             # TODO: 兼容历史本地配置里仍在使用已移除的 `codex` 协议值。

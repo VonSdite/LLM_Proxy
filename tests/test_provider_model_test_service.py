@@ -92,7 +92,6 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             {
                 "api": "https://example.com/v1/chat/completions",
                 "source_format": "openai_chat",
-                "transport": "http",
                 "models": ["demo-model"],
             }
         )
@@ -130,7 +129,6 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             {
                 "api": "https://example.com/v1/chat/completions",
                 "source_format": "openai_chat",
-                "transport": "http",
                 "models": ["demo-model"],
             }
         )
@@ -163,7 +161,6 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             {
                 "api": "https://example.com/v1/chat/completions",
                 "source_format": "openai_chat",
-                "transport": "http",
                 "models": ["demo-model"],
             }
         )
@@ -195,7 +192,6 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             {
                 "api": "https://example.com/v1/chat/completions",
                 "source_format": "openai_chat",
-                "transport": "http",
                 "models": ["demo-model"],
             }
         )
@@ -227,7 +223,6 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             {
                 "api": "https://example.com/v1/chat/completions",
                 "source_format": "openai_chat",
-                "transport": "http",
                 "api_key": "sk-legacy-demo",
                 "models": ["demo-model"],
             }
@@ -263,7 +258,6 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             {
                 "api": "https://example.com/v1/chat/completions",
                 "source_format": "openai_chat",
-                "transport": "http",
                 "models": ["demo-model"],
             },
             request_headers={"Content-Type": "application/custom+json"},
@@ -278,7 +272,6 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             {
                 "api": "https://example.com/v1/chat/completions",
                 "source_format": "openai_chat",
-                "transport": "http",
                 "api_key": "sk-legacy-demo",
                 "models": ["demo-model"],
                 "auth_entry_id": "entry-a",

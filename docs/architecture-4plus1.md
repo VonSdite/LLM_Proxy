@@ -19,6 +19,8 @@
 
 这个版本不保留 Gemini / Antigravity。配置加载阶段会清理少量历史废弃字段并回写配置文件；除此之外不再继续扩展旧字段兼容逻辑。
 
+控制平面除了 Provider、Auth Group、用户、统计和系统设置，还可以在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成和查看 CLI/OAuth 类本地认证文件。
+
 ## 2. Logical View
 
 ### 2.1 Core Pipeline
@@ -54,8 +56,24 @@ downstream request
   - 只为 `/v1/*` 数据平面添加 CORS 响应头
   - 直接处理 `OPTIONS /v1/*` 预检请求
 - `WebController`
-  - 提供统计页面与系统设置页面
+  - 提供 Provider、用户、统计与系统设置页面
+  - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
   - 暴露系统设置读取与保存接口
+- `OAuthController`
+  - 暴露 Codex OAuth 登录、回调提交、认证文件列表、删除与配额刷新接口
+- `CodexOAuthService`
+  - 生成 Codex OAuth PKCE 授权链接
+  - 使用回调 URL 换取 token 并写入本地认证文件
+  - 删除本地认证文件时同步清理该文件的本地状态
+  - 读取认证文件状态，并按需刷新 token 后查询 Codex 配额
+  - 持久化认证文件最近一次配额快照、配额刷新错误与 Codex 模型代理使用状态
+  - 维护本地手动 Codex OAuth 模型目录
+  - 按本地模型目录和配额窗口提供 Codex 请求候选账号
+- `CodexProxyService`
+  - 代理下游直接使用的 Codex 普通模型名
+  - 使用 `data/oauth/codex/*.json` 中的 OAuth access token 请求 Codex backend
+  - 遇到账号配额耗尽时标记临时冷却并尝试下一个账号
+  - 将每个认证文件最近一次数据面成功或失败结果写回 OAuth 状态
 - `ProviderManager`
   - 加载 provider 配置
   - 维护 `provider/model -> provider` 映射
@@ -73,13 +91,13 @@ downstream request
   - 在协议支持时显式请求 usage 返回
   - 批量测试按前端当前选择的模型行逐条执行并逐条回填结果
 - `SettingsService`
-  - 维护 `server`、`admin` 与 `logging`
+  - 维护 `server`、`admin`、`oauth` 与 `logging`
   - 管理立即生效项与重启生效项的边界
 - `ProviderRuntimeFactory`
   - 负责临时 / 正式 Provider 运行时对象构建
   - 统一 hook 加载与缓存
 - `ExecutorRegistry`
-  - 负责 HTTP / WebSocket 上游连接
+  - 负责 HTTP 上游连接
 - `Decoder`
   - 将上游流拆成统一事件
 - `TranslatorRegistry`
@@ -122,7 +140,14 @@ route family 直接决定当前请求的下游接口协议：
 `GET /v1/models` 除了模型 id，还会返回模型所属 provider 的：
 
 - `source_format`
-- `transport`
+
+Codex OAuth 模型是数据平面的例外路由：
+
+- Provider 配置模型仍使用 `{provider}/{model}` key
+- Codex OAuth 模型使用原始模型名，例如 `gpt-5-codex`
+- `ProxyController` 先查 Provider 映射，未命中时再查 Codex OAuth 模型目录
+- `/v1/models` 对 Codex OAuth 暴露普通模型名，`provider_name` 固定为 `codex`
+- Codex OAuth 代理复用 translator registry，把下游 `openai_chat` / `openai_responses` / `claude_chat` 转成 Codex backend 的 Responses 请求
 
 `OPTIONS /v1/*` 由表现层 CORS 钩子直接返回 `204`，用于支持浏览器、Obsidian 插件等第三方应用的跨域预检，不进入 provider lookup、白名单校验或上游代理链路。实际 `/v1/*` 响应也会附加 CORS 响应头；后台 `/api/*` 和管理页面不开放跨域。
 
@@ -135,6 +160,7 @@ route family 直接决定当前请求的下游接口协议：
 - API
   - `GET /api/settings/system`
   - `PUT /api/settings/system/basic`
+  - `PUT /api/settings/system/oauth`
   - `PUT /api/settings/system/debug`
   - `PUT /api/settings/system`
 
@@ -147,6 +173,9 @@ route family 直接决定当前请求的下游接口协议：
 - `logging.path`
 - `logging.level`
 - `logging.llm_request_debug_enabled`
+- `oauth.enabled`
+- `oauth.proxy`
+- `oauth.verify_ssl`
 
 行为约束：
 
@@ -174,11 +203,31 @@ route family 直接决定当前请求的下游接口协议：
     - 上游响应
     - 转换后的下游响应
   - 每条记录包含起始行、header 与 payload
+- `oauth.enabled`
+  - 保存后立即影响管理后台顶部 OAuth 页签是否显示
+  - 默认值为 `false`
+  - 只有开启后，系统设置页才展示 OAuth 代理服务和 SSL 校验设置
+- `oauth.proxy`
+  - 保存后立即影响 OAuth 控制平面请求
+  - 用于 Codex OAuth token 交换、token 刷新、配额查询与 Codex OAuth 数据面代理
+  - 留空时直连上游
+- `oauth.verify_ssl`
+  - 保存后立即影响 OAuth 控制平面请求和 Codex OAuth 数据面代理
+  - 默认值为 `false`
+  - 关闭时不校验 HTTPS 证书，便于本地代理或抓包代理场景
 
 运行时内存状态补充：
 
 - `Application`
   - 在保存日志配置后可重新装配 logger handler
+- `WebController`
+  - 渲染后台页面时读取当前 `oauth.enabled`，用于决定是否输出 OAuth 顶层导航项
+- `CodexOAuthService`
+  - 每次 token / quota / models 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
+  - 维护 OAuth PKCE 临时会话与 Codex 账号配额冷却状态
+  - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件配额与最近一次模型代理状态
+- `CodexProxyService`
+  - 每次 Codex 数据面请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
 
 ### 3.3 Provider Runtime Contract
 
@@ -186,7 +235,6 @@ Provider 公共配置字段只有：
 
 - `name`
 - `api`
-- `transport`
 - `source_format`
 - `api_key`
 - `auth_group`
@@ -201,10 +249,10 @@ Provider 公共配置字段只有：
 
 - `source_format`
   - 上游真实协议
-- `transport`
-  - HTTP 或 WebSocket
 
-没有公共 `stream_format` 字段。
+历史配置载入时会自动删除 `target_format`、`target_formats` 和 `transport` 并回写配置文件，用于兼容迁移窗口内的旧配置。
+
+没有公共 `transport` 或 `stream_format` 字段；Provider 上游传输固定由 HTTP executor 处理。
 
 Hook 运行时上下文还会暴露最小重试状态：
 
@@ -218,17 +266,12 @@ Hook 运行时上下文还会暴露最小重试状态：
 
 - `TIMEOUT`
 - `CONNECTION_ERROR`
-- `WEBSOCKET_ERROR`
 - `TRANSPORT_ERROR`
 
 ### 3.4 Internal Stream Detection
 
 流式识别完全是内部实现细节：
 
-- `transport = websocket`
-  - 按 WebSocket JSON 消息处理
-  - OpenAI Responses 上游首帧封装为 `response.create` 事件
-  - 收到 `response.completed` / `response.done` 等终止消息后关闭本次上游连接
 - HTTP `Content-Type = text/event-stream`
   - 按 SSE JSON 处理
 - HTTP `Content-Type` 含 `ndjson/jsonl`
@@ -314,6 +357,65 @@ provider editor form snapshot
 - 数据平面主代理链路未变化
 - 新增的是 Provider 编辑页上的控制平面上游模型拉取与性能测试链路
 
+### 3.7 Control-Plane OAuth Management
+
+OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并在页面内保留子 tab 结构。当前只有 `Codex` 子 tab。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
+
+页面与 API：
+
+- 页面
+  - `GET /oauth`
+- API
+  - `POST /api/oauth/codex/session`
+  - `POST /api/oauth/codex/callback`
+  - `GET /api/oauth/codex/models`
+  - `POST /api/oauth/codex/models`
+  - `DELETE /api/oauth/codex/models/<model_id>`
+  - `GET /api/oauth/codex/auth-files`
+  - `DELETE /api/oauth/codex/auth-files/<name>`
+  - `GET /api/oauth/codex/auth-files/<name>/quota`
+
+Codex OAuth 登录链路如下：
+
+```text
+OAuth Codex tab
+  -> create session
+  -> generate PKCE verifier / challenge and state
+  -> return auth.openai.com authorization URL
+  -> user opens URL and signs in
+  -> user pastes full callback URL
+  -> token exchange
+  -> write data/oauth/codex/*.json
+  -> list / manage local Codex model IDs
+  -> list auth file token/status/quota snapshot
+  -> optional quota refresh to chatgpt.com/backend-api/wham/usage
+  -> persist quota snapshot or quota error
+```
+
+运行时与存储约束：
+
+- OAuth state、PKCE verifier 只保存在进程内内存中
+- 临时 OAuth 会话 TTL 为 10 分钟
+- 认证文件保存在 `data/oauth/codex/`
+- Codex 认证文件名沿用 CLIProxyAPI 规则：普通账号为 `codex-{email}-{plan}.json`，team 账号为 `codex-{account_id_sha256前8位}-{email}-team.json`
+- Codex 模型目录缓存在 `data/oauth/codex/models.json`，文件内容只保存模型 ID 字符串数组
+- 认证文件的最近配额、配额错误和数据面使用状态保存在 `data/oauth/codex/.state/auth_files.json`
+- 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
+- OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持全选后批量刷新额度和批量删除
+- OAuth 页面删除认证文件前会用气泡确认，确认后调用删除 API
+- Codex 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
+- OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
+- 查询配额时如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
+- 如果认证文件 access token 已过期且缺少 refresh token，请求候选筛选不会直接跳过；系统会先用当前 access token 尝试请求一次，再按上游返回的认证、配额或其他错误决定后续状态
+- 配额刷新会同步内存冷却状态：Codex 窗口耗尽时冷却该认证文件，恢复可用时立即清除冷却
+- 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
+- OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
+- token 交换、token 刷新与配额查询会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
+- Codex 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
+- Codex 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
+- OAuth 登录、文件、配额与模型目录管理属于控制平面
+- Codex 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
+
 ## 4. Development View
 
 ### 4.1 Directory Responsibilities
@@ -325,7 +427,7 @@ provider editor form snapshot
 - `src/config/`
   - 配置加载、schema、provider runtime
 - `src/executors/`
-  - transport executor
+  - HTTP executor
 - `src/proxy_core/`
   - decoder、encoder、shared contracts
 - `src/translators/`
@@ -339,10 +441,16 @@ provider editor form snapshot
   - 主代理 orchestration
 - [src/services/settings_service.py](../src/services/settings_service.py)
   - 系统设置保存与生效边界
+- [src/services/codex_oauth_service.py](../src/services/codex_oauth_service.py)
+  - Codex OAuth PKCE、token 文件、本地模型 ID 目录与配额查询
+- [src/services/codex_proxy_service.py](../src/services/codex_proxy_service.py)
+  - Codex OAuth 数据面代理与账号配额切换
+- [src/presentation/oauth_controller.py](../src/presentation/oauth_controller.py)
+  - OAuth 管理 API
 - [src/config/provider_config.py](../src/config/provider_config.py)
   - Provider schema
 - [src/executors/registry.py](../src/executors/registry.py)
-  - HTTP / WebSocket executors
+  - HTTP executor
 - [src/proxy_core/decoders.py](../src/proxy_core/decoders.py)
   - 流式解码
 - [src/proxy_core/encoder.py](../src/proxy_core/encoder.py)
@@ -353,6 +461,8 @@ provider editor form snapshot
   - Provider 页面与 `source_format` / Auth Group 编辑
 - [src/presentation/templates/settings.html](../src/presentation/templates/settings.html)
   - 系统设置页面与帮助说明
+- [src/presentation/templates/oauth.html](../src/presentation/templates/oauth.html)
+  - OAuth 管理页面与 Codex 子 tab
 
 ## 5. Physical View
 
@@ -361,6 +471,8 @@ provider editor form snapshot
 - 一个 Flask 应用
 - 一个配置文件
 - 一组滚动日志文件
+- 一组本地 OAuth 认证文件
+- 一个本地 Codex OAuth 模型目录缓存
 - 多个 provider 指向多个真实上游
 - 下游统一接入这个代理
 
@@ -374,6 +486,7 @@ Client / Agent / IDE
         +--> OpenAI Responses upstream
         +--> Claude Messages upstream
         +--> Codex upstream
+        +--> auth.openai.com / chatgpt.com OAuth control-plane endpoints
 ```
 
 ## 6. Scenarios
@@ -392,14 +505,46 @@ sequenceDiagram
     Controller->>Service: proxy_request()
     Service->>Translator: openai_responses -> openai_chat
     Translator-->>Service: translated upstream request
-    Service->>Executor: execute HTTP / WebSocket request
-    Executor->>Executor: WebSocket Responses 首帧封装为 response.create
+    Service->>Executor: execute HTTP request
     Executor-->>Service: stream events
     Service->>Translator: translate stream events
     Translator-->>Service: openai_chat chunks
     Service->>Service: 编码下游块并移除空 delta.tool_calls
     Service-->>Controller: SSE response
     Controller-->>Client: chat.completion.chunk stream
+```
+
+### 6.2 Plain Codex Model -> Codex OAuth Backend
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Controller
+    participant CodexOAuth
+    participant CodexProxy
+    participant ChatGPT
+
+    Client->>Controller: POST /v1/chat/completions model=gpt-5-codex
+    Controller->>Controller: Provider 未命中后查 Codex 模型目录
+    Controller->>CodexOAuth: iter_auth_candidates_for_model()
+    CodexOAuth->>CodexOAuth: 按本地模型目录与 quota 过滤认证文件
+    Controller->>CodexProxy: proxy_request()
+    CodexProxy->>ChatGPT: POST /backend-api/codex/responses
+    Note over CodexProxy,ChatGPT: 对齐 Codex backend 要求：stream=true、store=false、parallel_tool_calls=true、include encrypted content，并移除不支持字段
+    alt 账号配额耗尽
+        ChatGPT-->>CodexProxy: 429 usage_limit_reached
+        CodexProxy->>CodexOAuth: mark_auth_file_quota_exhausted()
+        CodexProxy->>CodexOAuth: record_auth_file_failure()
+        CodexProxy->>ChatGPT: 使用下一个认证文件重试
+    else 账号认证失败
+        ChatGPT-->>CodexProxy: 401 authentication_error
+        CodexProxy->>CodexOAuth: record_auth_file_failure()
+        CodexProxy->>ChatGPT: 使用下一个认证文件重试
+    end
+    ChatGPT-->>CodexProxy: Responses SSE
+    CodexProxy->>CodexOAuth: record_auth_file_success()
+    CodexProxy-->>Controller: 下游协议响应
+    Controller-->>Client: OpenAI-compatible response
 ```
 
 ### 6.2 Claude Downstream -> OpenAI Chat Upstream
@@ -444,6 +589,5 @@ Gemini / Antigravity 这类协议面会显著增加配置复杂度，但对当�
 
 - 上游是什么协议
 - 下游要暴露成什么协议集合
-- 上游通过 HTTP 还是 WebSocket 连接
 
 上游到底是 SSE、NDJSON 还是非流式，由 executor / decoder 自动判断。

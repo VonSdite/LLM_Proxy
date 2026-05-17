@@ -97,6 +97,32 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("target_format", persisted_provider)
         self.assertNotIn("target_formats", persisted_provider)
 
+    def test_config_manager_removes_legacy_transport_on_load(self) -> None:
+        self._write_config(
+            {
+                "auth_groups": [],
+                "providers": [
+                    {
+                        "name": "demo",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "sk-demo",
+                        "transport": "http",
+                        "model_list": ["gpt-4.1"],
+                    }
+                ],
+            }
+        )
+
+        migrated_manager = ConfigManager(self.config_path, self.root_path)
+
+        provider = migrated_manager.get_raw_config()["providers"][0]
+        self.assertNotIn("transport", provider)
+
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        persisted_provider = persisted["providers"][0]
+        self.assertNotIn("transport", persisted_provider)
+
     def test_config_manager_normalizes_legacy_codex_protocol_aliases_on_load(self) -> None:
         self._write_config(
             {
