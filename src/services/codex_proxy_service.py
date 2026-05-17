@@ -277,7 +277,7 @@ class CodexProxyService:
             role = str(item.get("role") or "").strip().lower() if isinstance(item, dict) else ""
             if role == "system":
                 item["role"] = "developer"
-        if str(body.get("service_tier") or "").strip() != "priority":
+        if str(body.get("service_tier") or "").strip() not in {"priority", "fast"}:
             body.pop("service_tier", None)
         for field in (
             "max_output_tokens",
@@ -290,9 +290,34 @@ class CodexProxyService:
         ):
             body.pop(field, None)
         body.pop("previous_response_id", None)
-        body.pop("prompt_cache_retention", None)
-        body.pop("safety_identifier", None)
+        CodexProxyService._normalize_codex_builtin_tools(body)
         body.setdefault("instructions", "")
+
+    @staticmethod
+    def _normalize_codex_builtin_tools(body: Dict[str, Any]) -> None:
+        """归一 Codex 上游当前接受的内置工具名称。"""
+
+        def normalize_tool(tool: Any) -> None:
+            if not isinstance(tool, dict):
+                return
+            if tool.get("type") in {
+                "web_search_preview",
+                "web_search_preview_2025_03_11",
+            }:
+                tool["type"] = "web_search"
+
+        tools = body.get("tools")
+        if isinstance(tools, list):
+            for tool in tools:
+                normalize_tool(tool)
+
+        tool_choice = body.get("tool_choice")
+        if isinstance(tool_choice, dict):
+            normalize_tool(tool_choice)
+            choice_tools = tool_choice.get("tools")
+            if isinstance(choice_tools, list):
+                for tool in choice_tools:
+                    normalize_tool(tool)
 
     def _build_codex_headers(
         self,
