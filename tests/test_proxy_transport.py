@@ -1015,6 +1015,22 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn("已选择 ${selectedSize} 个 / 共", html)
         self.assertIn("function renderCodexQuotaProgress", html)
         self.assertIn("function renderTrashIcon", html)
+        self.assertIn("function copyTextToClipboard(text)", html)
+        self.assertIn("function copyTextWithTextarea(text)", html)
+        self.assertIn(
+            "navigator.clipboard && typeof navigator.clipboard.writeText === 'function'",
+            html,
+        )
+        self.assertIn("copyTextToClipboard(codexAuthState.authorizationUrl)", html)
+        self.assertIn("copyTextToClipboard(normalizedModelName)", html)
+        self.assertNotIn(
+            "await navigator.clipboard.writeText(codexAuthState.authorizationUrl)",
+            html,
+        )
+        self.assertNotIn(
+            "await navigator.clipboard.writeText(normalizedModelName)",
+            html,
+        )
         self.assertIn("function addCodexModel", html)
         self.assertIn("modelDeleteConfirmId: ''", html)
         self.assertIn("function toggleCodexModelDeleteConfirm", html)
