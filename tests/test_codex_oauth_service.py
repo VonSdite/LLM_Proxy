@@ -125,7 +125,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
             )
             captured: dict[str, Any] = {}
 
-            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None):
+            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
                 captured["url"] = url
                 captured["data"] = dict(data or {})
                 captured["headers"] = dict(headers or {})
@@ -169,9 +169,9 @@ class CodexOAuthServiceTests(unittest.TestCase):
 
             token_index = 0
 
-            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None):
+            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
                 nonlocal token_index
-                del url, data, headers, timeout, proxies, verify
+                del url, data, headers, timeout, proxies, verify, kwargs
                 token_index += 1
                 return FakeResponse(
                     {
@@ -214,8 +214,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
             account_id = "team-account-123"
             expected_hash = hashlib.sha256(account_id.encode("utf-8")).hexdigest()[:8]
 
-            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None):
-                del url, data, headers, timeout, proxies, verify
+            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del url, data, headers, timeout, proxies, verify, kwargs
                 return FakeResponse(
                     {
                         "access_token": "access-demo",
@@ -314,7 +314,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
             service = self._build_service(root)
             captured: dict[str, Any] = {}
 
-            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None):
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
                 captured["url"] = url
                 captured["headers"] = dict(headers or {})
                 captured["timeout"] = timeout
@@ -365,8 +365,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
             )
             service = self._build_service(root)
 
-            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None):
-                del url, headers, timeout, proxies, verify
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del url, headers, timeout, proxies, verify, kwargs
                 return FakeResponse(
                     {"error": {"message": "quota failed"}},
                     status_code=429,
@@ -400,8 +400,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
             service = self._build_service(root)
             usage_values = [100, 25]
 
-            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None):
-                del url, headers, timeout, proxies, verify
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del url, headers, timeout, proxies, verify, kwargs
                 return FakeResponse(
                     {
                         "rate_limit": {
@@ -445,9 +445,9 @@ class CodexOAuthServiceTests(unittest.TestCase):
             first_result: dict[str, Any] = {}
             call_count = 0
 
-            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None):
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
                 nonlocal call_count
-                del url, headers, timeout, proxies, verify
+                del url, headers, timeout, proxies, verify, kwargs
                 call_count += 1
                 request_started.set()
                 release_request.wait(2)
@@ -577,8 +577,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
             service = self._build_service(root)
             service.add_model("gpt-5.4")
 
-            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None):
-                del url, data, headers, timeout, proxies, verify
+            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del url, data, headers, timeout, proxies, verify, kwargs
                 return FakeResponse(
                     {"error": "invalid_grant"},
                     status_code=400,
@@ -630,8 +630,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
             skipped_candidates = service.iter_auth_candidates_for_model("gpt-5.4")
             captured_authorizations: list[str] = []
 
-            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None):
-                del url, timeout, proxies, verify
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del url, timeout, proxies, verify, kwargs
                 captured_authorizations.append(str((headers or {}).get("Authorization") or ""))
                 if len(captured_authorizations) == 1:
                     return FakeResponse(
@@ -650,8 +650,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     }
                 )
 
-            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None):
-                del url, data, headers, timeout, proxies, verify
+            def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del url, data, headers, timeout, proxies, verify, kwargs
                 return FakeResponse(
                     {
                         "access_token": "new-access",
@@ -702,9 +702,10 @@ class CodexOAuthServiceTests(unittest.TestCase):
             )
             captured: dict[str, Any] = {}
 
-            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None):
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
                 captured["proxies"] = proxies
                 captured["verify"] = verify
+                del url, headers, timeout, kwargs
                 return FakeResponse({})
 
             with patch("src.services.codex_oauth_service.requests.get", side_effect=fake_get):

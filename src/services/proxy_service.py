@@ -27,6 +27,11 @@ from ..proxy_core import (
 from ..translators import Translator, build_default_translator_registry
 from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_requests_proxies
+from ..utils.proxy_warning import (
+    PROXY_WARNING_ERROR_CODE,
+    PROXY_WARNING_STATUS_CODE,
+    ProxyWarningRequired,
+)
 from .proxy_response_builder import ProxyResponseBuilder
 from .proxy_trace_logger import ProxyTraceLogger
 from .proxy_transport_gateway import ProxyTransportGateway
@@ -41,6 +46,7 @@ class ProxyErrorInfo:
     status_code: int = 502
     error_type: str = "upstream_error"
     error_code: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
 
 
 class ProxyService:
@@ -298,6 +304,36 @@ class ProxyService:
                     )
                     continue
 
+                if 300 <= opened.status_code < 400:
+                    raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
+                    location = str(
+                        raw_response_headers.get("Location")
+                        or raw_response_headers.get("location")
+                        or ""
+                    ).strip()
+                    close = getattr(opened.response, "close", None)
+                    if callable(close):
+                        close()
+                    message = f"Upstream returned redirect {opened.status_code}"
+                    if location:
+                        message = f"{message}: {location}"
+                    last_error = ProxyErrorInfo(
+                        message=message,
+                        status_code=502,
+                        error_type="upstream_error",
+                        error_code="upstream_redirect",
+                        details={
+                            "redirect_url": location,
+                            "upstream_status": opened.status_code,
+                        },
+                    )
+                    finalize_attempt(
+                        status_code=opened.status_code,
+                        error_message=message,
+                        response_headers=raw_response_headers,
+                    )
+                    return None, 502, last_error
+
                 if requested_stream != opened.is_stream:
                     self._logger.warning(
                         "Stream mode mismatch: provider=%s requested_stream=%s upstream_stream=%s decoder=%s content_type=%s",
@@ -401,6 +437,25 @@ class ProxyService:
                 )
                 if attempt < max_retries - 1:
                     continue
+            except ProxyWarningRequired as exc:
+                last_error = ProxyErrorInfo(
+                    message=str(exc),
+                    status_code=PROXY_WARNING_STATUS_CODE,
+                    error_type="upstream_error",
+                    error_code=PROXY_WARNING_ERROR_CODE,
+                    details=exc.to_details(),
+                )
+                self._logger.warning(
+                    "Network proxy warning required: provider=%s confirmation_url=%s error=%s",
+                    provider.name,
+                    exc.confirmation_url,
+                    exc.auto_confirm_error or "",
+                )
+                finalize_attempt(
+                    status_code=PROXY_WARNING_STATUS_CODE,
+                    error_message=str(exc),
+                )
+                return None, PROXY_WARNING_STATUS_CODE, last_error
             except OSError as exc:
                 previous_status_code = None
                 previous_error_type = HookErrorType.TRANSPORT_ERROR

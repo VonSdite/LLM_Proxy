@@ -222,24 +222,31 @@ class ProxyController:
         error_type: str,
         status_code: int = 400,
         code: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
         error_format: str = "openai_chat",
     ) -> Dict[str, Any]:
         normalized_format = str(error_format or "").strip().lower()
         if normalized_format == "claude_chat":
+            error = {
+                "type": error_type,
+                "message": message,
+            }
+            if details:
+                error["details"] = details
             return {
                 "type": "error",
-                "error": {
-                    "type": error_type,
-                    "message": message,
-                },
+                "error": error,
             }
+        error = {
+            "message": message,
+            "type": error_type,
+            "param": None,
+            "code": code,
+        }
+        if details:
+            error["details"] = details
         return {
-            "error": {
-                "message": message,
-                "type": error_type,
-                "param": None,
-                "code": code,
-            }
+            "error": error
         }
 
     def _error_response(
@@ -249,6 +256,7 @@ class ProxyController:
         *,
         error_type: str,
         code: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
         error_format: str = "openai_chat",
         trace_id: Optional[str] = None,
         route_name: Optional[str] = None,
@@ -262,6 +270,7 @@ class ProxyController:
             error_type=error_type,
             status_code=status_code,
             code=code,
+            details=details,
             error_format=error_format,
         )
         self._log_downstream_response_trace_safe(
@@ -510,6 +519,7 @@ class ProxyController:
                     status_code,
                     error_type=failure_info.error_type,
                     code=failure_info.error_code,
+                    details=failure_info.details,
                     error_format=resolved_error_format,
                     trace_id=trace_id,
                     route_name=route_name,

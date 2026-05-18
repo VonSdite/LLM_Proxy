@@ -13,6 +13,7 @@ from ..application.app_context import AppContext
 from ..config.provider_config import clean_optional_string, parse_optional_bool, parse_optional_positive_int
 from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_requests_proxies, normalize_proxy_url
+from ..utils.proxy_warning import ProxyWarningRequired, request_with_proxy_warning_retry
 
 
 class ModelDiscoveryService:
@@ -68,12 +69,22 @@ class ModelDiscoveryService:
         with requests.Session() as session:
             for url in candidates:
                 try:
-                    response = session.get(
-                        url,
-                        headers=headers,
-                        proxies=proxies,
-                        timeout=timeout_seconds,
-                        verify=verify_ssl,
+                    request_options = {
+                        "proxies": proxies,
+                        "verify": verify_ssl,
+                    }
+                    response = request_with_proxy_warning_retry(
+                        lambda: session.get(
+                            url,
+                            headers=headers,
+                            timeout=timeout_seconds,
+                            allow_redirects=False,
+                            **request_options,
+                        ),
+                        request_options=request_options,
+                        confirm_session=session,
+                        logger=self._logger,
+                        log_context=f"model_discovery_url={url}",
                     )
                     if response.status_code >= 400:
                         last_error = f'{url} returned {response.status_code}'
@@ -92,6 +103,8 @@ class ModelDiscoveryService:
                     last_error = f'{url} returned no models'
                 except requests.RequestException as exc:
                     last_error = f'{url} request failed: {exc}'
+                except ProxyWarningRequired as exc:
+                    last_error = f"{url} requires proxy confirmation: {exc.confirmation_url}"
                 except ValueError as exc:
                     last_error = f'{url} returned invalid json: {exc}'
 

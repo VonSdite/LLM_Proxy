@@ -26,6 +26,12 @@ admin:
   username: admin
   password: admin
 
+oauth:
+  enabled: false
+  # OAuth 登录、token 刷新、配额查询和 Codex 上游请求使用的代理地址。
+  proxy: ""
+  verify_ssl: false
+
 auth_groups:
   - name: openai-shared
     strategy: least_inflight

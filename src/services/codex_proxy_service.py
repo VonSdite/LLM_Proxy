@@ -23,6 +23,12 @@ from ..proxy_core import (
 )
 from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_requests_proxies
+from ..utils.proxy_warning import (
+    PROXY_WARNING_ERROR_CODE,
+    PROXY_WARNING_STATUS_CODE,
+    ProxyWarningRequired,
+    request_with_proxy_warning_retry,
+)
 from .codex_oauth_service import (
     CODEX_USER_AGENT,
     CodexAuthCandidate,
@@ -36,6 +42,9 @@ CODEX_BACKEND_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 # 当前 Codex 模型目录中 gpt-5.5 要求客户端版本不低于 0.124.0。
 CODEX_CLIENT_VERSION = "0.124.0"
 CODEX_PROVIDER_NAME = "codex"
+CODEX_PROXY_WARNING_ERROR_CODE = PROXY_WARNING_ERROR_CODE
+CODEX_PROXY_WARNING_STATUS_CODE = PROXY_WARNING_STATUS_CODE
+CODEX_UPSTREAM_REDIRECT_ERROR_CODE = "codex_upstream_redirect"
 
 
 class CodexProxyService:
@@ -110,6 +119,11 @@ class CodexProxyService:
                 client_ip=client_ip,
             )
             if failure is not None:
+                if failure.error_code in {
+                    CODEX_PROXY_WARNING_ERROR_CODE,
+                    CODEX_UPSTREAM_REDIRECT_ERROR_CODE,
+                }:
+                    return response, status_code, failure
                 last_failure = failure
                 continue
             return response, status_code, failure
@@ -148,15 +162,35 @@ class CodexProxyService:
             candidate,
             stream=True,
         )
+        request_options = self._build_request_options()
 
         try:
-            upstream_response = requests.post(
-                CODEX_BACKEND_RESPONSES_URL,
-                headers=upstream_headers,
-                json=upstream_body,
-                stream=True,
-                timeout=1200,
-                **self._build_request_options(),
+            upstream_response = request_with_proxy_warning_retry(
+                lambda: requests.post(
+                    CODEX_BACKEND_RESPONSES_URL,
+                    headers=upstream_headers,
+                    json=upstream_body,
+                    stream=True,
+                    timeout=1200,
+                    allow_redirects=False,
+                    **request_options,
+                ),
+                request_options=request_options,
+                logger=self._logger,
+                log_context=f"provider=codex model={model_name} auth_file={candidate.name}",
+            )
+        except ProxyWarningRequired as exc:
+            self._logger.warning(
+                "Codex upstream blocked by network proxy warning: model=%s auth_file=%s "
+                "status=%s confirmation_url=%s auto_confirm_error=%s",
+                model_name,
+                candidate.name,
+                exc.upstream_status,
+                exc.confirmation_url,
+                exc.auto_confirm_error or "",
+            )
+            return None, CODEX_PROXY_WARNING_STATUS_CODE, self._build_proxy_warning_error(
+                exc,
             )
         except requests.exceptions.RequestException as exc:
             self._logger.error(
@@ -176,6 +210,23 @@ class CodexProxyService:
                 status_code=502,
                 error_type="upstream_error",
                 error_code="upstream_request_failed",
+            )
+
+        if 300 <= upstream_response.status_code < 400:
+            location = str(upstream_response.headers.get("Location") or "").strip()
+            upstream_response.close()
+            message = f"Codex upstream returned redirect {upstream_response.status_code}"
+            if location:
+                message = f"{message}: {location}"
+            return None, 502, ProxyErrorInfo(
+                message=message,
+                status_code=502,
+                error_type="upstream_error",
+                error_code=CODEX_UPSTREAM_REDIRECT_ERROR_CODE,
+                details={
+                    "redirect_url": location,
+                    "upstream_status": upstream_response.status_code,
+                },
             )
 
         if upstream_response.status_code >= 400:
@@ -605,6 +656,16 @@ class CodexProxyService:
         except (TypeError, ValueError):
             return None
         return None
+
+    @staticmethod
+    def _build_proxy_warning_error(exc: ProxyWarningRequired) -> ProxyErrorInfo:
+        return ProxyErrorInfo(
+            message=str(exc),
+            status_code=CODEX_PROXY_WARNING_STATUS_CODE,
+            error_type="upstream_error",
+            error_code=CODEX_PROXY_WARNING_ERROR_CODE,
+            details=exc.to_details(),
+        )
 
     @staticmethod
     def _read_response_body(response: requests.Response) -> bytes:

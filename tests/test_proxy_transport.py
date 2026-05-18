@@ -101,6 +101,94 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual(1, fake_session.cookies.clear_calls)
         self.assertEqual(1, len(fake_session.post_calls))
 
+    def test_http_executor_auto_confirms_proxy_warning_and_retries_once(self) -> None:
+        logger = FakeLogger()
+        executor = HttpExecutor(logger=logger)
+        provider = type(
+            "Provider",
+            (),
+            {
+                "api": "https://example.com/v1/chat/completions",
+                "transport": "http",
+                "name": "demo",
+            },
+        )()
+        confirmation_url = (
+            "http://114.114.114.114:9421/proxycontrolwarn/"
+            "httpwarning_3355.html?ori_url=aHR0cHM6Ly9leGFtcGxlLmNvbS8="
+        )
+
+        class FakeCookies:
+            def clear(self) -> None:
+                pass
+
+        class FakeResponse:
+            def __init__(
+                self,
+                status_code: int,
+                *,
+                headers: dict[str, str] | None = None,
+                text: str = "",
+            ) -> None:
+                self.status_code = status_code
+                self.headers = headers or {"Content-Type": "application/json"}
+                self.text = text
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.cookies = FakeCookies()
+                self.post_calls: list[dict[str, object]] = []
+                self.get_calls: list[tuple[str, dict[str, object]]] = []
+
+            def post(self, *args, **kwargs):
+                del args
+                self.post_calls.append(dict(kwargs))
+                if len(self.post_calls) == 1:
+                    return FakeResponse(
+                        302,
+                        headers={"Location": confirmation_url},
+                    )
+                return FakeResponse(200)
+
+            def get(self, url, **kwargs):
+                self.get_calls.append((url, dict(kwargs)))
+                if len(self.get_calls) == 1:
+                    return FakeResponse(
+                        200,
+                        text="""
+                            <input id="sessionid" value="session-123" />
+                            <input id="pid" value="3355" />
+                            <input id="uid" value="0" />
+                        """,
+                    )
+                return FakeResponse(200)
+
+        fake_session = FakeSession()
+        executor._http_local.session = fake_session  # type: ignore[attr-defined]
+
+        opened = executor.execute(
+            provider,  # type: ignore[arg-type]
+            headers={"authorization": "Bearer sk-demo"},
+            body={"model": "demo/model"},
+            requested_stream=False,
+            timeout_seconds=30,
+            verify_ssl=False,
+            request_proxies=None,
+        )
+
+        self.assertEqual(200, opened.status_code)
+        self.assertEqual(2, len(fake_session.post_calls))
+        self.assertEqual(2, len(fake_session.get_calls))
+        self.assertFalse(fake_session.post_calls[0]["allow_redirects"])
+        self.assertEqual(confirmation_url, fake_session.get_calls[0][0])
+        self.assertTrue(fake_session.get_calls[1][0].startswith(
+            "http://114.114.114.114:9421/proxycontrolwarn/check?"
+        ))
+
     def test_provider_enabled_defaults_to_true(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
             {
@@ -480,12 +568,13 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
                 del exc_type, exc, tb
                 return False
 
-            def get(self, url, headers=None, proxies=None, timeout=None, verify=None):
+            def get(self, url, headers=None, proxies=None, timeout=None, verify=None, **kwargs):
                 captured["url"] = url
                 captured["headers"] = dict(headers or {})
                 captured["proxies"] = proxies
                 captured["timeout"] = timeout
                 captured["verify"] = verify
+                captured["allow_redirects"] = kwargs.get("allow_redirects")
                 return FakeResponse()
 
         with patch("src.services.model_discovery_service.requests.Session", return_value=FakeSession()):
@@ -511,6 +600,7 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
         )
         self.assertEqual(12, captured["timeout"])
         self.assertTrue(captured["verify"])
+        self.assertFalse(captured["allow_redirects"])
 
     def test_fetch_models_preview_defaults_to_ten_second_timeout(self) -> None:
         logger = FakeLogger()
@@ -538,8 +628,8 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
                 del exc_type, exc, tb
                 return False
 
-            def get(self, url, headers=None, proxies=None, timeout=None, verify=None):
-                del url, headers, proxies, verify
+            def get(self, url, headers=None, proxies=None, timeout=None, verify=None, **kwargs):
+                del url, headers, proxies, verify, kwargs
                 captured["timeout"] = timeout
                 return FakeResponse()
 
@@ -574,8 +664,8 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
                 del exc_type, exc, tb
                 return False
 
-            def get(self, url, headers=None, proxies=None, timeout=None, verify=None):
-                del url, proxies, timeout, verify
+            def get(self, url, headers=None, proxies=None, timeout=None, verify=None, **kwargs):
+                del url, proxies, timeout, verify, kwargs
                 captured["headers"] = dict(headers or {})
                 return FakeResponse()
 
@@ -1118,6 +1208,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function updateSensitiveInputSaveButtonState(inputId)", html)
         self.assertIn("function saveSensitiveInputOnBlur(inputId)", html)
         self.assertIn('id="oauthVerifySsl"', html)
+        self.assertNotIn('id="oauthAutoConfirmProxyWarning"', html)
         self.assertIn('id="oauthDetailsPanel" hidden', html)
         self.assertNotIn('id="saveOAuthSettingsBtn"', html)
         self.assertIn("function collectOAuthSettingsPayload()", html)
@@ -1132,6 +1223,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('data-settings-help-topic="oauth_enabled"', html)
         self.assertIn('data-settings-help-topic="oauth_proxy"', html)
         self.assertIn('data-settings-help-topic="oauth_verify_ssl"', html)
+        self.assertNotIn('data-settings-help-topic="oauth_auto_confirm_proxy_warning"', html)
         self.assertIn("function showSettingsHelp(", html)
         self.assertIn("function initSettingsHelpInteractions()", html)
         self.assertIn("scheduleSettingsHelpPopoverHide()", html)
