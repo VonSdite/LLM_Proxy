@@ -37,5 +37,4 @@ class Executor(Protocol):
         timeout_seconds: int,
         verify_ssl: bool,
         request_proxies: Optional[Dict[str, str]],
-    ) -> OpenedUpstreamResponse:
-        ...
+    ) -> OpenedUpstreamResponse: ...

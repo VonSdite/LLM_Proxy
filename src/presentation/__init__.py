@@ -11,11 +11,11 @@ from .user_controller import UserController
 from .web_controller import WebController
 
 __all__ = [
-    'create_flask_app',
-    'AuthenticationController',
-    'OAuthController',
-    'ProviderController',
-    'ProxyController',
-    'UserController',
-    'WebController',
+    "create_flask_app",
+    "AuthenticationController",
+    "OAuthController",
+    "ProviderController",
+    "ProxyController",
+    "UserController",
+    "WebController",
 ]

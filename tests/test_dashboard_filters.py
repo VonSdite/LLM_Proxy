@@ -127,18 +127,10 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.user_repository.create("bob", "10.0.0.2")
         self.user_repository.create("carol", "10.0.0.3")
 
-        self._log_request(
-            "model-a", "resp-a", 10, "10.0.0.1", datetime(2026, 4, 8, 9, 0, 0)
-        )
-        self._log_request(
-            "model-c", "resp-c", 20, "10.0.0.1", datetime(2026, 4, 8, 10, 0, 0)
-        )
-        self._log_request(
-            "model-b", "resp-b", 30, "10.0.0.2", datetime(2026, 4, 8, 11, 0, 0)
-        )
-        self._log_request(
-            "model-a", "resp-a", 40, "10.0.0.3", datetime(2026, 4, 8, 12, 0, 0)
-        )
+        self._log_request("model-a", "resp-a", 10, "10.0.0.1", datetime(2026, 4, 8, 9, 0, 0))
+        self._log_request("model-c", "resp-c", 20, "10.0.0.1", datetime(2026, 4, 8, 10, 0, 0))
+        self._log_request("model-b", "resp-b", 30, "10.0.0.2", datetime(2026, 4, 8, 11, 0, 0))
+        self._log_request("model-a", "resp-a", 40, "10.0.0.3", datetime(2026, 4, 8, 12, 0, 0))
 
     def tearDown(self) -> None:
         if self.db_path.exists():

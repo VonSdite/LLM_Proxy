@@ -114,8 +114,7 @@ class ProviderTransportTests(unittest.TestCase):
             },
         )()
         confirmation_url = (
-            "http://114.114.114.114:9421/proxycontrolwarn/"
-            "httpwarning_3355.html?ori_url=aHR0cHM6Ly9leGFtcGxlLmNvbS8="
+            "http://114.114.114.114:9421/proxycontrolwarn/httpwarning_3355.html?ori_url=aHR0cHM6Ly9leGFtcGxlLmNvbS8="
         )
 
         class FakeCookies:
@@ -185,9 +184,7 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual(2, len(fake_session.get_calls))
         self.assertFalse(fake_session.post_calls[0]["allow_redirects"])
         self.assertEqual(confirmation_url, fake_session.get_calls[0][0])
-        self.assertTrue(fake_session.get_calls[1][0].startswith(
-            "http://114.114.114.114:9421/proxycontrolwarn/check?"
-        ))
+        self.assertTrue(fake_session.get_calls[1][0].startswith("http://114.114.114.114:9421/proxycontrolwarn/check?"))
 
     def test_provider_enabled_defaults_to_true(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
@@ -218,9 +215,7 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual(1200, runtime.timeout_seconds)
 
     def test_provider_schema_rejects_transport_field(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported provider field\\(s\\): transport"
-        ):
+        with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): transport"):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "bad-provider",
@@ -232,9 +227,7 @@ class ProviderTransportTests(unittest.TestCase):
             )
 
     def test_provider_rejects_websocket_api_scheme(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError, "Provider api must use http:// or https://"
-        ):
+        with self.assertRaisesRegex(ValueError, "Provider api must use http:// or https://"):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "bad-provider",
@@ -263,9 +256,7 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual(("openai_chat", "openai_responses", "claude_chat"), runtime.target_formats)
 
     def test_provider_schema_rejects_target_formats_field(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported provider field\\(s\\): target_formats"
-        ):
+        with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): target_formats"):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "demo",
@@ -291,9 +282,7 @@ class ProviderTransportTests(unittest.TestCase):
             )
 
     def test_provider_schema_rejects_legacy_target_format_field(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported provider field\\(s\\): target_format"
-        ):
+        with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): target_format"):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "demo",
@@ -305,9 +294,7 @@ class ProviderTransportTests(unittest.TestCase):
             )
 
     def test_provider_schema_rejects_removed_fields(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported provider field\\(s\\): format"
-        ):
+        with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): format"):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "demo",
@@ -318,9 +305,7 @@ class ProviderTransportTests(unittest.TestCase):
                 }
             )
 
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported provider field\\(s\\): stream_format"
-        ):
+        with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): stream_format"):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "demo",
@@ -336,12 +321,8 @@ class ProviderTransportTests(unittest.TestCase):
             "sse_json",
             resolve_stream_format(None, "text/event-stream; charset=utf-8", "http"),
         )
-        self.assertEqual(
-            "ndjson", resolve_stream_format(None, "application/x-ndjson", "http")
-        )
-        self.assertEqual(
-            "nonstream", resolve_stream_format(None, "application/json", "http")
-        )
+        self.assertEqual("ndjson", resolve_stream_format(None, "application/x-ndjson", "http"))
+        self.assertEqual("nonstream", resolve_stream_format(None, "application/json", "http"))
 
     def test_stream_probe_detects_sse_when_content_type_is_wrong(self) -> None:
         class FakeResponse:
@@ -412,16 +393,13 @@ class ProviderManagerEnabledTests(unittest.TestCase):
         assert provider_view is not None
         self.assertTrue(provider_view.legacy_api_key)
         self.assertIsNone(provider_view.auth_group)
-        runtime_provider = manager.get_provider_for_model(
-            "enabled-provider/gpt-4.1-mini"
-        )
+        runtime_provider = manager.get_provider_for_model("enabled-provider/gpt-4.1-mini")
         self.assertIsNotNone(runtime_provider)
         assert runtime_provider is not None
         self.assertIsNone(runtime_provider.auth_group)
         self.assertTrue(
             any(
-                "disabled-provider" in message
-                and "skipped runtime registration" in message
+                "disabled-provider" in message and "skipped runtime registration" in message
                 for _, message in logger.records
             )
         )
@@ -488,10 +466,7 @@ class AuthGroupLegacyCleanupTests(unittest.TestCase):
             self.assertEqual(0, usage["legacy"]["minute_request_count"])
             self.assertEqual(0, usage["legacy"]["day_request_count"])
             self.assertTrue(
-                any(
-                    "Purged legacy provider runtime state rows" in message
-                    for _, message in logger.records
-                )
+                any("Purged legacy provider runtime state rows" in message for _, message in logger.records)
             )
         finally:
             if db_path.exists():
@@ -512,9 +487,7 @@ class NetUtilsTests(unittest.TestCase):
 class ModelDiscoveryCandidateTests(unittest.TestCase):
     def test_model_discovery_rejects_websocket_scheme(self) -> None:
         with self.assertRaisesRegex(ValueError, "Provider api must use http:// or https://"):
-            ModelDiscoveryService._build_model_endpoint_candidates(
-                "wss://example.com/v1/chat/completions"
-            )
+            ModelDiscoveryService._build_model_endpoint_candidates("wss://example.com/v1/chat/completions")
 
     def test_model_discovery_uses_only_base_candidates(self) -> None:
         candidates = ModelDiscoveryService._build_model_endpoint_candidates(
@@ -530,9 +503,7 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
         )
 
     def test_model_discovery_trims_responses_endpoint_to_base_path(self) -> None:
-        candidates = ModelDiscoveryService._build_model_endpoint_candidates(
-            "https://example.com/gateway/v1/responses"
-        )
+        candidates = ModelDiscoveryService._build_model_endpoint_candidates("https://example.com/gateway/v1/responses")
 
         self.assertEqual(
             [
@@ -733,43 +704,22 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
 
 class ProviderTemplateTransportTests(unittest.TestCase):
     def test_provider_template_contains_clean_provider_fields_and_help(self) -> None:
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "providers.html"
-        )
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
-        users_template_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "users.html"
-        )
+        users_template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "users.html"
         users_html = users_template_path.read_text(encoding="utf-8")
-        css_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "static"
-            / "css"
-            / "providers.css"
-        )
+        css_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "css" / "providers.css"
         css = css_path.read_text(encoding="utf-8")
 
         self.assertRegex(
             html,
-            r'/static/css/providers\.css\?v=\d{8}-\d+',
+            r"/static/css/providers\.css\?v=\d{8}-\d+",
         )
         self.assertNotIn('id="providerTransport"', html)
         self.assertIn('id="providerSourceFormat"', html)
         self.assertNotIn('id="providerTargetFormat"', html)
         self.assertNotIn('data-multi-select-badge="多选"', html)
-        self.assertNotIn(
-            'data-multi-select-hint="可多选，点击已选项可取消；互斥项会自动替换"', html
-        )
+        self.assertNotIn('data-multi-select-hint="可多选，点击已选项可取消；互斥项会自动替换"', html)
         self.assertNotIn('class="field-mode-badge">多选</span>', html)
         self.assertNotIn(
             'class="field-inline-note">可多选；点击已选项可取消，互斥项会自动替换。</div>',
@@ -913,7 +863,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('data-provider-group-select-checkbox="${normalizedGroupKey}"', html)
         self.assertIn('class="drag-handle-placeholder" aria-hidden="true"', html)
         self.assertIn('id="${batchActionMeta.buttonId}"', html)
-        self.assertIn("class=\"btn btn-toolbar-secondary provider-group-batch-btn\"", html)
+        self.assertIn('class="btn btn-toolbar-secondary provider-group-batch-btn"', html)
         self.assertIn("onclick=\"runProviderBatchAction('${batchActionMeta.action}', '${normalizedGroupKey}')\"", html)
         self.assertIn("buttonId: 'disableEnabledProvidersBtn'", html)
         self.assertIn("buttonId: 'enableDisabledProvidersBtn'", html)
@@ -926,10 +876,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('data-provider-row-checkbox="${encodedProviderName}"', html)
         self.assertIn('data-auth-group-delete-trigger="${encodedGroupName}"', html)
         self.assertIn('class="drag-handle-button provider-drag-handle"', html)
-        self.assertNotIn('provider-chip ${isEnabled ? \'provider-chip-hook\' : \'provider-chip-muted\'}', html)
-        self.assertIn(
-            "class=\"btn-action ${isEnabled ? 'btn-delete' : 'btn-edit'}\"", html
-        )
+        self.assertNotIn("provider-chip ${isEnabled ? 'provider-chip-hook' : 'provider-chip-muted'}", html)
+        self.assertIn("class=\"btn-action ${isEnabled ? 'btn-delete' : 'btn-edit'}\"", html)
         self.assertNotIn(
             "window.confirm(`确认批量删除已选中的 ${selectedNames.length} 个 Provider？`)",
             html,
@@ -981,9 +929,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function closeDeleteAuthEntryConfirm(shouldSync = true) {", html)
         self.assertIn("function syncDeleteAuthEntryPopover() {", html)
         self.assertIn('data-auth-entry-delete-trigger="${entryKey}"', html)
-        self.assertIn(
-            "onclick=\"toggleDeleteAuthEntryConfirm('${entryKey}', event)\"", html
-        )
+        self.assertIn("onclick=\"toggleDeleteAuthEntryConfirm('${entryKey}', event)\"", html)
         self.assertIn('class="btn-action btn-edit auth-entry-toggle-btn"', html)
         self.assertIn("function handleAuthEntrySummaryKeydown(", html)
         self.assertIn('onclick="toggleAuthEntryCard(this)"', html)
@@ -1022,9 +968,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("ace.config.set('basePath', '/static/vendor/ace');", html)
         self.assertIn("authEntryYamlEditor.session.setMode('ace/mode/yaml');", html)
         self.assertIn("authEntryYamlEditor.renderer.setShowGutter(true);", html)
-        self.assertIn(
-            "authEntryYamlEditor.renderer.setShowInvisibles('tab space');", html
-        )
+        self.assertIn("authEntryYamlEditor.renderer.setShowInvisibles('tab space');", html)
         self.assertIn("authEntryYamlEditor.session.replace(", html)
         self.assertIn("authEntryYamlEditor.session.setUseSoftTabs(true);", html)
         self.assertIn("authEntryYamlEditor.session.setTabSize(2);", html)
@@ -1066,9 +1010,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .field-mode-badge {", css)
         self.assertNotIn(".providers-page .field-inline-note {", css)
         self.assertNotIn(".providers-page .custom-select-trigger-summary {", css)
-        self.assertIn(
-            ".providers-page .custom-select.is-multi .custom-select-trigger {", css
-        )
+        self.assertIn(".providers-page .custom-select.is-multi .custom-select-trigger {", css)
         self.assertNotIn(".providers-page .custom-select-trigger-badge {", css)
         self.assertIn(".providers-page .custom-select-option-check {", css)
         self.assertIn(".providers-page .custom-select-menu-hint {", css)
@@ -1094,35 +1036,22 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("formatDateTime(user.created_at)", users_html)
 
     def test_oauth_template_contains_codex_oauth_workflow(self) -> None:
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "oauth.html"
-        )
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "oauth.html"
         html = template_path.read_text(encoding="utf-8")
-        css_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "static"
-            / "css"
-            / "oauth.css"
-        )
+        css_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "css" / "oauth.css"
         css = css_path.read_text(encoding="utf-8")
 
         self.assertIn("Codex OAuth", html)
         self.assertIn('class="oauth-toolbar-section" hidden', html)
-        self.assertIn("class=\"oauth-toolbar-card\"", html)
-        self.assertIn("id=\"oauthTopTabBtn_codex\"", html)
-        self.assertIn("id=\"codexRefreshAuthLinkBtn\"", html)
+        self.assertIn('class="oauth-toolbar-card"', html)
+        self.assertIn('id="oauthTopTabBtn_codex"', html)
+        self.assertIn('id="codexRefreshAuthLinkBtn"', html)
         self.assertIn("Codex 可用模型", html)
-        self.assertNotIn("id=\"codexRefreshModelsBtn\"", html)
+        self.assertNotIn('id="codexRefreshModelsBtn"', html)
         self.assertNotIn("刷新模型", html)
         self.assertIn('id="codexModelIdInput"', html)
         self.assertIn('id="codexAddModelBtn"', html)
-        self.assertIn("id=\"codexModelList\"", html)
+        self.assertIn('id="codexModelList"', html)
         self.assertIn("https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json", html)
         self.assertIn("https://models.router-for.me/models.json", html)
         self.assertIn("<ul>", html)
@@ -1200,7 +1129,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn("return `${escapeHtml(window.label || 'Codex')}：${percent.text}", html)
         self.assertIn('class="btn btn-primary" id="codexSubmitCallbackBtn"', html)
         self.assertIn('id="codexCallbackSection" hidden', html)
-        self.assertIn("id=\"codexCallbackUrlInput\"", html)
+        self.assertIn('id="codexCallbackUrlInput"', html)
         self.assertIn("callbackSection.hidden = !hasAuthorizationUrl", html)
         self.assertIn("/api/oauth/codex/session", html)
         self.assertIn("/api/oauth/codex/callback", html)
@@ -1264,7 +1193,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function syncOAuthNavLink(enabled)", html)
         self.assertIn("function saveOAuthSettings()", html)
         self.assertIn("preserveSensitiveVisibility", html)
-        self.assertIn('fillOAuthSettingsForm(data.settings, { preserveSensitiveVisibility: true });', html)
+        self.assertIn("fillOAuthSettingsForm(data.settings, { preserveSensitiveVisibility: true });", html)
         self.assertIn('fetch("/api/settings/system/oauth"', html)
         self.assertIn('data-settings-help-topic="oauth_enabled"', html)
         self.assertIn('data-settings-help-topic="oauth_proxy"', html)
@@ -1285,13 +1214,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
     def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(
         self,
     ) -> None:
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "providers.html"
-        )
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
 
         self.assertNotIn(
@@ -1396,13 +1319,7 @@ process.stdout.write(JSON.stringify({{
         self.assertTrue(payload["message"])
 
     def test_fetch_models_button_supports_auth_group_mode(self) -> None:
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "providers.html"
-        )
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
 
         script_start = html.index("function canFetchModels")
@@ -1458,13 +1375,7 @@ process.stdout.write(JSON.stringify({{
         self.assertFalse(payload["legacyDisabled"])
 
     def test_fetch_models_request_is_aborted_when_modal_closes(self) -> None:
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "providers.html"
-        )
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
 
         script = "\n".join(
@@ -1474,8 +1385,8 @@ process.stdout.write(JSON.stringify({{
                     "function collectFormData() { return { api: 'https://example.com/v1/chat/completions', "
                     "api_key: '', auth_group: '', proxy: '', timeout_seconds: '', verify_ssl: '' }; }"
                 ),
-                html[html.index("function canFetchModels()"): html.index("function openCreateModal()")],
-                html[html.index("async function fetchModels()"): html.index("function initProvidersPage()")],
+                html[html.index("function canFetchModels()") : html.index("function openCreateModal()")],
+                html[html.index("async function fetchModels()") : html.index("function initProvidersPage()")],
             ]
         )
 
@@ -1559,13 +1470,7 @@ vm.runInContext({json.dumps(script)}, sandbox);
     def test_provider_drag_drop_helpers_keep_enabled_group_before_disabled_group(
         self,
     ) -> None:
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "providers.html"
-        )
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
 
         script_start = html.index("function isProviderEnabled")
@@ -1618,14 +1523,7 @@ process.stdout.write(JSON.stringify({{
 
 class FrontendMessageLocalizationTests(unittest.TestCase):
     def test_ui_message_script_contains_localized_error_formatter(self) -> None:
-        script_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "static"
-            / "js"
-            / "ui-message.js"
-        )
+        script_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "js" / "ui-message.js"
         script = script_path.read_text(encoding="utf-8")
 
         self.assertIn("function formatActionErrorMessage(", script)
@@ -1638,16 +1536,10 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         login_html = (root / "templates" / "login.html").read_text(encoding="utf-8")
         users_html = (root / "templates" / "users.html").read_text(encoding="utf-8")
         index_html = (root / "templates" / "index.html").read_text(encoding="utf-8")
-        base_page_html = (root / "templates" / "base_page.html").read_text(
-            encoding="utf-8"
-        )
+        base_page_html = (root / "templates" / "base_page.html").read_text(encoding="utf-8")
         theme_js = (root / "static" / "js" / "theme.js").read_text(encoding="utf-8")
-        base_admin_html = (root / "templates" / "base_admin.html").read_text(
-            encoding="utf-8"
-        )
-        web_controller_py = (root.parent / "presentation" / "web_controller.py").read_text(
-            encoding="utf-8"
-        )
+        base_admin_html = (root / "templates" / "base_admin.html").read_text(encoding="utf-8")
+        web_controller_py = (root.parent / "presentation" / "web_controller.py").read_text(encoding="utf-8")
 
         self.assertIn("/static/js/ui-message.js?v=20260319-1", login_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", users_html)
@@ -1680,18 +1572,11 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         )
         self.assertIn('self._app.route("/")(auth(self.home))', web_controller_py)
         self.assertIn('self._app.route("/statistics")(auth(self.statistics_page))', web_controller_py)
-        self.assertIn('def home(self) -> str:', web_controller_py)
-        self.assertIn('oauth_enabled=self._is_oauth_enabled()', web_controller_py)
+        self.assertIn("def home(self) -> str:", web_controller_py)
+        self.assertIn("oauth_enabled=self._is_oauth_enabled()", web_controller_py)
 
     def test_ui_message_formatter_appends_upstream_original_error(self) -> None:
-        script_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "static"
-            / "js"
-            / "ui-message.js"
-        )
+        script_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "js" / "ui-message.js"
         node_script = f"""
 const fs = require("fs");
 const vm = require("vm");
@@ -1725,9 +1610,7 @@ class DashboardTemplateTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"
         index_html = (root / "templates" / "index.html").read_text(encoding="utf-8")
         index_css = (root / "static" / "css" / "index.css").read_text(encoding="utf-8")
-        admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(
-            encoding="utf-8"
-        )
+        admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
 
         self.assertIn("/static/css/index.css?v=20260409-4", index_html)
         self.assertIn("dashboard-tabs-section", index_html)
@@ -1741,24 +1624,18 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn("function buildDashboardSearchParams(", index_html)
         self.assertIn("function filterCustomSelectOptions(", index_html)
         self.assertIn("function selectFilteredCustomSelectOptions(", index_html)
-        self.assertIn('custom-select-search-input', index_html)
-        self.assertIn('custom-select-menu-action', index_html)
-        self.assertIn('全选过滤结果', index_html)
-        self.assertIn('custom-select-menu-action-box', index_html)
+        self.assertIn("custom-select-search-input", index_html)
+        self.assertIn("custom-select-menu-action", index_html)
+        self.assertIn("全选过滤结果", index_html)
+        self.assertIn("custom-select-menu-action-box", index_html)
         self.assertIn("function switchDashboardTab(", index_html)
         self.assertIn("function loadActiveDashboardTabData()", index_html)
-        self.assertIn(
-            "fetch(`/api/statistics?${params}`, { cache: 'no-store' })", index_html
-        )
-        self.assertIn(
-            "fetch(`/api/request-logs?${params}`, { cache: 'no-store' })", index_html
-        )
+        self.assertIn("fetch(`/api/statistics?${params}`, { cache: 'no-store' })", index_html)
+        self.assertIn("fetch(`/api/request-logs?${params}`, { cache: 'no-store' })", index_html)
         self.assertIn("function parseLocalDateTime(value)", index_html)
         self.assertNotIn("new Date(log.start_time)", index_html)
         self.assertNotIn("new Date(log.end_time)", index_html)
-        self.assertIn(
-            "calculateDurationSeconds(log.start_time, log.end_time)", index_html
-        )
+        self.assertIn("calculateDurationSeconds(log.start_time, log.end_time)", index_html)
         self.assertIn("--dashboard-control-height: 40px;", index_css)
         self.assertIn(".dashboard-page .custom-select-trigger {", index_css)
         self.assertIn(
@@ -1774,7 +1651,9 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn(".dashboard-page .custom-select-empty {", index_css)
         self.assertIn(".dashboard-page .custom-select-menu-action-box {", index_css)
         self.assertIn(".dashboard-page .custom-select-menu-action.is-checked,", index_css)
-        self.assertIn(".dashboard-page .custom-select-menu-action.is-checked .custom-select-menu-action-box,", index_css)
+        self.assertIn(
+            ".dashboard-page .custom-select-menu-action.is-checked .custom-select-menu-action-box,", index_css
+        )
         self.assertIn("--nav-tab-hover-bg:", admin_base_css)
         self.assertIn("body.app-page .field-help-button,", admin_base_css)
         self.assertIn("body.app-page .oauth-help-button", admin_base_css)
@@ -1784,16 +1663,12 @@ class DashboardTemplateTests(unittest.TestCase):
 
     def test_provider_template_keeps_model_row_change_from_rebuilding_table(self) -> None:
         providers_html = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "providers.html"
+            Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         ).read_text(encoding="utf-8")
 
         self.assertIn("function refreshModelTestRowDisplay(rowId, inputElement)", providers_html)
         self.assertIn("function updateModelTestTableSummaryAndControls()", providers_html)
-        self.assertIn("onchange=\"handleModelTestRowChange(${row.rowId}, this.value, this)\"", providers_html)
+        self.assertIn('onchange="handleModelTestRowChange(${row.rowId}, this.value, this)"', providers_html)
         self.assertIn("function buildDroppedModelTestRows(dragRowId, targetRowId, placeAfter)", providers_html)
         self.assertIn("function handleModelTestRowDragStart(rowId, event)", providers_html)
         self.assertIn("function buildDroppedProviderOrderNames(name, targetName, placeAfter)", providers_html)
@@ -1814,13 +1689,7 @@ class DashboardTemplateTests(unittest.TestCase):
         )
 
     def test_provider_drag_drop_helper_keeps_group_boundary(self) -> None:
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "src"
-            / "presentation"
-            / "templates"
-            / "providers.html"
-        )
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         html = template_path.read_text(encoding="utf-8")
         script_start = html.index("function isProviderEnabled")
         script_end = html.index("function getProviderTabButton")

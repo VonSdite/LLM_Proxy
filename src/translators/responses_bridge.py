@@ -139,6 +139,8 @@ def _from_openai_responses_message_content(content: Any) -> Any:
         elif item_type == "input_image" and isinstance(item.get("image_url"), str):
             translated.append({"type": "image_url", "image_url": {"url": item.get("image_url")}})
     return translated
+
+
 def translate_openai_chat_downstream_chunk_to_responses(
     model_name: str,
     original_request: Dict[str, Any],
@@ -328,8 +330,10 @@ def _ensure_stream_started(
             "seq": int(state.get("seq") or 0),
             "next_output_index": int(state.get("next_output_index") or 0),
             "usage": state.get("usage") or {},
-            "message": state.get("message") or {"opened": False, "done": False, "content": "", "output_index": None, "item_id": None},
-            "reasoning": state.get("reasoning") or {"opened": False, "done": False, "text": "", "output_index": None, "item_id": None},
+            "message": state.get("message")
+            or {"opened": False, "done": False, "content": "", "output_index": None, "item_id": None},
+            "reasoning": state.get("reasoning")
+            or {"opened": False, "done": False, "text": "", "output_index": None, "item_id": None},
             "tool_calls": state.get("tool_calls") or {},
         }
     )
@@ -369,7 +373,9 @@ def _ensure_stream_started(
 
 
 def _ensure_message_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
-    message_state = state.setdefault("message", {"opened": False, "done": False, "content": "", "output_index": None, "item_id": None})
+    message_state = state.setdefault(
+        "message", {"opened": False, "done": False, "content": "", "output_index": None, "item_id": None}
+    )
     if message_state.get("opened"):
         return []
 
@@ -408,7 +414,9 @@ def _ensure_message_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
 
 
 def _ensure_reasoning_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
-    reasoning_state = state.setdefault("reasoning", {"opened": False, "done": False, "text": "", "output_index": None, "item_id": None})
+    reasoning_state = state.setdefault(
+        "reasoning", {"opened": False, "done": False, "text": "", "output_index": None, "item_id": None}
+    )
     if reasoning_state.get("opened"):
         return []
 
@@ -526,9 +534,44 @@ def _finalize_message(state: Dict[str, Any]) -> list[DownstreamChunk]:
     item_id = str(message_state.get("item_id") or "")
     message_state["done"] = True
     return [
-        _emit_event("response.output_text.done", {"type": "response.output_text.done", "sequence_number": _next_sequence(state), "item_id": item_id, "output_index": output_index, "content_index": 0, "text": text, "logprobs": []}),
-        _emit_event("response.content_part.done", {"type": "response.content_part.done", "sequence_number": _next_sequence(state), "item_id": item_id, "output_index": output_index, "content_index": 0, "part": {"type": "output_text", "annotations": [], "logprobs": [], "text": text}}),
-        _emit_event("response.output_item.done", {"type": "response.output_item.done", "sequence_number": _next_sequence(state), "output_index": output_index, "item": {"id": item_id, "type": "message", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "annotations": [], "logprobs": [], "text": text}]}}),
+        _emit_event(
+            "response.output_text.done",
+            {
+                "type": "response.output_text.done",
+                "sequence_number": _next_sequence(state),
+                "item_id": item_id,
+                "output_index": output_index,
+                "content_index": 0,
+                "text": text,
+                "logprobs": [],
+            },
+        ),
+        _emit_event(
+            "response.content_part.done",
+            {
+                "type": "response.content_part.done",
+                "sequence_number": _next_sequence(state),
+                "item_id": item_id,
+                "output_index": output_index,
+                "content_index": 0,
+                "part": {"type": "output_text", "annotations": [], "logprobs": [], "text": text},
+            },
+        ),
+        _emit_event(
+            "response.output_item.done",
+            {
+                "type": "response.output_item.done",
+                "sequence_number": _next_sequence(state),
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "annotations": [], "logprobs": [], "text": text}],
+                },
+            },
+        ),
     ]
 
 
@@ -542,9 +585,37 @@ def _finalize_reasoning(state: Dict[str, Any]) -> list[DownstreamChunk]:
     item_id = str(reasoning_state.get("item_id") or "")
     reasoning_state["done"] = True
     return [
-        _emit_event("response.reasoning_summary_text.done", {"type": "response.reasoning_summary_text.done", "sequence_number": _next_sequence(state), "item_id": item_id, "output_index": output_index, "summary_index": 0, "text": text}),
-        _emit_event("response.reasoning_summary_part.done", {"type": "response.reasoning_summary_part.done", "sequence_number": _next_sequence(state), "item_id": item_id, "output_index": output_index, "summary_index": 0, "part": {"type": "summary_text", "text": text}}),
-        _emit_event("response.output_item.done", {"type": "response.output_item.done", "sequence_number": _next_sequence(state), "output_index": output_index, "item": {"id": item_id, "type": "reasoning", "summary": [{"type": "summary_text", "text": text}]}}),
+        _emit_event(
+            "response.reasoning_summary_text.done",
+            {
+                "type": "response.reasoning_summary_text.done",
+                "sequence_number": _next_sequence(state),
+                "item_id": item_id,
+                "output_index": output_index,
+                "summary_index": 0,
+                "text": text,
+            },
+        ),
+        _emit_event(
+            "response.reasoning_summary_part.done",
+            {
+                "type": "response.reasoning_summary_part.done",
+                "sequence_number": _next_sequence(state),
+                "item_id": item_id,
+                "output_index": output_index,
+                "summary_index": 0,
+                "part": {"type": "summary_text", "text": text},
+            },
+        ),
+        _emit_event(
+            "response.output_item.done",
+            {
+                "type": "response.output_item.done",
+                "sequence_number": _next_sequence(state),
+                "output_index": output_index,
+                "item": {"id": item_id, "type": "reasoning", "summary": [{"type": "summary_text", "text": text}]},
+            },
+        ),
     ]
 
 
@@ -555,8 +626,36 @@ def _finalize_tool_calls(state: Dict[str, Any]) -> list[DownstreamChunk]:
         if tool_state.get("done"):
             continue
         arguments = str(tool_state.get("arguments") or "{}")
-        outputs.append(_emit_event("response.function_call_arguments.done", {"type": "response.function_call_arguments.done", "sequence_number": _next_sequence(state), "item_id": tool_state["item_id"], "output_index": tool_state["output_index"], "arguments": arguments}))
-        outputs.append(_emit_event("response.output_item.done", {"type": "response.output_item.done", "sequence_number": _next_sequence(state), "output_index": tool_state["output_index"], "item": {"id": tool_state["item_id"], "type": "function_call", "status": "completed", "arguments": arguments, "call_id": tool_state["call_id"], "name": tool_state["name"]}}))
+        outputs.append(
+            _emit_event(
+                "response.function_call_arguments.done",
+                {
+                    "type": "response.function_call_arguments.done",
+                    "sequence_number": _next_sequence(state),
+                    "item_id": tool_state["item_id"],
+                    "output_index": tool_state["output_index"],
+                    "arguments": arguments,
+                },
+            )
+        )
+        outputs.append(
+            _emit_event(
+                "response.output_item.done",
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": _next_sequence(state),
+                    "output_index": tool_state["output_index"],
+                    "item": {
+                        "id": tool_state["item_id"],
+                        "type": "function_call",
+                        "status": "completed",
+                        "arguments": arguments,
+                        "call_id": tool_state["call_id"],
+                        "name": tool_state["name"],
+                    },
+                },
+            )
+        )
         tool_state["done"] = True
     return outputs
 
@@ -589,12 +688,51 @@ def _build_output_items(state: Dict[str, Any]) -> list[Dict[str, Any]]:
     items: list[tuple[int, Dict[str, Any]]] = []
     message_state = state.get("message") or {}
     if message_state.get("opened"):
-        items.append((int(message_state.get("output_index") or 0), {"id": message_state.get("item_id"), "type": "message", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "annotations": [], "logprobs": [], "text": str(message_state.get("content") or "")}]}))
+        items.append(
+            (
+                int(message_state.get("output_index") or 0),
+                {
+                    "id": message_state.get("item_id"),
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "annotations": [],
+                            "logprobs": [],
+                            "text": str(message_state.get("content") or ""),
+                        }
+                    ],
+                },
+            )
+        )
     reasoning_state = state.get("reasoning") or {}
     if reasoning_state.get("opened"):
-        items.append((int(reasoning_state.get("output_index") or 0), {"id": reasoning_state.get("item_id"), "type": "reasoning", "summary": [{"type": "summary_text", "text": str(reasoning_state.get("text") or "")}]}))
+        items.append(
+            (
+                int(reasoning_state.get("output_index") or 0),
+                {
+                    "id": reasoning_state.get("item_id"),
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": str(reasoning_state.get("text") or "")}],
+                },
+            )
+        )
     for tool_state in (state.get("tool_calls") or {}).values():
-        items.append((int(tool_state.get("output_index") or 0), {"id": tool_state.get("item_id"), "type": "function_call", "status": "completed", "arguments": str(tool_state.get("arguments") or "{}"), "call_id": tool_state.get("call_id"), "name": tool_state.get("name")}))
+        items.append(
+            (
+                int(tool_state.get("output_index") or 0),
+                {
+                    "id": tool_state.get("item_id"),
+                    "type": "function_call",
+                    "status": "completed",
+                    "arguments": str(tool_state.get("arguments") or "{}"),
+                    "call_id": tool_state.get("call_id"),
+                    "name": tool_state.get("name"),
+                },
+            )
+        )
     return [item for _, item in sorted(items, key=lambda pair: pair[0])]
 
 
@@ -643,23 +781,63 @@ def convert_openai_chat_response_to_responses(
     output_items: list[Dict[str, Any]] = []
     reasoning_content = str(message.get("reasoning_content") or "")
     if reasoning_content:
-        output_items.append({"id": f"rs_{response_id}_0", "type": "reasoning", "summary": [{"type": "summary_text", "text": reasoning_content}]})
-    output_items.append({"id": f"msg_{response_id}_0", "type": "message", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "annotations": [], "logprobs": [], "text": str(message.get("content") or "")}]})
+        output_items.append(
+            {
+                "id": f"rs_{response_id}_0",
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": reasoning_content}],
+            }
+        )
+    output_items.append(
+        {
+            "id": f"msg_{response_id}_0",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+                {"type": "output_text", "annotations": [], "logprobs": [], "text": str(message.get("content") or "")}
+            ],
+        }
+    )
     for index, tool_call in enumerate(message.get("tool_calls") or []):
         if not isinstance(tool_call, dict):
             continue
         function = tool_call.get("function") or {}
         if not isinstance(function, dict):
             function = {}
-        output_items.append({"id": f"fc_{tool_call.get('id') or index}", "type": "function_call", "status": "completed", "arguments": str(function.get("arguments") or "{}"), "call_id": str(tool_call.get("id") or ""), "name": str(function.get("name") or "")})
+        output_items.append(
+            {
+                "id": f"fc_{tool_call.get('id') or index}",
+                "type": "function_call",
+                "status": "completed",
+                "arguments": str(function.get("arguments") or "{}"),
+                "call_id": str(tool_call.get("id") or ""),
+                "name": str(function.get("name") or ""),
+            }
+        )
 
-    response = {"id": response_id, "object": "response", "created_at": int(payload.get("created") or time.time()), "status": "completed", "background": False, "error": None, "model": response_model, "output": output_items}
+    response = {
+        "id": response_id,
+        "object": "response",
+        "created_at": int(payload.get("created") or time.time()),
+        "status": "completed",
+        "background": False,
+        "error": None,
+        "model": response_model,
+        "output": output_items,
+    }
     if isinstance(payload.get("usage"), dict):
-        response["usage"] = {"input_tokens": int(payload["usage"].get("prompt_tokens") or 0), "output_tokens": int(payload["usage"].get("completion_tokens") or 0), "total_tokens": int(payload["usage"].get("total_tokens") or 0)}
+        response["usage"] = {
+            "input_tokens": int(payload["usage"].get("prompt_tokens") or 0),
+            "output_tokens": int(payload["usage"].get("completion_tokens") or 0),
+            "total_tokens": int(payload["usage"].get("total_tokens") or 0),
+        }
     response.update(_extract_echo_fields(original_request))
     if finish_reason is not None:
         response["finish_reason"] = finish_reason
     return response
+
+
 def _next_sequence(state: Dict[str, Any]) -> int:
     sequence = int(state.get("seq") or 0) + 1
     state["seq"] = sequence

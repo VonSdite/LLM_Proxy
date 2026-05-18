@@ -20,9 +20,7 @@ if TYPE_CHECKING:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="LLM Proxy Service")
-    parser.add_argument(
-        "--config", type=str, default=None, help="Configuration file path"
-    )
+    parser.add_argument("--config", type=str, default=None, help="Configuration file path")
     return parser.parse_args()
 
 
@@ -37,9 +35,7 @@ def app() -> "Application":
     else:
         config_candidate = Path(config_path)
         resolved_config_path = (
-            config_candidate
-            if config_candidate.is_absolute()
-            else (Path.cwd() / config_candidate).resolve()
+            config_candidate if config_candidate.is_absolute() else (Path.cwd() / config_candidate).resolve()
         )
 
     if not resolved_config_path.exists():

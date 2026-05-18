@@ -25,10 +25,7 @@ class ProviderService:
 
     def list_providers(self) -> List[Dict[str, Any]]:
         config = self._config_manager.get_raw_config()
-        return [
-            ProviderConfigSchema.from_mapping(provider).to_mapping()
-            for provider in read_provider_entries(config)
-        ]
+        return [ProviderConfigSchema.from_mapping(provider).to_mapping() for provider in read_provider_entries(config)]
 
     def get_provider(self, name: str) -> Optional[Dict[str, Any]]:
         config = self._config_manager.get_raw_config()
@@ -57,12 +54,12 @@ class ProviderService:
         providers = read_provider_entries(config)
         target = self._find_provider(providers, current_name)
         if target is None:
-            raise ValueError(f'Provider not found: {current_name}')
+            raise ValueError(f"Provider not found: {current_name}")
         target_enabled = self._is_provider_enabled(target)
 
         normalized_payload = dict(payload)
-        if 'enabled' not in normalized_payload:
-            normalized_payload['enabled'] = ProviderConfigSchema.from_mapping(target).enabled
+        if "enabled" not in normalized_payload:
+            normalized_payload["enabled"] = ProviderConfigSchema.from_mapping(target).enabled
 
         provider_config = ProviderConfigSchema.from_payload(normalized_payload)
         normalized = provider_config.to_mapping()
@@ -83,7 +80,7 @@ class ProviderService:
         providers = read_provider_entries(config)
         target = self._find_provider(providers, name)
         if target is None:
-            raise ValueError(f'Provider not found: {name}')
+            raise ValueError(f"Provider not found: {name}")
 
         providers.remove(target)
         self._save_providers(config, providers)
@@ -93,11 +90,11 @@ class ProviderService:
         providers = read_provider_entries(config)
         target = self._find_provider(providers, name)
         if target is None:
-            raise ValueError(f'Provider not found: {name}')
+            raise ValueError(f"Provider not found: {name}")
 
         target_index = providers.index(target)
         normalized = ProviderConfigSchema.from_mapping(target).to_storage_mapping()
-        normalized['enabled'] = bool(enabled)
+        normalized["enabled"] = bool(enabled)
         provider_config = ProviderConfigSchema.from_payload(normalized)
         providers[target_index] = provider_config.to_storage_mapping()
         providers = self._regroup_providers_by_enabled(providers)
@@ -112,15 +109,15 @@ class ProviderService:
 
         for target_index in target_indexes:
             normalized = ProviderConfigSchema.from_mapping(providers[target_index]).to_storage_mapping()
-            normalized['enabled'] = bool(enabled)
+            normalized["enabled"] = bool(enabled)
             providers[target_index] = ProviderConfigSchema.from_payload(normalized).to_storage_mapping()
 
         providers = self._regroup_providers_by_enabled(providers)
         self._save_providers(config, providers)
         return {
-            'count': len(normalized_names),
-            'names': normalized_names,
-            'enabled': bool(enabled),
+            "count": len(normalized_names),
+            "names": normalized_names,
+            "enabled": bool(enabled),
         }
 
     def reorder_providers(self, names: List[str]) -> Dict[str, Any]:
@@ -134,14 +131,9 @@ class ProviderService:
         unknown_names = [name for name in normalized_names if name not in current_name_set]
         missing_names = [name for name in current_names if name not in provided_name_set]
         if unknown_names or missing_names or len(normalized_names) != len(current_names):
-            raise ValueError(
-                "Provider order must include every provider exactly once"
-            )
+            raise ValueError("Provider order must include every provider exactly once")
 
-        providers_by_name = {
-            str(provider.get("name", "")).strip(): provider
-            for provider in providers
-        }
+        providers_by_name = {str(provider.get("name", "")).strip(): provider for provider in providers}
         ordered_providers = [providers_by_name[name] for name in normalized_names]
         self._ensure_grouped_provider_order(ordered_providers)
         self._save_providers(config, ordered_providers)
@@ -157,20 +149,16 @@ class ProviderService:
         self._find_provider_indexes(providers, normalized_names)
 
         name_set = set(normalized_names)
-        providers = [
-            provider
-            for provider in providers
-            if str(provider.get('name', '')).strip() not in name_set
-        ]
+        providers = [provider for provider in providers if str(provider.get("name", "")).strip() not in name_set]
         self._save_providers(config, providers)
         return {
-            'count': len(normalized_names),
-            'names': normalized_names,
+            "count": len(normalized_names),
+            "names": normalized_names,
         }
 
     def _save_providers(self, config: Dict[str, Any], providers: List[Dict[str, Any]]) -> None:
         self._validate_providers(config, providers)
-        config['providers'] = providers
+        config["providers"] = providers
         self._config_manager.write_raw_config(config)
         self._reload_callback()
 
@@ -197,7 +185,7 @@ class ProviderService:
         reject_duplicates: bool,
     ) -> List[str]:
         if not isinstance(names, list):
-            raise ValueError('Provider names must be a non-empty list')
+            raise ValueError("Provider names must be a non-empty list")
 
         normalized_names: List[str] = []
         seen_names = set()
@@ -225,12 +213,8 @@ class ProviderService:
         cls,
         providers: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        enabled_providers = [
-            provider for provider in providers if cls._is_provider_enabled(provider)
-        ]
-        disabled_providers = [
-            provider for provider in providers if not cls._is_provider_enabled(provider)
-        ]
+        enabled_providers = [provider for provider in providers if cls._is_provider_enabled(provider)]
+        disabled_providers = [provider for provider in providers if not cls._is_provider_enabled(provider)]
         return enabled_providers + disabled_providers
 
     @classmethod
@@ -261,9 +245,7 @@ class ProviderService:
         for provider in providers:
             if cls._is_provider_enabled(provider):
                 if disabled_seen:
-                    raise ValueError(
-                        "Enabled providers must appear before disabled providers"
-                    )
+                    raise ValueError("Enabled providers must appear before disabled providers")
                 continue
             disabled_seen = True
 
@@ -273,10 +255,7 @@ class ProviderService:
 
     @staticmethod
     def _build_provider_indexes_by_name(providers: List[Dict[str, Any]]) -> Dict[str, int]:
-        return {
-            str(provider.get("name", "")).strip(): index
-            for index, provider in enumerate(providers)
-        }
+        return {str(provider.get("name", "")).strip(): index for index, provider in enumerate(providers)}
 
     @staticmethod
     def _find_provider_indexes(providers: List[Dict[str, Any]], names: List[str]) -> List[int]:
@@ -284,6 +263,6 @@ class ProviderService:
         missing_names = [name for name in names if name not in provider_indexes]
         if missing_names:
             if len(missing_names) == 1:
-                raise ValueError(f'Provider not found: {missing_names[0]}')
+                raise ValueError(f"Provider not found: {missing_names[0]}")
             raise ValueError(f"Providers not found: {', '.join(missing_names)}")
         return [provider_indexes[name] for name in names]

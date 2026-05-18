@@ -33,9 +33,8 @@ class AuthenticationService:
             return False
 
         # 使用 compare_digest 可降低时序攻击风险，避免通过比较耗时推断凭据内容。
-        is_valid = (
-            secrets.compare_digest(str(username), str(expected_username))
-            and secrets.compare_digest(str(password), str(expected_password))
+        is_valid = secrets.compare_digest(str(username), str(expected_username)) and secrets.compare_digest(
+            str(password), str(expected_password)
         )
         if not is_valid:
             self._logger.warning(f"Authentication failed for username={username!r}")

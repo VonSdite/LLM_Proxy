@@ -179,9 +179,7 @@ class ProviderControllerOrderRouteTests(unittest.TestCase):
         )
 
     def test_reorder_providers_route_returns_bad_request_for_validation_error(self) -> None:
-        self.provider_service.raise_error = ValueError(
-            "Provider order must include every provider exactly once"
-        )
+        self.provider_service.raise_error = ValueError("Provider order must include every provider exactly once")
 
         response = self.client.put(
             "/api/providers/order",

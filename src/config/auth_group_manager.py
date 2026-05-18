@@ -14,8 +14,8 @@ from ..hooks import HookErrorType
 from ..repositories import AuthGroupRepository
 from ..utils.local_time import format_local_datetime, now_local_datetime, parse_local_datetime
 from .provider_config import (
-    AuthGroupSchema,
     AuthEntrySchema,
+    AuthGroupSchema,
 )
 
 
@@ -65,9 +65,7 @@ class AuthGroupManager:
         self._rotation_cursor_by_group.clear()
         # TODO: Remove this migration cleanup in a future release after all
         # deployments have aged out the hidden __legacy_provider__ auth groups.
-        runtime_rows, usage_rows = self._repository.purge_legacy_provider_runtime_state(
-            self._groups_by_name.keys()
-        )
+        runtime_rows, usage_rows = self._repository.purge_legacy_provider_runtime_state(self._groups_by_name.keys())
         if runtime_rows or usage_rows:
             self._logger.info(
                 "Purged legacy provider runtime state rows: runtime=%s usage=%s",
@@ -186,8 +184,7 @@ class AuthGroupManager:
             disabled = False
             disabled_reason = None
             cooldown_until = format_local_datetime(
-                now_local_datetime()
-                + timedelta(seconds=self._resolve_cooldown_seconds(group, entry, response_headers))
+                now_local_datetime() + timedelta(seconds=self._resolve_cooldown_seconds(group, entry, response_headers))
             )
             last_status_code = int(status_code)
             last_error_type = None
@@ -298,10 +295,7 @@ class AuthGroupManager:
         self._repository.reset_current_day_usage(group.name, entry.id, now)
 
     def list_explicit_auth_groups(self) -> tuple[AuthGroupSchema, ...]:
-        return tuple(
-            self._groups_by_name[name]
-            for name in sorted(self._groups_by_name)
-        )
+        return tuple(self._groups_by_name[name] for name in sorted(self._groups_by_name))
 
     def _build_group_summary(self, group: AuthGroupSchema) -> Dict[str, Any]:
         runtime = self.get_auth_group_runtime(group.name)

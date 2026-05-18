@@ -140,10 +140,7 @@ class ProxyTraceLogger:
     @classmethod
     def _normalize_trace_payload(cls, payload: Any) -> Any:
         if isinstance(payload, dict):
-            return {
-                str(key): cls._normalize_trace_payload(value)
-                for key, value in payload.items()
-            }
+            return {str(key): cls._normalize_trace_payload(value) for key, value in payload.items()}
         if isinstance(payload, (list, tuple)):
             return [cls._normalize_trace_payload(item) for item in payload]
         if isinstance(payload, bytes):

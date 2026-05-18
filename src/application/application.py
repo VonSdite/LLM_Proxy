@@ -10,7 +10,6 @@ from typing import Any, cast
 
 from flask import request
 
-from .app_context import AppContext, Logger
 from ..config import (
     ConfigManager,
     ProviderManager,
@@ -29,8 +28,8 @@ from ..presentation import (
 )
 from ..repositories import AuthGroupRepository, LogRepository, UserRepository
 from ..services import (
-    AuthGroupService,
     AuthenticationService,
+    AuthGroupService,
     CodexOAuthService,
     CodexProxyService,
     LogService,
@@ -43,6 +42,7 @@ from ..services import (
 )
 from ..utils import normalize_ip
 from ..utils.database import create_connection_factory
+from .app_context import AppContext, Logger
 
 
 class Application:
@@ -61,7 +61,7 @@ class Application:
         self._setup_controllers()
         self._setup_request_access_logging()
 
-        self._logger.info('Application initialized successfully')
+        self._logger.info("Application initialized successfully")
 
     def _setup_config(self) -> None:
         """初始化配置管理器。"""
@@ -76,16 +76,16 @@ class Application:
         level = getattr(logging, log_level.upper(), logging.INFO)
 
         formatter = logging.Formatter(
-            '%(asctime)s|%(name)s|%(filename)s:%(lineno)d|%(levelname)s|%(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
+            "%(asctime)s|%(name)s|%(filename)s:%(lineno)d|%(levelname)s|%(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-        logger = logging.getLogger('app')
+        logger = logging.getLogger("app")
         app_log_handler = RotatingFileHandler(
-            log_path / 'app.log',
+            log_path / "app.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=3,
-            encoding='utf-8',
+            encoding="utf-8",
         )
         app_log_handler.setFormatter(formatter)
         app_log_handler.setLevel(level)
@@ -95,27 +95,27 @@ class Application:
         console_handler.setFormatter(formatter)
         console_handler.setLevel(level)
 
-        access_logger = logging.getLogger('access')
+        access_logger = logging.getLogger("access")
         access_handler = RotatingFileHandler(
-            log_path / 'access.log',
+            log_path / "access.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=3,
-            encoding='utf-8',
+            encoding="utf-8",
         )
         access_handler.setFormatter(
             logging.Formatter(
-                '%(asctime)s|%(name)s|%(filename)s:%(lineno)d|%(levelname)s|%(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S',
+                "%(asctime)s|%(name)s|%(filename)s:%(lineno)d|%(levelname)s|%(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
         access_handler.setLevel(level)
 
-        trace_logger = logging.getLogger('llm_request_trace')
+        trace_logger = logging.getLogger("llm_request_trace")
         trace_handler = RotatingFileHandler(
-            log_path / 'llm_request_trace.log',
+            log_path / "llm_request_trace.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=3,
-            encoding='utf-8',
+            encoding="utf-8",
         )
         trace_handler.setFormatter(formatter)
         trace_handler.setLevel(level)
@@ -176,11 +176,7 @@ class Application:
             client_ip = normalize_ip(request.remote_addr) or "-"
             requested_url = request.url
             model = None
-            if (
-                self._should_read_access_log_model()
-                and (request.content_length or 0) > 0
-                and request.is_json
-            ):
+            if self._should_read_access_log_model() and (request.content_length or 0) > 0 and request.is_json:
                 payload = request.get_json(silent=True)
                 if isinstance(payload, dict):
                     model = payload.get("model")
@@ -301,7 +297,7 @@ class Application:
             auth_service,
         )
 
-        self._logger.info('All controllers initialized successfully')
+        self._logger.info("All controllers initialized successfully")
 
     def reload_providers(self) -> None:
         self._config_manager.reload()
@@ -330,14 +326,14 @@ class Application:
         from gevent.pywsgi import WSGIServer
 
         server = WSGIServer((host, port), self._flask_app)
-        self._logger.info('Starting LLM Proxy on %s:%s...', host, port)
+        self._logger.info("Starting LLM Proxy on %s:%s...", host, port)
         server.serve_forever()
 
     def reload_logging_settings(self) -> None:
         """按当前配置重新装配日志输出。"""
         self._setup_logging()
         self._logger.info(
-            'Logging settings reloaded: path=%s level=%s',
+            "Logging settings reloaded: path=%s level=%s",
             self._config_manager.get_log_path(),
             self._config_manager.get_log_level(),
         )

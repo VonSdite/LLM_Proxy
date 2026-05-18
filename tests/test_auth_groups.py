@@ -41,9 +41,7 @@ class FakeLogger:
 
 class AuthGroupConfigTests(unittest.TestCase):
     def test_provider_rejects_multiple_auth_bindings(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError, "either auth_group or api_key, not both"
-        ):
+        with self.assertRaisesRegex(ValueError, "either auth_group or api_key, not both"):
             ProviderConfigSchema.from_mapping(
                 {
                     "name": "demo",
@@ -226,9 +224,7 @@ class AuthGroupManagerTests(unittest.TestCase):
         )
 
         runtime = self.manager.get_auth_group_runtime("pool-a")
-        cooled_entry = next(
-            item for item in runtime["entries"] if item["id"] == "key-a"
-        )
+        cooled_entry = next(item for item in runtime["entries"] if item["id"] == "key-a")
         other_entry = next(item for item in runtime["entries"] if item["id"] == "key-b")
 
         self.assertEqual("cooldown", cooled_entry["status"])
@@ -263,9 +259,7 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.manager.finish(selection, status_code=401, error_message="bad key")
 
         runtime = self.manager.get_auth_group_runtime("pool-a")
-        disabled_entry = next(
-            item for item in runtime["entries"] if item["id"] == "key-a"
-        )
+        disabled_entry = next(item for item in runtime["entries"] if item["id"] == "key-a")
         self.assertEqual("disabled", disabled_entry["status"])
 
         next_selection = self.manager.acquire("pool-a")
@@ -274,26 +268,20 @@ class AuthGroupManagerTests(unittest.TestCase):
 
         self.manager.restore_entry("pool-a", "key-a")
         restored_runtime = self.manager.get_auth_group_runtime("pool-a")
-        restored_entry = next(
-            item for item in restored_runtime["entries"] if item["id"] == "key-a"
-        )
+        restored_entry = next(item for item in restored_runtime["entries"] if item["id"] == "key-a")
         self.assertEqual("available", restored_entry["status"])
 
     def test_manual_disable_and_enable_entry_updates_runtime_status(self) -> None:
         self.manager.set_entry_disabled("pool-a", "key-a", disabled=True)
         disabled_runtime = self.manager.get_auth_group_runtime("pool-a")
-        disabled_entry = next(
-            item for item in disabled_runtime["entries"] if item["id"] == "key-a"
-        )
+        disabled_entry = next(item for item in disabled_runtime["entries"] if item["id"] == "key-a")
 
         self.assertEqual("disabled", disabled_entry["status"])
         self.assertEqual("manual_disabled", disabled_entry["disabled_reason"])
 
         self.manager.set_entry_disabled("pool-a", "key-a", disabled=False)
         enabled_runtime = self.manager.get_auth_group_runtime("pool-a")
-        enabled_entry = next(
-            item for item in enabled_runtime["entries"] if item["id"] == "key-a"
-        )
+        enabled_entry = next(item for item in enabled_runtime["entries"] if item["id"] == "key-a")
 
         self.assertEqual("available", enabled_entry["status"])
         self.assertIsNone(enabled_entry["disabled_reason"])
@@ -312,9 +300,7 @@ class AuthGroupManagerTests(unittest.TestCase):
         )
 
         before_reset = self.manager.get_auth_group_runtime("pool-a")
-        before_entry = next(
-            item for item in before_reset["entries"] if item["id"] == "key-a"
-        )
+        before_entry = next(item for item in before_reset["entries"] if item["id"] == "key-a")
         self.assertEqual(1, before_entry["minute_request_count"])
         self.assertEqual(15, before_entry["minute_total_tokens"])
         self.assertEqual(1, before_entry["day_request_count"])
@@ -322,9 +308,7 @@ class AuthGroupManagerTests(unittest.TestCase):
 
         self.manager.reset_entry_minute_usage("pool-a", "key-a")
         after_reset = self.manager.get_auth_group_runtime("pool-a")
-        after_entry = next(
-            item for item in after_reset["entries"] if item["id"] == "key-a"
-        )
+        after_entry = next(item for item in after_reset["entries"] if item["id"] == "key-a")
 
         self.assertEqual(0, after_entry["minute_request_count"])
         self.assertEqual(0, after_entry["minute_total_tokens"])
@@ -343,9 +327,7 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.manager.set_entry_disabled("pool-a", "key-a", disabled=True)
 
         before_reset = self.manager.get_auth_group_runtime("pool-a")
-        before_entry = next(
-            item for item in before_reset["entries"] if item["id"] == "key-a"
-        )
+        before_entry = next(item for item in before_reset["entries"] if item["id"] == "key-a")
         self.assertEqual("disabled", before_entry["status"])
         self.assertEqual("manual_disabled", before_entry["disabled_reason"])
         self.assertIsNotNone(before_entry["cooldown_until"])
@@ -357,9 +339,7 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.manager.reset_entry_runtime("pool-a", "key-a")
 
         after_reset = self.manager.get_auth_group_runtime("pool-a")
-        after_entry = next(
-            item for item in after_reset["entries"] if item["id"] == "key-a"
-        )
+        after_entry = next(item for item in after_reset["entries"] if item["id"] == "key-a")
         self.assertEqual("available", after_entry["status"])
         self.assertFalse(after_entry["disabled"])
         self.assertIsNone(after_entry["disabled_reason"])
@@ -395,9 +375,7 @@ class AuthGroupServiceTests(unittest.TestCase):
             self.reload_count += 1
             self.config_manager.reload()
             raw = self.config_manager.get_raw_config()
-            self.manager.load_auth_groups(
-                build_auth_group_schemas(raw.get("auth_groups", []) or [])
-            )
+            self.manager.load_auth_groups(build_auth_group_schemas(raw.get("auth_groups", []) or []))
 
         self.reload_callback = reload_callback
         self.service = AuthGroupService(self.ctx, self.reload_callback, self.manager)
@@ -537,9 +515,7 @@ entries:
                     {
                         "name": "pool-a",
                         "strategy": "least_inflight",
-                        "entries": [
-                            {"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}
-                        ],
+                        "entries": [{"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}],
                     }
                 ],
                 "providers": [
@@ -559,9 +535,7 @@ entries:
             {
                 "name": "pool-b",
                 "strategy": "least_inflight",
-                "entries": [
-                    {"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}
-                ],
+                "entries": [{"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}],
             },
         )
 
@@ -576,9 +550,7 @@ entries:
                     {
                         "name": "pool-a",
                         "strategy": "least_inflight",
-                        "entries": [
-                            {"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}
-                        ],
+                        "entries": [{"id": "key-a", "headers": {"Authorization": "Bearer sk-a"}}],
                     }
                 ],
                 "providers": [

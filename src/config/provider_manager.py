@@ -46,10 +46,7 @@ class ProviderManager:
 
     def list_provider_views(self) -> tuple[ProviderRuntimeView, ...]:
         """返回所有 provider 的只读运行时视图。"""
-        return tuple(
-            self._provider_views_by_name[name]
-            for name in sorted(self._provider_views_by_name.keys())
-        )
+        return tuple(self._provider_views_by_name[name] for name in sorted(self._provider_views_by_name.keys()))
 
     def has_model(self, model_name: str) -> bool:
         """判断模型 key 是否已注册。"""

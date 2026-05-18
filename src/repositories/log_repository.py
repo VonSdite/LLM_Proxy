@@ -67,12 +67,8 @@ class LogRepository:
                 )
                 """
             )
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_start_time ON request_logs(start_time)"
-            )
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ip_address ON request_logs(ip_address)"
-            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_start_time ON request_logs(start_time)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_address ON request_logs(ip_address)")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS daily_request_stats (
@@ -91,12 +87,8 @@ class LogRepository:
                 )
                 """
             )
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_request_stats(stat_date)"
-            )
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_daily_stats_ip ON daily_request_stats(ip_address)"
-            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_request_stats(stat_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_ip ON daily_request_stats(ip_address)")
 
     def insert(
         self,
@@ -256,9 +248,7 @@ class LogRepository:
                 conditions.append("d.stat_date <= ?")
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
-            self._append_text_filter(
-                conditions, params, "d.request_model", request_model
-            )
+            self._append_text_filter(conditions, params, "d.request_model", request_model)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             order_clause = self._build_order_clause(
@@ -313,9 +303,7 @@ class LogRepository:
                 conditions.append('l.start_time < DATE(?, "+1 day")')
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
-            self._append_text_filter(
-                conditions, params, "l.request_model", request_model
-            )
+            self._append_text_filter(conditions, params, "l.request_model", request_model)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
 

@@ -78,11 +78,7 @@ def _append_vary_header(response: Response, header_name: str) -> None:
         response.headers["Vary"] = header_name
         return
 
-    existing_names = {
-        item.strip().lower()
-        for item in current_value.split(",")
-        if item.strip()
-    }
+    existing_names = {item.strip().lower() for item in current_value.split(",") if item.strip()}
     if header_name.lower() in existing_names:
         return
 

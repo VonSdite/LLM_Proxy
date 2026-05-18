@@ -104,5 +104,5 @@ def _resolve_guarded_upstream_model(
 
     provider_prefix = f"{provider_name}/"
     if normalized_guarded_model.startswith(provider_prefix):
-        return normalized_guarded_model[len(provider_prefix):]
+        return normalized_guarded_model[len(provider_prefix) :]
     return normalized_guarded_model

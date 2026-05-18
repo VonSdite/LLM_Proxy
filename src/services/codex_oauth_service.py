@@ -23,7 +23,6 @@ from ..application.app_context import AppContext
 from ..utils.net import build_requests_proxies
 from ..utils.proxy_warning import ProxyWarningRequired, request_with_proxy_warning_retry
 
-
 CODEX_AUTH_URL = "https://auth.openai.com/oauth/authorize"
 CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -222,9 +221,7 @@ class CodexOAuthService:
         """删除一个本地 Codex 模型 ID。"""
         normalized_model_id = self._normalize_model_id(model_id)
         model_ids = [
-            current_model_id
-            for current_model_id in self._load_model_ids()
-            if current_model_id != normalized_model_id
+            current_model_id for current_model_id in self._load_model_ids() if current_model_id != normalized_model_id
         ]
         self._write_model_ids(model_ids)
         return self.list_models()
@@ -381,9 +378,7 @@ class CodexOAuthService:
                 "refreshed": refreshed,
                 "refreshed_at": self._now_iso(),
                 "plan_type": self._normalize_text(
-                    usage_payload.get("plan_type")
-                    or usage_payload.get("planType")
-                    or payload.get("plan_type")
+                    usage_payload.get("plan_type") or usage_payload.get("planType") or payload.get("plan_type")
                 ),
                 "windows": self._build_quota_windows(usage_payload),
                 "raw": usage_payload,
@@ -454,9 +449,7 @@ class CodexOAuthService:
         if not self._auth_dir.exists():
             return []
         paths = [
-            path
-            for path in self._auth_dir.glob("*.json")
-            if path.name != self._models_file.name and path.is_file()
+            path for path in self._auth_dir.glob("*.json") if path.name != self._models_file.name and path.is_file()
         ]
         return sorted(paths, key=lambda item: item.stat().st_mtime, reverse=True)
 
@@ -718,8 +711,7 @@ class CodexOAuthService:
         codex_windows = [
             window
             for window in windows
-            if isinstance(window, dict)
-            and str(window.get("label") or "").strip().lower().startswith("codex")
+            if isinstance(window, dict) and str(window.get("label") or "").strip().lower().startswith("codex")
         ]
         if not codex_windows:
             return False
@@ -743,18 +735,15 @@ class CodexOAuthService:
                 continue
             remaining_percent = CodexOAuthService._parse_float(window.get("remaining_percent"))
             used_percent = CodexOAuthService._parse_float(window.get("used_percent"))
-            if (
-                (remaining_percent is not None and remaining_percent <= 0)
-                or (used_percent is not None and used_percent >= 100)
+            if (remaining_percent is not None and remaining_percent <= 0) or (
+                used_percent is not None and used_percent >= 100
             ):
                 return None
         return None
 
     def _purge_quota_cooldowns(self) -> None:
         now = time.time()
-        expired_names = [
-            name for name, expires_at in self._quota_cooldowns.items() if expires_at <= now
-        ]
+        expired_names = [name for name, expires_at in self._quota_cooldowns.items() if expires_at <= now]
         for name in expired_names:
             self._quota_cooldowns.pop(name, None)
 
@@ -938,7 +927,9 @@ class CodexOAuthService:
         refresh_token = str(payload.get("refresh_token") or "").strip()
         usage_error_type = str(file_state.get("usage_error_type") or "").strip()
         if usage_error_type == "token_refresh_failed":
-            return self._availability("auth_failed", "认证失败：access_token 过期后使用 refresh_token 刷新失败，请重新登录")
+            return self._availability(
+                "auth_failed", "认证失败：access_token 过期后使用 refresh_token 刷新失败，请重新登录"
+            )
 
         if not access_token:
             return self._availability("auth_failed", "认证失败：认证文件缺少 access_token，请重新登录")
@@ -963,8 +954,13 @@ class CodexOAuthService:
 
         if self._is_auth_payload_expired(payload):
             if refresh_token:
-                return self._availability("refresh_required", "待刷新：access_token 已过期，请求前会使用 refresh_token 自动刷新")
-            return self._availability("auth_check_required", "待验证：access_token 已过期且缺少 refresh_token，会先用当前 access_token 请求一次")
+                return self._availability(
+                    "refresh_required", "待刷新：access_token 已过期，请求前会使用 refresh_token 自动刷新"
+                )
+            return self._availability(
+                "auth_check_required",
+                "待验证：access_token 已过期且缺少 refresh_token，会先用当前 access_token 请求一次",
+            )
 
         usage_status = str(file_state.get("usage_status") or "").strip()
         if usage_status == "success":
@@ -1026,9 +1022,7 @@ class CodexOAuthService:
     @staticmethod
     def _normalize_plan_type_for_filename(plan_type: str) -> str:
         parts = [
-            part.strip().lower()
-            for part in re.split(r"[^A-Za-z0-9]+", str(plan_type or "").strip())
-            if part.strip()
+            part.strip().lower() for part in re.split(r"[^A-Za-z0-9]+", str(plan_type or "").strip()) if part.strip()
         ]
         return "-".join(parts)
 
@@ -1109,9 +1103,7 @@ class CodexOAuthService:
 
     def _purge_expired_sessions(self) -> None:
         now = time.time()
-        expired_states = [
-            state for state, session in self._sessions.items() if session.expires_at <= now
-        ]
+        expired_states = [state for state, session in self._sessions.items() if session.expires_at <= now]
         for state in expired_states:
             self._sessions.pop(state, None)
 

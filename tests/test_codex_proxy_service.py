@@ -220,9 +220,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual("web_search", body["tool_choice"]["tools"][0]["type"])
         self.assertEqual("web_search", body["tool_choice"]["tools"][1]["type"])
 
-        direct_choice_body: dict[str, Any] = {
-            "tool_choice": {"type": "web_search_preview_2025_03_11"}
-        }
+        direct_choice_body: dict[str, Any] = {"tool_choice": {"type": "web_search_preview_2025_03_11"}}
         CodexProxyService._apply_codex_body_defaults(direct_choice_body, "gpt-5.4")
         self.assertEqual("web_search", direct_choice_body["tool_choice"]["type"])
 
@@ -284,10 +282,7 @@ class CodexProxyServiceTests(unittest.TestCase):
             self.assertEqual(200, status_code)
             self.assertIsNotNone(response)
             payload = json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
-            auth_entries = {
-                entry["name"]: entry
-                for entry in oauth_service.list_auth_files()["files"]
-            }
+            auth_entries = {entry["name"]: entry for entry in oauth_service.list_auth_files()["files"]}
 
         self.assertEqual(
             ["Bearer access-first", "Bearer access-second"],
@@ -350,10 +345,7 @@ class CodexProxyServiceTests(unittest.TestCase):
             self.assertEqual(200, status_code)
             self.assertIsNotNone(response)
             payload = json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
-            auth_entries = {
-                entry["name"]: entry
-                for entry in oauth_service.list_auth_files()["files"]
-            }
+            auth_entries = {entry["name"]: entry for entry in oauth_service.list_auth_files()["files"]}
 
         self.assertEqual(
             ["Bearer access-first", "Bearer access-second"],
@@ -365,9 +357,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertTrue(all(body["parallel_tool_calls"] is True for body in captured_bodies))
         self.assertTrue(all(headers["Version"] == CODEX_CLIENT_VERSION for headers in captured_headers))
         self.assertTrue(all("codex_cli_rs/0.124.0" in headers["User-Agent"] for headers in captured_headers))
-        self.assertTrue(
-            all(body["include"] == ["reasoning.encrypted_content"] for body in captured_bodies)
-        )
+        self.assertTrue(all(body["include"] == ["reasoning.encrypted_content"] for body in captured_bodies))
         self.assertTrue(all("max_output_tokens" not in body for body in captured_bodies))
         self.assertTrue(all("temperature" not in body for body in captured_bodies))
         self.assertTrue(all("top_p" not in body for body in captured_bodies))
@@ -393,10 +383,7 @@ class CodexProxyServiceTests(unittest.TestCase):
             oauth_service = CodexOAuthService(ctx)
             oauth_service.add_model("gpt-5.4")
             proxy_service = CodexProxyService(ctx, oauth_service)
-            confirmation_url = (
-                "http://114.114.114.114:9421/proxycontrolwarn/"
-                "httpwarning_3355.html?ori_url=demo"
-            )
+            confirmation_url = "http://114.114.114.114:9421/proxycontrolwarn/httpwarning_3355.html?ori_url=demo"
             captured_authorizations: list[str] = []
             fake_session = FakeSession(
                 [
@@ -509,11 +496,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual(["Bearer access-first", "Bearer access-first"], captured_authorizations)
         self.assertEqual(2, len(fake_session.get_calls))
         self.assertEqual(confirmation_url, fake_session.get_calls[0][0])
-        self.assertTrue(
-            fake_session.get_calls[1][0].startswith(
-                "http://114.114.114.114:9421/proxycontrolwarn/check?"
-            )
-        )
+        self.assertTrue(fake_session.get_calls[1][0].startswith("http://114.114.114.114:9421/proxycontrolwarn/check?"))
         self.assertFalse(fake_session.get_calls[0][1]["allow_redirects"])
         self.assertFalse(fake_session.get_calls[1][1]["allow_redirects"])
 
@@ -560,10 +543,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                     )
                 next_candidates = oauth_service.iter_auth_candidates_for_model("gpt-5.4")
                 quota_mock.assert_not_called()
-            auth_entries = {
-                entry["name"]: entry
-                for entry in oauth_service.list_auth_files()["files"]
-            }
+            auth_entries = {entry["name"]: entry for entry in oauth_service.list_auth_files()["files"]}
 
         self.assertIsNone(failure)
         self.assertEqual(200, status_code)
