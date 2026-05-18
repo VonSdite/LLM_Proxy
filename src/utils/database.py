@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, ContextManager, Iterator
 
-
 ConnectionFactory = Callable[[], ContextManager[sqlite3.Connection]]
 
 

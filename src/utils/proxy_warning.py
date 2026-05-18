@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 
 import requests
 
-
 PROXY_WARNING_CONFIRM_TIMEOUT_SECONDS = 20
 PROXY_WARNING_ERROR_CODE = "proxy_warning_required"
 PROXY_WARNING_STATUS_CODE = 511

@@ -37,7 +37,6 @@ from .codex_oauth_service import (
 from .proxy_response_builder import ProxyResponseBuilder
 from .proxy_service import ProxyErrorInfo
 
-
 CODEX_BACKEND_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 # 当前 Codex 模型目录中 gpt-5.5 要求客户端版本不低于 0.124.0。
 CODEX_CLIENT_VERSION = "0.124.0"
@@ -82,27 +81,39 @@ class CodexProxyService:
         model_name = str(request_data.get("model") or "").strip()
         target_format = str(resolved_target_format or "").strip().lower()
         if not model_name:
-            return None, 400, ProxyErrorInfo(
-                message="Missing 'model' in request body",
-                status_code=400,
-                error_type="invalid_request_error",
-                error_code="missing_model",
+            return (
+                None,
+                400,
+                ProxyErrorInfo(
+                    message="Missing 'model' in request body",
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="missing_model",
+                ),
             )
         if not target_format:
-            return None, 400, ProxyErrorInfo(
-                message="Missing downstream target format",
-                status_code=400,
-                error_type="invalid_request_error",
-                error_code="missing_target_format",
+            return (
+                None,
+                400,
+                ProxyErrorInfo(
+                    message="Missing downstream target format",
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="missing_target_format",
+                ),
             )
 
         candidates = self._codex_oauth_service.iter_auth_candidates_for_model(model_name)
         if not candidates:
-            return None, 503, ProxyErrorInfo(
-                message=f"No available Codex OAuth account for model: {model_name}",
-                status_code=503,
-                error_type="upstream_error",
-                error_code="codex_auth_unavailable",
+            return (
+                None,
+                503,
+                ProxyErrorInfo(
+                    message=f"No available Codex OAuth account for model: {model_name}",
+                    status_code=503,
+                    error_type="upstream_error",
+                    error_code="codex_auth_unavailable",
+                ),
             )
 
         last_failure: Optional[ProxyErrorInfo] = None
@@ -189,8 +200,12 @@ class CodexProxyService:
                 exc.confirmation_url,
                 exc.auto_confirm_error or "",
             )
-            return None, CODEX_PROXY_WARNING_STATUS_CODE, self._build_proxy_warning_error(
-                exc,
+            return (
+                None,
+                CODEX_PROXY_WARNING_STATUS_CODE,
+                self._build_proxy_warning_error(
+                    exc,
+                ),
             )
         except requests.exceptions.RequestException as exc:
             self._logger.error(
@@ -205,11 +220,15 @@ class CodexProxyService:
                 status_code=502,
                 error_type="upstream_request_failed",
             )
-            return None, 502, ProxyErrorInfo(
-                message=f"HTTP upstream request failed after 1 attempts: {exc}",
-                status_code=502,
-                error_type="upstream_error",
-                error_code="upstream_request_failed",
+            return (
+                None,
+                502,
+                ProxyErrorInfo(
+                    message=f"HTTP upstream request failed after 1 attempts: {exc}",
+                    status_code=502,
+                    error_type="upstream_error",
+                    error_code="upstream_request_failed",
+                ),
             )
 
         if 300 <= upstream_response.status_code < 400:
@@ -218,15 +237,19 @@ class CodexProxyService:
             message = f"Codex upstream returned redirect {upstream_response.status_code}"
             if location:
                 message = f"{message}: {location}"
-            return None, 502, ProxyErrorInfo(
-                message=message,
-                status_code=502,
-                error_type="upstream_error",
-                error_code=CODEX_UPSTREAM_REDIRECT_ERROR_CODE,
-                details={
-                    "redirect_url": location,
-                    "upstream_status": upstream_response.status_code,
-                },
+            return (
+                None,
+                502,
+                ProxyErrorInfo(
+                    message=message,
+                    status_code=502,
+                    error_type="upstream_error",
+                    error_code=CODEX_UPSTREAM_REDIRECT_ERROR_CODE,
+                    details={
+                        "redirect_url": location,
+                        "upstream_status": upstream_response.status_code,
+                    },
+                ),
             )
 
         if upstream_response.status_code >= 400:
@@ -253,11 +276,15 @@ class CodexProxyService:
                     model_name,
                     candidate.name,
                 )
-                return None, 429, ProxyErrorInfo(
-                    message="Codex OAuth account quota exhausted",
-                    status_code=429,
-                    error_type="upstream_error",
-                    error_code="codex_quota_exhausted",
+                return (
+                    None,
+                    429,
+                    ProxyErrorInfo(
+                        message="Codex OAuth account quota exhausted",
+                        status_code=429,
+                        error_type="upstream_error",
+                        error_code="codex_quota_exhausted",
+                    ),
                 )
             self._codex_oauth_service.record_auth_file_failure(
                 candidate.name,
@@ -265,11 +292,15 @@ class CodexProxyService:
                 status_code=upstream_response.status_code,
                 error_type=error_type,
             )
-            return None, upstream_response.status_code, ProxyErrorInfo(
-                message=error_message,
-                status_code=upstream_response.status_code,
-                error_type="upstream_error",
-                error_code=error_type or "codex_upstream_error",
+            return (
+                None,
+                upstream_response.status_code,
+                ProxyErrorInfo(
+                    message=error_message,
+                    status_code=upstream_response.status_code,
+                    error_type="upstream_error",
+                    error_code=error_type or "codex_upstream_error",
+                ),
             )
 
         if bool(request_data.get("stream", False)):
@@ -542,11 +573,15 @@ class CodexProxyService:
                     status_code=502,
                     error_type="codex_stream_incomplete",
                 )
-                return None, 502, ProxyErrorInfo(
-                    message=error_message,
-                    status_code=502,
-                    error_type="upstream_error",
-                    error_code="codex_stream_incomplete",
+                return (
+                    None,
+                    502,
+                    ProxyErrorInfo(
+                        message=error_message,
+                        status_code=502,
+                        error_type="upstream_error",
+                        error_code="codex_stream_incomplete",
+                    ),
                 )
 
             payload_for_translation: Any = completed_payload

@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from flask import Flask
 import yaml
+from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -449,9 +449,7 @@ class ProviderServiceTests(unittest.TestCase):
             ]
         )
 
-        result = self.service.reorder_providers(
-            ["enabled-b", "enabled-a", "disabled-a"]
-        )
+        result = self.service.reorder_providers(["enabled-b", "enabled-a", "disabled-a"])
 
         self.assertEqual(3, result["count"])
         self.assertEqual(
@@ -483,9 +481,7 @@ class ProviderServiceTests(unittest.TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(
-            ValueError, "Provider order must include every provider exactly once"
-        ):
+        with self.assertRaisesRegex(ValueError, "Provider order must include every provider exactly once"):
             self.service.reorder_providers(["enabled-a"])
 
     def test_reorder_providers_rejects_duplicate_name(self) -> None:
@@ -507,9 +503,7 @@ class ProviderServiceTests(unittest.TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(
-            ValueError, "Duplicate provider name in order list: enabled-a"
-        ):
+        with self.assertRaisesRegex(ValueError, "Duplicate provider name in order list: enabled-a"):
             self.service.reorder_providers(["enabled-a", "enabled-a"])
 
     def test_reorder_providers_rejects_unknown_name(self) -> None:
@@ -531,9 +525,7 @@ class ProviderServiceTests(unittest.TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(
-            ValueError, "Provider order must include every provider exactly once"
-        ):
+        with self.assertRaisesRegex(ValueError, "Provider order must include every provider exactly once"):
             self.service.reorder_providers(["enabled-a", "unknown-provider"])
 
     def test_reorder_providers_rejects_disabled_provider_before_enabled_provider(self) -> None:
@@ -555,9 +547,7 @@ class ProviderServiceTests(unittest.TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(
-            ValueError, "Enabled providers must appear before disabled providers"
-        ):
+        with self.assertRaisesRegex(ValueError, "Enabled providers must appear before disabled providers"):
             self.service.reorder_providers(["disabled-a", "enabled-a"])
 
     def test_batch_delete_providers_removes_selected_entries(self) -> None:

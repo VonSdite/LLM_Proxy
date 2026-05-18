@@ -47,8 +47,7 @@ class FakeSession:
 class ProxyWarningTests(unittest.TestCase):
     def test_request_with_proxy_warning_retry_confirms_and_retries_once(self) -> None:
         confirmation_url = (
-            "http://114.114.114.114:9421/proxycontrolwarn/"
-            "httpwarning_3355.html?ori_url=aHR0cHM6Ly9jaGF0Z3B0LmNvbS8="
+            "http://114.114.114.114:9421/proxycontrolwarn/httpwarning_3355.html?ori_url=aHR0cHM6Ly9jaGF0Z3B0LmNvbS8="
         )
         warning_response = FakeResponse(
             status_code=302,
@@ -85,18 +84,13 @@ class ProxyWarningTests(unittest.TestCase):
         self.assertEqual(2, len(confirm_session.get_calls))
         self.assertEqual(confirmation_url, confirm_session.get_calls[0][0])
         self.assertTrue(
-            confirm_session.get_calls[1][0].startswith(
-                "http://114.114.114.114:9421/proxycontrolwarn/check?"
-            )
+            confirm_session.get_calls[1][0].startswith("http://114.114.114.114:9421/proxycontrolwarn/check?")
         )
         self.assertFalse(confirm_session.get_calls[0][1]["allow_redirects"])
         self.assertFalse(confirm_session.get_calls[1][1]["allow_redirects"])
 
     def test_request_with_proxy_warning_retry_raises_details_on_confirm_failure(self) -> None:
-        confirmation_url = (
-            "http://114.114.114.114:9421/proxycontrolwarn/"
-            "httpwarning_3355.html?ori_url=demo"
-        )
+        confirmation_url = "http://114.114.114.114:9421/proxycontrolwarn/httpwarning_3355.html?ori_url=demo"
         confirm_session = FakeSession(
             [
                 FakeResponse(status_code=200, text="<html></html>"),

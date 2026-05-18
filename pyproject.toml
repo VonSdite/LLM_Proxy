@@ -11,3 +11,27 @@ dependencies = [
     "requests>=2.33.1",
     "urllib3>=2.6.3",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["src", "tests", "hooks"]
+extend-exclude = [
+    "src/presentation/static/vendor",
+]
+
+[tool.ruff.lint]
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
+]
+fixable = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = false

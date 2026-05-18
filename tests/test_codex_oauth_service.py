@@ -120,9 +120,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = self._build_service(Path(tmp_dir))
             session = service.start_login()
-            callback_url = (
-                f"{CODEX_REDIRECT_URI}?code=demo-code&state={session['state']}"
-            )
+            callback_url = f"{CODEX_REDIRECT_URI}?code=demo-code&state={session['state']}"
             captured: dict[str, Any] = {}
 
             def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):

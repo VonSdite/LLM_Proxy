@@ -306,7 +306,8 @@ def finalize_claude_stream(
             {
                 "type": "message_delta",
                 "delta": {
-                    "stop_reason": state.get("finish_reason") or ("tool_use" if state.get("saw_tool_call") else "end_turn"),
+                    "stop_reason": state.get("finish_reason")
+                    or ("tool_use" if state.get("saw_tool_call") else "end_turn"),
                     "stop_sequence": None,
                 },
                 "usage": {
@@ -391,7 +392,9 @@ def _convert_claude_system_to_openai(system: Any) -> Dict[str, Any] | None:
     return {"role": "system", "content": _compact_openai_content(content_items)}
 
 
-def _convert_claude_blocks_to_openai_parts(content: Any, role: str) -> Tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _convert_claude_blocks_to_openai_parts(
+    content: Any, role: str
+) -> Tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
     if isinstance(content, str):
         return ([{"type": "text", "text": content}] if content else []), [], [], []
     if not isinstance(content, list):
@@ -471,7 +474,9 @@ def _compact_openai_content(content_items: List[Dict[str, Any]]) -> Any:
     return content_items
 
 
-def _ensure_message_started(model_name: str, translated_request: Dict[str, Any], state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _ensure_message_started(
+    model_name: str, translated_request: Dict[str, Any], state: Dict[str, Any]
+) -> list[DownstreamChunk]:
     if state.get("started"):
         return []
 
@@ -700,6 +705,8 @@ def _coerce_tool_input(arguments: Any) -> Dict[str, Any]:
             return parsed
         return {"value": parsed}
     return {}
+
+
 def _budget_to_reasoning_effort(budget_tokens: Any) -> str:
     try:
         budget = int(budget_tokens)

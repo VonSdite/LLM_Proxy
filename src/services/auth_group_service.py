@@ -189,10 +189,7 @@ class AuthGroupService:
         return normalized_entries
 
     def _build_auth_group_summary_map(self) -> Dict[str, Dict[str, Any]]:
-        return {
-            item["name"]: item
-            for item in self._auth_group_manager.list_auth_group_summaries()
-        }
+        return {item["name"]: item for item in self._auth_group_manager.list_auth_group_summaries()}
 
     def _get_auth_group_entries(self, name: str) -> tuple[str, list[Any]]:
         auth_group = self.get_auth_group(name)
@@ -242,10 +239,7 @@ class AuthGroupService:
 
     @staticmethod
     def _build_auth_group_indexes_by_name(auth_groups: List[Dict[str, Any]]) -> Dict[str, int]:
-        return {
-            str(auth_group.get("name", "")).strip(): index
-            for index, auth_group in enumerate(auth_groups)
-        }
+        return {str(auth_group.get("name", "")).strip(): index for index, auth_group in enumerate(auth_groups)}
 
     @staticmethod
     def _count_providers_by_auth_group(providers: List[Dict[str, Any]]) -> Dict[str, int]:

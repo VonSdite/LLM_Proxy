@@ -7,7 +7,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-
 LOCAL_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 LEGACY_LOCAL_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOCAL_DATE_FORMAT = "%Y-%m-%d"

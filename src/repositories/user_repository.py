@@ -47,14 +47,9 @@ class UserRepository:
                 )
                 """
             )
-            columns = {
-                str(row["name"]).strip()
-                for row in cursor.execute("PRAGMA table_info(users)").fetchall()
-            }
+            columns = {str(row["name"]).strip() for row in cursor.execute("PRAGMA table_info(users)").fetchall()}
             if "model_permissions" not in columns:
-                cursor.execute(
-                    "ALTER TABLE users ADD COLUMN model_permissions TEXT NOT NULL DEFAULT '*'"
-                )
+                cursor.execute("ALTER TABLE users ADD COLUMN model_permissions TEXT NOT NULL DEFAULT '*'")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_ip ON users(ip_address)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
 

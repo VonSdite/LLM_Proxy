@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Mapping, Optional
 import requests
 
 from ..application.app_context import AppContext
-from ..config.provider_config import ProviderConfigSchema, SUPPORTED_PROVIDER_FIELDS
+from ..config.provider_config import SUPPORTED_PROVIDER_FIELDS, ProviderConfigSchema
 from ..config.provider_runtime_factory import ProviderRuntimeFactory
 from ..executors import OpenedUpstreamResponse, build_default_executor_registry
 from ..hooks import HookContext, HookErrorType
@@ -72,11 +72,7 @@ class ProviderModelTestService:
         return normalize_http_headers(request_headers)
 
     def _build_provider(self, payload: Dict[str, Any], models: List[str]):
-        provider_payload = {
-            str(key): value
-            for key, value in payload.items()
-            if str(key) in SUPPORTED_PROVIDER_FIELDS
-        }
+        provider_payload = {str(key): value for key, value in payload.items() if str(key) in SUPPORTED_PROVIDER_FIELDS}
         provider_payload["name"] = str(provider_payload.get("name") or "").strip() or self._TEST_PROVIDER_NAME
         provider_payload["model_list"] = list(models)
         provider_config = ProviderConfigSchema.from_payload(provider_payload)
@@ -162,7 +158,9 @@ class ProviderModelTestService:
                 if attempt + 1 < max_retries:
                     continue
             except Exception as exc:
-                self._logger.error("Provider model test failed: provider=%s model=%s error=%s", provider.name, model_name, exc)
+                self._logger.error(
+                    "Provider model test failed: provider=%s model=%s error=%s", provider.name, model_name, exc
+                )
                 return self._build_failure_result(
                     model_name=model_name,
                     response_model=None,

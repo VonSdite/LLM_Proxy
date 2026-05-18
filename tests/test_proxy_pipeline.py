@@ -50,9 +50,7 @@ class FakeConfigManager:
 
 
 class FakeStreamResponse:
-    def __init__(
-        self, chunks, *, content_type: str = "text/event-stream", status_code: int = 200
-    ):
+    def __init__(self, chunks, *, content_type: str = "text/event-stream", status_code: int = 200):
         self._chunks = list(chunks)
         self.headers = {"Content-Type": content_type}
         self.status_code = status_code
@@ -238,9 +236,7 @@ class TranslatorTests(unittest.TestCase):
 
         self.assertEqual("response", translated["object"])
         self.assertEqual("completed", translated["status"])
-        self.assertEqual(
-            "Hello from chat", translated["output"][0]["content"][0]["text"]
-        )
+        self.assertEqual("Hello from chat", translated["output"][0]["content"][0]["text"])
         self.assertEqual(
             {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
             translated["usage"],
@@ -307,17 +303,13 @@ class TranslatorRegistryTests(unittest.TestCase):
     def test_default_registry_rejects_removed_gemini_pairs(self) -> None:
         registry = build_default_translator_registry()
 
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported translator pair: gemini_chat -> openai_chat"
-        ):
+        with self.assertRaisesRegex(ValueError, "Unsupported translator pair: gemini_chat -> openai_chat"):
             registry.get("gemini_chat", "openai_chat")
 
     def test_default_registry_rejects_removed_codex_pairs(self) -> None:
         registry = build_default_translator_registry()
 
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported translator pair: codex -> openai_responses"
-        ):
+        with self.assertRaisesRegex(ValueError, "Unsupported translator pair: codex -> openai_responses"):
             registry.get("codex", "openai_responses")
 
 
@@ -327,18 +319,13 @@ class ProxyServicePipelineTests(unittest.TestCase):
         assert response is not None
         chunks = response.response
         assert chunks is not None
-        return b"".join(
-            chunk if isinstance(chunk, bytes) else chunk.encode("utf-8")
-            for chunk in chunks
-        )
+        return b"".join(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8") for chunk in chunks)
 
     def _build_service(self, *, llm_request_debug_enabled: bool = False):
         app = Flask(__name__)
         ctx = AppContext(
             logger=FakeLogger(),
-            config_manager=FakeConfigManager(
-                llm_request_debug_enabled=llm_request_debug_enabled
-            ),
+            config_manager=FakeConfigManager(llm_request_debug_enabled=llm_request_debug_enabled),
             root_path=Path(__file__).resolve().parents[1],
             flask_app=app,
         )
@@ -393,9 +380,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             stream_body = self._collect_response_body(response)
 
         headers = captured["headers"]
-        authorization_headers = [
-            key for key in headers if key.lower() == "authorization"
-        ]
+        authorization_headers = [key for key in headers if key.lower() == "authorization"]
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
         self.assertEqual(["authorization"], authorization_headers)
@@ -449,9 +434,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             self._collect_response_body(response)
 
         headers = captured["headers"]
-        authorization_headers = [
-            key for key in headers if key.lower() == "authorization"
-        ]
+        authorization_headers = [key for key in headers if key.lower() == "authorization"]
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
         self.assertEqual(["Authorization"], authorization_headers)
@@ -773,12 +756,8 @@ class ProxyServicePipelineTests(unittest.TestCase):
         coerce_calls: list[bytes] = []
 
         def record_trace_bytes(payload):
-            coerce_calls.append(
-                payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
-            )
-            return (
-                payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
-            )
+            coerce_calls.append(payload if isinstance(payload, bytes) else str(payload).encode("utf-8"))
+            return payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
 
         original_coerce_trace_bytes = ProxyService._coerce_trace_bytes
         service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
@@ -855,9 +834,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             )
             stream_body = self._collect_response_body(response)
 
-        upstream_trace = next(
-            entry for entry in trace_entries if entry["stage"] == "upstream_response"
-        )
+        upstream_trace = next(entry for entry in trace_entries if entry["stage"] == "upstream_response")
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
         self.assertIn(b"Hello", stream_body)

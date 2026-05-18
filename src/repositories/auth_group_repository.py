@@ -148,9 +148,7 @@ class AuthGroupRepository:
         active_auth_group_names: Iterable[str] = (),
     ) -> tuple[int, int]:
         normalized_active_names = {
-            str(name or "").strip()
-            for name in active_auth_group_names
-            if str(name or "").strip()
+            str(name or "").strip() for name in active_auth_group_names if str(name or "").strip()
         }
 
         with self._get_connection() as conn:
@@ -168,11 +166,7 @@ class AuthGroupRepository:
                 """
             ).fetchall()
 
-            target_group_names = [
-                str(row[0])
-                for row in rows
-                if str(row[0]) not in normalized_active_names
-            ]
+            target_group_names = [str(row[0]) for row in rows if str(row[0]) not in normalized_active_names]
             if not target_group_names:
                 return 0, 0
 
@@ -419,20 +413,13 @@ class AuthGroupRepository:
         entry_ids: Iterable[str],
         when: datetime,
     ) -> Dict[str, Dict[str, int]]:
-        normalized_entry_ids = [
-            str(entry_id).strip()
-            for entry_id in entry_ids
-            if str(entry_id).strip()
-        ]
+        normalized_entry_ids = [str(entry_id).strip() for entry_id in entry_ids if str(entry_id).strip()]
         if not normalized_entry_ids:
             return {}
 
         minute_bucket = self._minute_bucket_start(when)
         day_bucket = self._day_bucket_start(when)
-        usage_by_entry: Dict[str, Dict[str, int]] = {
-            entry_id: self._empty_usage()
-            for entry_id in normalized_entry_ids
-        }
+        usage_by_entry: Dict[str, Dict[str, int]] = {entry_id: self._empty_usage() for entry_id in normalized_entry_ids}
 
         placeholders = ", ".join("?" for _ in normalized_entry_ids)
         with self._get_connection() as conn:

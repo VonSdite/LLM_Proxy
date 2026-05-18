@@ -165,9 +165,7 @@ class UserService:
             return normalized
 
         resolved_available_models = tuple(
-            self._get_available_model_names()
-            if available_models is None
-            else available_models
+            self._get_available_model_names() if available_models is None else available_models
         )
         available_model_set = set(resolved_available_models)
         parsed_permissions = self._deserialize_model_permissions(normalized.get("model_permissions"))
@@ -241,10 +239,7 @@ class UserService:
             sort_direction=sort_direction,
             available_model_count=len(available_models),
         )
-        decorated_users = [
-            self._decorate_user(user, available_models=available_models)
-            for user in users
-        ]
+        decorated_users = [self._decorate_user(user, available_models=available_models) for user in users]
         return [user for user in decorated_users if user is not None]
 
     def get_users(
@@ -273,10 +268,7 @@ class UserService:
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
-            decorated_users = [
-                self._decorate_user(user, available_models=available_models)
-                for user in users
-            ]
+            decorated_users = [self._decorate_user(user, available_models=available_models) for user in users]
             return [user for user in decorated_users if user is not None]
         except Exception as exc:
             self._logger.error(f"Failed to get users: {exc}")
@@ -430,9 +422,7 @@ class UserService:
             return []
 
         resolved_available_models = list(
-            self._get_available_model_names()
-            if available_models is None
-            else available_models
+            self._get_available_model_names() if available_models is None else available_models
         )
         permissions = user.get("model_permissions")
         if permissions == self.MODEL_PERMISSIONS_ALL or user.get("model_permissions_mode") == "all":
@@ -465,8 +455,7 @@ class UserService:
 
         permissions = user.get("model_permissions")
         if (
-            permissions == self.MODEL_PERMISSIONS_ALL
-            or user.get("model_permissions_mode") == "all"
+            permissions == self.MODEL_PERMISSIONS_ALL or user.get("model_permissions_mode") == "all"
         ) and available_models is None:
             return True
 
@@ -486,9 +475,7 @@ class UserService:
                     expected_raw = self.MODEL_PERMISSIONS_ALL
                 else:
                     filtered_permissions = [
-                        model_name
-                        for model_name in parsed_permissions
-                        if model_name in available_models
+                        model_name for model_name in parsed_permissions if model_name in available_models
                     ]
                     expected_raw = json.dumps(filtered_permissions, ensure_ascii=True)
 

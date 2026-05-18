@@ -205,10 +205,9 @@ def normalize_provider_target_formats(value: Any, *, field_name: str = "target_f
         target_formats.append(resolved)
     return tuple(target_formats)
 
+
 def resolve_provider_target_formats(target_formats_value: Any) -> tuple[str, ...]:
-    resolved_target_formats = list(
-        normalize_provider_target_formats(target_formats_value, field_name="target_formats")
-    )
+    resolved_target_formats = list(normalize_provider_target_formats(target_formats_value, field_name="target_formats"))
     if not resolved_target_formats:
         resolved_target_formats = list(DEFAULT_PROVIDER_TARGET_FORMATS)
     return tuple(resolved_target_formats)
@@ -228,11 +227,7 @@ def _validate_supported_fields(
     supported_fields: set[str],
     field_group_name: str,
 ) -> None:
-    unknown_fields = sorted(
-        str(key)
-        for key in config.keys()
-        if str(key) not in supported_fields
-    )
+    unknown_fields = sorted(str(key) for key in config.keys() if str(key) not in supported_fields)
     if unknown_fields:
         raise ValueError(f"Unsupported {field_group_name} field(s): {', '.join(unknown_fields)}")
 
@@ -550,11 +545,7 @@ class RuntimeProviderSpec:
             proxy=config.proxy,
             timeout_seconds=config.timeout_seconds or DEFAULT_PROVIDER_TIMEOUT_SECONDS,
             max_retries=config.max_retries or DEFAULT_PROVIDER_MAX_RETRIES,
-            verify_ssl=(
-                config.verify_ssl
-                if config.verify_ssl is not None
-                else DEFAULT_PROVIDER_VERIFY_SSL
-            ),
+            verify_ssl=(config.verify_ssl if config.verify_ssl is not None else DEFAULT_PROVIDER_VERIFY_SSL),
             hook=config.hook,
         )
 
@@ -642,11 +633,7 @@ def build_provider_schemas(
         schema = ProviderConfigSchema.from_mapping(provider)
         if schema.name in seen_names:
             raise ValueError(f"Duplicate provider name detected: {schema.name}")
-        if (
-            schema.auth_group
-            and available_auth_group_names is not None
-            and schema.auth_group not in auth_group_names
-        ):
+        if schema.auth_group and available_auth_group_names is not None and schema.auth_group not in auth_group_names:
             raise ValueError(f"Provider references unknown auth_group: {schema.auth_group}")
         seen_names.add(schema.name)
 

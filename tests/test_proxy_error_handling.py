@@ -190,11 +190,15 @@ class FakeCodexProxyService:
         del args, kwargs
         if self._proxy_result is not None:
             return self._proxy_result
-        return None, 503, ProxyErrorInfo(
-            message="No available Codex OAuth account for model: gpt-5",
-            status_code=503,
-            error_type="upstream_error",
-            error_code="codex_auth_unavailable",
+        return (
+            None,
+            503,
+            ProxyErrorInfo(
+                message="No available Codex OAuth account for model: gpt-5",
+                status_code=503,
+                error_type="upstream_error",
+                error_code="codex_auth_unavailable",
+            ),
         )
 
 
@@ -368,9 +372,7 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
 
         self.assertEqual(403, response.status_code)
         self.assertEqual("model_not_allowed", response.get_json()["error"]["code"])
-        self.assertTrue(
-            any("is not allowed to access model=demo/gpt-4.1" in msg for msg in logger.messages("warning"))
-        )
+        self.assertTrue(any("is not allowed to access model=demo/gpt-4.1" in msg for msg in logger.messages("warning")))
 
     def test_chat_completions_returns_openai_style_error_payload_for_upstream_failures(self) -> None:
         provider = LLMProvider(
@@ -424,7 +426,10 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             response.get_json(),
         )
         self.assertTrue(
-            any("upstream_error=HTTP upstream request failed after 2 attempts: dial tcp timeout" in msg for msg in logger.messages("error"))
+            any(
+                "upstream_error=HTTP upstream request failed after 2 attempts: dial tcp timeout" in msg
+                for msg in logger.messages("error")
+            )
         )
 
     def test_codex_proxy_warning_error_includes_confirmation_url(self) -> None:
@@ -788,7 +793,10 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             },
             response.get_json(),
         )
-        self.assertTrue(any("upstream_error=Upstream Claude request failed: overloaded" in msg for msg in logger.messages("error")))
+        self.assertTrue(
+            any("upstream_error=Upstream Claude request failed: overloaded" in msg for msg in logger.messages("error"))
+        )
+
 
 class ProxyServiceErrorLoggingTests(unittest.TestCase):
     def test_proxy_service_logs_upstream_error_payload(self) -> None:

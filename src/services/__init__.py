@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """服务层导出。"""
 
-from .authentication_service import AuthenticationService
 from .auth_group_service import AuthGroupService
+from .authentication_service import AuthenticationService
 from .codex_oauth_service import CodexOAuthService
 from .codex_proxy_service import CodexProxyService
 from .log_service import LogService
@@ -15,15 +15,15 @@ from .settings_service import SettingsService
 from .user_service import UserService
 
 __all__ = [
-    'AuthenticationService',
-    'AuthGroupService',
-    'CodexOAuthService',
-    'CodexProxyService',
-    'UserService',
-    'LogService',
-    'ModelDiscoveryService',
-    'ProviderModelTestService',
-    'ProxyService',
-    'ProviderService',
-    'SettingsService',
+    "AuthenticationService",
+    "AuthGroupService",
+    "CodexOAuthService",
+    "CodexProxyService",
+    "UserService",
+    "LogService",
+    "ModelDiscoveryService",
+    "ProviderModelTestService",
+    "ProxyService",
+    "ProviderService",
+    "SettingsService",
 ]

@@ -36,7 +36,7 @@ class ModelDiscoveryService:
         verify_ssl: Optional[Any] = None,
     ) -> Dict[str, Any]:
         if not api or not str(api).strip():
-            raise ValueError('Provider api is required')
+            raise ValueError("Provider api is required")
 
         fetched_models = self._fetch_models_from_upstream(
             api=str(api).strip(),
@@ -48,8 +48,8 @@ class ModelDiscoveryService:
         )
 
         return {
-            'fetched_models': fetched_models,
-            'fetched_count': len(fetched_models),
+            "fetched_models": fetched_models,
+            "fetched_count": len(fetched_models),
         }
 
     def _fetch_models_from_upstream(
@@ -61,9 +61,9 @@ class ModelDiscoveryService:
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> List[str]:
-        headers = {'accept': 'application/json'}
+        headers = {"accept": "application/json"}
         if api_key:
-            headers['authorization'] = f'Bearer {api_key}'
+            headers["authorization"] = f"Bearer {api_key}"
         headers = merge_http_headers(headers, request_headers)
         proxies = build_requests_proxies(proxy)
 
@@ -92,71 +92,71 @@ class ModelDiscoveryService:
                         log_context=f"model_discovery_url={url}",
                     )
                     if response.status_code >= 400:
-                        last_error = f'{url} returned {response.status_code}'
+                        last_error = f"{url} returned {response.status_code}"
                         continue
 
                     payload = response.json()
                     models = self._extract_models_from_payload(payload)
                     if models:
                         self._logger.info(
-                            'Fetched %s models from provider endpoint: provider_api=%s endpoint=%s',
+                            "Fetched %s models from provider endpoint: provider_api=%s endpoint=%s",
                             len(models),
                             api,
                             url,
                         )
                         return models
-                    last_error = f'{url} returned no models'
+                    last_error = f"{url} returned no models"
                 except requests.RequestException as exc:
-                    last_error = f'{url} request failed: {exc}'
+                    last_error = f"{url} request failed: {exc}"
                 except ProxyWarningRequired as exc:
                     last_error = f"{url} requires proxy confirmation: {exc.confirmation_url}"
                 except ValueError as exc:
-                    last_error = f'{url} returned invalid json: {exc}'
+                    last_error = f"{url} returned invalid json: {exc}"
                 finally:
                     close_response(response)
 
-        raise ValueError(last_error or 'Failed to fetch models')
+        raise ValueError(last_error or "Failed to fetch models")
 
     @staticmethod
     def _build_model_endpoint_candidates(api: str) -> List[str]:
-        cleaned_api = api.strip().rstrip('/')
+        cleaned_api = api.strip().rstrip("/")
         parsed = urlparse(cleaned_api)
         if not parsed.scheme or not parsed.netloc:
-            raise ValueError('Provider api must be a valid absolute URL')
+            raise ValueError("Provider api must be a valid absolute URL")
 
         normalized_scheme = parsed.scheme.lower()
         if normalized_scheme not in {"http", "https"}:
             raise ValueError("Provider api must use http:// or https://")
 
-        root = f'{normalized_scheme}://{parsed.netloc}'
-        base_path = ModelDiscoveryService._build_model_endpoint_base_path(parsed.path.rstrip('/'))
-        base_url = f'{root}{base_path}'
+        root = f"{normalized_scheme}://{parsed.netloc}"
+        base_path = ModelDiscoveryService._build_model_endpoint_base_path(parsed.path.rstrip("/"))
+        base_url = f"{root}{base_path}"
         return [
-            f'{base_url}/v1/models',
-            f'{base_url}/models',
+            f"{base_url}/v1/models",
+            f"{base_url}/models",
         ]
 
     @staticmethod
     def _build_model_endpoint_base_path(path: str) -> str:
-        normalized_path = path.rstrip('/')
+        normalized_path = path.rstrip("/")
         if not normalized_path:
-            return ''
+            return ""
 
         lower_path = normalized_path.lower()
         known_suffixes = (
-            '/v1/chat/completions',
-            '/chat/completions',
-            '/v1/completions',
-            '/completions',
-            '/v1/responses',
-            '/responses',
-            '/v1/models',
-            '/models',
-            '/v1',
+            "/v1/chat/completions",
+            "/chat/completions",
+            "/v1/completions",
+            "/completions",
+            "/v1/responses",
+            "/responses",
+            "/v1/models",
+            "/models",
+            "/v1",
         )
         for suffix in known_suffixes:
             if lower_path.endswith(suffix):
-                return normalized_path[: -len(suffix)].rstrip('/')
+                return normalized_path[: -len(suffix)].rstrip("/")
         return normalized_path
 
     @staticmethod
@@ -164,9 +164,9 @@ class ModelDiscoveryService:
         models: List[str] = []
         items: Any = None
         if isinstance(payload, dict):
-            items = payload.get('data')
-            if items is None and isinstance(payload.get('models'), list):
-                items = payload.get('models')
+            items = payload.get("data")
+            if items is None and isinstance(payload.get("models"), list):
+                items = payload.get("models")
         elif isinstance(payload, list):
             items = payload
 
@@ -176,10 +176,10 @@ class ModelDiscoveryService:
         seen: set[str] = set()
         for item in items:
             if isinstance(item, dict):
-                model = item.get('id') or item.get('name')
+                model = item.get("id") or item.get("name")
             else:
                 model = item
-            model_name = str(model).strip() if model is not None else ''
+            model_name = str(model).strip() if model is not None else ""
             if not model_name or model_name in seen:
                 continue
             seen.add(model_name)

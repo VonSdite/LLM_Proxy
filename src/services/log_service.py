@@ -23,15 +23,9 @@ class LogService:
     def _normalize_log_timestamps(log: Dict[str, Any]) -> Dict[str, Any]:
         """统一请求日志时间字段格式。"""
         normalized = dict(log)
-        normalized["start_time"] = normalize_local_datetime_text(
-            normalized.get("start_time")
-        )
-        normalized["end_time"] = normalize_local_datetime_text(
-            normalized.get("end_time")
-        )
-        normalized["created_at"] = normalize_local_datetime_text(
-            normalized.get("created_at")
-        )
+        normalized["start_time"] = normalize_local_datetime_text(normalized.get("start_time"))
+        normalized["end_time"] = normalize_local_datetime_text(normalized.get("end_time"))
+        normalized["created_at"] = normalize_local_datetime_text(normalized.get("created_at"))
         return normalized
 
     def log_request(
@@ -140,9 +134,7 @@ class LogService:
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
-            result["logs"] = [
-                self._normalize_log_timestamps(log) for log in result.get("logs", [])
-            ]
+            result["logs"] = [self._normalize_log_timestamps(log) for log in result.get("logs", [])]
             return result
         except Exception as exc:
             self._logger.error(f"Failed to get request logs: {exc}")

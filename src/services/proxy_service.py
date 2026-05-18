@@ -48,9 +48,7 @@ class ProxyErrorInfo:
 class ProxyService:
     """处理上游 LLM 代理请求。"""
 
-    def __init__(
-        self, ctx: AppContext, auth_group_manager: Optional[AuthGroupManager] = None
-    ):
+    def __init__(self, ctx: AppContext, auth_group_manager: Optional[AuthGroupManager] = None):
         self._config_manager = ctx.config_manager
         self._logger = ctx.logger
         self._trace_logger = logging.getLogger("llm_request_trace")
@@ -146,9 +144,7 @@ class ProxyService:
             provider,
             resolved_target_format,
         )
-        translator = self._translator_registry.get(
-            provider.source_format, downstream_target_format
-        )
+        translator = self._translator_registry.get(provider.source_format, downstream_target_format)
         last_error: Optional[ProxyErrorInfo] = None
         previous_status_code: Optional[int] = None
         previous_error_type: Optional[HookErrorType] = None
@@ -179,14 +175,8 @@ class ProxyService:
                 attempt=attempt,
                 previous_status_code=previous_status_code,
                 previous_error_type=previous_error_type,
-                auth_group_name=(
-                    selected_auth.auth_group_name
-                    if selected_auth is not None
-                    else provider.auth_group
-                ),
-                auth_entry_id=(
-                    selected_auth.entry_id if selected_auth is not None else None
-                ),
+                auth_group_name=(selected_auth.auth_group_name if selected_auth is not None else provider.auth_group),
+                auth_entry_id=(selected_auth.entry_id if selected_auth is not None else None),
             )
             return (
                 built_request.headers,
@@ -224,13 +214,9 @@ class ProxyService:
 
             try:
                 if self._auth_group_manager is not None and provider.auth_group:
-                    selected_auth = self._auth_group_manager.acquire(
-                        provider.auth_group
-                    )
+                    selected_auth = self._auth_group_manager.acquire(provider.auth_group)
 
-                headers, guarded_body, translated_body, request_ctx = build_request(
-                    attempt, selected_auth
-                )
+                headers, guarded_body, translated_body, request_ctx = build_request(attempt, selected_auth)
                 requested_stream = request_ctx.stream
                 effective_upstream_model = request_ctx.upstream_model
                 translated_upstream_model = translated_body["model"]
@@ -281,15 +267,10 @@ class ProxyService:
                     )
                 )
 
-                if (
-                    self._transport.should_retry_status_code(opened.status_code)
-                    and attempt < max_retries - 1
-                ):
+                if self._transport.should_retry_status_code(opened.status_code) and attempt < max_retries - 1:
                     previous_status_code = opened.status_code
                     previous_error_type = None
-                    raw_response_headers = dict(
-                        getattr(opened.response, "headers", {}) or {}
-                    )
+                    raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
                     _, _, retry_summary = self._response_builder.consume_upstream_error(
                         provider=provider,
                         opened=opened,
@@ -316,13 +297,9 @@ class ProxyService:
                     continue
 
                 if 300 <= opened.status_code < 400:
-                    raw_response_headers = dict(
-                        getattr(opened.response, "headers", {}) or {}
-                    )
+                    raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
                     location = str(
-                        raw_response_headers.get("Location")
-                        or raw_response_headers.get("location")
-                        or ""
+                        raw_response_headers.get("Location") or raw_response_headers.get("location") or ""
                     ).strip()
                     close = getattr(opened.response, "close", None)
                     if callable(close):
@@ -358,20 +335,16 @@ class ProxyService:
                     )
 
                 if opened.status_code >= 400:
-                    raw_response_headers = dict(
-                        getattr(opened.response, "headers", {}) or {}
-                    )
-                    response, error_summary = (
-                        self._response_builder.build_error_response(
-                            provider=provider,
-                            opened=opened,
-                            downstream_target_format=downstream_target_format,
-                            trace_id=trace_id,
-                            route_name=route_name,
-                            client_ip=client_ip,
-                            request_model=requested_model,
-                            upstream_model=effective_upstream_model,
-                        )
+                    raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
+                    response, error_summary = self._response_builder.build_error_response(
+                        provider=provider,
+                        opened=opened,
+                        downstream_target_format=downstream_target_format,
+                        trace_id=trace_id,
+                        route_name=route_name,
+                        client_ip=client_ip,
+                        request_model=requested_model,
+                        upstream_model=effective_upstream_model,
                     )
                     finalize_attempt(
                         status_code=opened.status_code,
@@ -617,9 +590,7 @@ class ProxyService:
             "content-length",
             "content-encoding",
         }
-        return {
-            key: value for key, value in headers.items() if key.lower() not in excluded
-        }
+        return {key: value for key, value in headers.items() if key.lower() not in excluded}
 
     @staticmethod
     def _coerce_trace_bytes(payload: Any) -> bytes:

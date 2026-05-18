@@ -82,8 +82,7 @@ class SettingsService:
         username = self._normalize_admin_value(admin_payload.get("username"))
         password = self._normalize_admin_secret(admin_payload.get("password"))
         server_restart_required = (
-            str(current_settings["server"]["host"]) != host
-            or int(current_settings["server"]["port"]) != port
+            str(current_settings["server"]["host"]) != host or int(current_settings["server"]["port"]) != port
         )
 
         config = self._config_manager.get_raw_config()
@@ -101,8 +100,7 @@ class SettingsService:
         return {
             "settings": updated_settings,
             "auth_config_changed": (
-                current_settings["admin"]["username"] != username
-                or current_settings["admin"]["password"] != password
+                current_settings["admin"]["username"] != username or current_settings["admin"]["password"] != password
             ),
             "server_restart_required": server_restart_required,
         }
@@ -123,9 +121,7 @@ class SettingsService:
             or str(current_settings["logging"]["level"]).upper() != log_level
         )
 
-        llm_request_debug_enabled = parse_optional_bool(
-            logging_payload.get("llm_request_debug_enabled")
-        )
+        llm_request_debug_enabled = parse_optional_bool(logging_payload.get("llm_request_debug_enabled"))
         if llm_request_debug_enabled is None:
             raise ValueError("LLM request debug flag is required")
 
@@ -194,9 +190,7 @@ class SettingsService:
         password = self._normalize_admin_secret(admin_payload.get("password"))
         log_path = self._parse_log_path(logging_payload.get("path"))
         log_level = self._parse_log_level(logging_payload.get("level"))
-        llm_request_debug_enabled = parse_optional_bool(
-            logging_payload.get("llm_request_debug_enabled")
-        )
+        llm_request_debug_enabled = parse_optional_bool(logging_payload.get("llm_request_debug_enabled"))
         if llm_request_debug_enabled is None:
             raise ValueError("LLM request debug flag is required")
 
@@ -218,12 +212,10 @@ class SettingsService:
             oauth_values = (enabled, proxy, verify_ssl)
 
         server_restart_required = (
-            str(current_settings["server"]["host"]) != host
-            or int(current_settings["server"]["port"]) != port
+            str(current_settings["server"]["host"]) != host or int(current_settings["server"]["port"]) != port
         )
         auth_config_changed = (
-            current_settings["admin"]["username"] != username
-            or current_settings["admin"]["password"] != password
+            current_settings["admin"]["username"] != username or current_settings["admin"]["password"] != password
         )
         logging_settings_changed = (
             str(current_settings["logging"]["path"]) != log_path
@@ -302,9 +294,7 @@ class SettingsService:
         log_level = str(value or "").strip().upper()
         allowed_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         if log_level not in allowed_levels:
-            raise ValueError(
-                "Log level must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL"
-            )
+            raise ValueError("Log level must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL")
         return log_level
 
     @staticmethod

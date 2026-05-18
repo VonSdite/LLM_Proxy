@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
 from typing import Any, Dict, Iterable, Optional, Sequence
+from uuid import uuid4
 
 from flask import Response, jsonify, request
 from flask.typing import ResponseReturnValue
@@ -15,8 +15,8 @@ from ..hooks import HookAbortError
 from ..services.codex_proxy_service import CODEX_PROVIDER_NAME
 from ..services.proxy_service import ProxyErrorInfo
 from ..utils import normalize_ip
-from ..utils.local_time import now_local_datetime
 from ..utils.compat import Protocol
+from ..utils.local_time import now_local_datetime
 
 
 class ConfigManagerLike(Protocol):
@@ -185,9 +185,7 @@ class ProxyController:
         self._app.route("/v1/models", methods=["GET"])(self.list_models)
 
     def _get_user_by_ip(self, ip_address: str) -> Optional[Dict[str, Any]]:
-        return self._user_service.get_user_by_ip(
-            ip_address, require_whitelist_access=True
-        )
+        return self._user_service.get_user_by_ip(ip_address, require_whitelist_access=True)
 
     def _is_whitelist_required(self) -> bool:
         return self._config_manager.is_chat_whitelist_enabled()
@@ -245,9 +243,7 @@ class ProxyController:
         }
         if details:
             error["details"] = details
-        return {
-            "error": error
-        }
+        return {"error": error}
 
     def _error_response(
         self,
@@ -293,11 +289,7 @@ class ProxyController:
     @staticmethod
     def _get_provider_target_formats(provider: Any) -> tuple[str, ...]:
         candidate_formats = getattr(provider, "target_formats", ())
-        return tuple(
-            str(item or "").strip().lower()
-            for item in candidate_formats
-            if str(item or "").strip()
-        )
+        return tuple(str(item or "").strip().lower() for item in candidate_formats if str(item or "").strip())
 
     def _list_available_model_names(self) -> tuple[str, ...]:
         provider_models = list(self._provider_manager.list_model_names())
@@ -347,9 +339,7 @@ class ProxyController:
         model_name: Optional[str] = None
         provider_name: Optional[str] = None
         try:
-            self._logger.info(
-                "Proxy request received: route=%s ip=%s", route_name, client_ip
-            )
+            self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
             user, denial_response = self._get_authorized_user_for_request(
                 client_ip,
                 error_format=resolved_error_format,
@@ -377,9 +367,7 @@ class ProxyController:
 
             model_name_value = request_data.get("model")
             if not isinstance(model_name_value, str) or not model_name_value.strip():
-                self._logger.warning(
-                    "Proxy rejected: missing model in request body route=%s", route_name
-                )
+                self._logger.warning("Proxy rejected: missing model in request body route=%s", route_name)
                 return self._error_response(
                     "Missing 'model' in request body",
                     400,
@@ -392,15 +380,10 @@ class ProxyController:
             provider = self._provider_manager.get_provider_for_model(model_name)
             is_codex_model = False
             if not provider:
-                if (
-                    self._codex_proxy_service is not None
-                    and self._codex_proxy_service.has_model(model_name)
-                ):
+                if self._codex_proxy_service is not None and self._codex_proxy_service.has_model(model_name):
                     is_codex_model = True
                 else:
-                    self._logger.warning(
-                        "Proxy rejected: unknown model=%r route=%s", model_name, route_name
-                    )
+                    self._logger.warning("Proxy rejected: unknown model=%r route=%s", model_name, route_name)
                     return self._error_response(
                         f"Unknown model: {model_name}",
                         400,
@@ -410,13 +393,10 @@ class ProxyController:
                     )
 
             available_model_names = self._list_available_model_names()
-            if (
-                self._is_whitelist_required()
-                and not self._user_service.can_user_access_model(
-                    user,
-                    model_name,
-                    available_models=available_model_names,
-                )
+            if self._is_whitelist_required() and not self._user_service.can_user_access_model(
+                user,
+                model_name,
+                available_models=available_model_names,
             ):
                 self._logger.warning(
                     "Proxy denied: ip=%s is not allowed to access model=%s route=%s",
@@ -586,11 +566,7 @@ class ProxyController:
                         available_models=model_names,
                     )
                 )
-                model_names = [
-                    model_name
-                    for model_name in model_names
-                    if model_name in allowed_models
-                ]
+                model_names = [model_name for model_name in model_names if model_name in allowed_models]
 
             data = []
             codex_model_names = set()

@@ -45,28 +45,14 @@ class WebController:
         self._app.route("/settings")(auth(self.settings_page))
 
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
-        self._app.route("/api/request-logs", methods=["GET"])(
-            auth(self.get_request_logs)
-        )
+        self._app.route("/api/request-logs", methods=["GET"])(auth(self.get_request_logs))
         self._app.route("/api/usernames", methods=["GET"])(auth(self.get_usernames))
-        self._app.route("/api/request-models", methods=["GET"])(
-            auth(self.get_request_models)
-        )
-        self._app.route("/api/settings/system", methods=["GET"])(
-            auth(self.get_system_settings)
-        )
-        self._app.route("/api/settings/system", methods=["PUT"])(
-            auth(self.update_system_settings)
-        )
-        self._app.route("/api/settings/system/basic", methods=["PUT"])(
-            auth(self.update_basic_settings)
-        )
-        self._app.route("/api/settings/system/debug", methods=["PUT"])(
-            auth(self.update_debug_settings)
-        )
-        self._app.route("/api/settings/system/oauth", methods=["PUT"])(
-            auth(self.update_oauth_settings)
-        )
+        self._app.route("/api/request-models", methods=["GET"])(auth(self.get_request_models))
+        self._app.route("/api/settings/system", methods=["GET"])(auth(self.get_system_settings))
+        self._app.route("/api/settings/system", methods=["PUT"])(auth(self.update_system_settings))
+        self._app.route("/api/settings/system/basic", methods=["PUT"])(auth(self.update_basic_settings))
+        self._app.route("/api/settings/system/debug", methods=["PUT"])(auth(self.update_debug_settings))
+        self._app.route("/api/settings/system/oauth", methods=["PUT"])(auth(self.update_oauth_settings))
 
     def home(self) -> str:
         return self.providers_page()
@@ -132,11 +118,7 @@ class WebController:
 
     @staticmethod
     def _get_multi_filter_values(name: str) -> list[str]:
-        return [
-            value.strip()
-            for value in request.args.getlist(name)
-            if isinstance(value, str) and value.strip()
-        ]
+        return [value.strip() for value in request.args.getlist(name) if isinstance(value, str) and value.strip()]
 
     @staticmethod
     def _parse_dashboard_date(value: str | None, field_name: str) -> datetime:
@@ -214,9 +196,7 @@ class WebController:
                 request.args.get("start_date"),
                 request.args.get("end_date"),
             )
-            self._logger.debug(
-                "Request logs queried: page=%s, page_size=%s", page, page_size
-            )
+            self._logger.debug("Request logs queried: page=%s, page_size=%s", page, page_size)
 
             logs = self._log_service.get_request_logs(
                 page,

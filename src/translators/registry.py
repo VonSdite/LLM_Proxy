@@ -4,25 +4,33 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from ..proxy_core.contracts import DownstreamChunk, StreamEvent
 from ..utils.compat import Protocol
-from .event_chunk_utils import build_json_event_chunk
 from .claude_bridge import (
     convert_claude_request_to_openai_chat_request as _convert_claude_request_to_openai_chat_request,
+)
+from .claude_bridge import (
     convert_openai_chat_response_to_claude as _convert_openai_chat_response_to_claude,
+)
+from .claude_bridge import (
     translate_openai_chat_downstream_chunk_to_claude as _translate_openai_chat_downstream_chunk_to_claude,
 )
-from .tool_result_utils import normalize_tool_result_content
+from .event_chunk_utils import build_json_event_chunk
 from .responses_bridge import (
     convert_openai_chat_response_to_responses as _convert_openai_chat_response_to_responses,
+)
+from .responses_bridge import (
     convert_openai_responses_request_to_chat_request as _convert_openai_responses_request_to_chat_request,
+)
+from .responses_bridge import (
     translate_openai_chat_downstream_chunk_to_responses as _translate_openai_chat_downstream_chunk_to_responses,
 )
+from .tool_result_utils import normalize_tool_result_content
 
 
 class Translator(Protocol):
@@ -32,8 +40,7 @@ class Translator(Protocol):
     @property
     def target_format(self) -> str: ...
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
-        ...
+    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]: ...
 
     def translate_stream_event(
         self,
@@ -42,8 +49,7 @@ class Translator(Protocol):
         translated_request: Dict[str, Any],
         event: StreamEvent,
         state: Dict[str, Any],
-    ) -> list[DownstreamChunk]:
-        ...
+    ) -> list[DownstreamChunk]: ...
 
     def translate_nonstream_response(
         self,
@@ -51,8 +57,7 @@ class Translator(Protocol):
         original_request: Dict[str, Any],
         translated_request: Dict[str, Any],
         payload: Any,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 def _translate_passthrough_stream_event(
@@ -349,11 +354,7 @@ class OpenAIResponsesTranslator:
                                 else "upstream_error"
                             ),
                             "param": None,
-                            "code": (
-                                (error_payload or {}).get("code")
-                                if isinstance(error_payload, dict)
-                                else None
-                            ),
+                            "code": ((error_payload or {}).get("code") if isinstance(error_payload, dict) else None),
                         }
                     },
                 )
@@ -1085,6 +1086,8 @@ def _extract_text_content(content: Any) -> str:
         if isinstance(item.get("text"), str):
             parts.append(item["text"])
     return "\n".join(parts)
+
+
 def _to_openai_responses_input(messages: Any) -> tuple[str, list[Dict[str, Any]]]:
     if not isinstance(messages, list):
         return "", []

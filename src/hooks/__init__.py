@@ -4,4 +4,4 @@
 
 from .contracts import BaseHook, HookAbortError, HookContext, HookErrorType, HookModule
 
-__all__ = ['BaseHook', 'HookAbortError', 'HookContext', 'HookErrorType', 'HookModule']
+__all__ = ["BaseHook", "HookAbortError", "HookContext", "HookErrorType", "HookModule"]

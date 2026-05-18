@@ -30,30 +30,16 @@ class OAuthController:
 
     def _register_routes(self) -> None:
         auth = require_authentication(self._auth_service)
-        self._app.route("/api/oauth/codex/session", methods=["POST"])(
-            auth(self.create_codex_session)
-        )
-        self._app.route("/api/oauth/codex/callback", methods=["POST"])(
-            auth(self.complete_codex_callback)
-        )
-        self._app.route("/api/oauth/codex/auth-files", methods=["GET"])(
-            auth(self.list_codex_auth_files)
-        )
-        self._app.route("/api/oauth/codex/auth-files/<name>", methods=["DELETE"])(
-            auth(self.delete_codex_auth_file)
-        )
+        self._app.route("/api/oauth/codex/session", methods=["POST"])(auth(self.create_codex_session))
+        self._app.route("/api/oauth/codex/callback", methods=["POST"])(auth(self.complete_codex_callback))
+        self._app.route("/api/oauth/codex/auth-files", methods=["GET"])(auth(self.list_codex_auth_files))
+        self._app.route("/api/oauth/codex/auth-files/<name>", methods=["DELETE"])(auth(self.delete_codex_auth_file))
         self._app.route("/api/oauth/codex/auth-files/<name>/quota", methods=["GET"])(
             auth(self.get_codex_auth_file_quota)
         )
-        self._app.route("/api/oauth/codex/models", methods=["GET"])(
-            auth(self.list_codex_models)
-        )
-        self._app.route("/api/oauth/codex/models", methods=["POST"])(
-            auth(self.add_codex_model)
-        )
-        self._app.route("/api/oauth/codex/models/<path:model_id>", methods=["DELETE"])(
-            auth(self.delete_codex_model)
-        )
+        self._app.route("/api/oauth/codex/models", methods=["GET"])(auth(self.list_codex_models))
+        self._app.route("/api/oauth/codex/models", methods=["POST"])(auth(self.add_codex_model))
+        self._app.route("/api/oauth/codex/models/<path:model_id>", methods=["DELETE"])(auth(self.delete_codex_model))
 
     def create_codex_session(self) -> ResponseReturnValue:
         try:
