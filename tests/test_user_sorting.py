@@ -148,6 +148,33 @@ class UserBackendSortApiTests(unittest.TestCase):
         self.assertEqual("alice", payload["users"][0]["username"])
         self.assertEqual(1, payload["users"][0]["allowed_models_count"])
 
+    def test_users_api_sorts_derived_model_permissions_with_keyword(self) -> None:
+        alice_id = self.user_ids["alice"]
+        self.assertIsNotNone(alice_id)
+        assert alice_id is not None
+        self.user_service.update_user(
+            alice_id,
+            model_permissions_provided=True,
+            model_permissions=["demo/m1"],
+        )
+
+        response = self.client.get(
+            "/api/users",
+            query_string={
+                "page": "1",
+                "page_size": "1",
+                "keyword": "ali",
+                "sort_key": "allowed_models_count",
+                "sort_direction": "asc",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(1, payload["total"])
+        self.assertEqual("alice", payload["users"][0]["username"])
+        self.assertEqual(1, payload["users"][0]["allowed_models_count"])
+
 
 if __name__ == "__main__":
     unittest.main()

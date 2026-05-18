@@ -432,14 +432,15 @@ class ProxyResponseBuilder:
         )
         return Response(body, status=opened.status_code, headers=headers), summary
 
-    @staticmethod
     def _iter_stream_chunks_with_trace(
+        self,
         upstream_chunks: Iterator[bytes],
         payload_buffer: Optional[bytearray],
     ) -> Iterator[bytes]:
         for chunk in upstream_chunks:
             if not chunk:
                 continue
+            self._extend_trace_buffer(payload_buffer, chunk)
             yield chunk
 
     def _guard_stream_chunk(

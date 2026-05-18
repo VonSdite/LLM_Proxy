@@ -177,13 +177,87 @@ class SettingsService:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
 
-        basic_result = self.update_basic_settings(payload)
-        debug_result = self.update_debug_settings(payload)
-        basic_result["settings"] = debug_result["settings"]
+        server_payload = payload.get("server")
+        admin_payload = payload.get("admin")
+        logging_payload = payload.get("logging")
+        if not isinstance(server_payload, dict):
+            raise ValueError("Config field 'server' must be an object")
+        if not isinstance(admin_payload, dict):
+            raise ValueError("Config field 'admin' must be an object")
+        if not isinstance(logging_payload, dict):
+            raise ValueError("Config field 'logging' must be an object")
+
+        current_settings = self.get_system_settings()
+        host = self._parse_server_host(server_payload.get("host"))
+        port = self._parse_server_port(server_payload.get("port"))
+        username = self._normalize_admin_value(admin_payload.get("username"))
+        password = self._normalize_admin_secret(admin_payload.get("password"))
+        log_path = self._parse_log_path(logging_payload.get("path"))
+        log_level = self._parse_log_level(logging_payload.get("level"))
+        llm_request_debug_enabled = parse_optional_bool(
+            logging_payload.get("llm_request_debug_enabled")
+        )
+        if llm_request_debug_enabled is None:
+            raise ValueError("LLM request debug flag is required")
+
+        oauth_values: Optional[tuple[bool, str, bool]] = None
         if "oauth" in payload:
-            oauth_result = self.update_oauth_settings(payload)
-            basic_result["settings"] = oauth_result["settings"]
-        return basic_result
+            oauth_payload = payload.get("oauth")
+            if not isinstance(oauth_payload, dict):
+                raise ValueError("Config field 'oauth' must be an object")
+            enabled = parse_optional_bool(
+                oauth_payload.get("enabled"),
+                default=self._config_manager.is_oauth_enabled(),
+            )
+            if enabled is None:
+                raise ValueError("OAuth enabled flag is required")
+            proxy = self._parse_oauth_proxy(oauth_payload.get("proxy"))
+            verify_ssl = parse_optional_bool(oauth_payload.get("verify_ssl"))
+            if verify_ssl is None:
+                raise ValueError("OAuth SSL verify flag is required")
+            oauth_values = (enabled, proxy, verify_ssl)
+
+        server_restart_required = (
+            str(current_settings["server"]["host"]) != host
+            or int(current_settings["server"]["port"]) != port
+        )
+        auth_config_changed = (
+            current_settings["admin"]["username"] != username
+            or current_settings["admin"]["password"] != password
+        )
+        logging_settings_changed = (
+            str(current_settings["logging"]["path"]) != log_path
+            or str(current_settings["logging"]["level"]).upper() != log_level
+        )
+
+        config = self._config_manager.get_raw_config()
+        server_config = self._ensure_mapping(config, "server")
+        admin_config = self._ensure_mapping(config, "admin")
+        logging_config = self._ensure_mapping(config, "logging")
+
+        server_config["host"] = host
+        server_config["port"] = port
+        admin_config["username"] = username
+        admin_config["password"] = password
+        logging_config["path"] = log_path
+        logging_config["level"] = log_level
+        logging_config["llm_request_debug_enabled"] = llm_request_debug_enabled
+
+        if oauth_values is not None:
+            oauth_config = self._ensure_mapping(config, "oauth")
+            oauth_config["enabled"] = oauth_values[0]
+            oauth_config["proxy"] = oauth_values[1]
+            oauth_config["verify_ssl"] = oauth_values[2]
+
+        self._config_manager.write_raw_config(config)
+        if logging_settings_changed and self._reload_logging_callback is not None:
+            self._reload_logging_callback()
+
+        return {
+            "settings": self.get_system_settings(),
+            "auth_config_changed": auth_config_changed,
+            "server_restart_required": server_restart_required,
+        }
 
     @staticmethod
     def _ensure_mapping(config: dict[str, Any], key: str) -> dict[str, Any]:

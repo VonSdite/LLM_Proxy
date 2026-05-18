@@ -179,6 +179,67 @@ class UserRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_sorted_by_allowed_model_count(
+        self,
+        page: int,
+        page_size: int,
+        keyword: Optional[str],
+        sort_direction: Optional[str],
+        available_model_count: int,
+    ) -> List[Dict[str, Any]]:
+        """按模型权限数量排序后分页查询用户。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            offset = (page - 1) * page_size
+            where_clause, search_params = self._build_search_clause(keyword, table_alias="u")
+            direction = self._normalize_sort_direction(sort_direction)
+            allowed_count_expression = """
+                CASE
+                    WHEN TRIM(COALESCE(u.model_permissions, '')) IN ('', '*') THEN ?
+                    WHEN json_valid(u.model_permissions)
+                        AND json_type(u.model_permissions) = 'array'
+                        THEN json_array_length(u.model_permissions)
+                    ELSE 0
+                END
+            """
+            cursor.execute(
+                f"""
+                SELECT
+                    u.id,
+                    u.username,
+                    u.ip_address,
+                    u.whitelist_access_enabled,
+                    u.model_permissions,
+                    u.created_at,
+                    u.updated_at,
+                    COALESCE(s.total_request_count, 0) AS total_request_count,
+                    COALESCE(s.total_tokens, 0) AS total_tokens,
+                    COALESCE(s.prompt_tokens, 0) AS prompt_tokens,
+                    COALESCE(s.completion_tokens, 0) AS completion_tokens
+                FROM users u
+                LEFT JOIN (
+                    SELECT
+                        ip_address,
+                        SUM(request_count) AS total_request_count,
+                        SUM(total_tokens) AS total_tokens,
+                        SUM(prompt_tokens) AS prompt_tokens,
+                        SUM(completion_tokens) AS completion_tokens
+                    FROM daily_request_stats
+                    GROUP BY ip_address
+                ) s ON u.ip_address = s.ip_address
+                {where_clause}
+                ORDER BY {allowed_count_expression} {direction}, u.id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (
+                    *search_params,
+                    int(available_model_count),
+                    page_size,
+                    offset,
+                ),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
     def get_count(self, keyword: Optional[str] = None) -> int:
         """查询用户总数。"""
         with self._get_connection() as conn:
