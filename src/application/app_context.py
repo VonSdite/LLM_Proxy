@@ -31,4 +31,4 @@ class AppContext:
     logger: Logger
     config_manager: Any
     root_path: Path
-    flask_app: "Flask"
+    flask_app: Flask

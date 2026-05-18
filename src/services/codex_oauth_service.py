@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
@@ -414,8 +414,9 @@ class CodexOAuthService:
         file_state = files.get(name) if isinstance(files, dict) else None
         if not isinstance(file_state, dict):
             file_state = {}
-        quota = file_state.get("quota") if isinstance(file_state.get("quota"), dict) else {}
-        result = dict(quota)
+        raw_quota = file_state.get("quota")
+        quota = cast(Dict[str, Any], raw_quota) if isinstance(raw_quota, dict) else {}
+        result: Dict[str, Any] = dict(quota)
         result.update(
             {
                 "status": "ok",

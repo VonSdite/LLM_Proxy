@@ -1,4 +1,3 @@
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -51,7 +50,9 @@ class FakeConfigManager:
 
 
 class FakeStreamResponse:
-    def __init__(self, chunks, *, content_type: str = "text/event-stream", status_code: int = 200):
+    def __init__(
+        self, chunks, *, content_type: str = "text/event-stream", status_code: int = 200
+    ):
         self._chunks = list(chunks)
         self.headers = {"Content-Type": content_type}
         self.status_code = status_code
@@ -118,8 +119,8 @@ class StreamDecoderTests(unittest.TestCase):
     def test_ndjson_decoder_handles_split_lines(self) -> None:
         chunks = [
             b'{"id":1}\n{"id"',
-            b':2}\n[D',
-            b'ONE]\n',
+            b":2}\n[D",
+            b"ONE]\n",
         ]
 
         events = list(decode_stream_events(chunks, "ndjson"))
@@ -179,7 +180,9 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual("Hello", translated["messages"][0]["content"][0]["text"])
         self.assertTrue(translated["stream"])
 
-    def test_openai_chat_claude_translator_preserves_responses_extension_fields(self) -> None:
+    def test_openai_chat_claude_translator_preserves_responses_extension_fields(
+        self,
+    ) -> None:
         translator = OpenAIChatClaudeTranslator()
 
         translated = translator.translate_request(
@@ -225,19 +228,30 @@ class TranslatorTests(unittest.TestCase):
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 2,
+                    "total_tokens": 5,
+                },
             },
         )
 
         self.assertEqual("response", translated["object"])
         self.assertEqual("completed", translated["status"])
-        self.assertEqual("Hello from chat", translated["output"][0]["content"][0]["text"])
-        self.assertEqual({"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}, translated["usage"])
+        self.assertEqual(
+            "Hello from chat", translated["output"][0]["content"][0]["text"]
+        )
+        self.assertEqual(
+            {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+            translated["usage"],
+        )
         self.assertEqual("Be brief", translated["instructions"])
         self.assertFalse(translated["store"])
         self.assertEqual(["reasoning.encrypted_content"], translated["include"])
 
-    def test_openai_responses_passthrough_translator_normalizes_response_done_event(self) -> None:
+    def test_openai_responses_passthrough_translator_normalizes_response_done_event(
+        self,
+    ) -> None:
         translator = OpenAIResponsesPassthroughTranslator()
 
         translated_chunks = translator.translate_stream_event(
@@ -274,7 +288,10 @@ class TranslatorRegistryTests(unittest.TestCase):
             ("openai_chat", "openai_responses"): OpenAIChatResponsesTranslator,
             ("openai_chat", "claude_chat"): OpenAIChatClaudeTranslator,
             ("openai_responses", "openai_chat"): OpenAIResponsesTranslator,
-            ("openai_responses", "openai_responses"): OpenAIResponsesPassthroughTranslator,
+            (
+                "openai_responses",
+                "openai_responses",
+            ): OpenAIResponsesPassthroughTranslator,
             ("openai_responses", "claude_chat"): ComposedTranslator,
             ("claude_chat", "openai_chat"): ClaudeChatTranslator,
             ("claude_chat", "openai_responses"): ComposedTranslator,
@@ -290,13 +307,17 @@ class TranslatorRegistryTests(unittest.TestCase):
     def test_default_registry_rejects_removed_gemini_pairs(self) -> None:
         registry = build_default_translator_registry()
 
-        with self.assertRaisesRegex(ValueError, "Unsupported translator pair: gemini_chat -> openai_chat"):
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported translator pair: gemini_chat -> openai_chat"
+        ):
             registry.get("gemini_chat", "openai_chat")
 
     def test_default_registry_rejects_removed_codex_pairs(self) -> None:
         registry = build_default_translator_registry()
 
-        with self.assertRaisesRegex(ValueError, "Unsupported translator pair: codex -> openai_responses"):
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported translator pair: codex -> openai_responses"
+        ):
             registry.get("codex", "openai_responses")
 
 
@@ -315,13 +336,17 @@ class ProxyServicePipelineTests(unittest.TestCase):
         app = Flask(__name__)
         ctx = AppContext(
             logger=FakeLogger(),
-            config_manager=FakeConfigManager(llm_request_debug_enabled=llm_request_debug_enabled),
+            config_manager=FakeConfigManager(
+                llm_request_debug_enabled=llm_request_debug_enabled
+            ),
             root_path=Path(__file__).resolve().parents[1],
             flask_app=app,
         )
         return app, ProxyService(ctx)
 
-    def test_provider_api_key_replaces_client_authorization_before_header_hook(self) -> None:
+    def test_provider_api_key_replaces_client_authorization_before_header_hook(
+        self,
+    ) -> None:
         app, service = self._build_service()
         hook = HeaderRecordingHook()
         provider = LLMProvider(
@@ -368,7 +393,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
             stream_body = self._collect_response_body(response)
 
         headers = captured["headers"]
-        authorization_headers = [key for key in headers if key.lower() == "authorization"]
+        authorization_headers = [
+            key for key in headers if key.lower() == "authorization"
+        ]
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
         self.assertEqual(["authorization"], authorization_headers)
@@ -422,7 +449,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
             self._collect_response_body(response)
 
         headers = captured["headers"]
-        authorization_headers = [key for key in headers if key.lower() == "authorization"]
+        authorization_headers = [
+            key for key in headers if key.lower() == "authorization"
+        ]
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
         self.assertEqual(["Authorization"], authorization_headers)
@@ -462,7 +491,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual("rewritten-model", built_request.translated_body["model"])
         self.assertEqual("rewritten-model", built_request.request_ctx.upstream_model)
 
-    def test_proxy_service_sends_model_rewritten_by_request_guard_upstream(self) -> None:
+    def test_proxy_service_sends_model_rewritten_by_request_guard_upstream(
+        self,
+    ) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
             name="demo",
@@ -578,7 +609,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertIn(b"data: [DONE]", stream_body)
         self.assertTrue(fake_response.closed)
 
-    def test_proxy_service_translates_openai_responses_stream_to_openai_chat(self) -> None:
+    def test_proxy_service_translates_openai_responses_stream_to_openai_chat(
+        self,
+    ) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
             name="responses-upstream",
@@ -646,7 +679,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(1, stream_body.count(b"data: [DONE]\n\n"))
         self.assertTrue(fake_response.closed)
 
-    def test_proxy_service_collects_usage_when_openai_chat_usage_chunk_is_suppressed(self) -> None:
+    def test_proxy_service_collects_usage_when_openai_chat_usage_chunk_is_suppressed(
+        self,
+    ) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
             name="responses-upstream",
@@ -705,7 +740,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(5, captured_meta["total_tokens"])
         self.assertTrue(fake_response.closed)
 
-    def test_proxy_service_skips_trace_buffering_when_debug_logging_disabled(self) -> None:
+    def test_proxy_service_skips_trace_buffering_when_debug_logging_disabled(
+        self,
+    ) -> None:
         app, service = self._build_service(llm_request_debug_enabled=False)
         provider = LLMProvider(
             name="responses-upstream",
@@ -736,8 +773,12 @@ class ProxyServicePipelineTests(unittest.TestCase):
         coerce_calls: list[bytes] = []
 
         def record_trace_bytes(payload):
-            coerce_calls.append(payload if isinstance(payload, bytes) else str(payload).encode("utf-8"))
-            return payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
+            coerce_calls.append(
+                payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
+            )
+            return (
+                payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
+            )
 
         original_coerce_trace_bytes = ProxyService._coerce_trace_bytes
         service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
@@ -763,7 +804,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual([], coerce_calls)
         self.assertIn(b"data: [DONE]", stream_body)
 
-    def test_proxy_service_buffers_upstream_stream_trace_when_debug_logging_enabled(self) -> None:
+    def test_proxy_service_buffers_upstream_stream_trace_when_debug_logging_enabled(
+        self,
+    ) -> None:
         app, service = self._build_service(llm_request_debug_enabled=True)
         provider = LLMProvider(
             name="responses-upstream",
@@ -932,7 +975,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertNotIn(b"[DONE]", stream_body)
         self.assertTrue(fake_response.closed)
 
-    def test_proxy_service_translates_openai_chat_stream_to_openai_responses(self) -> None:
+    def test_proxy_service_translates_openai_chat_stream_to_openai_responses(
+        self,
+    ) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
             name="chat-upstream",
@@ -998,7 +1043,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertNotIn(b"[DONE]", stream_body)
         self.assertTrue(fake_response.closed)
 
-    def test_proxy_service_translates_openai_chat_stream_to_claude_messages(self) -> None:
+    def test_proxy_service_translates_openai_chat_stream_to_claude_messages(
+        self,
+    ) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
             name="chat-upstream",
@@ -1038,7 +1085,10 @@ class ProxyServicePipelineTests(unittest.TestCase):
                     "model": "chat-upstream/gpt-4.1",
                     "max_tokens": 256,
                     "messages": [
-                        {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "Hello"}],
+                        },
                     ],
                     "stream": True,
                 },
@@ -1060,7 +1110,9 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertNotIn(b"[DONE]", stream_body)
         self.assertTrue(fake_response.closed)
 
-    def test_proxy_service_translates_openai_responses_stream_to_claude_messages_without_upstream_done_and_preserves_response_model(self) -> None:
+    def test_proxy_service_translates_openai_responses_stream_to_claude_messages_without_upstream_done_and_preserves_response_model(
+        self,
+    ) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
             name="responses-upstream",
@@ -1101,7 +1153,10 @@ class ProxyServicePipelineTests(unittest.TestCase):
                     "model": "responses-upstream/gpt-4.1",
                     "max_tokens": 256,
                     "messages": [
-                        {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "Hello"}],
+                        },
                     ],
                     "store": False,
                     "include": ["reasoning.encrypted_content"],
@@ -1133,7 +1188,6 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(2, captured_meta["completion_tokens"])
         self.assertEqual(5, captured_meta["total_tokens"])
         self.assertTrue(fake_response.closed)
-
 
     def test_proxy_service_normalizes_response_done_to_response_completed(self) -> None:
         app, service = self._build_service()
