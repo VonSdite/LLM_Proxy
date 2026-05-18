@@ -372,6 +372,7 @@ curl http://127.0.0.1:8080/v1/responses \
 - 上游固定访问 `https://chatgpt.com/backend-api/codex/responses`
 - 代理会按认证文件候选顺序尝试账号；认证失败、配额冷却或配额耗尽的文件会被跳过
 - access token 过期且存在 refresh token 时，会在配额查询或请求前自动刷新
+- 遇到代理风险确认页时，会自动确认一次并重试原请求；自动确认失败或重试后仍被拦截时，向下游返回 `proxy_warning_required` 和确认 URL
 - Codex 上游当前按流式响应处理；下游仍可以请求非流式响应，代理会聚合后返回
 - `/oauth` 页面支持查看配额、筛选可用/不可用认证文件、批量刷新额度和批量删除认证文件
 

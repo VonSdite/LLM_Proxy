@@ -18,6 +18,7 @@ from ..external import (
     probe_stream_response,
 )
 from ..proxy_core import resolve_stream_format
+from ..utils.proxy_warning import request_with_proxy_warning_retry
 from .contracts import Executor, OpenedUpstreamResponse
 
 
@@ -41,14 +42,24 @@ class HttpExecutor:
     ) -> OpenedUpstreamResponse:
         http_session = self._get_http_session()
         self._reset_http_session_state(http_session)
-        upstream_response = http_session.post(
-            provider.api,
-            headers=headers,
-            json=body,
-            stream=requested_stream,
-            proxies=request_proxies,
-            verify=verify_ssl,
-            timeout=timeout_seconds,
+        request_options = {
+            "proxies": request_proxies,
+            "verify": verify_ssl,
+        }
+        upstream_response = request_with_proxy_warning_retry(
+            lambda: http_session.post(
+                provider.api,
+                headers=headers,
+                json=body,
+                stream=requested_stream,
+                timeout=timeout_seconds,
+                allow_redirects=False,
+                **request_options,
+            ),
+            request_options=request_options,
+            confirm_session=http_session,
+            logger=self.logger,
+            log_context=f"provider={provider.name}",
         )
 
         status_code = upstream_response.status_code

@@ -18,6 +18,8 @@ from src.services.codex_oauth_service import CodexOAuthService
 from src.services.codex_proxy_service import (
     CODEX_BACKEND_RESPONSES_URL,
     CODEX_CLIENT_VERSION,
+    CODEX_PROXY_WARNING_ERROR_CODE,
+    CODEX_PROXY_WARNING_STATUS_CODE,
     CodexProxyService,
 )
 
@@ -54,11 +56,13 @@ class FakeHTTPResponse:
         status_code: int,
         chunks: list[bytes] | None = None,
         body: bytes = b"",
+        text: str | None = None,
         headers: dict[str, str] | None = None,
     ) -> None:
         self.status_code = status_code
         self._chunks = list(chunks or [])
         self.content = body
+        self.text = text if text is not None else body.decode("utf-8", errors="replace")
         self.headers = headers or {"Content-Type": "text/event-stream"}
         self.closed = False
 
@@ -70,10 +74,29 @@ class FakeHTTPResponse:
         self.closed = True
 
 
-def build_context(root_path: Path) -> AppContext:
+class FakeSession:
+    def __init__(self, responses: list[FakeHTTPResponse]) -> None:
+        self._responses = list(responses)
+        self.get_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+    def get(self, url, **kwargs):
+        self.get_calls.append((url, dict(kwargs)))
+        return self._responses.pop(0)
+
+
+def build_context(
+    root_path: Path,
+    config_manager: FakeConfigManager | None = None,
+) -> AppContext:
     return AppContext(
         logger=FakeLogger(),
-        config_manager=FakeConfigManager(),  # type: ignore[arg-type]
+        config_manager=config_manager or FakeConfigManager(),  # type: ignore[arg-type]
         root_path=root_path,
         flask_app=Flask(__name__),
     )
@@ -360,6 +383,139 @@ class CodexProxyServiceTests(unittest.TestCase):
         )
         self.assertEqual("quota_cooldown", auth_entries["codex-first.json"]["availability_status"])
         self.assertEqual("success", auth_entries["codex-second.json"]["usage_status"])
+
+    def test_proxy_warning_confirmation_failure_returns_confirmation_url_without_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            write_auth_file(root, "codex-second.json", "access-second", mtime=1000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            confirmation_url = (
+                "http://114.114.114.114:9421/proxycontrolwarn/"
+                "httpwarning_3355.html?ori_url=demo"
+            )
+            captured_authorizations: list[str] = []
+            fake_session = FakeSession(
+                [
+                    FakeHTTPResponse(status_code=200, text="<html></html>"),
+                ]
+            )
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del json, timeout
+                self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
+                self.assertTrue(stream)
+                self.assertFalse(kwargs["allow_redirects"])
+                captured_authorizations.append(str((headers or {}).get("Authorization") or ""))
+                return FakeHTTPResponse(
+                    status_code=302,
+                    headers={
+                        "Server": "netentsec",
+                        "Location": confirmation_url,
+                    },
+                )
+
+            with patch.object(oauth_service, "get_auth_file_quota") as quota_mock:
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                    with patch("src.utils.proxy_warning.requests.Session", return_value=fake_session):
+                        response, status_code, failure = proxy_service.proxy_request(
+                            {
+                                "model": "gpt-5.4",
+                                "messages": [{"role": "user", "content": "hi"}],
+                                "stream": False,
+                            },
+                            {"Authorization": "Bearer downstream-token"},
+                            resolved_target_format="openai_chat",
+                        )
+                quota_mock.assert_not_called()
+
+        self.assertIsNone(response)
+        self.assertEqual(CODEX_PROXY_WARNING_STATUS_CODE, status_code)
+        self.assertIsNotNone(failure)
+        self.assertEqual(CODEX_PROXY_WARNING_ERROR_CODE, failure.error_code)
+        self.assertEqual(confirmation_url, failure.details["confirmation_url"])  # type: ignore[index]
+        self.assertIn("auto_confirm_error", failure.details)  # type: ignore[operator]
+        self.assertIn(confirmation_url, failure.message)  # type: ignore[union-attr]
+        self.assertEqual(["Bearer access-first"], captured_authorizations)
+
+    def test_proxy_warning_auto_confirm_retries_same_account_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            write_auth_file(root, "codex-second.json", "access-second", mtime=1000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            confirmation_url = (
+                "http://114.114.114.114:9421/proxycontrolwarn/"
+                "httpwarning_3355.html?ori_url=aHR0cHM6Ly9jaGF0Z3B0LmNvbS8="
+            )
+            warning_html = """
+                <input id="sessionid" value="session-123" />
+                <input id="pid" value="3355" />
+                <input id="uid" value="0" />
+            """
+            fake_session = FakeSession(
+                [
+                    FakeHTTPResponse(status_code=200, text=warning_html),
+                    FakeHTTPResponse(status_code=200, text="ok"),
+                ]
+            )
+            captured_authorizations: list[str] = []
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del json, timeout
+                self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
+                self.assertTrue(stream)
+                self.assertFalse(kwargs["allow_redirects"])
+                captured_authorizations.append(str((headers or {}).get("Authorization") or ""))
+                if len(captured_authorizations) == 1:
+                    return FakeHTTPResponse(
+                        status_code=302,
+                        headers={
+                            "Server": "netentsec",
+                            "Location": confirmation_url,
+                        },
+                    )
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n'
+                    ],
+                )
+
+            with patch.object(oauth_service, "get_auth_file_quota") as quota_mock:
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                    with patch("src.utils.proxy_warning.requests.Session", return_value=fake_session):
+                        response, status_code, failure = proxy_service.proxy_request(
+                            {
+                                "model": "gpt-5.4",
+                                "messages": [{"role": "user", "content": "hi"}],
+                                "stream": False,
+                            },
+                            {"Authorization": "Bearer downstream-token"},
+                            resolved_target_format="openai_chat",
+                        )
+                quota_mock.assert_not_called()
+            payload = json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertEqual("ok", payload["choices"][0]["message"]["content"])
+        self.assertEqual(["Bearer access-first", "Bearer access-first"], captured_authorizations)
+        self.assertEqual(2, len(fake_session.get_calls))
+        self.assertEqual(confirmation_url, fake_session.get_calls[0][0])
+        self.assertTrue(
+            fake_session.get_calls[1][0].startswith(
+                "http://114.114.114.114:9421/proxycontrolwarn/check?"
+            )
+        )
+        self.assertFalse(fake_session.get_calls[0][1]["allow_redirects"])
+        self.assertFalse(fake_session.get_calls[1][1]["allow_redirects"])
 
     def test_authentication_error_marks_auth_file_unavailable_and_skips_next_request(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -176,8 +176,9 @@ class RecordingProxyService:
 
 
 class FakeCodexProxyService:
-    def __init__(self, models: tuple[str, ...] = ("gpt-5",)) -> None:
+    def __init__(self, models: tuple[str, ...] = ("gpt-5",), proxy_result=None) -> None:
         self._models = models
+        self._proxy_result = proxy_result
 
     def has_model(self, model_name: str) -> bool:
         return model_name in self._models
@@ -187,6 +188,8 @@ class FakeCodexProxyService:
 
     def proxy_request(self, *args, **kwargs):
         del args, kwargs
+        if self._proxy_result is not None:
+            return self._proxy_result
         return None, 503, ProxyErrorInfo(
             message="No available Codex OAuth account for model: gpt-5",
             status_code=503,
@@ -423,6 +426,54 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         self.assertTrue(
             any("upstream_error=HTTP upstream request failed after 2 attempts: dial tcp timeout" in msg for msg in logger.messages("error"))
         )
+
+    def test_codex_proxy_warning_error_includes_confirmation_url(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        confirmation_url = "http://114.114.114.114:9421/proxycontrolwarn/httpwarning_3355.html?ori_url=demo"
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            codex_proxy_service=FakeCodexProxyService(
+                ("gpt-5",),
+                (
+                    None,
+                    511,
+                    ProxyErrorInfo(
+                        message=f"Network proxy confirmation required: {confirmation_url}",
+                        status_code=511,
+                        error_type="upstream_error",
+                        error_code="proxy_warning_required",
+                        details={"confirmation_url": confirmation_url, "upstream_status": 302},
+                    ),
+                ),
+            ),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            json={"model": "gpt-5", "messages": [{"role": "user", "content": "hi"}]},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        payload = response.get_json()
+
+        self.assertEqual(511, response.status_code)
+        self.assertEqual("proxy_warning_required", payload["error"]["code"])
+        self.assertEqual(confirmation_url, payload["error"]["details"]["confirmation_url"])
+        self.assertEqual(302, payload["error"]["details"]["upstream_status"])
 
     def test_responses_route_resolves_target_format_from_route(self) -> None:
         provider = LLMProvider(

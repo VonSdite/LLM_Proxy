@@ -66,6 +66,7 @@ downstream request
   - 使用回调 URL 换取 token 并写入本地认证文件
   - 删除本地认证文件时同步清理该文件的本地状态
   - 读取认证文件状态，并按需刷新 token 后查询 Codex 配额
+  - token 交换、token 刷新与配额查询遇到代理风险确认页时，会走统一自动确认重试流程
   - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
   - 持久化认证文件最近一次配额快照、配额刷新错误与 Codex 模型代理使用状态
   - 维护本地手动 Codex OAuth 模型目录
@@ -99,6 +100,7 @@ downstream request
   - 统一 hook 加载与缓存
 - `ExecutorRegistry`
   - 负责 HTTP 上游连接
+  - 统一处理 Provider 出站请求中的代理风险确认页自动确认与一次重试
 - `Decoder`
   - 将上游流拆成统一事件
 - `TranslatorRegistry`
@@ -415,6 +417,7 @@ OAuth Codex tab
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
 - token 交换、token 刷新与配额查询会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
 - Codex 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
+- 出站 HTTP 请求遇到代理风险确认页时，会自动确认一次并重试原请求；自动确认失败或重试后仍被拦截时，返回 `proxy_warning_required` 和确认页 URL
 - Codex 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
 - OAuth 登录、文件、配额与模型目录管理属于控制平面
 - Codex 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
@@ -534,7 +537,15 @@ sequenceDiagram
     Controller->>CodexProxy: proxy_request()
     CodexProxy->>ChatGPT: POST /backend-api/codex/responses
     Note over CodexProxy,ChatGPT: 对齐 Codex backend 要求：stream=true、store=false、parallel_tool_calls=true、include encrypted content，并移除不支持字段
-    alt 账号配额耗尽
+    alt 代理风险确认页
+        ChatGPT-->>CodexProxy: 302 proxycontrolwarn
+        CodexProxy->>ChatGPT: GET warning page and check endpoint
+        CodexProxy->>ChatGPT: retry original POST once
+        alt 自动确认失败或重试后仍被拦截
+            CodexProxy-->>Controller: proxy_warning_required + confirmation_url
+            Controller-->>Client: error response
+        end
+    else 账号配额耗尽
         ChatGPT-->>CodexProxy: 429 usage_limit_reached
         CodexProxy->>CodexOAuth: mark_auth_file_quota_exhausted()
         CodexProxy->>CodexOAuth: record_auth_file_failure()

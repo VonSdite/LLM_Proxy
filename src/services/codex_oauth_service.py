@@ -21,6 +21,7 @@ import requests
 
 from ..application.app_context import AppContext
 from ..utils.net import build_requests_proxies
+from ..utils.proxy_warning import ProxyWarningRequired, request_with_proxy_warning_retry
 
 
 CODEX_AUTH_URL = "https://auth.openai.com/oauth/authorize"
@@ -441,11 +442,11 @@ class CodexOAuthService:
         if account_id:
             headers["Chatgpt-Account-Id"] = account_id
 
-        return requests.get(
+        return self._request_with_proxy_warning_retry(
+            "GET",
             CODEX_USAGE_URL,
             headers=headers,
             timeout=20,
-            **self._build_request_options(),
         )
 
     def _iter_auth_file_paths(self) -> List[Path]:
@@ -768,7 +769,8 @@ class CodexOAuthService:
             "redirect_uri": CODEX_REDIRECT_URI,
             "code_verifier": code_verifier,
         }
-        response = requests.post(
+        response = self._request_with_proxy_warning_retry(
+            "POST",
             CODEX_TOKEN_URL,
             data=data,
             headers={
@@ -776,7 +778,6 @@ class CodexOAuthService:
                 "Accept": "application/json",
             },
             timeout=30,
-            **self._build_request_options(),
         )
         if response.status_code != 200:
             raise ValueError(f"Token exchange failed with status {response.status_code}: {response.text}")
@@ -789,7 +790,8 @@ class CodexOAuthService:
 
     def _refresh_auth_file(self, auth_file: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
         refresh_token = str(payload.get("refresh_token") or "").strip()
-        response = requests.post(
+        response = self._request_with_proxy_warning_retry(
+            "POST",
             CODEX_TOKEN_URL,
             data={
                 "client_id": CODEX_CLIENT_ID,
@@ -802,7 +804,6 @@ class CodexOAuthService:
                 "Accept": "application/json",
             },
             timeout=30,
-            **self._build_request_options(),
         )
         if response.status_code != 200:
             raise ValueError(f"Token refresh failed with status {response.status_code}: {response.text}")
@@ -835,6 +836,42 @@ class CodexOAuthService:
         with path.open("w", encoding="utf-8", newline="\n") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
+
+    def _request_with_proxy_warning_retry(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> requests.Response:
+        request_options = self._build_request_options()
+        normalized_method = str(method or "").strip().upper()
+
+        def send_request() -> requests.Response:
+            if normalized_method == "GET":
+                return requests.get(
+                    url,
+                    allow_redirects=False,
+                    **kwargs,
+                    **request_options,
+                )
+            if normalized_method == "POST":
+                return requests.post(
+                    url,
+                    allow_redirects=False,
+                    **kwargs,
+                    **request_options,
+                )
+            raise ValueError(f"Unsupported OAuth request method: {method}")
+
+        try:
+            return request_with_proxy_warning_retry(
+                send_request,
+                request_options=request_options,
+                logger=self._logger,
+                log_context=f"oauth_url={url}",
+            )
+        except ProxyWarningRequired as exc:
+            raise ValueError(str(exc)) from exc
 
     def _build_request_options(self) -> Dict[str, Any]:
         if self._config_manager is None:

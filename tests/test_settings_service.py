@@ -75,7 +75,7 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertIsNone(self.config_manager.get_oauth_proxy())
         self.assertFalse(self.config_manager.is_oauth_verify_ssl_enabled())
 
-    def test_update_oauth_settings_persists_proxy_and_ssl_verify_flag(self) -> None:
+    def test_update_oauth_settings_persists_network_flags(self) -> None:
         result = self.service.update_oauth_settings(
             {
                 "oauth": {
