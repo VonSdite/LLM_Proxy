@@ -763,6 +763,63 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual([], coerce_calls)
         self.assertIn(b"data: [DONE]", stream_body)
 
+    def test_proxy_service_buffers_upstream_stream_trace_when_debug_logging_enabled(self) -> None:
+        app, service = self._build_service(llm_request_debug_enabled=True)
+        provider = LLMProvider(
+            name="responses-upstream",
+            api="https://example.com/v1/responses",
+            transport="http",
+            source_format="openai_responses",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        upstream_chunks = [
+            b'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","created_at":123,"model":"gpt-4.1"}}\n\n',
+            b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+        fake_response = FakeStreamResponse(upstream_chunks)
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, body, args, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        trace_entries: list[dict[str, Any]] = []
+
+        def record_trace_entry(**kwargs):
+            trace_entries.append(kwargs)
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+        service._trace.log_entry = record_trace_entry  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "responses-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+                trace_id="trace-enabled",
+            )
+            stream_body = self._collect_response_body(response)
+
+        upstream_trace = next(
+            entry for entry in trace_entries if entry["stage"] == "upstream_response"
+        )
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(b"Hello", stream_body)
+        self.assertEqual(b"".join(upstream_chunks), upstream_trace["payload"])
+
     def test_stream_hook_abort_emits_openai_chat_error_chunk_and_done(self) -> None:
         app, service = self._build_service()
         provider = LLMProvider(

@@ -170,25 +170,53 @@ class Application:
 
         @self._flask_app.before_request
         def log_request_access() -> None:
-            client_ip = normalize_ip(request.remote_addr) or '-'
+            if self._should_skip_access_log_request():
+                return
+
+            client_ip = normalize_ip(request.remote_addr) or "-"
             requested_url = request.url
             model = None
-            if (request.content_length or 0) > 0 and request.is_json:
+            if (
+                self._should_read_access_log_model()
+                and (request.content_length or 0) > 0
+                and request.is_json
+            ):
                 payload = request.get_json(silent=True)
                 if isinstance(payload, dict):
-                    model = payload.get('model')
+                    model = payload.get("model")
 
             username = None
-            user = self._user_service.get_user_by_ip(client_ip)
-            if user:
-                username = str(user.get('username') or '')
+            if self._should_lookup_access_log_user():
+                user = self._user_service.get_user_by_ip(client_ip)
+                if user:
+                    username = str(user.get("username") or "")
 
-            log_message = f'ip={client_ip} url={requested_url}'
+            log_message = f"ip={client_ip} url={requested_url}"
             if username:
-                log_message = f'{log_message} username={username}'
+                log_message = f"{log_message} username={username}"
             if model is not None:
-                log_message = f'{log_message} model={model}'
+                log_message = f"{log_message} model={model}"
             self._access_logger.info(log_message)
+
+    @staticmethod
+    def _should_skip_access_log_request() -> bool:
+        """跳过静态资源访问日志，避免高频资源请求污染日志。"""
+        path = str(request.path or "")
+        return request.endpoint == "static" or path.startswith("/static/")
+
+    @staticmethod
+    def _should_read_access_log_model() -> bool:
+        """仅数据平面模型请求需要解析 JSON 读取 model。"""
+        return request.method == "POST" and request.path in {
+            "/v1/chat/completions",
+            "/v1/responses",
+            "/v1/messages",
+        }
+
+    @staticmethod
+    def _should_lookup_access_log_user() -> bool:
+        """仅数据平面请求需要按 IP 补充用户名。"""
+        return str(request.path or "").startswith("/v1/")
 
     def _setup_context(self) -> None:
         """创建全局运行上下文。"""

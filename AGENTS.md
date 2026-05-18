@@ -52,7 +52,7 @@
 - `src/config`
   - 配置快照管理、显式 Provider schema / factory、Provider 运行时注册
 - `src/external`
-  - 上游响应适配、流式探测、Provider 运行时对象
+  - 流式探测、Provider 运行时对象
 - `src/hooks`
   - Hook 协议和动态扩展点
 - `src/utils`
@@ -99,7 +99,7 @@
 6. 补齐 `stream_options.include_usage=true`
 7. 用 `ProviderManager.get_provider_for_model(model)` 获取目标 Provider
 8. `ProxyService.proxy_request(...)` 转发到上游
-9. `response_adapter` 处理普通响应或 SSE 响应
+9. `ProxyResponseBuilder` 处理普通响应或 SSE 响应
 10. 响应完成后通过回调写入 `request_logs` 并同步更新 `daily_request_stats`
 
 ## 模型路由规则
@@ -128,8 +128,8 @@
 - Hook 模块必须导出 `Hook` 类
 - 可选方法：
   - `header_hook(ctx, headers) -> headers`
-  - `input_body_hook(ctx, body) -> body`
-  - `output_body_hook(ctx, body) -> body`
+  - `request_guard(ctx, body) -> body`
+  - `response_guard(ctx, body) -> body`
 - `ProviderManager` 负责 Hook 动态加载和缓存
 
 ## 认证与会话
@@ -204,7 +204,7 @@
 
 ## 当前风险与注意事项
 - 历史文件里有较多中文乱码的注释和 docstring，修改相关文件时优先逐步修复，避免继续扩散。
-- `output_body_hook` 在非流式分支如果返回 `None`，可能把响应体变成 `null`；新增 Hook 时要注意返回值约定。
+- `response_guard` 返回 `None` 表示保留当前响应体；新增 Hook 时要注意返回值约定。
 - 认证 Session、用户 IP 缓存、Provider 映射和 Hook 缓存都在单进程内存中，不适合多实例部署。
 
 ## 4+1 架构文档维护

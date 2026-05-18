@@ -638,6 +638,52 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
 
         self.assertEqual(10, captured["timeout"])
 
+    def test_fetch_models_preview_closes_candidate_responses(self) -> None:
+        logger = FakeLogger()
+        ctx = AppContext(
+            logger=logger,
+            config_manager=None,  # type: ignore[arg-type]
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=Flask(__name__),
+        )
+        service = ModelDiscoveryService(ctx)
+
+        class FakeResponse:
+            def __init__(self, status_code: int, payload: dict[str, object]) -> None:
+                self.status_code = status_code
+                self._payload = payload
+                self.closed = False
+
+            def json(self) -> dict[str, object]:
+                return self._payload
+
+            def close(self) -> None:
+                self.closed = True
+
+        all_responses = [
+            FakeResponse(500, {}),
+            FakeResponse(200, {"data": [{"id": "demo-model"}]}),
+        ]
+        pending_responses = list(all_responses)
+
+        class FakeSession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                del exc_type, exc, tb
+                return False
+
+            def get(self, url, headers=None, proxies=None, timeout=None, verify=None, **kwargs):
+                del url, headers, proxies, timeout, verify, kwargs
+                return pending_responses.pop(0)
+
+        with patch("src.services.model_discovery_service.requests.Session", return_value=FakeSession()):
+            result = service.fetch_models_preview(api="https://example.com/v1/chat/completions")
+
+        self.assertEqual(["demo-model"], result["fetched_models"])
+        self.assertTrue(all(response.closed for response in all_responses))
+
     def test_fetch_models_preview_replaces_case_insensitive_header_duplicates(self) -> None:
         logger = FakeLogger()
         ctx = AppContext(

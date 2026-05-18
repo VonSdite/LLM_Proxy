@@ -225,12 +225,6 @@ class UserService:
             self._logger.error(f"Failed to get user: {exc}")
             return None
 
-    @staticmethod
-    def _normalize_sort_direction(sort_direction: Optional[str]) -> str:
-        """标准化用户列表排序方向。"""
-        normalized = str(sort_direction or "desc").strip().lower()
-        return normalized if normalized in {"asc", "desc"} else "desc"
-
     def _get_users_sorted_by_allowed_model_count(
         self,
         page: int,
@@ -238,41 +232,20 @@ class UserService:
         keyword: Optional[str],
         sort_direction: Optional[str],
     ) -> List[Dict[str, Any]]:
-        """按派生的模型权限数量做后端排序后分页。"""
-        total = self._repository.get_count(keyword=keyword)
-        if total <= 0:
-            return []
-
+        """按派生的模型权限数量排序后分页。"""
         available_models = self._get_available_model_names()
-        users = self._repository.get(
-            page=1,
-            page_size=total,
+        users = self._repository.get_sorted_by_allowed_model_count(
+            page=page,
+            page_size=page_size,
             keyword=keyword,
-            sort_key="id",
-            sort_direction="asc",
+            sort_direction=sort_direction,
+            available_model_count=len(available_models),
         )
         decorated_users = [
             self._decorate_user(user, available_models=available_models)
             for user in users
         ]
-        sortable_users = [
-            (index, user)
-            for index, user in enumerate(decorated_users)
-            if user is not None
-        ]
-
-        direction = self._normalize_sort_direction(sort_direction)
-        sortable_users.sort(
-            key=lambda item: (
-                -int(item[1].get("allowed_models_count") or 0)
-                if direction == "desc"
-                else int(item[1].get("allowed_models_count") or 0),
-                item[0],
-            )
-        )
-
-        offset = (page - 1) * page_size
-        return [user for _, user in sortable_users[offset : offset + page_size]]
+        return [user for user in decorated_users if user is not None]
 
     def get_users(
         self,

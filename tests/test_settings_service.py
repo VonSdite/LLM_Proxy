@@ -122,6 +122,66 @@ class SettingsServiceTests(unittest.TestCase):
                 }
             )
 
+    def test_update_system_settings_writes_once_after_full_validation(self) -> None:
+        write_calls: list[dict] = []
+        reload_calls: list[bool] = []
+        original_write_raw_config = self.config_manager.write_raw_config
+
+        def record_write(config: dict) -> None:
+            write_calls.append(config)
+            original_write_raw_config(config)
+
+        self.config_manager.write_raw_config = record_write  # type: ignore[method-assign]
+        service = SettingsService(
+            self.ctx,
+            reload_logging_callback=lambda: reload_calls.append(True),
+        )
+
+        result = service.update_system_settings(
+            {
+                "server": {"host": "0.0.0.0", "port": 9090},
+                "admin": {"username": "admin", "password": "secret"},
+                "logging": {
+                    "path": str(self.root_path / "new-logs"),
+                    "level": "DEBUG",
+                    "llm_request_debug_enabled": True,
+                },
+                "oauth": {
+                    "enabled": True,
+                    "proxy": "http://127.0.0.1:7890",
+                    "verify_ssl": True,
+                },
+            }
+        )
+
+        self.assertEqual(1, len(write_calls))
+        self.assertEqual([True], reload_calls)
+        self.assertTrue(result["auth_config_changed"])
+        self.assertTrue(result["server_restart_required"])
+        self.assertTrue(result["settings"]["logging"]["llm_request_debug_enabled"])
+        self.assertTrue(result["settings"]["oauth"]["enabled"])
+
+    def test_update_system_settings_rejects_invalid_debug_without_partial_write(self) -> None:
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            before = yaml.safe_load(handle)
+
+        with self.assertRaisesRegex(ValueError, "Log path is required"):
+            self.service.update_system_settings(
+                {
+                    "server": {"host": "0.0.0.0", "port": 9090},
+                    "admin": {"username": "admin", "password": "secret"},
+                    "logging": {
+                        "path": "",
+                        "level": "DEBUG",
+                        "llm_request_debug_enabled": True,
+                    },
+                }
+            )
+
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            after = yaml.safe_load(handle)
+        self.assertEqual(before, after)
+
 
 if __name__ == "__main__":
     unittest.main()
