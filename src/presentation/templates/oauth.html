@@ -679,6 +679,7 @@
                 const encodedName = encodeURIComponent(file.name || '');
                 const quota = getCodexAuthFileQuota(file);
                 const isLoadingQuota = codexAuthState.quotaLoadingByFile[file.name || ''] === true;
+                const quotaRefreshedAt = formatCodexQuotaRefreshedAt(file, quota);
                 const isDeleting = codexAuthState.deletingAuthFileName === (file.name || '') || codexAuthState.batchDeleting;
                 const isConfirmingDelete = codexAuthState.deleteConfirmName === (file.name || '');
                 const isSelected = codexAuthState.selectedAuthFiles.has(file.name || '');
@@ -741,6 +742,7 @@
                                             ${isLoadingQuota ? 'disabled' : ''}
                                         >${renderRefreshIcon()}</button>
                                     </div>
+                                    <div class="oauth-quota-refreshed-at"><span>上次刷新：</span>${escapeHtml(quotaRefreshedAt)}</div>
                                     <div class="oauth-quota-text">${renderCodexQuotaSummary(quota, isLoadingQuota)}</div>
                                     ${renderCodexQuotaProgress(quota, isLoadingQuota)}
                                 </div>
@@ -970,6 +972,11 @@
                 const resetAt = window.reset_at || window.resetAt || window.reset_label || '-';
                 return `${percent.text} 剩余，下次刷新：${escapeHtml(formatTimestamp(resetAt))}`;
             }).join('；');
+        }
+
+        function formatCodexQuotaRefreshedAt(file, quota) {
+            const refreshedAt = quota?.refreshed_at || quota?.quota_refreshed_at || file?.quota_refreshed_at || '';
+            return formatTimestamp(refreshedAt);
         }
 
         function renderCodexQuotaProgress(quota, isLoadingQuota = false) {
@@ -1234,7 +1241,9 @@
                 const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/quota`, { cache: 'no-store' });
                 const result = await response.json();
                 if (!response.ok) {
-                    throw new Error(result.error || '刷新配额失败');
+                    const error = new Error(result.error || '刷新配额失败');
+                    error.quotaRefreshedAt = result.quota_refreshed_at || result.refreshed_at || '';
+                    throw error;
                 }
                 codexAuthState.quotaByFile[name] = result;
                 updateCodexAuthFileQuotaState(name, result, '');
@@ -1249,8 +1258,9 @@
             } catch (error) {
                 console.error('刷新 Codex 配额失败:', error);
                 const message = error?.message || '刷新配额失败';
-                codexAuthState.quotaByFile[name] = { error: message };
-                updateCodexAuthFileQuotaState(name, null, message);
+                const refreshedAt = error?.quotaRefreshedAt || '';
+                codexAuthState.quotaByFile[name] = { error: message, refreshed_at: refreshedAt };
+                updateCodexAuthFileQuotaState(name, null, message, refreshedAt);
                 if (!silent) {
                     showActionError('刷新 Codex 配额', error, { fallback: '刷新配额失败' });
                 }
@@ -1263,14 +1273,14 @@
             }
         }
 
-        function updateCodexAuthFileQuotaState(name, quota, errorMessage) {
+        function updateCodexAuthFileQuotaState(name, quota, errorMessage, refreshedAt = '') {
             codexAuthState.authFiles = (codexAuthState.authFiles || []).map(file => {
                 if (file.name !== name) return file;
                 return {
                     ...file,
                     quota: quota || file.quota || null,
                     quota_error: errorMessage || '',
-                    quota_refreshed_at: quota?.refreshed_at || file.quota_refreshed_at || '',
+                    quota_refreshed_at: refreshedAt || quota?.refreshed_at || quota?.quota_refreshed_at || file.quota_refreshed_at || '',
                 };
             });
         }
