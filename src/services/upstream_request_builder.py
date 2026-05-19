@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..application.app_context import Logger
 from ..external import LLMProvider
@@ -19,9 +19,9 @@ from .upstream_usage import ensure_upstream_usage_capture
 class BuiltUpstreamRequest:
     """标准化后的上游请求构建结果。"""
 
-    headers: Dict[str, str]
-    guarded_body: Dict[str, Any]
-    translated_body: Dict[str, Any]
+    headers: dict[str, str]
+    guarded_body: dict[str, Any]
+    translated_body: dict[str, Any]
     request_ctx: HookContext
 
 
@@ -33,14 +33,14 @@ def build_upstream_request(
     request_model: str,
     upstream_model: str,
     provider_target_format: str,
-    request_data: Dict[str, Any],
-    request_headers: Dict[str, str],
+    request_data: dict[str, Any],
+    request_headers: dict[str, str],
     translator: Translator,
     attempt: int,
-    previous_status_code: Optional[int],
-    previous_error_type: Optional[HookErrorType],
-    auth_group_name: Optional[str],
-    auth_entry_id: Optional[str],
+    previous_status_code: int | None,
+    previous_error_type: HookErrorType | None,
+    auth_group_name: str | None,
+    auth_entry_id: str | None,
 ) -> BuiltUpstreamRequest:
     """构建经过 hook 和翻译后的上游请求。"""
     initial_stream = bool(request_data.get("stream", False))
@@ -90,7 +90,7 @@ def build_upstream_request(
 
 def _resolve_guarded_upstream_model(
     provider_name: str,
-    guarded_body: Dict[str, Any],
+    guarded_body: dict[str, Any],
     fallback_model: str,
 ) -> str:
     """解析 request_guard 修改后的实际上游模型名。"""

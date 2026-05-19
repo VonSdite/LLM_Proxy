@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from ipaddress import ip_address
-from typing import Any, Callable, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from ..application.app_context import AppContext
@@ -18,7 +19,7 @@ class SettingsService:
     def __init__(
         self,
         ctx: AppContext,
-        reload_logging_callback: Optional[Callable[[], None]] = None,
+        reload_logging_callback: Callable[[], None] | None = None,
     ):
         self._config_manager = ctx.config_manager
         self._reload_logging_callback = reload_logging_callback
@@ -194,7 +195,7 @@ class SettingsService:
         if llm_request_debug_enabled is None:
             raise ValueError("LLM request debug flag is required")
 
-        oauth_values: Optional[tuple[bool, str, bool]] = None
+        oauth_values: tuple[bool, str, bool] | None = None
         if "oauth" in payload:
             oauth_payload = payload.get("oauth")
             if not isinstance(oauth_payload, dict):

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -13,8 +13,8 @@ class NormalizedRequest:
     """Downstream request shape before provider-specific translation."""
 
     model: str
-    body: Dict[str, Any]
-    headers: Dict[str, str]
+    body: dict[str, Any]
+    headers: dict[str, str]
     stream: bool
 
 
@@ -25,7 +25,7 @@ class StreamEvent:
     kind: Literal["json", "text", "done"]
     payload: Any = None
     raw: str = ""
-    event: Optional[str] = None
+    event: str | None = None
 
 
 @dataclass(frozen=True)
@@ -34,4 +34,4 @@ class DownstreamChunk:
 
     kind: Literal["json", "text", "done"]
     payload: Any = None
-    event: Optional[str] = None
+    event: str | None = None

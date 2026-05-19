@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def normalize_http_headers(headers: Mapping[str, Any] | None) -> dict[str, str]:

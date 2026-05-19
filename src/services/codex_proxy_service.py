@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Callable, Dict, Iterator, Optional
+from collections.abc import Callable, Iterator
+from typing import Any
 from uuid import uuid4
 
 import requests
@@ -67,15 +68,15 @@ class CodexProxyService:
 
     def proxy_request(
         self,
-        request_data: Dict[str, Any],
-        request_headers: Dict[str, str],
-        on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
+        request_data: dict[str, Any],
+        request_headers: dict[str, str],
+        on_complete: Callable[[dict[str, Any]], None] | None = None,
         forward_stream_usage: bool = False,
-        resolved_target_format: Optional[str] = None,
-        trace_id: Optional[str] = None,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-    ) -> tuple[Optional[Response], int, Optional[ProxyErrorInfo]]:
+        resolved_target_format: str | None = None,
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """按账号配额顺序代理 Codex 请求。"""
         del trace_id
         model_name = str(request_data.get("model") or "").strip()
@@ -116,7 +117,7 @@ class CodexProxyService:
                 ),
             )
 
-        last_failure: Optional[ProxyErrorInfo] = None
+        last_failure: ProxyErrorInfo | None = None
         for candidate in candidates:
             response, status_code, failure = self._proxy_with_candidate(
                 candidate=candidate,
@@ -153,14 +154,14 @@ class CodexProxyService:
         *,
         candidate: CodexAuthCandidate,
         model_name: str,
-        request_data: Dict[str, Any],
-        request_headers: Dict[str, str],
-        on_complete: Optional[Callable[[Dict[str, Any]], None]],
+        request_data: dict[str, Any],
+        request_headers: dict[str, str],
+        on_complete: Callable[[dict[str, Any]], None] | None,
         forward_stream_usage: bool,
         target_format: str,
-        route_name: Optional[str],
-        client_ip: Optional[str],
-    ) -> tuple[Optional[Response], int, Optional[ProxyErrorInfo]]:
+        route_name: str | None,
+        client_ip: str | None,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         translator = self._translator_registry.get("openai_responses", target_format)
         upstream_body = translator.translate_request(
             model_name,
@@ -336,7 +337,7 @@ class CodexProxyService:
         )
 
     @staticmethod
-    def _apply_codex_body_defaults(body: Dict[str, Any], model_name: str) -> None:
+    def _apply_codex_body_defaults(body: dict[str, Any], model_name: str) -> None:
         body["model"] = model_name
         body["stream"] = True
         body["store"] = False
@@ -376,7 +377,7 @@ class CodexProxyService:
         body.setdefault("instructions", "")
 
     @staticmethod
-    def _normalize_codex_builtin_tools(body: Dict[str, Any]) -> None:
+    def _normalize_codex_builtin_tools(body: dict[str, Any]) -> None:
         """归一 Codex 上游当前接受的内置工具名称。"""
 
         def normalize_tool(tool: Any) -> None:
@@ -403,11 +404,11 @@ class CodexProxyService:
 
     def _build_codex_headers(
         self,
-        request_headers: Dict[str, str],
+        request_headers: dict[str, str],
         candidate: CodexAuthCandidate,
         *,
         stream: bool,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         headers = merge_http_headers({}, request_headers)
         headers = merge_http_headers(
             headers,
@@ -429,7 +430,7 @@ class CodexProxyService:
             )
         return headers
 
-    def _build_request_options(self) -> Dict[str, Any]:
+    def _build_request_options(self) -> dict[str, Any]:
         if self._config_manager is None:
             return {
                 "proxies": None,
@@ -446,13 +447,13 @@ class CodexProxyService:
         response: requests.Response,
         translator: Any,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         target_format: str,
-        on_complete: Optional[Callable[[Dict[str, Any]], None]],
+        on_complete: Callable[[dict[str, Any]], None] | None,
         forward_stream_usage: bool,
-        route_name: Optional[str],
-        client_ip: Optional[str],
+        route_name: str | None,
+        client_ip: str | None,
         auth_file_name: str,
     ) -> Response:
         del route_name, client_ip
@@ -461,11 +462,11 @@ class CodexProxyService:
         downstream_headers["Cache-Control"] = "no-cache"
 
         def generate() -> Iterator[bytes]:
-            state: Dict[str, Any] = {}
+            state: dict[str, Any] = {}
             meta = ProxyResponseBuilder._create_empty_meta()
             terminal_sent = False
             completed = False
-            failed_payload: Optional[Dict[str, Any]] = None
+            failed_payload: dict[str, Any] | None = None
             stream_error_message = ""
             try:
                 for event in decode_stream_events(response.iter_content(chunk_size=None), "sse_json"):
@@ -544,18 +545,18 @@ class CodexProxyService:
         response: requests.Response,
         translator: Any,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         target_format: str,
-        on_complete: Optional[Callable[[Dict[str, Any]], None]],
-        route_name: Optional[str],
-        client_ip: Optional[str],
+        on_complete: Callable[[dict[str, Any]], None] | None,
+        route_name: str | None,
+        client_ip: str | None,
         auth_file_name: str,
-    ) -> tuple[Optional[Response], int, Optional[ProxyErrorInfo]]:
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         del route_name, client_ip
         try:
-            completed_payload: Optional[Dict[str, Any]] = None
-            failed_payload: Optional[Dict[str, Any]] = None
+            completed_payload: dict[str, Any] | None = None
+            failed_payload: dict[str, Any] | None = None
             for event in decode_stream_events(response.iter_content(chunk_size=None), "sse_json"):
                 if event.kind != "json" or not isinstance(event.payload, dict):
                     continue
@@ -616,7 +617,7 @@ class CodexProxyService:
             response.close()
 
     @staticmethod
-    def _extract_stream_failure_message(payload: Optional[Dict[str, Any]]) -> str:
+    def _extract_stream_failure_message(payload: dict[str, Any] | None) -> str:
         if not isinstance(payload, dict):
             return "Codex stream closed before response.completed"
         response = payload.get("response")
@@ -663,7 +664,7 @@ class CodexProxyService:
         return str(error.get("type") or "").strip() in {"usage_limit_reached", "rate_limit_exceeded", ""}
 
     @staticmethod
-    def _extract_retry_after_seconds(response: requests.Response, body: bytes) -> Optional[float]:
+    def _extract_retry_after_seconds(response: requests.Response, body: bytes) -> float | None:
         retry_after = response.headers.get("Retry-After")
         try:
             if retry_after:
@@ -715,7 +716,7 @@ class CodexProxyService:
             response.close()
 
     @staticmethod
-    def _filter_response_headers(headers: Any) -> Dict[str, str]:
+    def _filter_response_headers(headers: Any) -> dict[str, str]:
         excluded = {
             "transfer-encoding",
             "connection",

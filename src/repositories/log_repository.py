@@ -5,7 +5,8 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from ..utils.database import ConnectionFactory
 from ..utils.local_time import (
@@ -93,14 +94,14 @@ class LogRepository:
     def insert(
         self,
         request_model: str,
-        response_model: Optional[str],
+        response_model: str | None,
         total_tokens: int,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
-        start_time: Optional[object] = None,
-        end_time: Optional[object] = None,
-        ip_address: Optional[str] = None,
-    ) -> Optional[int]:
+        start_time: object | None = None,
+        end_time: object | None = None,
+        ip_address: str | None = None,
+    ) -> int | None:
         """写入单条请求日志，并同步更新日聚合统计。"""
         start_time_value = ensure_local_datetime(start_time)
         end_time_value = ensure_local_datetime(end_time)
@@ -164,7 +165,7 @@ class LogRepository:
             return cursor.lastrowid
 
     @staticmethod
-    def _normalize_filter_values(values: Optional[str | Sequence[str]]) -> list[str]:
+    def _normalize_filter_values(values: str | Sequence[str] | None) -> list[str]:
         if values is None:
             return []
 
@@ -182,7 +183,7 @@ class LogRepository:
         conditions: list[str],
         params: list[Any],
         column_name: str,
-        values: Optional[str | Sequence[str]],
+        values: str | Sequence[str] | None,
     ) -> None:
         normalized_values = cls._normalize_filter_values(values)
         if not normalized_values:
@@ -199,7 +200,7 @@ class LogRepository:
 
     @staticmethod
     def _normalize_sort_direction(
-        sort_direction: Optional[str],
+        sort_direction: str | None,
         default_direction: str = "desc",
     ) -> str:
         """标准化排序方向，仅允许 asc/desc。"""
@@ -212,8 +213,8 @@ class LogRepository:
     def _build_order_clause(
         cls,
         sort_columns: dict[str, str],
-        sort_key: Optional[str],
-        sort_direction: Optional[str],
+        sort_key: str | None,
+        sort_direction: str | None,
         default_key: str,
         tie_breaker: str,
     ) -> str:
@@ -227,13 +228,13 @@ class LogRepository:
 
     def get_statistics(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        username: Optional[str | Sequence[str]] = None,
-        request_model: Optional[str | Sequence[str]] = None,
-        sort_key: Optional[str] = None,
-        sort_direction: Optional[str] = None,
-    ) -> List[sqlite3.Row]:
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[sqlite3.Row]:
         """按条件查询聚合统计。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -281,13 +282,13 @@ class LogRepository:
         self,
         page: int = 1,
         page_size: int = 50,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        username: Optional[str | Sequence[str]] = None,
-        request_model: Optional[str | Sequence[str]] = None,
-        sort_key: Optional[str] = None,
-        sort_direction: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> dict[str, Any]:
         """按条件分页查询原始请求日志。"""
         offset = (page - 1) * page_size
 
@@ -343,7 +344,7 @@ class LogRepository:
                 "logs": [dict(log) for log in logs],
             }
 
-    def get_unique_request_models(self) -> List[str]:
+    def get_unique_request_models(self) -> list[str]:
         """查询有日志记录的请求模型列表。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -357,7 +358,7 @@ class LogRepository:
             )
             return [row["request_model"] for row in cursor.fetchall()]
 
-    def get_unique_usernames(self) -> List[str]:
+    def get_unique_usernames(self) -> list[str]:
         """查询有日志记录的用户名列表。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()

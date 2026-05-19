@@ -7,7 +7,7 @@ import os
 import tempfile
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any
 
 import yaml
 
@@ -37,7 +37,7 @@ class ConfigManager:
     def get_server_host(self) -> str:
         return str(self.get("server.host", "127.0.0.1"))
 
-    def get_admin_config(self) -> Optional[Dict[str, str]]:
+    def get_admin_config(self) -> dict[str, str] | None:
         admin = self.get("admin")
         return dict(admin) if isinstance(admin, dict) else None
 
@@ -51,7 +51,7 @@ class ConfigManager:
     def is_llm_request_debug_enabled(self) -> bool:
         return self._read_bool("logging.llm_request_debug_enabled", default=False)
 
-    def get_oauth_proxy(self) -> Optional[str]:
+    def get_oauth_proxy(self) -> str | None:
         value = self.get("oauth.proxy")
         if value is None:
             return None
@@ -73,10 +73,10 @@ class ConfigManager:
     def get_log_level(self) -> str:
         return self.get("logging.level", "INFO").upper()
 
-    def get_raw_config(self) -> Dict[str, Any]:
+    def get_raw_config(self) -> dict[str, Any]:
         return deepcopy(self._config)
 
-    def write_raw_config(self, config: Dict[str, Any]) -> None:
+    def write_raw_config(self, config: dict[str, Any]) -> None:
         if not isinstance(config, dict):
             raise ValueError("Configuration file must contain a top-level mapping")
 
@@ -88,7 +88,7 @@ class ConfigManager:
         self._config = self._load_config(self._config_path)
 
     @classmethod
-    def _load_config(cls, config_path: Union[str, Path]) -> Dict[str, Any]:
+    def _load_config(cls, config_path: str | Path) -> dict[str, Any]:
         path = Path(config_path).resolve()
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")
@@ -109,12 +109,12 @@ class ConfigManager:
             )
         return normalized
 
-    def _write_config(self, config: Dict[str, Any]) -> None:
+    def _write_config(self, config: dict[str, Any]) -> None:
         self._write_config_file(self._config_path, config)
 
     @staticmethod
-    def _write_config_file(config_path: Path, config: Dict[str, Any]) -> None:
-        temp_file_path: Optional[str] = None
+    def _write_config_file(config_path: Path, config: dict[str, Any]) -> None:
+        temp_file_path: str | None = None
         try:
             with tempfile.NamedTemporaryFile(
                 "w",
@@ -133,7 +133,7 @@ class ConfigManager:
                 os.remove(temp_file_path)
 
     @classmethod
-    def _normalize_config(cls, config: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    def _normalize_config(cls, config: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         normalized = deepcopy(config)
         providers = normalized.get("providers")
         if not isinstance(providers, list):

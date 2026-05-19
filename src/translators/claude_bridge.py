@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from ..proxy_core.contracts import DownstreamChunk
 from .event_chunk_utils import build_json_event_chunk as _emit_event
@@ -15,10 +15,10 @@ from .tool_result_utils import normalize_tool_result_content
 
 def convert_claude_request_to_openai_chat_request(
     model_name: str,
-    body: Dict[str, Any],
+    body: dict[str, Any],
     stream: bool,
-) -> Dict[str, Any]:
-    translated: Dict[str, Any] = {
+) -> dict[str, Any]:
+    translated: dict[str, Any] = {
         "model": model_name,
         "messages": [],
         "stream": bool(stream),
@@ -74,7 +74,7 @@ def convert_claude_request_to_openai_chat_request(
             translated["messages"].extend(tool_results)
 
         if content_items or reasoning_parts or tool_calls:
-            openai_message: Dict[str, Any] = {
+            openai_message: dict[str, Any] = {
                 "role": "assistant" if role == "assistant" else "user",
                 "content": _compact_openai_content(content_items),
             }
@@ -119,10 +119,10 @@ def convert_claude_request_to_openai_chat_request(
 
 def translate_openai_chat_downstream_chunk_to_claude(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
     chunk: DownstreamChunk,
-    state: Dict[str, Any],
+    state: dict[str, Any],
 ) -> list[DownstreamChunk]:
     if chunk.kind == "done":
         return finalize_claude_stream(model_name, original_request, translated_request, state)
@@ -160,10 +160,10 @@ def translate_openai_chat_downstream_chunk_to_claude(
 
 def translate_openai_chat_stream_payload_to_claude(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
-    payload: Dict[str, Any],
-    state: Dict[str, Any],
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
+    payload: dict[str, Any],
+    state: dict[str, Any],
 ) -> list[DownstreamChunk]:
     del original_request
     outputs: list[DownstreamChunk] = []
@@ -286,9 +286,9 @@ def translate_openai_chat_stream_payload_to_claude(
 
 def finalize_claude_stream(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
-    state: Dict[str, Any],
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
+    state: dict[str, Any],
 ) -> list[DownstreamChunk]:
     del model_name, original_request, translated_request
     if not state.get("started") or state.get("completed"):
@@ -329,15 +329,15 @@ def finalize_claude_stream(
 
 def convert_openai_chat_response_to_claude(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
     payload: Any,
 ) -> Any:
     del original_request
     if not isinstance(payload, dict):
         return payload
 
-    message: Dict[str, Any] = {}
+    message: dict[str, Any] = {}
     finish_reason = None
     for choice in payload.get("choices") or []:
         if not isinstance(choice, dict):
@@ -363,7 +363,7 @@ def convert_openai_chat_response_to_claude(
         "stop_sequence": None,
     }
     if isinstance(payload.get("usage"), dict):
-        usage_payload: Dict[str, Any] = {
+        usage_payload: dict[str, Any] = {
             "input_tokens": int(payload["usage"].get("prompt_tokens") or 0),
             "output_tokens": int(payload["usage"].get("completion_tokens") or 0),
         }
@@ -374,13 +374,13 @@ def convert_openai_chat_response_to_claude(
     return response
 
 
-def _convert_claude_system_to_openai(system: Any) -> Dict[str, Any] | None:
+def _convert_claude_system_to_openai(system: Any) -> dict[str, Any] | None:
     if isinstance(system, str) and system.strip():
         return {"role": "system", "content": system}
     if not isinstance(system, list):
         return None
 
-    content_items: List[Dict[str, Any]] = []
+    content_items: list[dict[str, Any]] = []
     for part in system:
         if not isinstance(part, dict):
             continue
@@ -394,16 +394,16 @@ def _convert_claude_system_to_openai(system: Any) -> Dict[str, Any] | None:
 
 def _convert_claude_blocks_to_openai_parts(
     content: Any, role: str
-) -> Tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]], list[dict[str, Any]]]:
     if isinstance(content, str):
         return ([{"type": "text", "text": content}] if content else []), [], [], []
     if not isinstance(content, list):
         return [], [], [], []
 
-    content_items: List[Dict[str, Any]] = []
-    reasoning_parts: List[str] = []
-    tool_calls: List[Dict[str, Any]] = []
-    tool_results: List[Dict[str, Any]] = []
+    content_items: list[dict[str, Any]] = []
+    reasoning_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+    tool_results: list[dict[str, Any]] = []
 
     for part in content:
         if not isinstance(part, dict):
@@ -440,7 +440,7 @@ def _convert_claude_blocks_to_openai_parts(
     return content_items, reasoning_parts, tool_calls, tool_results
 
 
-def _convert_claude_part_to_openai_content(part: Dict[str, Any]) -> Dict[str, Any] | None:
+def _convert_claude_part_to_openai_content(part: dict[str, Any]) -> dict[str, Any] | None:
     part_type = str(part.get("type") or "").strip().lower()
     if part_type == "text":
         text = str(part.get("text") or "")
@@ -466,7 +466,7 @@ def _convert_claude_part_to_openai_content(part: Dict[str, Any]) -> Dict[str, An
     return None
 
 
-def _compact_openai_content(content_items: List[Dict[str, Any]]) -> Any:
+def _compact_openai_content(content_items: list[dict[str, Any]]) -> Any:
     if not content_items:
         return ""
     if len(content_items) == 1 and content_items[0].get("type") == "text":
@@ -475,7 +475,7 @@ def _compact_openai_content(content_items: List[Dict[str, Any]]) -> Any:
 
 
 def _ensure_message_started(
-    model_name: str, translated_request: Dict[str, Any], state: Dict[str, Any]
+    model_name: str, translated_request: dict[str, Any], state: dict[str, Any]
 ) -> list[DownstreamChunk]:
     if state.get("started"):
         return []
@@ -516,7 +516,7 @@ def _ensure_message_started(
     ]
 
 
-def _ensure_text_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _ensure_text_open(state: dict[str, Any]) -> list[DownstreamChunk]:
     text_state = state.setdefault("text", {"opened": False, "closed": False, "block_index": None, "text": ""})
     if text_state.get("opened"):
         return []
@@ -536,7 +536,7 @@ def _ensure_text_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
     ]
 
 
-def _ensure_reasoning_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _ensure_reasoning_open(state: dict[str, Any]) -> list[DownstreamChunk]:
     reasoning_state = state.setdefault("reasoning", {"opened": False, "closed": False, "block_index": None, "text": ""})
     if reasoning_state.get("opened"):
         return []
@@ -557,11 +557,11 @@ def _ensure_reasoning_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
 
 
 def _ensure_tool_open(
-    state: Dict[str, Any],
+    state: dict[str, Any],
     tool_index: int,
     tool_call_id: str,
     tool_name: str,
-) -> Tuple[Dict[str, Any], list[DownstreamChunk]]:
+) -> tuple[dict[str, Any], list[DownstreamChunk]]:
     tool_blocks = state.setdefault("tool_blocks", {})
     tool_state = tool_blocks.get(tool_index)
     if tool_state is None:
@@ -604,7 +604,7 @@ def _ensure_tool_open(
     ]
 
 
-def _finalize_text_block(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _finalize_text_block(state: dict[str, Any]) -> list[DownstreamChunk]:
     text_state = state.get("text") or {}
     if not text_state.get("opened") or text_state.get("closed"):
         return []
@@ -621,7 +621,7 @@ def _finalize_text_block(state: Dict[str, Any]) -> list[DownstreamChunk]:
     ]
 
 
-def _finalize_reasoning_block(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _finalize_reasoning_block(state: dict[str, Any]) -> list[DownstreamChunk]:
     reasoning_state = state.get("reasoning") or {}
     if not reasoning_state.get("opened") or reasoning_state.get("closed"):
         return []
@@ -638,7 +638,7 @@ def _finalize_reasoning_block(state: Dict[str, Any]) -> list[DownstreamChunk]:
     ]
 
 
-def _finalize_tool_blocks(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _finalize_tool_blocks(state: dict[str, Any]) -> list[DownstreamChunk]:
     outputs: list[DownstreamChunk] = []
     for tool_index in sorted((state.get("tool_blocks") or {}).keys()):
         tool_state = state["tool_blocks"][tool_index]
@@ -658,8 +658,8 @@ def _finalize_tool_blocks(state: Dict[str, Any]) -> list[DownstreamChunk]:
     return outputs
 
 
-def _convert_openai_message_to_claude_blocks(message: Dict[str, Any]) -> List[Dict[str, Any]]:
-    content_blocks: List[Dict[str, Any]] = []
+def _convert_openai_message_to_claude_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
+    content_blocks: list[dict[str, Any]] = []
     reasoning_content = str(message.get("reasoning_content") or "").strip()
     if reasoning_content:
         content_blocks.append({"type": "thinking", "thinking": reasoning_content})
@@ -693,7 +693,7 @@ def _convert_openai_message_to_claude_blocks(message: Dict[str, Any]) -> List[Di
     return content_blocks
 
 
-def _coerce_tool_input(arguments: Any) -> Dict[str, Any]:
+def _coerce_tool_input(arguments: Any) -> dict[str, Any]:
     if isinstance(arguments, dict):
         return arguments
     if isinstance(arguments, str):

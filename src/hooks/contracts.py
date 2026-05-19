@@ -3,11 +3,11 @@
 """Hook type contracts."""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Protocol
 
 from ..application.app_context import Logger
-from ..utils.compat import Protocol, StrEnum
 
 
 class HookAbortError(Exception):
@@ -42,16 +42,16 @@ class HookContext:
     provider_target_format: str = "openai_chat"
     transport: str = "http"
     stream: bool = False
-    auth_group_name: Optional[str] = None
-    auth_entry_id: Optional[str] = None
-    last_status_code: Optional[int] = None
-    last_error_type: Optional[HookErrorType] = None
+    auth_group_name: str | None = None
+    auth_entry_id: str | None = None
+    last_status_code: int | None = None
+    last_error_type: HookErrorType | None = None
 
 
 class HookModule(Protocol):
-    def header_hook(self, ctx: HookContext, headers: Dict[str, str]) -> Dict[str, str]: ...
+    def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]: ...
 
-    def request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Optional[Dict[str, Any]]: ...
+    def request_guard(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any] | None: ...
 
     def response_guard(self, ctx: HookContext, body: Any) -> Any: ...
 
@@ -59,10 +59,10 @@ class HookModule(Protocol):
 class BaseHook:
     """Base hook implementation. Override only the methods you need."""
 
-    def header_hook(self, ctx: HookContext, headers: Dict[str, str]) -> Dict[str, str]:
+    def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
         return headers
 
-    def request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def request_guard(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any] | None:
         return body
 
     def response_guard(self, ctx: HookContext, body: Any) -> Any:

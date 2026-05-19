@@ -4,7 +4,7 @@
 
 import secrets
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..application.app_context import AppContext, Logger
 
@@ -15,7 +15,7 @@ class AuthenticationService:
     def __init__(self, ctx: AppContext):
         self._config_manager = ctx.config_manager
         self._logger: Logger = ctx.logger
-        self._sessions: Dict[str, Dict[str, Any]] = {}
+        self._sessions: dict[str, dict[str, Any]] = {}
         self._session_max_age = 86400
 
     def is_auth_enabled(self) -> bool:
@@ -51,7 +51,7 @@ class AuthenticationService:
         self._logger.info(f"Created session for user={username!r}")
         return session_token
 
-    def validate_session(self, session_token: Optional[str]) -> bool:
+    def validate_session(self, session_token: str | None) -> bool:
         """校验会话是否存在且未过期。"""
         return self._get_active_session(session_token) is not None
 
@@ -67,7 +67,7 @@ class AuthenticationService:
         self._sessions.clear()
         self._logger.info("Cleared all sessions: count=%s", cleared_count)
 
-    def get_session_username(self, session_token: Optional[str]) -> Optional[str]:
+    def get_session_username(self, session_token: str | None) -> str | None:
         """根据 session token 获取当前登录用户名。"""
         session = self._get_active_session(session_token)
         if session is None:
@@ -75,7 +75,7 @@ class AuthenticationService:
         username = session.get("username")
         return str(username) if username else None
 
-    def get_cookie_settings(self) -> Dict[str, Any]:
+    def get_cookie_settings(self) -> dict[str, Any]:
         """返回 session cookie 配置。"""
         return {
             "max_age": self._session_max_age,
@@ -93,7 +93,7 @@ class AuthenticationService:
         if expired:
             self._logger.info(f"Expired sessions cleaned: count={len(expired)}")
 
-    def _get_active_session(self, session_token: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _get_active_session(self, session_token: str | None) -> dict[str, Any] | None:
         """读取有效会话；过期会话会被顺手清理。"""
         if not session_token:
             return None

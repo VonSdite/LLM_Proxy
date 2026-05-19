@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..application.app_context import AppContext
 from ..config.provider_config import (
@@ -23,11 +24,11 @@ class ProviderService:
         self._logger = ctx.logger
         self._reload_callback = reload_callback
 
-    def list_providers(self) -> List[Dict[str, Any]]:
+    def list_providers(self) -> list[dict[str, Any]]:
         config = self._config_manager.get_raw_config()
         return [ProviderConfigSchema.from_mapping(provider).to_mapping() for provider in read_provider_entries(config)]
 
-    def get_provider(self, name: str) -> Optional[Dict[str, Any]]:
+    def get_provider(self, name: str) -> dict[str, Any] | None:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
         provider = self._find_provider(providers, name)
@@ -35,7 +36,7 @@ class ProviderService:
             return None
         return ProviderConfigSchema.from_mapping(provider).to_mapping()
 
-    def create_provider(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def create_provider(self, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
         provider_config = ProviderConfigSchema.from_payload(payload)
@@ -49,7 +50,7 @@ class ProviderService:
         self._save_providers(config, providers)
         return normalized
 
-    def update_provider(self, current_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def update_provider(self, current_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
         target = self._find_provider(providers, current_name)
@@ -85,7 +86,7 @@ class ProviderService:
         providers.remove(target)
         self._save_providers(config, providers)
 
-    def set_provider_enabled(self, name: str, enabled: bool) -> Dict[str, Any]:
+    def set_provider_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
         target = self._find_provider(providers, name)
@@ -101,7 +102,7 @@ class ProviderService:
         self._save_providers(config, providers)
         return provider_config.to_mapping()
 
-    def batch_set_provider_enabled(self, names: List[str], enabled: bool) -> Dict[str, Any]:
+    def batch_set_provider_enabled(self, names: list[str], enabled: bool) -> dict[str, Any]:
         normalized_names = self._normalize_provider_names(names, reject_duplicates=False)
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -120,7 +121,7 @@ class ProviderService:
             "enabled": bool(enabled),
         }
 
-    def reorder_providers(self, names: List[str]) -> Dict[str, Any]:
+    def reorder_providers(self, names: list[str]) -> dict[str, Any]:
         normalized_names = self._normalize_provider_names(names, reject_duplicates=True)
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -142,7 +143,7 @@ class ProviderService:
             "names": normalized_names,
         }
 
-    def batch_delete_providers(self, names: List[str]) -> Dict[str, Any]:
+    def batch_delete_providers(self, names: list[str]) -> dict[str, Any]:
         normalized_names = self._normalize_provider_names(names, reject_duplicates=False)
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -156,14 +157,14 @@ class ProviderService:
             "names": normalized_names,
         }
 
-    def _save_providers(self, config: Dict[str, Any], providers: List[Dict[str, Any]]) -> None:
+    def _save_providers(self, config: dict[str, Any], providers: list[dict[str, Any]]) -> None:
         self._validate_providers(config, providers)
         config["providers"] = providers
         self._config_manager.write_raw_config(config)
         self._reload_callback()
 
     @staticmethod
-    def _find_provider(providers: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
+    def _find_provider(providers: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
         normalized_name = str(name).strip()
         provider_indexes = ProviderService._build_provider_indexes_by_name(providers)
         provider_index = provider_indexes.get(normalized_name)
@@ -172,7 +173,7 @@ class ProviderService:
         return providers[provider_index]
 
     @staticmethod
-    def _validate_providers(config: Dict[str, Any], providers: List[Dict[str, Any]]) -> None:
+    def _validate_providers(config: dict[str, Any], providers: list[dict[str, Any]]) -> None:
         validate_auth_group_provider_definitions(
             read_auth_group_entries(config),
             providers,
@@ -183,11 +184,11 @@ class ProviderService:
         names: Any,
         *,
         reject_duplicates: bool,
-    ) -> List[str]:
+    ) -> list[str]:
         if not isinstance(names, list):
             raise ValueError("Provider names must be a non-empty list")
 
-        normalized_names: List[str] = []
+        normalized_names: list[str] = []
         seen_names = set()
         for raw_name in names:
             name = str(raw_name or "").strip()
@@ -205,14 +206,14 @@ class ProviderService:
         return normalized_names
 
     @staticmethod
-    def _is_provider_enabled(provider: Dict[str, Any]) -> bool:
+    def _is_provider_enabled(provider: dict[str, Any]) -> bool:
         return parse_optional_bool(provider.get("enabled"), default=True) is not False
 
     @classmethod
     def _regroup_providers_by_enabled(
         cls,
-        providers: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+        providers: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         enabled_providers = [provider for provider in providers if cls._is_provider_enabled(provider)]
         disabled_providers = [provider for provider in providers if not cls._is_provider_enabled(provider)]
         return enabled_providers + disabled_providers
@@ -220,8 +221,8 @@ class ProviderService:
     @classmethod
     def _insert_provider_by_enabled_group(
         cls,
-        providers: List[Dict[str, Any]],
-        provider: Dict[str, Any],
+        providers: list[dict[str, Any]],
+        provider: dict[str, Any],
     ) -> None:
         if cls._is_provider_enabled(provider):
             first_disabled_index = next(
@@ -239,7 +240,7 @@ class ProviderService:
     @classmethod
     def _ensure_grouped_provider_order(
         cls,
-        providers: List[Dict[str, Any]],
+        providers: list[dict[str, Any]],
     ) -> None:
         disabled_seen = False
         for provider in providers:
@@ -250,15 +251,15 @@ class ProviderService:
             disabled_seen = True
 
     @staticmethod
-    def _list_provider_names(providers: List[Dict[str, Any]]) -> List[str]:
+    def _list_provider_names(providers: list[dict[str, Any]]) -> list[str]:
         return list(ProviderService._build_provider_indexes_by_name(providers).keys())
 
     @staticmethod
-    def _build_provider_indexes_by_name(providers: List[Dict[str, Any]]) -> Dict[str, int]:
+    def _build_provider_indexes_by_name(providers: list[dict[str, Any]]) -> dict[str, int]:
         return {str(provider.get("name", "")).strip(): index for index, provider in enumerate(providers)}
 
     @staticmethod
-    def _find_provider_indexes(providers: List[Dict[str, Any]], names: List[str]) -> List[int]:
+    def _find_provider_indexes(providers: list[dict[str, Any]], names: list[str]) -> list[int]:
         provider_indexes = ProviderService._build_provider_indexes_by_name(providers)
         missing_names = [name for name in names if name not in provider_indexes]
         if missing_names:

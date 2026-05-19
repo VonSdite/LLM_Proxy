@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 import requests
 
@@ -37,10 +38,10 @@ class ProviderModelTestService:
 
     def test_models(
         self,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
-        request_headers: Optional[Mapping[str, str]] = None,
-    ) -> Dict[str, Any]:
+        request_headers: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
         models = self._normalize_test_models(payload.get("models"))
         provider = self._build_provider(payload, models)
         normalized_headers = self._normalize_request_headers(request_headers)
@@ -57,7 +58,7 @@ class ProviderModelTestService:
         return {"results": results}
 
     @staticmethod
-    def _normalize_test_models(value: Any) -> List[str]:
+    def _normalize_test_models(value: Any) -> list[str]:
         if not isinstance(value, list):
             raise ValueError("Model test models must be a non-empty list")
 
@@ -68,10 +69,10 @@ class ProviderModelTestService:
         return normalized_models
 
     @staticmethod
-    def _normalize_request_headers(request_headers: Optional[Mapping[str, str]]) -> Dict[str, str]:
+    def _normalize_request_headers(request_headers: Mapping[str, str] | None) -> dict[str, str]:
         return normalize_http_headers(request_headers)
 
-    def _build_provider(self, payload: Dict[str, Any], models: List[str]):
+    def _build_provider(self, payload: dict[str, Any], models: list[str]):
         provider_payload = {str(key): value for key, value in payload.items() if str(key) in SUPPORTED_PROVIDER_FIELDS}
         provider_payload["name"] = str(provider_payload.get("name") or "").strip() or self._TEST_PROVIDER_NAME
         provider_payload["model_list"] = list(models)
@@ -83,18 +84,18 @@ class ProviderModelTestService:
         provider,
         model_name: str,
         *,
-        request_headers: Dict[str, str],
-        auth_entry_id: Optional[str],
-    ) -> Dict[str, Any]:
+        request_headers: dict[str, str],
+        auth_entry_id: str | None,
+    ) -> dict[str, Any]:
         translator = self._translator_registry.get(provider.source_format, self._TEST_TARGET_FORMAT)
         max_retries = max(int(provider.max_retries or 1), 1)
-        previous_status_code: Optional[int] = None
-        previous_error_type: Optional[HookErrorType] = None
-        last_error_message: Optional[str] = None
+        previous_status_code: int | None = None
+        previous_error_type: HookErrorType | None = None
+        last_error_message: str | None = None
 
         for attempt in range(max_retries):
             request_started_at = time.perf_counter()
-            opened: Optional[OpenedUpstreamResponse] = None
+            opened: OpenedUpstreamResponse | None = None
             try:
                 headers, benchmark_request, translated_request, request_ctx = self._build_upstream_request(
                     provider,
@@ -184,13 +185,13 @@ class ProviderModelTestService:
         provider,
         model_name: str,
         *,
-        request_headers: Dict[str, str],
-        auth_entry_id: Optional[str],
+        request_headers: dict[str, str],
+        auth_entry_id: str | None,
         translator,
         attempt: int,
-        previous_status_code: Optional[int],
-        previous_error_type: Optional[HookErrorType],
-    ) -> tuple[Dict[str, str], Dict[str, Any], Dict[str, Any], HookContext]:
+        previous_status_code: int | None,
+        previous_error_type: HookErrorType | None,
+    ) -> tuple[dict[str, str], dict[str, Any], dict[str, Any], HookContext]:
         request_data = self._build_benchmark_request(model_name)
         headers = {"content-type": "application/json"}
         if request_headers:
@@ -221,7 +222,7 @@ class ProviderModelTestService:
         )
 
     @staticmethod
-    def _build_benchmark_request(model_name: str) -> Dict[str, Any]:
+    def _build_benchmark_request(model_name: str) -> dict[str, Any]:
         return {
             "model": model_name,
             "stream": True,
@@ -247,11 +248,11 @@ class ProviderModelTestService:
     def _open_upstream_response(
         self,
         provider,
-        headers: Dict[str, str],
-        body: Dict[str, Any],
+        headers: dict[str, str],
+        body: dict[str, Any],
         *,
         requested_stream: bool,
-        request_proxies: Optional[Dict[str, str]],
+        request_proxies: dict[str, str] | None,
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> OpenedUpstreamResponse:
@@ -272,16 +273,16 @@ class ProviderModelTestService:
         opened: OpenedUpstreamResponse,
         provider,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         translator,
         request_started_at: float,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         meta = self._create_empty_meta()
-        first_token_at: Optional[float] = None
+        first_token_at: float | None = None
         completed_at = request_started_at
-        stream_error: Optional[str] = None
-        state: Dict[str, Any] = {}
+        stream_error: str | None = None
+        state: dict[str, Any] = {}
 
         try:
             for event in decode_stream_events(opened.response.iter_content(chunk_size=None), opened.stream_format):
@@ -332,10 +333,10 @@ class ProviderModelTestService:
         *,
         opened: OpenedUpstreamResponse,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         translator,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         raw_body = self._read_response_body(opened)
         decoded_payload = self._decode_response_payload(raw_body)
         translated_payload = translator.translate_nonstream_response(
@@ -372,14 +373,14 @@ class ProviderModelTestService:
         cls,
         *,
         model_name: str,
-        response_model: Optional[str],
-        first_token_at: Optional[float],
-        completed_at: Optional[float],
-        request_started_at: Optional[float],
+        response_model: str | None,
+        first_token_at: float | None,
+        completed_at: float | None,
+        request_started_at: float | None,
         completion_tokens: int,
-    ) -> Dict[str, Any]:
-        first_token_latency_ms: Optional[float] = None
-        tps: Optional[float] = None
+    ) -> dict[str, Any]:
+        first_token_latency_ms: float | None = None
+        tps: float | None = None
 
         if first_token_at is not None and request_started_at is not None:
             first_token_latency_ms = round(max((first_token_at - request_started_at) * 1000, 0), 2)
@@ -404,9 +405,9 @@ class ProviderModelTestService:
     def _build_failure_result(
         *,
         model_name: str,
-        response_model: Optional[str],
+        response_model: str | None,
         error: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return {
             "requested_model": model_name,
             "available": False,
@@ -417,7 +418,7 @@ class ProviderModelTestService:
         }
 
     @staticmethod
-    def _create_empty_meta() -> Dict[str, Any]:
+    def _create_empty_meta() -> dict[str, Any]:
         return {
             "response_model": None,
             "prompt_tokens": 0,
@@ -426,7 +427,7 @@ class ProviderModelTestService:
         }
 
     @staticmethod
-    def _update_meta_from_payload(meta: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    def _update_meta_from_payload(meta: dict[str, Any], payload: dict[str, Any]) -> None:
         model = payload.get("model")
         if model:
             meta["response_model"] = str(model)
@@ -448,7 +449,7 @@ class ProviderModelTestService:
             meta["total_tokens"] = int(meta["prompt_tokens"]) + int(meta["completion_tokens"])
 
     @staticmethod
-    def _has_openai_chat_output_delta(payload: Dict[str, Any]) -> bool:
+    def _has_openai_chat_output_delta(payload: dict[str, Any]) -> bool:
         choices = payload.get("choices")
         if not isinstance(choices, list):
             return False
@@ -465,7 +466,7 @@ class ProviderModelTestService:
         return False
 
     @staticmethod
-    def _extract_error_message(payload: Any) -> Optional[str]:
+    def _extract_error_message(payload: Any) -> str | None:
         if not isinstance(payload, dict):
             return None
 
@@ -486,7 +487,7 @@ class ProviderModelTestService:
         return None
 
     @staticmethod
-    def _extract_response_model(payload: Any) -> Optional[str]:
+    def _extract_response_model(payload: Any) -> str | None:
         if not isinstance(payload, dict):
             return None
         model = payload.get("model")

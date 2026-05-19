@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any, Protocol
 from uuid import uuid4
 
 from flask import Response, jsonify, request
@@ -15,7 +16,6 @@ from ..hooks import HookAbortError
 from ..services.codex_proxy_service import CODEX_PROVIDER_NAME
 from ..services.proxy_service import ProxyErrorInfo
 from ..utils import normalize_ip
-from ..utils.compat import Protocol
 from ..utils.local_time import now_local_datetime
 
 
@@ -28,7 +28,7 @@ class ProxyServiceLike(Protocol):
         self,
         *args: Any,
         **kwargs: Any,
-    ) -> tuple[Optional[Response], int, Optional[ProxyErrorInfo]]: ...
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]: ...
 
 
 class CodexProxyServiceLike(Protocol):
@@ -40,7 +40,7 @@ class CodexProxyServiceLike(Protocol):
         self,
         *args: Any,
         **kwargs: Any,
-    ) -> tuple[Optional[Response], int, Optional[ProxyErrorInfo]]: ...
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]: ...
 
 
 class UserServiceLike(Protocol):
@@ -48,19 +48,19 @@ class UserServiceLike(Protocol):
         self,
         ip_address: str,
         require_whitelist_access: bool = True,
-    ) -> Optional[Dict[str, Any]]: ...
+    ) -> dict[str, Any] | None: ...
 
     def can_user_access_model(
         self,
-        user: Optional[Dict[str, Any]],
+        user: dict[str, Any] | None,
         model_name: str,
-        available_models: Optional[Sequence[str]] = None,
+        available_models: Sequence[str] | None = None,
     ) -> bool: ...
 
     def get_accessible_models_for_user(
         self,
-        user: Optional[Dict[str, Any]],
-        available_models: Optional[Sequence[str]] = None,
+        user: dict[str, Any] | None,
+        available_models: Sequence[str] | None = None,
     ) -> list[str]: ...
 
 
@@ -68,14 +68,14 @@ class LogServiceLike(Protocol):
     def log_request(
         self,
         request_model: str,
-        response_model: Optional[str],
+        response_model: str | None,
         total_tokens: int,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         start_time: Any = None,
         end_time: Any = None,
-        ip_address: Optional[str] = None,
-    ) -> Optional[int]: ...
+        ip_address: str | None = None,
+    ) -> int | None: ...
 
 
 class ProviderManagerLike(Protocol):
@@ -96,7 +96,7 @@ class ProxyController:
         user_service: UserServiceLike,
         log_service: LogServiceLike,
         provider_manager: ProviderManagerLike,
-        codex_proxy_service: Optional[CodexProxyServiceLike] = None,
+        codex_proxy_service: CodexProxyServiceLike | None = None,
     ):
         self._app = ctx.flask_app
         self._logger = ctx.logger
@@ -111,15 +111,15 @@ class ProxyController:
     def _log_downstream_request_trace_safe(
         self,
         *,
-        trace_id: Optional[str],
+        trace_id: str | None,
         start_line: str,
-        headers: Dict[str, Any],
+        headers: dict[str, Any],
         payload: Any,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        request_model: Optional[str] = None,
-        target_format: Optional[str] = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+        provider_name: str | None = None,
+        request_model: str | None = None,
+        target_format: str | None = None,
     ) -> None:
         try:
             trace_method = getattr(self._proxy_service, "log_downstream_request_trace")
@@ -145,16 +145,16 @@ class ProxyController:
     def _log_downstream_response_trace_safe(
         self,
         *,
-        trace_id: Optional[str],
+        trace_id: str | None,
         status_code: int,
-        headers: Dict[str, Any],
+        headers: dict[str, Any],
         payload: Any,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        request_model: Optional[str] = None,
-        target_format: Optional[str] = None,
-        error_type: Optional[str] = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+        provider_name: str | None = None,
+        request_model: str | None = None,
+        target_format: str | None = None,
+        error_type: str | None = None,
     ) -> None:
         try:
             trace_method = getattr(self._proxy_service, "log_downstream_response_trace")
@@ -184,7 +184,7 @@ class ProxyController:
         self._app.route("/v1/messages", methods=["POST"])(self.messages)
         self._app.route("/v1/models", methods=["GET"])(self.list_models)
 
-    def _get_user_by_ip(self, ip_address: str) -> Optional[Dict[str, Any]]:
+    def _get_user_by_ip(self, ip_address: str) -> dict[str, Any] | None:
         return self._user_service.get_user_by_ip(ip_address, require_whitelist_access=True)
 
     def _is_whitelist_required(self) -> bool:
@@ -195,7 +195,7 @@ class ProxyController:
         client_ip: str,
         *,
         error_format: str,
-    ) -> tuple[Optional[Dict[str, Any]], Optional[tuple[Response, int]]]:
+    ) -> tuple[dict[str, Any] | None, tuple[Response, int] | None]:
         """在启用白名单时解析当前请求对应的用户。"""
         if not self._is_whitelist_required():
             return None, None
@@ -219,10 +219,10 @@ class ProxyController:
         *,
         error_type: str,
         status_code: int = 400,
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
         error_format: str = "openai_chat",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         normalized_format = str(error_format or "").strip().lower()
         if normalized_format == "claude_chat":
             error = {
@@ -251,15 +251,15 @@ class ProxyController:
         status_code: int,
         *,
         error_type: str,
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
         error_format: str = "openai_chat",
-        trace_id: Optional[str] = None,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        request_model: Optional[str] = None,
-        target_format: Optional[str] = None,
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+        provider_name: str | None = None,
+        request_model: str | None = None,
+        target_format: str | None = None,
     ) -> tuple[Response, int]:
         payload = self._build_error_payload(
             message,
@@ -328,16 +328,16 @@ class ProxyController:
         route_name: str,
         target_format: str,
         inspect_stream_usage: bool,
-        error_format: Optional[str] = None,
+        error_format: str | None = None,
     ) -> ResponseReturnValue:
         resolved_target_format = str(target_format or "").strip().lower()
         if not resolved_target_format:
             raise ValueError("target_format must not be empty")
         resolved_error_format = error_format or resolved_target_format
         client_ip = normalize_ip(request.remote_addr)
-        trace_id: Optional[str] = None
-        model_name: Optional[str] = None
-        provider_name: Optional[str] = None
+        trace_id: str | None = None
+        model_name: str | None = None
+        provider_name: str | None = None
         try:
             self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
             user, denial_response = self._get_authorized_user_for_request(
@@ -349,7 +349,7 @@ class ProxyController:
 
             raw_request_data = request.get_json(silent=True)
             if raw_request_data is None:
-                request_data: Dict[str, Any] = {}
+                request_data: dict[str, Any] = {}
             elif not isinstance(raw_request_data, dict):
                 self._logger.warning(
                     "Proxy rejected: request body is not a JSON object route=%s",
@@ -436,7 +436,7 @@ class ProxyController:
             headers = self._filter_request_headers(request.headers)
             start_time = now_local_datetime()
 
-            def on_proxy_complete(response_meta: Dict[str, Any]) -> None:
+            def on_proxy_complete(response_meta: dict[str, Any]) -> None:
                 self._logger.info(
                     "Proxy completed: route=%s model=%s response_model=%s total_tokens=%s ip=%s",
                     route_name,
@@ -617,7 +617,7 @@ class ProxyController:
             )
 
     @staticmethod
-    def _filter_request_headers(headers: Any) -> Dict[str, str]:
+    def _filter_request_headers(headers: Any) -> dict[str, str]:
         excluded = {
             "host",
             "content-length",
@@ -633,7 +633,7 @@ class ProxyController:
         return {k: v for k, v in headers.items() if k.lower() not in excluded}
 
     @staticmethod
-    def _copy_headers(headers: Any) -> Dict[str, str]:
+    def _copy_headers(headers: Any) -> dict[str, str]:
         return {key: value for key, value in headers.items()}
 
     @staticmethod

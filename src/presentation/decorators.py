@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """认证装饰器。"""
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable
+from typing import ParamSpec
 
 from flask import jsonify, redirect, request
 from flask.typing import ResponseReturnValue
 
 from ..services import AuthenticationService
-from ..utils.compat import ParamSpec
 
 P = ParamSpec("P")
 

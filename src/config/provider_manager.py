@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Sequence
+from collections.abc import Sequence
 
 from ..application.app_context import AppContext, Logger
 from ..external import LLMProvider
@@ -15,12 +15,12 @@ from .provider_runtime_factory import ProviderRuntimeFactory
 class ProviderManager:
     """管理模型到 provider 的运行时映射关系。"""
 
-    def __init__(self, ctx: AppContext, runtime_factory: Optional[ProviderRuntimeFactory] = None):
+    def __init__(self, ctx: AppContext, runtime_factory: ProviderRuntimeFactory | None = None):
         self._logger: Logger = ctx.logger
         self._runtime_factory = runtime_factory or ProviderRuntimeFactory(ctx)
-        self._provider_by_model: Dict[str, LLMProvider] = {}
-        self._provider_by_name: Dict[str, LLMProvider] = {}
-        self._provider_views_by_name: Dict[str, ProviderRuntimeView] = {}
+        self._provider_by_model: dict[str, LLMProvider] = {}
+        self._provider_by_name: dict[str, LLMProvider] = {}
+        self._provider_views_by_name: dict[str, ProviderRuntimeView] = {}
 
     def load_providers(self, providers_config: Sequence[ProviderConfigSchema]) -> None:
         """重载 provider 配置。"""
@@ -32,7 +32,7 @@ class ProviderManager:
         for provider_cfg in providers_config:
             self._load_provider(provider_cfg)
 
-    def get_provider_for_model(self, model_name: str) -> Optional[LLMProvider]:
+    def get_provider_for_model(self, model_name: str) -> LLMProvider | None:
         """按模型 key 查询运行时 provider。"""
         return self._provider_by_model.get(model_name)
 
@@ -40,7 +40,7 @@ class ProviderManager:
         """返回当前已注册的模型 key 列表。"""
         return tuple(sorted(self._provider_by_model.keys()))
 
-    def get_provider_view(self, provider_name: str) -> Optional[ProviderRuntimeView]:
+    def get_provider_view(self, provider_name: str) -> ProviderRuntimeView | None:
         """按 provider 名称返回只读运行时视图。"""
         return self._provider_views_by_name.get(str(provider_name).strip())
 

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..utils.database import ConnectionFactory
 from ..utils.local_time import now_local_datetime_text
@@ -58,7 +58,7 @@ class UserRepository:
         username: str,
         ip_address: str,
         model_permissions: str = MODEL_PERMISSIONS_ALL,
-    ) -> Optional[int]:
+    ) -> int | None:
         """创建用户记录。"""
         now_text = now_local_datetime_text()
         with self._get_connection() as conn:
@@ -74,7 +74,7 @@ class UserRepository:
             )
             return cursor.lastrowid
 
-    def get_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+    def get_by_id(self, user_id: int) -> dict[str, Any] | None:
         """按 ID 查询用户。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -89,7 +89,7 @@ class UserRepository:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def _build_search_clause(self, keyword: Optional[str], table_alias: str = "u") -> tuple[str, list[Any]]:
+    def _build_search_clause(self, keyword: str | None, table_alias: str = "u") -> tuple[str, list[Any]]:
         """构造用户搜索条件，支持用户名和 IP 模糊匹配。"""
         normalized = (keyword or "").strip()
         if not normalized:
@@ -103,7 +103,7 @@ class UserRepository:
 
     @staticmethod
     def _normalize_sort_direction(
-        sort_direction: Optional[str],
+        sort_direction: str | None,
         default_direction: str = "desc",
     ) -> str:
         """标准化排序方向，仅允许 asc/desc。"""
@@ -115,8 +115,8 @@ class UserRepository:
     @classmethod
     def _build_order_clause(
         cls,
-        sort_key: Optional[str],
-        sort_direction: Optional[str],
+        sort_key: str | None,
+        sort_direction: str | None,
         default_key: str = "created_at",
     ) -> str:
         """基于白名单字段构造 ORDER BY 子句。"""
@@ -131,10 +131,10 @@ class UserRepository:
         self,
         page: int = 1,
         page_size: int = 50,
-        keyword: Optional[str] = None,
-        sort_key: Optional[str] = None,
-        sort_direction: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        keyword: str | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[dict[str, Any]]:
         """分页查询用户及其聚合统计。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -178,10 +178,10 @@ class UserRepository:
         self,
         page: int,
         page_size: int,
-        keyword: Optional[str],
-        sort_direction: Optional[str],
+        keyword: str | None,
+        sort_direction: str | None,
         available_model_count: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """按模型权限数量排序后分页查询用户。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -235,7 +235,7 @@ class UserRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_count(self, keyword: Optional[str] = None) -> int:
+    def get_count(self, keyword: str | None = None) -> int:
         """查询用户总数。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -253,10 +253,10 @@ class UserRepository:
     def update(
         self,
         user_id: int,
-        username: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        whitelist_access_enabled: Optional[bool] = None,
-        model_permissions: Optional[str] = None,
+        username: str | None = None,
+        ip_address: str | None = None,
+        whitelist_access_enabled: bool | None = None,
+        model_permissions: str | None = None,
     ) -> bool:
         """更新用户记录。"""
         updates: list[str] = []
@@ -294,7 +294,7 @@ class UserRepository:
             cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
             return cursor.rowcount > 0
 
-    def get_by_ip(self, ip_address: str) -> Optional[Dict[str, Any]]:
+    def get_by_ip(self, ip_address: str) -> dict[str, Any] | None:
         """按 IP 查询用户。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -309,7 +309,7 @@ class UserRepository:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_by_ids(self, user_ids: List[int]) -> List[Dict[str, Any]]:
+    def get_by_ids(self, user_ids: list[int]) -> list[dict[str, Any]]:
         """按 ID 列表查询用户。"""
         normalized_user_ids = [int(user_id) for user_id in user_ids]
         if not normalized_user_ids:
@@ -328,7 +328,7 @@ class UserRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def list_all(self) -> List[Dict[str, Any]]:
+    def list_all(self) -> list[dict[str, Any]]:
         """查询全部用户，用于权限同步与批量设置。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -341,7 +341,7 @@ class UserRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def batch_update_model_permissions(self, user_ids: List[int], model_permissions: str) -> int:
+    def batch_update_model_permissions(self, user_ids: list[int], model_permissions: str) -> int:
         """批量更新用户模型权限。"""
         normalized_user_ids = [int(user_id) for user_id in user_ids]
         if not normalized_user_ids:

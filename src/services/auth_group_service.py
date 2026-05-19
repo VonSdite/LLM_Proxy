@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import yaml
 
@@ -32,13 +33,13 @@ class AuthGroupService:
         self._reload_callback = reload_callback
         self._auth_group_manager = auth_group_manager
 
-    def list_auth_groups(self) -> List[Dict[str, Any]]:
+    def list_auth_groups(self) -> list[dict[str, Any]]:
         config = self._config_manager.get_raw_config()
         auth_groups = read_auth_group_entries(config)
         providers = read_provider_entries(config)
         summaries = self._build_auth_group_summary_map()
         provider_counts = self._count_providers_by_auth_group(providers)
-        result: List[Dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         for auth_group in auth_groups:
             normalized = AuthGroupSchema.from_mapping(auth_group).to_mapping()
             normalized["summary"] = summaries.get(normalized["name"], {}).get("summary", {})
@@ -46,7 +47,7 @@ class AuthGroupService:
             result.append(normalized)
         return result
 
-    def get_auth_group(self, name: str) -> Optional[Dict[str, Any]]:
+    def get_auth_group(self, name: str) -> dict[str, Any] | None:
         config = self._config_manager.get_raw_config()
         auth_groups = read_auth_group_entries(config)
         providers = read_provider_entries(config)
@@ -59,7 +60,7 @@ class AuthGroupService:
         normalized["provider_count"] = self._count_providers_by_auth_group(providers).get(normalized["name"], 0)
         return normalized
 
-    def create_auth_group(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def create_auth_group(self, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         auth_groups = read_auth_group_entries(config)
         providers = read_provider_entries(config)
@@ -73,7 +74,7 @@ class AuthGroupService:
         self._save_auth_groups(config, auth_groups, providers)
         return normalized
 
-    def update_auth_group(self, current_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def update_auth_group(self, current_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         auth_groups = read_auth_group_entries(config)
         providers = read_provider_entries(config)
@@ -111,7 +112,7 @@ class AuthGroupService:
         auth_groups.remove(target)
         self._save_auth_groups(config, auth_groups, providers)
 
-    def get_auth_group_runtime(self, name: str) -> Dict[str, Any]:
+    def get_auth_group_runtime(self, name: str) -> dict[str, Any]:
         runtime = self._auth_group_manager.get_auth_group_runtime(name)
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -133,7 +134,7 @@ class AuthGroupService:
     def reset_entry_runtime(self, auth_group_name: str, entry_id: str) -> None:
         self._auth_group_manager.reset_entry_runtime(auth_group_name, entry_id)
 
-    def get_first_entry_headers(self, name: str) -> Dict[str, str]:
+    def get_first_entry_headers(self, name: str) -> dict[str, str]:
         auth_group_name, entries = self._get_auth_group_entries(name)
         first_entry = entries[0]
         if not isinstance(first_entry, Mapping):
@@ -143,7 +144,7 @@ class AuthGroupService:
             error_label=f"Auth group '{auth_group_name}' first entry",
         )
 
-    def get_entry_headers(self, name: str, entry_id: str) -> Dict[str, str]:
+    def get_entry_headers(self, name: str, entry_id: str) -> dict[str, str]:
         auth_group_name, entries = self._get_auth_group_entries(name)
         normalized_entry_id = str(entry_id or "").strip()
         if not normalized_entry_id:
@@ -164,7 +165,7 @@ class AuthGroupService:
             error_label=f"Auth entry '{auth_group_name}/{normalized_entry_id}'",
         )
 
-    def import_auth_entries(self, yaml_text: str) -> List[Dict[str, Any]]:
+    def import_auth_entries(self, yaml_text: str) -> list[dict[str, Any]]:
         raw_text = str(yaml_text or "").strip()
         if not raw_text:
             raise ValueError("YAML 内容不能为空")
@@ -179,7 +180,7 @@ class AuthGroupService:
             raise ValueError("请至少导入一个 Auth Entry")
 
         seen_entry_ids: set[str] = set()
-        normalized_entries: List[Dict[str, Any]] = []
+        normalized_entries: list[dict[str, Any]] = []
         for item in entries_payload:
             entry = AuthEntrySchema.from_mapping(item)
             if entry.id in seen_entry_ids:
@@ -188,7 +189,7 @@ class AuthGroupService:
             normalized_entries.append(entry.to_mapping())
         return normalized_entries
 
-    def _build_auth_group_summary_map(self) -> Dict[str, Dict[str, Any]]:
+    def _build_auth_group_summary_map(self) -> dict[str, dict[str, Any]]:
         return {item["name"]: item for item in self._auth_group_manager.list_auth_group_summaries()}
 
     def _get_auth_group_entries(self, name: str) -> tuple[str, list[Any]]:
@@ -202,11 +203,11 @@ class AuthGroupService:
         return str(auth_group["name"]), entries
 
     @staticmethod
-    def _normalize_entry_headers(headers: Any, *, error_label: str) -> Dict[str, str]:
+    def _normalize_entry_headers(headers: Any, *, error_label: str) -> dict[str, str]:
         if not isinstance(headers, Mapping) or not headers:
             raise ValueError(f"{error_label} must define headers")
 
-        normalized_headers: Dict[str, str] = {}
+        normalized_headers: dict[str, str] = {}
         for raw_key, raw_value in headers.items():
             header_name = str(raw_key or "").strip()
             if not header_name:
@@ -218,9 +219,9 @@ class AuthGroupService:
 
     def _save_auth_groups(
         self,
-        config: Dict[str, Any],
-        auth_groups: List[Dict[str, Any]],
-        providers: List[Dict[str, Any]],
+        config: dict[str, Any],
+        auth_groups: list[dict[str, Any]],
+        providers: list[dict[str, Any]],
     ) -> None:
         validate_auth_group_provider_definitions(auth_groups, providers)
         config["auth_groups"] = auth_groups
@@ -229,7 +230,7 @@ class AuthGroupService:
         self._reload_callback()
 
     @staticmethod
-    def _find_auth_group(auth_groups: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
+    def _find_auth_group(auth_groups: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
         normalized_name = str(name).strip()
         auth_group_indexes = AuthGroupService._build_auth_group_indexes_by_name(auth_groups)
         auth_group_index = auth_group_indexes.get(normalized_name)
@@ -238,12 +239,12 @@ class AuthGroupService:
         return auth_groups[auth_group_index]
 
     @staticmethod
-    def _build_auth_group_indexes_by_name(auth_groups: List[Dict[str, Any]]) -> Dict[str, int]:
+    def _build_auth_group_indexes_by_name(auth_groups: list[dict[str, Any]]) -> dict[str, int]:
         return {str(auth_group.get("name", "")).strip(): index for index, auth_group in enumerate(auth_groups)}
 
     @staticmethod
-    def _count_providers_by_auth_group(providers: List[Dict[str, Any]]) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
+    def _count_providers_by_auth_group(providers: list[dict[str, Any]]) -> dict[str, int]:
+        counts: dict[str, int] = {}
         for provider in providers:
             auth_group = str(provider.get("auth_group") or "").strip()
             if not auth_group:
@@ -252,7 +253,7 @@ class AuthGroupService:
         return counts
 
     @staticmethod
-    def _normalize_import_payload(payload: Any) -> List[Mapping[str, Any]]:
+    def _normalize_import_payload(payload: Any) -> list[Mapping[str, Any]]:
         entries: Any
         if isinstance(payload, list):
             entries = payload
@@ -267,7 +268,7 @@ class AuthGroupService:
         if not isinstance(entries, list):
             raise ValueError("YAML 中的 entries 必须是列表")
 
-        normalized_entries: List[Mapping[str, Any]] = []
+        normalized_entries: list[Mapping[str, Any]] = []
         for index, item in enumerate(entries):
             if not isinstance(item, Mapping):
                 raise ValueError(f"第 {index + 1} 个 Auth Entry 必须是对象")
