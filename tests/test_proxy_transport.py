@@ -1076,6 +1076,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("selectedAuthFiles: new Set()", html)
         self.assertIn("batchDeleteConfirm: false", html)
         self.assertIn("batchDeleting: false", html)
+        self.assertIn(
+            "codexAuthState.quotaLoadingByFile[name] = false;\n                        renderCodexAuthFiles();",
+            html,
+        )
         self.assertIn("已选择 ${selectedSize} 个", html)
         self.assertNotIn("已选择 ${selectedSize} 个 / 共", html)
         self.assertIn("function renderCodexQuotaProgress", html)
