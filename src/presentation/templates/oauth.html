@@ -1068,11 +1068,16 @@
             let failedCount = 0;
             try {
                 for (const name of names) {
-                    const ok = await refreshCodexQuotaByName(name, { silent: true, markLoading: false });
-                    if (ok) {
-                        successCount += 1;
-                    } else {
-                        failedCount += 1;
+                    try {
+                        const ok = await refreshCodexQuotaByName(name, { silent: true, markLoading: false });
+                        if (ok) {
+                            successCount += 1;
+                        } else {
+                            failedCount += 1;
+                        }
+                    } finally {
+                        codexAuthState.quotaLoadingByFile[name] = false;
+                        renderCodexAuthFiles();
                     }
                 }
             } finally {
