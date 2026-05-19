@@ -22,6 +22,7 @@ from src.services.codex_oauth_service import (
     CODEX_CLIENT_ID,
     CODEX_MODEL_REFERENCE_URLS,
     CODEX_REDIRECT_URI,
+    CODEX_USAGE_URL,
     CodexOAuthService,
 )
 
@@ -53,13 +54,57 @@ class FakeConfigManager:
 
 
 class FakeResponse:
-    def __init__(self, payload: dict[str, Any], *, status_code: int = 200, text: str = "") -> None:
+    def __init__(
+        self,
+        payload: dict[str, Any],
+        *,
+        status_code: int = 200,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self._payload = payload
         self.status_code = status_code
         self.text = text or json.dumps(payload)
+        self.headers = headers or {}
+        self.closed = False
 
     def json(self) -> dict[str, Any]:
         return dict(self._payload)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeRequestsSession:
+    def __init__(
+        self,
+        *,
+        get: Any = None,
+        post: Any = None,
+    ) -> None:
+        self._get = get
+        self._post = post
+        self.closed = False
+
+    def get(self, url: str, **kwargs: Any) -> FakeResponse:
+        if self._get is None:
+            raise AssertionError(f"Unexpected GET request: {url}")
+        return self._get(url, **kwargs)
+
+    def post(self, url: str, **kwargs: Any) -> FakeResponse:
+        if self._post is None:
+            raise AssertionError(f"Unexpected POST request: {url}")
+        return self._post(url, **kwargs)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def patch_requests_session(*, get: Any = None, post: Any = None) -> Any:
+    return patch(
+        "src.services.codex_oauth_service.requests.Session",
+        side_effect=lambda: FakeRequestsSession(get=get, post=post),
+    )
 
 
 def build_id_token(
@@ -139,7 +184,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     }
                 )
 
-            with patch("src.services.codex_oauth_service.requests.post", side_effect=fake_post):
+            with patch_requests_session(post=fake_post):
                 result = service.complete_login(callback_url)
 
             auth_file = Path(result["auth_file"]["path"])
@@ -180,7 +225,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     }
                 )
 
-            with patch("src.services.codex_oauth_service.requests.post", side_effect=fake_post):
+            with patch_requests_session(post=fake_post):
                 first = service.complete_login(callback_url)
                 service.record_auth_file_failure(
                     first["auth_file"]["name"],
@@ -227,7 +272,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     }
                 )
 
-            with patch("src.services.codex_oauth_service.requests.post", side_effect=fake_post):
+            with patch_requests_session(post=fake_post):
                 result = service.complete_login(callback_url)
 
         self.assertEqual(
@@ -330,9 +375,10 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     }
                 )
 
-            with patch("src.services.codex_oauth_service.requests.get", side_effect=fake_get):
+            with patch_requests_session(get=fake_get):
                 result = service.get_auth_file_quota("codex-demo.json")
             auth_files = service.list_auth_files()["files"]
+            quota_refreshed_at = service.get_auth_file_quota_refreshed_at("codex-demo.json")
 
         self.assertEqual("Bearer access-demo", captured["headers"]["Authorization"])
         self.assertEqual("account-123", captured["headers"]["Chatgpt-Account-Id"])
@@ -344,6 +390,86 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertTrue(result["windows"][0]["reset_at"])
         self.assertEqual(75.0, auth_files[0]["quota"]["windows"][0]["remaining_percent"])
         self.assertEqual("", auth_files[0]["quota_error"])
+        self.assertTrue(auth_files[0]["quota_refreshed_at"])
+        self.assertEqual(auth_files[0]["quota_refreshed_at"], quota_refreshed_at)
+
+    def test_get_auth_file_quota_retries_after_proxy_warning_in_same_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            confirmation_url = (
+                "http://114.114.114.114:9421/proxycontrolwarn/"
+                "httpwarning_3355.html?ori_url=aHR0cHM6Ly9jaGF0Z3B0LmNvbS8="
+            )
+            warning_html = """
+                <input id="sessionid" value="session-123" />
+                <input id="pid" value="3355" />
+                <input id="uid" value="0" />
+            """
+            sessions: list[Any] = []
+
+            class StatefulProxyWarningSession(FakeRequestsSession):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.confirmed = False
+                    self.get_calls: list[tuple[str, dict[str, Any]]] = []
+
+                def get(self, url: str, **kwargs: Any) -> FakeResponse:
+                    self.get_calls.append((url, dict(kwargs)))
+                    if url == CODEX_USAGE_URL:
+                        if not self.confirmed:
+                            return FakeResponse(
+                                {},
+                                status_code=302,
+                                headers={"Location": confirmation_url},
+                            )
+                        return FakeResponse(
+                            {
+                                "rate_limit": {
+                                    "primary_window": {
+                                        "used_percent": 25,
+                                        "reset_after_seconds": 3600,
+                                    }
+                                }
+                            }
+                        )
+                    if url == confirmation_url:
+                        return FakeResponse({}, text=warning_html)
+                    if url.startswith("http://114.114.114.114:9421/proxycontrolwarn/check?"):
+                        self.confirmed = True
+                        return FakeResponse({}, text="ok")
+                    raise AssertionError(f"Unexpected GET request: {url}")
+
+            def build_session() -> StatefulProxyWarningSession:
+                session = StatefulProxyWarningSession()
+                sessions.append(session)
+                return session
+
+            with patch("src.services.codex_oauth_service.requests.Session", side_effect=build_session):
+                result = service.get_auth_file_quota("codex-demo.json")
+
+        self.assertEqual(75.0, result["windows"][0]["remaining_percent"])
+        self.assertEqual(1, len(sessions))
+        self.assertTrue(sessions[0].closed)
+        self.assertEqual(CODEX_USAGE_URL, sessions[0].get_calls[0][0])
+        self.assertEqual(confirmation_url, sessions[0].get_calls[1][0])
+        self.assertTrue(
+            sessions[0].get_calls[2][0].startswith("http://114.114.114.114:9421/proxycontrolwarn/check?")
+        )
+        self.assertEqual(CODEX_USAGE_URL, sessions[0].get_calls[3][0])
 
     def test_get_auth_file_quota_persists_error_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -371,13 +497,14 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     text="quota failed",
                 )
 
-            with patch("src.services.codex_oauth_service.requests.get", side_effect=fake_get):
+            with patch_requests_session(get=fake_get):
                 with self.assertRaisesRegex(ValueError, "quota failed"):
                     service.get_auth_file_quota("codex-demo.json")
             auth_files = service.list_auth_files()["files"]
 
         self.assertEqual("codex-demo.json", auth_files[0]["name"])
         self.assertIn("quota failed", auth_files[0]["quota_error"])
+        self.assertTrue(auth_files[0]["quota_refreshed_at"])
 
     def test_get_auth_file_quota_syncs_memory_cooldown_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -411,7 +538,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     }
                 )
 
-            with patch("src.services.codex_oauth_service.requests.get", side_effect=fake_get):
+            with patch_requests_session(get=fake_get):
                 exhausted_quota = service.get_auth_file_quota("codex-demo.json")
                 self.assertIn("codex-demo.json", service._quota_cooldowns)
                 available_quota = service.get_auth_file_quota("codex-demo.json")
@@ -466,7 +593,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
                 except BaseException as exc:
                     errors.append(exc)
 
-            with patch("src.services.codex_oauth_service.requests.get", side_effect=fake_get):
+            with patch_requests_session(get=fake_get):
                 worker = threading.Thread(target=run_first_refresh)
                 worker.start()
                 try:
@@ -583,7 +710,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     text="invalid_grant",
                 )
 
-            with patch("src.services.codex_oauth_service.requests.post", side_effect=fake_post):
+            with patch_requests_session(post=fake_post):
                 candidates = service.iter_auth_candidates_for_model("gpt-5.4")
             auth_file = service.list_auth_files()["files"][0]
 
@@ -659,9 +786,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     }
                 )
 
-            with patch("src.services.codex_oauth_service.requests.get", side_effect=fake_get):
-                with patch("src.services.codex_oauth_service.requests.post", side_effect=fake_post):
-                    quota = service.get_auth_file_quota("codex-demo.json")
+            with patch_requests_session(get=fake_get, post=fake_post):
+                quota = service.get_auth_file_quota("codex-demo.json")
             after = service.list_auth_files()["files"][0]
             next_payload = json.loads(auth_file.read_text(encoding="utf-8"))
 
@@ -706,7 +832,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
                 del url, headers, timeout, kwargs
                 return FakeResponse({})
 
-            with patch("src.services.codex_oauth_service.requests.get", side_effect=fake_get):
+            with patch_requests_session(get=fake_get):
                 service.get_auth_file_quota("codex-demo.json")
 
         self.assertEqual(

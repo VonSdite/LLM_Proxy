@@ -519,13 +519,26 @@ class CodexOAuthService:
         )
 
     def _store_auth_file_quota_error(self, name: str, message: str) -> None:
+        refreshed_at = self._now_iso()
         self._update_auth_file_state(
             name,
             {
                 "quota_error": self._truncate_state_text(message),
-                "quota_refreshed_at": self._now_iso(),
+                "quota_refreshed_at": refreshed_at,
             },
         )
+
+    def get_auth_file_quota_refreshed_at(self, name: str) -> str:
+        """读取认证文件最近一次配额刷新时间。"""
+        auth_file = self._resolve_auth_file(name)
+        state = self._load_auth_file_state()
+        files = state.get("files")
+        if not isinstance(files, dict):
+            return ""
+        file_state = files.get(auth_file.name)
+        if not isinstance(file_state, dict):
+            return ""
+        return str(file_state.get("quota_refreshed_at") or "")
 
     def _delete_auth_file_state_entry(self, name: str) -> None:
         state = self._load_auth_file_state()
@@ -835,17 +848,18 @@ class CodexOAuthService:
     ) -> requests.Response:
         request_options = self._build_request_options()
         normalized_method = str(method or "").strip().upper()
+        session = requests.Session()
 
         def send_request() -> requests.Response:
             if normalized_method == "GET":
-                return requests.get(
+                return session.get(
                     url,
                     allow_redirects=False,
                     **kwargs,
                     **request_options,
                 )
             if normalized_method == "POST":
-                return requests.post(
+                return session.post(
                     url,
                     allow_redirects=False,
                     **kwargs,
@@ -857,11 +871,14 @@ class CodexOAuthService:
             return request_with_proxy_warning_retry(
                 send_request,
                 request_options=request_options,
+                confirm_session=session,
                 logger=self._logger,
                 log_context=f"oauth_url={url}",
             )
         except ProxyWarningRequired as exc:
             raise ValueError(str(exc)) from exc
+        finally:
+            session.close()
 
     def _build_request_options(self) -> dict[str, Any]:
         if self._config_manager is None:

@@ -706,6 +706,16 @@
     overflow-wrap: anywhere;
 }
 
+.oauth-page .oauth-quota-refreshed-at {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.oauth-page .oauth-quota-refreshed-at span {
+    color: var(--text-secondary);
+}
+
 .oauth-page .oauth-quota-progress-row {
     margin-top: 8px;
 }

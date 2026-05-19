@@ -72,10 +72,21 @@ class OAuthController:
         try:
             return jsonify(self._codex_oauth_service.get_auth_file_quota(name))
         except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+            return jsonify(self._build_codex_quota_error_payload(name, exc)), 400
         except Exception as exc:
             self._logger.error("Error fetching Codex OAuth quota: %s", exc)
-            return jsonify({"error": str(exc)}), 500
+            return jsonify(self._build_codex_quota_error_payload(name, exc)), 500
+
+    def _build_codex_quota_error_payload(self, name: str, exc: Exception) -> dict[str, str]:
+        """构造配额刷新失败响应，并尽量带出本次刷新时间。"""
+        payload = {"error": str(exc)}
+        try:
+            refreshed_at = self._codex_oauth_service.get_auth_file_quota_refreshed_at(name)
+        except ValueError:
+            refreshed_at = ""
+        if refreshed_at:
+            payload["quota_refreshed_at"] = refreshed_at
+        return payload
 
     def delete_codex_auth_file(self, name: str) -> ResponseReturnValue:
         try:
