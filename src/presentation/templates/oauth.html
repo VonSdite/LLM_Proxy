@@ -970,7 +970,7 @@
             return visibleWindows.map(window => {
                 const percent = formatCodexQuotaPercent(window);
                 const resetAt = window.reset_at || window.resetAt || window.reset_label || '-';
-                return `${percent.text} 剩余，下次刷新：${escapeHtml(formatTimestamp(resetAt))}`;
+                return `${percent.text} 剩余，下次更新：${escapeHtml(formatTimestamp(resetAt))}`;
             }).join('；');
         }
 
