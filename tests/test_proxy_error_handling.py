@@ -4,7 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 import requests
 from flask import Flask
@@ -57,13 +57,13 @@ class FakeUserService:
     def __init__(
         self,
         *,
-        user: Optional[dict[str, Any]] | object = _UNSET,
-        accessible_models: Optional[list[str]] = None,
+        user: dict[str, Any] | None | object = _UNSET,
+        accessible_models: list[str] | None = None,
     ) -> None:
-        self._user: Optional[dict[str, Any]] = (
+        self._user: dict[str, Any] | None = (
             {"username": "tester", "model_permissions": "*"}
             if user is self._UNSET
-            else cast(Optional[Dict[str, Any]], user)
+            else cast(dict[str, Any] | None, user)
         )
         self._accessible_models = None if accessible_models is None else list(accessible_models)
 
@@ -71,13 +71,13 @@ class FakeUserService:
         self,
         ip_address: str,
         require_whitelist_access: bool = True,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         del ip_address, require_whitelist_access
         return self._user
 
     def can_user_access_model(
         self,
-        user: Optional[dict[str, Any]],
+        user: dict[str, Any] | None,
         model_name: str,
         available_models=None,
     ) -> bool:
@@ -88,7 +88,7 @@ class FakeUserService:
 
     def get_accessible_models_for_user(
         self,
-        user: Optional[dict[str, Any]],
+        user: dict[str, Any] | None,
         available_models=None,
     ) -> list[str]:
         del user

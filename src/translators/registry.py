@@ -7,10 +7,9 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Protocol
 
 from ..proxy_core.contracts import DownstreamChunk, StreamEvent
-from ..utils.compat import Protocol
 from .claude_bridge import (
     convert_claude_request_to_openai_chat_request as _convert_claude_request_to_openai_chat_request,
 )
@@ -40,22 +39,22 @@ class Translator(Protocol):
     @property
     def target_format(self) -> str: ...
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]: ...
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]: ...
 
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]: ...
 
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any: ...
 
@@ -106,7 +105,7 @@ class OpenAIChatTranslator:
     source_format: str = "openai_chat"
     target_format: str = "openai_chat"
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
         translated = dict(body)
         translated["model"] = model_name
         translated["stream"] = bool(stream)
@@ -115,10 +114,10 @@ class OpenAIChatTranslator:
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]:
         del model_name, original_request, translated_request, state
         return _translate_passthrough_stream_event(event, include_done_chunk=True)
@@ -126,8 +125,8 @@ class OpenAIChatTranslator:
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
         del model_name, original_request, translated_request
@@ -139,8 +138,8 @@ class OpenAIResponsesTranslator:
     source_format: str = "openai_responses"
     target_format: str = "openai_chat"
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
-        translated: Dict[str, Any] = {
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
+        translated: dict[str, Any] = {
             "model": model_name,
             "input": [],
             "stream": bool(stream),
@@ -182,10 +181,10 @@ class OpenAIResponsesTranslator:
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]:
         del original_request
         if event.kind == "done":
@@ -366,8 +365,8 @@ class OpenAIResponsesTranslator:
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
         del original_request
@@ -414,7 +413,7 @@ class OpenAIResponsesPassthroughTranslator:
     source_format: str = "openai_responses"
     target_format: str = "openai_responses"
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
         translated = dict(body)
         translated["model"] = model_name
         translated["stream"] = bool(stream)
@@ -423,10 +422,10 @@ class OpenAIResponsesPassthroughTranslator:
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]:
         del model_name, original_request, translated_request, state
         return _translate_passthrough_stream_event(
@@ -437,8 +436,8 @@ class OpenAIResponsesPassthroughTranslator:
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
         del model_name, original_request, translated_request
@@ -450,16 +449,16 @@ class OpenAIChatResponsesTranslator:
     source_format: str = "openai_chat"
     target_format: str = "openai_responses"
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
         return _convert_openai_responses_request_to_chat_request(model_name, body, stream)
 
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]:
         return _translate_openai_chat_downstream_chunk_to_responses(
             model_name,
@@ -472,8 +471,8 @@ class OpenAIChatResponsesTranslator:
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
         return _convert_openai_chat_response_to_responses(
@@ -489,8 +488,8 @@ class ClaudeChatTranslator:
     source_format: str = "claude_chat"
     target_format: str = "openai_chat"
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
-        translated: Dict[str, Any] = {
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
+        translated: dict[str, Any] = {
             "model": model_name,
             "max_tokens": int(body.get("max_tokens") or 4096),
             "messages": [],
@@ -558,10 +557,10 @@ class ClaudeChatTranslator:
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]:
         del original_request, translated_request
         if event.kind == "done":
@@ -727,8 +726,8 @@ class ClaudeChatTranslator:
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
         del original_request, translated_request
@@ -736,7 +735,7 @@ class ClaudeChatTranslator:
             return payload
 
         response_model = str(payload.get("model") or model_name)
-        message: Dict[str, Any] = {"role": "assistant", "content": ""}
+        message: dict[str, Any] = {"role": "assistant", "content": ""}
         tool_calls = []
         reasoning_parts: list[str] = []
         for block in payload.get("content", []) or []:
@@ -787,7 +786,7 @@ class ClaudePassthroughTranslator:
     source_format: str = "claude_chat"
     target_format: str = "claude_chat"
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
         translated = dict(body)
         translated["model"] = model_name
         translated["stream"] = bool(stream)
@@ -796,10 +795,10 @@ class ClaudePassthroughTranslator:
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]:
         del model_name, original_request, translated_request, state
         return _translate_passthrough_stream_event(event, include_done_chunk=False)
@@ -807,8 +806,8 @@ class ClaudePassthroughTranslator:
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
         del model_name, original_request, translated_request
@@ -820,16 +819,16 @@ class OpenAIChatClaudeTranslator:
     source_format: str = "openai_chat"
     target_format: str = "claude_chat"
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
         return _convert_claude_request_to_openai_chat_request(model_name, body, stream)
 
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]:
         return _translate_openai_chat_downstream_chunk_to_claude(
             model_name,
@@ -842,8 +841,8 @@ class OpenAIChatClaudeTranslator:
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
         return _convert_openai_chat_response_to_claude(
@@ -861,17 +860,17 @@ class ComposedTranslator:
     source_to_chat: Translator
     chat_to_target: Translator
 
-    def translate_request(self, model_name: str, body: Dict[str, Any], stream: bool) -> Dict[str, Any]:
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
         chat_request = self.chat_to_target.translate_request(model_name, body, stream)
         return self.source_to_chat.translate_request(model_name, chat_request, stream)
 
     def translate_stream_event(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         event: StreamEvent,
-        state: Dict[str, Any],
+        state: dict[str, Any],
     ) -> list[DownstreamChunk]:
         chat_request = state.setdefault(
             "chat_request",
@@ -910,8 +909,8 @@ class ComposedTranslator:
     def translate_nonstream_response(
         self,
         model_name: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
         chat_request = self.chat_to_target.translate_request(
@@ -935,7 +934,7 @@ class ComposedTranslator:
 
 class TranslatorRegistry:
     def __init__(self) -> None:
-        self._translators: Dict[str, Dict[str, Translator]] = {}
+        self._translators: dict[str, dict[str, Translator]] = {}
 
     def register(self, translator: Translator) -> None:
         source_key = str(translator.source_format).strip().lower()
@@ -984,13 +983,13 @@ def build_default_translator_registry() -> TranslatorRegistry:
     return registry
 
 
-def _to_claude_content_blocks(content: Any) -> list[Dict[str, Any]]:
+def _to_claude_content_blocks(content: Any) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
     if not isinstance(content, list):
         return []
 
-    blocks: list[Dict[str, Any]] = []
+    blocks: list[dict[str, Any]] = []
     for item in content:
         if not isinstance(item, dict):
             continue
@@ -1004,7 +1003,7 @@ def _to_claude_content_blocks(content: Any) -> list[Dict[str, Any]]:
     return blocks
 
 
-def _to_claude_tool_use_blocks(tool_calls: Any) -> list[Dict[str, Any]]:
+def _to_claude_tool_use_blocks(tool_calls: Any) -> list[dict[str, Any]]:
     if not isinstance(tool_calls, list):
         return []
     blocks = []
@@ -1035,7 +1034,7 @@ def _to_claude_tool_use_blocks(tool_calls: Any) -> list[Dict[str, Any]]:
     return blocks
 
 
-def _to_claude_tools(tools: Any) -> list[Dict[str, Any]]:
+def _to_claude_tools(tools: Any) -> list[dict[str, Any]]:
     if not isinstance(tools, list):
         return []
     translated = []
@@ -1055,7 +1054,7 @@ def _to_claude_tools(tools: Any) -> list[Dict[str, Any]]:
     return translated
 
 
-def _to_claude_tool_choice(tool_choice: Any) -> Optional[Dict[str, Any]]:
+def _to_claude_tool_choice(tool_choice: Any) -> dict[str, Any] | None:
     if tool_choice in (None, ""):
         return None
     if isinstance(tool_choice, str):
@@ -1088,12 +1087,12 @@ def _extract_text_content(content: Any) -> str:
     return "\n".join(parts)
 
 
-def _to_openai_responses_input(messages: Any) -> tuple[str, list[Dict[str, Any]]]:
+def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]]:
     if not isinstance(messages, list):
         return "", []
 
     instructions: list[str] = []
-    items: list[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, dict):
             continue
@@ -1144,14 +1143,14 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[Dict[str, Any]]
     return "\n\n".join(part for part in instructions if part), items
 
 
-def _to_openai_responses_message_content(content: Any, role: str) -> list[Dict[str, Any]]:
+def _to_openai_responses_message_content(content: Any, role: str) -> list[dict[str, Any]]:
     content_type = "output_text" if str(role).strip().lower() == "assistant" else "input_text"
     if isinstance(content, str):
         return [{"type": content_type, "text": content}]
     if not isinstance(content, list):
         return []
 
-    translated: list[Dict[str, Any]] = []
+    translated: list[dict[str, Any]] = []
     for item in content:
         if not isinstance(item, dict):
             continue
@@ -1165,10 +1164,10 @@ def _to_openai_responses_message_content(content: Any, role: str) -> list[Dict[s
     return translated
 
 
-def _to_openai_responses_tools(tools: Any) -> list[Dict[str, Any]]:
+def _to_openai_responses_tools(tools: Any) -> list[dict[str, Any]]:
     if not isinstance(tools, list):
         return []
-    translated: list[Dict[str, Any]] = []
+    translated: list[dict[str, Any]] = []
     for tool in tools:
         if not isinstance(tool, dict) or str(tool.get("type") or "").strip().lower() != "function":
             continue
@@ -1201,7 +1200,7 @@ def _to_openai_responses_tool_choice(tool_choice: Any) -> Any:
     return tool_choice
 
 
-def _extract_openai_responses_usage(usage: Any) -> Dict[str, int]:
+def _extract_openai_responses_usage(usage: Any) -> dict[str, int]:
     if not isinstance(usage, dict):
         return {}
 
@@ -1217,9 +1216,9 @@ def _extract_openai_responses_usage(usage: Any) -> Dict[str, int]:
     }
 
 
-def _extract_openai_responses_message_and_tool_calls(outputs: Any) -> tuple[Dict[str, Any], list[Dict[str, Any]]]:
-    message: Dict[str, Any] = {"role": "assistant", "content": ""}
-    tool_calls: list[Dict[str, Any]] = []
+def _extract_openai_responses_message_and_tool_calls(outputs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    message: dict[str, Any] = {"role": "assistant", "content": ""}
+    tool_calls: list[dict[str, Any]] = []
 
     if not isinstance(outputs, list):
         return message, tool_calls
@@ -1274,14 +1273,14 @@ def _build_openai_delta_chunk(
     model: str,
     index: int,
     *,
-    content: Optional[str] = None,
-    tool_call: Optional[Dict[str, Any]] = None,
-    finish_reason: Optional[str] = None,
-    response_id: Optional[str] = None,
+    content: str | None = None,
+    tool_call: dict[str, Any] | None = None,
+    finish_reason: str | None = None,
+    response_id: str | None = None,
     created: int = 0,
-    delta_fields: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    delta: Dict[str, Any] = {}
+    delta_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    delta: dict[str, Any] = {}
     if content is not None:
         delta["content"] = content
     if tool_call is not None:
@@ -1304,12 +1303,12 @@ def _build_openai_delta_chunk(
 
 
 def _build_openai_usage_chunk_from_usage(
-    usage: Dict[str, Any],
+    usage: dict[str, Any],
     model: str,
     *,
-    response_id: Optional[str] = None,
+    response_id: str | None = None,
     created: int = 0,
-) -> Optional[DownstreamChunk]:
+) -> DownstreamChunk | None:
     if not usage:
         return None
     return DownstreamChunk(
@@ -1325,12 +1324,12 @@ def _build_openai_usage_chunk_from_usage(
     )
 
 
-def _extract_claude_usage(payload: Any) -> Dict[str, Any]:
+def _extract_claude_usage(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
     prompt_tokens = int(payload.get("input_tokens") or 0)
     completion_tokens = int(payload.get("output_tokens") or 0)
-    usage: Dict[str, Any] = {
+    usage: dict[str, Any] = {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": prompt_tokens + completion_tokens,
@@ -1344,7 +1343,7 @@ def _extract_claude_usage(payload: Any) -> Dict[str, Any]:
     return usage
 
 
-def _map_claude_stop_reason(reason: Any) -> Optional[str]:
+def _map_claude_stop_reason(reason: Any) -> str | None:
     if reason in (None, ""):
         return None
     normalized = str(reason).strip().lower()

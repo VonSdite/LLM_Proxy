@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from ..application.app_context import AppContext
 from ..repositories import LogRepository
@@ -20,7 +21,7 @@ class LogService:
         self._repository = repository
 
     @staticmethod
-    def _normalize_log_timestamps(log: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_log_timestamps(log: dict[str, Any]) -> dict[str, Any]:
         """统一请求日志时间字段格式。"""
         normalized = dict(log)
         normalized["start_time"] = normalize_local_datetime_text(normalized.get("start_time"))
@@ -31,14 +32,14 @@ class LogService:
     def log_request(
         self,
         request_model: str,
-        response_model: Optional[str],
+        response_model: str | None,
         total_tokens: int,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        ip_address: Optional[str] = None,
-    ) -> Optional[int]:
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        ip_address: str | None = None,
+    ) -> int | None:
         """记录一次请求日志。"""
         try:
             log_id = self._repository.insert(
@@ -66,13 +67,13 @@ class LogService:
 
     def get_statistics(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        username: Optional[str | Sequence[str]] = None,
-        request_model: Optional[str | Sequence[str]] = None,
-        sort_key: Optional[str] = None,
-        sort_direction: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[dict[str, Any]]:
         """获取统计聚合数据。"""
         try:
             rows = self._repository.get_statistics(
@@ -115,13 +116,13 @@ class LogService:
         self,
         page: int = 1,
         page_size: int = 50,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        username: Optional[str | Sequence[str]] = None,
-        request_model: Optional[str | Sequence[str]] = None,
-        sort_key: Optional[str] = None,
-        sort_direction: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> dict[str, Any]:
         """获取请求日志分页数据。"""
         try:
             result = self._repository.get_logs(
@@ -146,7 +147,7 @@ class LogService:
                 "logs": [],
             }
 
-    def get_unique_usernames(self) -> List[str]:
+    def get_unique_usernames(self) -> list[str]:
         """获取有日志记录的用户名列表。"""
         try:
             usernames = self._repository.get_unique_usernames()
@@ -156,7 +157,7 @@ class LogService:
             self._logger.error(f"Failed to get unique usernames: {exc}")
             return []
 
-    def get_unique_request_models(self) -> List[str]:
+    def get_unique_request_models(self) -> list[str]:
         """获取有日志记录的请求模型列表。"""
         try:
             models = self._repository.get_unique_request_models()

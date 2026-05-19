@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 from ..config.provider_config import resolve_provider_target_formats
 from ..hooks import HookContext, HookModule
@@ -22,14 +23,14 @@ class LLMProvider:
     transport: str = "http"
     source_format: str = "openai_chat"
     target_formats: tuple[str, ...] = ()
-    api_key: Optional[str] = None
-    auth_group: Optional[str] = None
+    api_key: str | None = None
+    auth_group: str | None = None
     model_list: tuple[str, ...] = ()
-    proxy: Optional[str] = None
+    proxy: str | None = None
     timeout_seconds: int = 1200
     max_retries: int = 3
     verify_ssl: bool = False
-    hook: Optional[HookModule] = None
+    hook: HookModule | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "model_list", tuple(self.model_list))
@@ -44,7 +45,7 @@ class LLMProvider:
         normalized_target_format = str(target_format or "").strip().lower()
         return normalized_target_format in self.target_formats
 
-    def apply_header_hook(self, ctx: HookContext, headers: Dict[str, str]) -> Dict[str, str]:
+    def apply_header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
         return self._call_optional_hook(
             "header_hook",
             ctx,
@@ -52,7 +53,7 @@ class LLMProvider:
             default_value=headers,
         )
 
-    def apply_request_guard(self, ctx: HookContext, body: Dict[str, Any]) -> Dict[str, Any]:
+    def apply_request_guard(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any]:
         return self._call_optional_hook(
             "request_guard",
             ctx,
@@ -80,7 +81,7 @@ class LLMProvider:
             return default_value
 
         hook_method = cast(
-            Optional[Callable[[HookContext, T], Any]],
+            Callable[[HookContext, T], Any] | None,
             getattr(self.hook, method_name, None),
         )
         if not callable(hook_method):

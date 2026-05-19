@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -33,12 +33,12 @@ class HttpExecutor:
     def execute(
         self,
         provider: LLMProvider,
-        headers: Dict[str, str],
-        body: Dict[str, Any],
+        headers: dict[str, str],
+        body: dict[str, Any],
         requested_stream: bool,
         timeout_seconds: int,
         verify_ssl: bool,
-        request_proxies: Optional[Dict[str, str]],
+        request_proxies: dict[str, str] | None,
     ) -> OpenedUpstreamResponse:
         http_session = self._get_http_session()
         self._reset_http_session_state(http_session)
@@ -123,7 +123,7 @@ class ExecutorRegistry:
     """Registry keyed by transport name."""
 
     def __init__(self) -> None:
-        self._executors: Dict[str, Executor] = {}
+        self._executors: dict[str, Executor] = {}
 
     def register(self, executor: Executor) -> None:
         self._executors[str(executor.transport).strip().lower()] = executor

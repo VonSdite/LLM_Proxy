@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any
 from urllib.parse import urlparse
 
 from ..utils.net import normalize_proxy_url
@@ -59,7 +60,7 @@ SUPPORTED_AUTH_ENTRY_FIELDS = {
 }
 
 
-def clean_optional_string(value: Any) -> Optional[str]:
+def clean_optional_string(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -69,9 +70,9 @@ def clean_optional_string(value: Any) -> Optional[str]:
 def parse_optional_positive_int(
     value: Any,
     *,
-    default: Optional[int] = None,
+    default: int | None = None,
     error_message: str = "Expected a positive integer",
-) -> Optional[int]:
+) -> int | None:
     if value is None:
         return default
     if isinstance(value, str) and not value.strip():
@@ -90,9 +91,9 @@ def parse_optional_positive_int(
 def parse_optional_bool(
     value: Any,
     *,
-    default: Optional[bool] = None,
+    default: bool | None = None,
     error_message: str = "Expected a boolean value",
-) -> Optional[bool]:
+) -> bool | None:
     if value is None:
         return default
 
@@ -114,8 +115,8 @@ def parse_optional_bool(
     raise ValueError(error_message)
 
 
-def normalize_model_list(value: Any) -> List[str]:
-    models: List[str] = []
+def normalize_model_list(value: Any) -> list[str]:
+    models: list[str] = []
     if value is None:
         return models
 
@@ -136,13 +137,13 @@ def normalize_model_list(value: Any) -> List[str]:
     return models
 
 
-def normalize_headers(value: Any) -> Dict[str, str]:
+def normalize_headers(value: Any) -> dict[str, str]:
     if value is None:
         return {}
     if not isinstance(value, Mapping):
         raise ValueError("headers must be an object")
 
-    headers: Dict[str, str] = {}
+    headers: dict[str, str] = {}
     seen_names: set[str] = set()
     for raw_key, raw_value in value.items():
         header_name = clean_optional_string(raw_key)
@@ -188,7 +189,7 @@ def normalize_provider_target_formats(value: Any, *, field_name: str = "target_f
     else:
         raise ValueError(f"{field_name} must be a list or newline-separated string")
 
-    target_formats: List[str] = []
+    target_formats: list[str] = []
     seen_formats: set[str] = set()
     for item in raw_items:
         normalized_item = clean_optional_string(item)
@@ -263,12 +264,12 @@ class AuthEntrySchema:
     id: str
     enabled: bool = True
     headers: tuple[tuple[str, str], ...] = ()
-    max_concurrency: Optional[int] = None
-    cooldown_seconds_on_429: Optional[int] = None
-    request_quota_per_minute: Optional[int] = None
-    request_quota_per_day: Optional[int] = None
-    token_quota_per_minute: Optional[int] = None
-    token_quota_per_day: Optional[int] = None
+    max_concurrency: int | None = None
+    cooldown_seconds_on_429: int | None = None
+    request_quota_per_minute: int | None = None
+    request_quota_per_day: int | None = None
+    token_quota_per_minute: int | None = None
+    token_quota_per_day: int | None = None
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> "AuthEntrySchema":
@@ -319,8 +320,8 @@ class AuthEntrySchema:
             ),
         )
 
-    def to_mapping(self) -> Dict[str, Any]:
-        config: Dict[str, Any] = {
+    def to_mapping(self) -> dict[str, Any]:
+        config: dict[str, Any] = {
             "id": self.id,
             "enabled": bool(self.enabled),
             "headers": dict(self.headers),
@@ -339,7 +340,7 @@ class AuthEntrySchema:
             config["token_quota_per_day"] = self.token_quota_per_day
         return config
 
-    def headers_mapping(self) -> Dict[str, str]:
+    def headers_mapping(self) -> dict[str, str]:
         return dict(self.headers)
 
 
@@ -367,7 +368,7 @@ class AuthGroupSchema:
             raise ValueError(f"Auth group '{name}' must define a non-empty entries list")
 
         seen_entry_ids: set[str] = set()
-        entries: List[AuthEntrySchema] = []
+        entries: list[AuthEntrySchema] = []
         for index, raw_entry in enumerate(raw_entries):
             entry = AuthEntrySchema.from_mapping(raw_entry)
             if entry.id in seen_entry_ids:
@@ -387,7 +388,7 @@ class AuthGroupSchema:
             entries=tuple(entries),
         )
 
-    def to_mapping(self) -> Dict[str, Any]:
+    def to_mapping(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "strategy": self.strategy,
@@ -406,14 +407,14 @@ class ProviderConfigSchema:
     transport: str = DEFAULT_PROVIDER_TRANSPORT
     source_format: str = DEFAULT_PROVIDER_SOURCE_FORMAT
     target_formats: tuple[str, ...] = DEFAULT_PROVIDER_TARGET_FORMATS
-    api_key: Optional[str] = None
-    auth_group: Optional[str] = None
-    proxy: Optional[str] = None
-    timeout_seconds: Optional[int] = None
-    max_retries: Optional[int] = None
-    verify_ssl: Optional[bool] = None
+    api_key: str | None = None
+    auth_group: str | None = None
+    proxy: str | None = None
+    timeout_seconds: int | None = None
+    max_retries: int | None = None
+    verify_ssl: bool | None = None
     model_list: tuple[str, ...] = ()
-    hook: Optional[str] = None
+    hook: str | None = None
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "ProviderConfigSchema":
@@ -476,8 +477,8 @@ class ProviderConfigSchema:
         # 兼容旧调用方的只读别名。
         return self.primary_target_format
 
-    def to_mapping(self) -> Dict[str, Any]:
-        config: Dict[str, Any] = {
+    def to_mapping(self) -> dict[str, Any]:
+        config: dict[str, Any] = {
             "name": self.name,
             "enabled": bool(self.enabled),
             "api": self.api,
@@ -503,7 +504,7 @@ class ProviderConfigSchema:
 
         return config
 
-    def to_storage_mapping(self) -> Dict[str, Any]:
+    def to_storage_mapping(self) -> dict[str, Any]:
         return self.to_mapping()
 
 
@@ -518,13 +519,13 @@ class RuntimeProviderSpec:
     source_format: str
     target_formats: tuple[str, ...]
     api_key: str
-    auth_group: Optional[str]
+    auth_group: str | None
     model_list: tuple[str, ...]
-    proxy: Optional[str]
+    proxy: str | None
     timeout_seconds: int
     max_retries: int
     verify_ssl: bool
-    hook: Optional[str]
+    hook: str | None
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> "RuntimeProviderSpec":
@@ -564,14 +565,14 @@ class ProviderRuntimeView:
     transport: str
     source_format: str
     target_formats: tuple[str, ...]
-    auth_group: Optional[str]
+    auth_group: str | None
     legacy_api_key: bool
     model_list: tuple[str, ...]
-    proxy: Optional[str]
+    proxy: str | None
     timeout_seconds: int
     max_retries: int
     verify_ssl: bool
-    hook: Optional[str]
+    hook: str | None
 
     @classmethod
     def from_spec(cls, spec: RuntimeProviderSpec, *, legacy_api_key: bool = False) -> "ProviderRuntimeView":
@@ -601,7 +602,7 @@ def build_auth_group_schemas(
     auth_groups: Sequence[Mapping[str, Any]],
 ) -> tuple[AuthGroupSchema, ...]:
     seen_names: set[str] = set()
-    schemas: List[AuthGroupSchema] = []
+    schemas: list[AuthGroupSchema] = []
 
     for index, auth_group in enumerate(auth_groups):
         if not isinstance(auth_group, Mapping):
@@ -619,12 +620,12 @@ def build_auth_group_schemas(
 def build_provider_schemas(
     providers: Sequence[Mapping[str, Any]],
     *,
-    available_auth_group_names: Optional[Iterable[str]] = None,
+    available_auth_group_names: Iterable[str] | None = None,
 ) -> tuple[ProviderConfigSchema, ...]:
     auth_group_names = set(available_auth_group_names or ())
     seen_names: set[str] = set()
     seen_model_keys: set[str] = set()
-    schemas: List[ProviderConfigSchema] = []
+    schemas: list[ProviderConfigSchema] = []
 
     for index, provider in enumerate(providers):
         if not isinstance(provider, Mapping):

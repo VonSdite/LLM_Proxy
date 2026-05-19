@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 from html.parser import HTMLParser
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -24,7 +25,7 @@ class ProxyWarningRequired(RuntimeError):
         confirmation_url: str,
         upstream_status: int,
         *,
-        auto_confirm_error: Optional[str] = None,
+        auto_confirm_error: str | None = None,
     ) -> None:
         self.confirmation_url = confirmation_url
         self.upstream_status = upstream_status
@@ -38,9 +39,9 @@ class ProxyWarningRequired(RuntimeError):
             message = f"{message} Auto-confirm failed: {auto_confirm_error}"
         super().__init__(message)
 
-    def to_details(self) -> Dict[str, Any]:
+    def to_details(self) -> dict[str, Any]:
         """返回可下发给客户端的结构化错误详情。"""
-        details: Dict[str, Any] = {
+        details: dict[str, Any] = {
             "confirmation_url": self.confirmation_url,
             "upstream_status": self.upstream_status,
         }
@@ -54,9 +55,9 @@ class _ProxyWarningInputParser(HTMLParser):
 
     def __init__(self) -> None:
         super().__init__()
-        self.inputs: Dict[str, str] = {}
+        self.inputs: dict[str, str] = {}
 
-    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag.lower() != "input":
             return
         values = {str(key).lower(): value for key, value in attrs}
@@ -68,9 +69,9 @@ class _ProxyWarningInputParser(HTMLParser):
 def request_with_proxy_warning_retry(
     send_request: Callable[[], Any],
     *,
-    request_options: Optional[Dict[str, Any]] = None,
-    confirm_session: Optional[requests.Session] = None,
-    session_factory: Optional[Callable[[], requests.Session]] = None,
+    request_options: dict[str, Any] | None = None,
+    confirm_session: requests.Session | None = None,
+    session_factory: Callable[[], requests.Session] | None = None,
     logger: Any = None,
     log_context: str = "",
 ) -> Any:
@@ -113,11 +114,11 @@ def request_with_proxy_warning_retry(
 def confirm_proxy_warning(
     confirmation_url: str,
     *,
-    request_options: Optional[Dict[str, Any]] = None,
-    session: Optional[requests.Session] = None,
-    session_factory: Optional[Callable[[], requests.Session]] = None,
+    request_options: dict[str, Any] | None = None,
+    session: requests.Session | None = None,
+    session_factory: Callable[[], requests.Session] | None = None,
     timeout_seconds: int = PROXY_WARNING_CONFIRM_TIMEOUT_SECONDS,
-) -> Optional[str]:
+) -> str | None:
     """确认代理风险页，成功返回 None，失败返回错误摘要。"""
     owns_session = session is None
     active_session = session or (session_factory or requests.Session)()
@@ -157,7 +158,7 @@ def confirm_proxy_warning(
             close_response(active_session)
 
 
-def extract_proxy_warning_confirmation_url(response: Any) -> Optional[str]:
+def extract_proxy_warning_confirmation_url(response: Any) -> str | None:
     """从 HTTP 响应中提取代理风险确认页地址。"""
     status_code = _get_status_code(response)
     if status_code < 300 or status_code >= 400:
@@ -171,7 +172,7 @@ def extract_proxy_warning_confirmation_url(response: Any) -> Optional[str]:
     return location
 
 
-def parse_proxy_warning_inputs(html: str) -> Dict[str, str]:
+def parse_proxy_warning_inputs(html: str) -> dict[str, str]:
     """解析风险确认页隐藏字段。"""
     parser = _ProxyWarningInputParser()
     parser.feed(str(html or ""))
@@ -184,7 +185,7 @@ def parse_proxy_warning_inputs(html: str) -> Dict[str, str]:
 
 def build_proxy_warning_check_url(
     confirmation_url: str,
-    hidden_inputs: Dict[str, str],
+    hidden_inputs: dict[str, str],
 ) -> str:
     """构造风险页确认接口地址。"""
     parsed = urlparse(confirmation_url)

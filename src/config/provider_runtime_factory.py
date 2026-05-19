@@ -9,7 +9,6 @@ import importlib.util
 import inspect
 import sys
 from pathlib import Path
-from typing import Optional
 
 from ..application.app_context import AppContext, Logger
 from ..external.llm_provider import LLMProvider
@@ -23,7 +22,7 @@ class ProviderRuntimeFactory:
     def __init__(self, ctx: AppContext):
         self._base_dir = ctx.root_path.resolve()
         self._logger: Logger = ctx.logger
-        self._hook_cache: dict[str, Optional[HookModule]] = {}
+        self._hook_cache: dict[str, HookModule | None] = {}
 
     def clear_cache(self) -> None:
         """清理 hook 缓存。"""
@@ -55,7 +54,7 @@ class ProviderRuntimeFactory:
             hook=self._load_hook(spec.hook),
         )
 
-    def _load_hook(self, hook_path: Optional[str]) -> Optional[HookModule]:
+    def _load_hook(self, hook_path: str | None) -> HookModule | None:
         """按路径加载 hook 模块，并做缓存复用。"""
         if not hook_path:
             return None

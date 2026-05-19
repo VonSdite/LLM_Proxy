@@ -27,6 +27,10 @@ select = [
     "E9",
     "F",
     "I",
+    "UP006",
+    "UP007",
+    "UP035",
+    "UP045",
 ]
 fixable = ["ALL"]
 

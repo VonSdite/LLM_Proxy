@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -29,12 +30,12 @@ class ModelDiscoveryService:
     def fetch_models_preview(
         self,
         api: str,
-        api_key: Optional[str] = None,
-        request_headers: Optional[Mapping[str, str]] = None,
-        proxy: Optional[str] = None,
-        timeout_seconds: Optional[Any] = None,
-        verify_ssl: Optional[Any] = None,
-    ) -> Dict[str, Any]:
+        api_key: str | None = None,
+        request_headers: Mapping[str, str] | None = None,
+        proxy: str | None = None,
+        timeout_seconds: Any | None = None,
+        verify_ssl: Any | None = None,
+    ) -> dict[str, Any]:
         if not api or not str(api).strip():
             raise ValueError("Provider api is required")
 
@@ -55,12 +56,12 @@ class ModelDiscoveryService:
     def _fetch_models_from_upstream(
         self,
         api: str,
-        api_key: Optional[str],
-        request_headers: Optional[Mapping[str, str]],
-        proxy: Optional[str],
+        api_key: str | None,
+        request_headers: Mapping[str, str] | None,
+        proxy: str | None,
         timeout_seconds: int,
         verify_ssl: bool,
-    ) -> List[str]:
+    ) -> list[str]:
         headers = {"accept": "application/json"}
         if api_key:
             headers["authorization"] = f"Bearer {api_key}"
@@ -68,7 +69,7 @@ class ModelDiscoveryService:
         proxies = build_requests_proxies(proxy)
 
         candidates = self._build_model_endpoint_candidates(api)
-        last_error: Optional[str] = None
+        last_error: str | None = None
 
         with requests.Session() as session:
             for url in candidates:
@@ -118,7 +119,7 @@ class ModelDiscoveryService:
         raise ValueError(last_error or "Failed to fetch models")
 
     @staticmethod
-    def _build_model_endpoint_candidates(api: str) -> List[str]:
+    def _build_model_endpoint_candidates(api: str) -> list[str]:
         cleaned_api = api.strip().rstrip("/")
         parsed = urlparse(cleaned_api)
         if not parsed.scheme or not parsed.netloc:
@@ -160,8 +161,8 @@ class ModelDiscoveryService:
         return normalized_path
 
     @staticmethod
-    def _extract_models_from_payload(payload: Any) -> List[str]:
-        models: List[str] = []
+    def _extract_models_from_payload(payload: Any) -> list[str]:
+        models: list[str] = []
         items: Any = None
         if isinstance(payload, dict):
             items = payload.get("data")

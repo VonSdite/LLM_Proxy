@@ -3,11 +3,11 @@
 """数据库工具函数。"""
 
 import sqlite3
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
-from typing import Callable, ContextManager, Iterator
 
-ConnectionFactory = Callable[[], ContextManager[sqlite3.Connection]]
+ConnectionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
 
 
 def create_connection_factory(db_path: Path) -> ConnectionFactory:

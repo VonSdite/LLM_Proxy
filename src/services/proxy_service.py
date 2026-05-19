@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+from typing import Any
 
 import requests
 from flask import Response
@@ -41,14 +42,14 @@ class ProxyErrorInfo:
     message: str
     status_code: int = 502
     error_type: str = "upstream_error"
-    error_code: Optional[str] = None
-    details: Optional[Dict[str, Any]] = None
+    error_code: str | None = None
+    details: dict[str, Any] | None = None
 
 
 class ProxyService:
     """处理上游 LLM 代理请求。"""
 
-    def __init__(self, ctx: AppContext, auth_group_manager: Optional[AuthGroupManager] = None):
+    def __init__(self, ctx: AppContext, auth_group_manager: AuthGroupManager | None = None):
         self._config_manager = ctx.config_manager
         self._logger = ctx.logger
         self._trace_logger = logging.getLogger("llm_request_trace")
@@ -68,15 +69,15 @@ class ProxyService:
     def log_downstream_request_trace(
         self,
         *,
-        trace_id: Optional[str],
+        trace_id: str | None,
         start_line: str,
-        headers: Dict[str, Any],
+        headers: dict[str, Any],
         payload: Any,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        request_model: Optional[str] = None,
-        target_format: Optional[str] = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+        provider_name: str | None = None,
+        request_model: str | None = None,
+        target_format: str | None = None,
     ) -> None:
         self._trace.log_entry(
             stage="downstream_request",
@@ -94,16 +95,16 @@ class ProxyService:
     def log_downstream_response_trace(
         self,
         *,
-        trace_id: Optional[str],
+        trace_id: str | None,
         status_code: int,
-        headers: Dict[str, Any],
+        headers: dict[str, Any],
         payload: Any,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        request_model: Optional[str] = None,
-        target_format: Optional[str] = None,
-        error_type: Optional[str] = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+        provider_name: str | None = None,
+        request_model: str | None = None,
+        target_format: str | None = None,
+        error_type: str | None = None,
     ) -> None:
         self._trace.log_entry(
             stage="downstream_response",
@@ -123,15 +124,15 @@ class ProxyService:
     def proxy_request(
         self,
         provider: LLMProvider,
-        request_data: Dict[str, Any],
-        request_headers: Dict[str, str],
-        on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
+        request_data: dict[str, Any],
+        request_headers: dict[str, str],
+        on_complete: Callable[[dict[str, Any]], None] | None = None,
         forward_stream_usage: bool = False,
-        resolved_target_format: Optional[str] = None,
-        trace_id: Optional[str] = None,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-    ) -> Tuple[Optional[Response], int, Optional[ProxyErrorInfo]]:
+        resolved_target_format: str | None = None,
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """代理请求到目标 provider，并处理重试、格式转换与 guard。"""
         target_url = provider.api
         requested_model = request_data["model"]
@@ -145,14 +146,14 @@ class ProxyService:
             resolved_target_format,
         )
         translator = self._translator_registry.get(provider.source_format, downstream_target_format)
-        last_error: Optional[ProxyErrorInfo] = None
-        previous_status_code: Optional[int] = None
-        previous_error_type: Optional[HookErrorType] = None
+        last_error: ProxyErrorInfo | None = None
+        previous_status_code: int | None = None
+        previous_error_type: HookErrorType | None = None
 
         def build_request(
             attempt: int,
-            selected_auth: Optional[SelectedAuthEntry],
-        ) -> Tuple[Dict[str, str], Dict[str, Any], Dict[str, Any], HookContext]:
+            selected_auth: SelectedAuthEntry | None,
+        ) -> tuple[dict[str, str], dict[str, Any], dict[str, Any], HookContext]:
             headers = dict(request_headers)
             headers["content-type"] = "application/json"
             if selected_auth is not None:
@@ -186,16 +187,16 @@ class ProxyService:
             )
 
         for attempt in range(max_retries):
-            selected_auth: Optional[SelectedAuthEntry] = None
+            selected_auth: SelectedAuthEntry | None = None
             attempt_finalized = False
 
             def finalize_attempt(
                 *,
-                status_code: Optional[int] = None,
-                error_type: Optional[HookErrorType] = None,
-                error_message: Optional[str] = None,
-                response_headers: Optional[Dict[str, Any]] = None,
-                usage: Optional[Dict[str, Any]] = None,
+                status_code: int | None = None,
+                error_type: HookErrorType | None = None,
+                error_message: str | None = None,
+                response_headers: dict[str, Any] | None = None,
+                usage: dict[str, Any] | None = None,
             ) -> None:
                 nonlocal attempt_finalized
                 if attempt_finalized:
@@ -479,11 +480,11 @@ class ProxyService:
     def _open_upstream_response(
         self,
         provider: LLMProvider,
-        headers: Dict[str, str],
-        body: Dict[str, Any],
+        headers: dict[str, str],
+        body: dict[str, Any],
         requested_stream: bool,
         target_url: str,
-        request_proxies: Optional[Dict[str, str]],
+        request_proxies: dict[str, str] | None,
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> OpenedUpstreamResponse:
@@ -530,7 +531,7 @@ class ProxyService:
     @staticmethod
     def _resolve_downstream_target_format(
         provider: LLMProvider,
-        resolved_target_format: Optional[str] = None,
+        resolved_target_format: str | None = None,
     ) -> str:
         normalized_target_format = str(resolved_target_format or "").strip().lower()
         if normalized_target_format:
@@ -558,7 +559,7 @@ class ProxyService:
     @staticmethod
     def _iter_stream_chunks_with_trace(
         upstream_chunks: Iterator[bytes],
-        payload_buffer: Optional[bytearray],
+        payload_buffer: bytearray | None,
     ) -> Iterator[bytes]:
         for chunk in upstream_chunks:
             if not chunk:
@@ -566,17 +567,17 @@ class ProxyService:
             ProxyService._extend_trace_buffer(payload_buffer, chunk)
             yield chunk
 
-    def _is_trace_enabled(self, trace_id: Optional[str]) -> bool:
+    def _is_trace_enabled(self, trace_id: str | None) -> bool:
         return self._trace.is_enabled(trace_id)
 
     @staticmethod
-    def _extend_trace_buffer(payload_buffer: Optional[bytearray], payload: Any) -> None:
+    def _extend_trace_buffer(payload_buffer: bytearray | None, payload: Any) -> None:
         if payload_buffer is None:
             return
         payload_buffer.extend(ProxyService._coerce_trace_bytes(payload))
 
     @staticmethod
-    def _filter_response_headers(headers: Any) -> Dict[str, str]:
+    def _filter_response_headers(headers: Any) -> dict[str, str]:
         excluded = {
             "transfer-encoding",
             "connection",

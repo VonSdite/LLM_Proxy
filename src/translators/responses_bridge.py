@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict
+from typing import Any
 
 from ..proxy_core.contracts import DownstreamChunk
 from .event_chunk_utils import build_json_event_chunk as _emit_event
@@ -14,10 +14,10 @@ from .tool_result_utils import normalize_tool_result_content
 
 def convert_openai_responses_request_to_chat_request(
     model_name: str,
-    body: Dict[str, Any],
+    body: dict[str, Any],
     stream: bool,
-) -> Dict[str, Any]:
-    translated: Dict[str, Any] = {
+) -> dict[str, Any]:
+    translated: dict[str, Any] = {
         "model": model_name,
         "messages": [],
         "stream": bool(stream),
@@ -143,10 +143,10 @@ def _from_openai_responses_message_content(content: Any) -> Any:
 
 def translate_openai_chat_downstream_chunk_to_responses(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
     chunk: DownstreamChunk,
-    state: Dict[str, Any],
+    state: dict[str, Any],
 ) -> list[DownstreamChunk]:
     if chunk.kind == "done":
         return finalize_openai_responses_stream(model_name, original_request, translated_request, state)
@@ -184,10 +184,10 @@ def translate_openai_chat_downstream_chunk_to_responses(
 
 def translate_openai_chat_stream_payload_to_responses(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
-    payload: Dict[str, Any],
-    state: Dict[str, Any],
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
+    payload: dict[str, Any],
+    state: dict[str, Any],
 ) -> list[DownstreamChunk]:
     outputs: list[DownstreamChunk] = []
     outputs.extend(_ensure_stream_started(model_name, translated_request, state))
@@ -312,8 +312,8 @@ def translate_openai_chat_stream_payload_to_responses(
 
 def _ensure_stream_started(
     model_name: str,
-    translated_request: Dict[str, Any],
-    state: Dict[str, Any],
+    translated_request: dict[str, Any],
+    state: dict[str, Any],
 ) -> list[DownstreamChunk]:
     if state.get("started"):
         return []
@@ -372,7 +372,7 @@ def _ensure_stream_started(
     ]
 
 
-def _ensure_message_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _ensure_message_open(state: dict[str, Any]) -> list[DownstreamChunk]:
     message_state = state.setdefault(
         "message", {"opened": False, "done": False, "content": "", "output_index": None, "item_id": None}
     )
@@ -413,7 +413,7 @@ def _ensure_message_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
     ]
 
 
-def _ensure_reasoning_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _ensure_reasoning_open(state: dict[str, Any]) -> list[DownstreamChunk]:
     reasoning_state = state.setdefault(
         "reasoning", {"opened": False, "done": False, "text": "", "output_index": None, "item_id": None}
     )
@@ -449,11 +449,11 @@ def _ensure_reasoning_open(state: Dict[str, Any]) -> list[DownstreamChunk]:
 
 
 def _ensure_tool_open(
-    state: Dict[str, Any],
+    state: dict[str, Any],
     tool_index: int,
     tool_call_id: str,
     tool_name: str,
-) -> tuple[Dict[str, Any], list[DownstreamChunk]]:
+) -> tuple[dict[str, Any], list[DownstreamChunk]]:
     tool_calls = state.setdefault("tool_calls", {})
     tool_state = tool_calls.get(tool_index)
     if tool_state is None:
@@ -503,9 +503,9 @@ def _ensure_tool_open(
 
 def finalize_openai_responses_stream(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
-    state: Dict[str, Any],
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
+    state: dict[str, Any],
 ) -> list[DownstreamChunk]:
     if not state.get("started") or state.get("completed"):
         return []
@@ -524,7 +524,7 @@ def finalize_openai_responses_stream(
     return outputs
 
 
-def _finalize_message(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _finalize_message(state: dict[str, Any]) -> list[DownstreamChunk]:
     message_state = state.get("message") or {}
     if not message_state.get("opened") or message_state.get("done"):
         return []
@@ -575,7 +575,7 @@ def _finalize_message(state: Dict[str, Any]) -> list[DownstreamChunk]:
     ]
 
 
-def _finalize_reasoning(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _finalize_reasoning(state: dict[str, Any]) -> list[DownstreamChunk]:
     reasoning_state = state.get("reasoning") or {}
     if not reasoning_state.get("opened") or reasoning_state.get("done"):
         return []
@@ -619,7 +619,7 @@ def _finalize_reasoning(state: Dict[str, Any]) -> list[DownstreamChunk]:
     ]
 
 
-def _finalize_tool_calls(state: Dict[str, Any]) -> list[DownstreamChunk]:
+def _finalize_tool_calls(state: dict[str, Any]) -> list[DownstreamChunk]:
     outputs: list[DownstreamChunk] = []
     for tool_index in sorted((state.get("tool_calls") or {}).keys()):
         tool_state = state["tool_calls"][tool_index]
@@ -662,10 +662,10 @@ def _finalize_tool_calls(state: Dict[str, Any]) -> list[DownstreamChunk]:
 
 def _build_completed_payload(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
-    state: Dict[str, Any],
-) -> Dict[str, Any]:
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any]:
     response_model = str(state.get("response_model") or translated_request.get("model") or model_name)
     response = {
         "id": state["response_id"],
@@ -684,8 +684,8 @@ def _build_completed_payload(
     return {"type": "response.completed", "sequence_number": _next_sequence(state), "response": response}
 
 
-def _build_output_items(state: Dict[str, Any]) -> list[Dict[str, Any]]:
-    items: list[tuple[int, Dict[str, Any]]] = []
+def _build_output_items(state: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[tuple[int, dict[str, Any]]] = []
     message_state = state.get("message") or {}
     if message_state.get("opened"):
         items.append(
@@ -736,8 +736,8 @@ def _build_output_items(state: Dict[str, Any]) -> list[Dict[str, Any]]:
     return [item for _, item in sorted(items, key=lambda pair: pair[0])]
 
 
-def _extract_echo_fields(original_request: Dict[str, Any]) -> Dict[str, Any]:
-    echoed: Dict[str, Any] = {}
+def _extract_echo_fields(original_request: dict[str, Any]) -> dict[str, Any]:
+    echoed: dict[str, Any] = {}
     for field in (
         "instructions",
         "max_output_tokens",
@@ -759,14 +759,14 @@ def _extract_echo_fields(original_request: Dict[str, Any]) -> Dict[str, Any]:
 
 def convert_openai_chat_response_to_responses(
     model_name: str,
-    original_request: Dict[str, Any],
-    translated_request: Dict[str, Any],
+    original_request: dict[str, Any],
+    translated_request: dict[str, Any],
     payload: Any,
 ) -> Any:
     if not isinstance(payload, dict):
         return payload
 
-    message: Dict[str, Any] = {}
+    message: dict[str, Any] = {}
     finish_reason = None
     for choice in payload.get("choices") or []:
         if not isinstance(choice, dict):
@@ -778,7 +778,7 @@ def convert_openai_chat_response_to_responses(
 
     response_id = payload.get("id") or f"resp_{model_name}_{int(time.time() * 1000)}"
     response_model = payload.get("model") or translated_request.get("model") or model_name
-    output_items: list[Dict[str, Any]] = []
+    output_items: list[dict[str, Any]] = []
     reasoning_content = str(message.get("reasoning_content") or "")
     if reasoning_content:
         output_items.append(
@@ -838,7 +838,7 @@ def convert_openai_chat_response_to_responses(
     return response
 
 
-def _next_sequence(state: Dict[str, Any]) -> int:
+def _next_sequence(state: dict[str, Any]) -> int:
     sequence = int(state.get("seq") or 0) + 1
     state["seq"] = sequence
     return sequence

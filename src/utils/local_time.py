@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 LOCAL_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 LEGACY_LOCAL_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -27,7 +26,7 @@ def now_local_datetime_text() -> str:
     return format_local_datetime(now_local_datetime())
 
 
-def parse_local_datetime(value: object) -> Optional[datetime]:
+def parse_local_datetime(value: object) -> datetime | None:
     """解析数据库/API 使用的本地时间文本。"""
     if value is None:
         return None
@@ -56,7 +55,7 @@ def ensure_local_datetime(value: object | None) -> datetime:
     return parsed
 
 
-def normalize_local_datetime_text(value: object | None) -> Optional[str]:
+def normalize_local_datetime_text(value: object | None) -> str | None:
     """把时间值整理成统一格式。"""
     if value is None:
         return None

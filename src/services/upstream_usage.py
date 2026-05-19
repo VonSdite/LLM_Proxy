@@ -4,12 +4,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 
 def ensure_upstream_usage_capture(
     source_format: str,
-    translated_body: Dict[str, Any],
+    translated_body: dict[str, Any],
     stream: bool,
 ) -> None:
     """在协议支持时显式请求 usage 返回。"""

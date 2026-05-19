@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from flask import jsonify, make_response, render_template, request
 from flask.typing import ResponseReturnValue

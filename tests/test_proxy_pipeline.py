@@ -1,7 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from flask import Flask
 
@@ -83,7 +83,7 @@ class RewriteRequestModelHook(BaseHook):
     def __init__(self, target_model: str) -> None:
         self._target_model = target_model
 
-    def request_guard(self, ctx: Any, body: Dict[str, Any]) -> Dict[str, Any]:
+    def request_guard(self, ctx: Any, body: dict[str, Any]) -> dict[str, Any]:
         del ctx
         guarded_body = dict(body)
         guarded_body["model"] = self._target_model
@@ -92,9 +92,9 @@ class RewriteRequestModelHook(BaseHook):
 
 class HeaderRecordingHook(BaseHook):
     def __init__(self) -> None:
-        self.headers: list[Dict[str, str]] = []
+        self.headers: list[dict[str, str]] = []
 
-    def header_hook(self, ctx: Any, headers: Dict[str, str]) -> Dict[str, str]:
+    def header_hook(self, ctx: Any, headers: dict[str, str]) -> dict[str, str]:
         del ctx
         self.headers.append(dict(headers))
         headers["x-hook-stage"] = "after-auth"

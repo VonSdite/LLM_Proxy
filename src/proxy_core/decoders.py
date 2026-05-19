@@ -7,7 +7,7 @@ from __future__ import annotations
 import codecs
 import json
 import re
-from typing import Iterable, Iterator, Optional
+from collections.abc import Iterable, Iterator
 
 from .contracts import StreamEvent
 
@@ -24,7 +24,7 @@ _SSE_SEPARATOR = re.compile(r"\r?\n\r?\n")
 
 
 def resolve_stream_format(
-    preferred_format: Optional[str],
+    preferred_format: str | None,
     content_type: str,
     transport: str,
 ) -> str:
@@ -91,7 +91,7 @@ def _parse_sse_event(event_text: str, *, parse_json: bool) -> Iterator[StreamEve
     if not normalized.strip():
         return
 
-    event_name: Optional[str] = None
+    event_name: str | None = None
     data_lines: list[str] = []
     passthrough_lines: list[str] = []
     for raw_line in normalized.split("\n"):

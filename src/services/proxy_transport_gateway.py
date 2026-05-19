@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 
@@ -23,10 +23,10 @@ class ProxyTransportGateway:
         self,
         *,
         provider: LLMProvider,
-        headers: Dict[str, str],
-        body: Dict[str, Any],
+        headers: dict[str, str],
+        body: dict[str, Any],
         requested_stream: bool,
-        request_proxies: Optional[Dict[str, str]],
+        request_proxies: dict[str, str] | None,
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> OpenedUpstreamResponse:

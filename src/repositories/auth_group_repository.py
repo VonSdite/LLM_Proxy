@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Dict, Iterable
+from typing import Any
 
 from ..utils.database import ConnectionFactory
 from ..utils.local_time import format_local_date, format_local_datetime, now_local_datetime_text
@@ -61,7 +62,7 @@ class AuthGroupRepository:
             )
 
     @staticmethod
-    def _default_runtime_state(auth_group_name: str, entry_id: str) -> Dict[str, Any]:
+    def _default_runtime_state(auth_group_name: str, entry_id: str) -> dict[str, Any]:
         return {
             "auth_group_name": auth_group_name,
             "entry_id": entry_id,
@@ -75,7 +76,7 @@ class AuthGroupRepository:
         }
 
     @staticmethod
-    def _empty_usage() -> Dict[str, int]:
+    def _empty_usage() -> dict[str, int]:
         return {
             "minute_request_count": 0,
             "day_request_count": 0,
@@ -87,7 +88,7 @@ class AuthGroupRepository:
             "day_total_tokens": 0,
         }
 
-    def get_entry_runtime_state(self, auth_group_name: str, entry_id: str) -> Dict[str, Any]:
+    def get_entry_runtime_state(self, auth_group_name: str, entry_id: str) -> dict[str, Any]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -114,7 +115,7 @@ class AuthGroupRepository:
             "updated_at": row["updated_at"],
         }
 
-    def list_group_runtime_states(self, auth_group_name: str) -> Dict[str, Dict[str, Any]]:
+    def list_group_runtime_states(self, auth_group_name: str) -> dict[str, dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -128,7 +129,7 @@ class AuthGroupRepository:
             )
             rows = cursor.fetchall()
 
-        result: Dict[str, Dict[str, Any]] = {}
+        result: dict[str, dict[str, Any]] = {}
         for row in rows:
             result[row["entry_id"]] = {
                 "auth_group_name": row["auth_group_name"],
@@ -380,7 +381,7 @@ class AuthGroupRepository:
                 total_tokens=total_tokens,
             )
 
-    def get_current_usage(self, auth_group_name: str, entry_id: str, when: datetime) -> Dict[str, int]:
+    def get_current_usage(self, auth_group_name: str, entry_id: str, when: datetime) -> dict[str, int]:
         minute_bucket = self._minute_bucket_start(when)
         day_bucket = self._day_bucket_start(when)
 
@@ -412,14 +413,14 @@ class AuthGroupRepository:
         auth_group_name: str,
         entry_ids: Iterable[str],
         when: datetime,
-    ) -> Dict[str, Dict[str, int]]:
+    ) -> dict[str, dict[str, int]]:
         normalized_entry_ids = [str(entry_id).strip() for entry_id in entry_ids if str(entry_id).strip()]
         if not normalized_entry_ids:
             return {}
 
         minute_bucket = self._minute_bucket_start(when)
         day_bucket = self._day_bucket_start(when)
-        usage_by_entry: Dict[str, Dict[str, int]] = {entry_id: self._empty_usage() for entry_id in normalized_entry_ids}
+        usage_by_entry: dict[str, dict[str, int]] = {entry_id: self._empty_usage() for entry_id in normalized_entry_ids}
 
         placeholders = ", ".join("?" for _ in normalized_entry_ids)
         with self._get_connection() as conn:

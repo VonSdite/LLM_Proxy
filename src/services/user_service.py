@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import json
 import threading
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from ..application.app_context import AppContext
 from ..config.provider_config import normalize_model_list
@@ -25,21 +26,21 @@ class UserService:
         self._config_manager = getattr(ctx, "config_manager", None)
         self._repository = repository
         self._cache_lock = threading.RLock()
-        self._user_by_ip_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+        self._user_by_ip_cache: dict[str, dict[str, Any] | None] = {}
 
-    def _get_cached_user_by_ip(self, ip_address: str) -> tuple[bool, Optional[Dict[str, Any]]]:
+    def _get_cached_user_by_ip(self, ip_address: str) -> tuple[bool, dict[str, Any] | None]:
         """读取 IP 缓存，返回是否命中与缓存值。"""
         with self._cache_lock:
             if ip_address not in self._user_by_ip_cache:
                 return False, None
             return True, self._user_by_ip_cache[ip_address]
 
-    def _set_cached_user_by_ip(self, ip_address: str, user: Optional[Dict[str, Any]]) -> None:
+    def _set_cached_user_by_ip(self, ip_address: str, user: dict[str, Any] | None) -> None:
         """写入 IP 对应缓存。"""
         with self._cache_lock:
             self._user_by_ip_cache[ip_address] = user
 
-    def _invalidate_ip_cache(self, *ip_addresses: Optional[str]) -> None:
+    def _invalidate_ip_cache(self, *ip_addresses: str | None) -> None:
         """按 IP 失效缓存。"""
         with self._cache_lock:
             for ip_address in ip_addresses:
@@ -47,7 +48,7 @@ class UserService:
                     self._user_by_ip_cache.pop(ip_address, None)
 
     @staticmethod
-    def _normalize_user_timestamps(user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _normalize_user_timestamps(user: dict[str, Any] | None) -> dict[str, Any] | None:
         """统一用户时间字段格式。"""
         if not user:
             return user
@@ -58,9 +59,9 @@ class UserService:
         return normalized
 
     @staticmethod
-    def _dedupe_models(model_names: Iterable[Any]) -> List[str]:
+    def _dedupe_models(model_names: Iterable[Any]) -> list[str]:
         seen_models: set[str] = set()
-        normalized_models: List[str] = []
+        normalized_models: list[str] = []
         for item in model_names:
             model_name = str(item or "").strip()
             if not model_name or model_name in seen_models:
@@ -84,7 +85,7 @@ class UserService:
         if raw_providers is None or not isinstance(raw_providers, list):
             return ()
 
-        model_names: List[str] = []
+        model_names: list[str] = []
         seen_models: set[str] = set()
         for raw_provider in raw_providers:
             if not isinstance(raw_provider, dict):
@@ -109,7 +110,7 @@ class UserService:
         return tuple(sorted(model_names))
 
     @classmethod
-    def _deserialize_model_permissions(cls, raw_value: Any) -> Optional[tuple[str, ...]]:
+    def _deserialize_model_permissions(cls, raw_value: Any) -> tuple[str, ...] | None:
         """反序列化模型权限；返回 None 表示通配全模型。"""
         normalized_text = str(raw_value or "").strip()
         if not normalized_text or normalized_text == cls.MODEL_PERMISSIONS_ALL:
@@ -155,10 +156,10 @@ class UserService:
 
     def _decorate_user(
         self,
-        user: Optional[Dict[str, Any]],
+        user: dict[str, Any] | None,
         *,
-        available_models: Optional[Sequence[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        available_models: Sequence[str] | None = None,
+    ) -> dict[str, Any] | None:
         """补充模型权限字段并标准化时间格式。"""
         normalized = self._normalize_user_timestamps(user)
         if not normalized:
@@ -187,11 +188,11 @@ class UserService:
         normalized["available_models_count"] = len(resolved_available_models)
         return normalized
 
-    def get_available_models(self) -> List[str]:
+    def get_available_models(self) -> list[str]:
         """返回当前配置中可选的模型列表。"""
         return list(self._get_available_model_names())
 
-    def create_user(self, username: str, ip_address: str) -> Optional[int]:
+    def create_user(self, username: str, ip_address: str) -> int | None:
         """创建用户。"""
         try:
             if not is_valid_ip(ip_address):
@@ -215,7 +216,7 @@ class UserService:
             self._logger.error(f"Failed to create user: {exc}")
             return None
 
-    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+    def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         """按 ID 查询用户。"""
         try:
             return self._decorate_user(self._repository.get_by_id(user_id))
@@ -227,9 +228,9 @@ class UserService:
         self,
         page: int,
         page_size: int,
-        keyword: Optional[str],
-        sort_direction: Optional[str],
-    ) -> List[Dict[str, Any]]:
+        keyword: str | None,
+        sort_direction: str | None,
+    ) -> list[dict[str, Any]]:
         """按派生的模型权限数量排序后分页。"""
         available_models = self._get_available_model_names()
         users = self._repository.get_sorted_by_allowed_model_count(
@@ -246,10 +247,10 @@ class UserService:
         self,
         page: int = 1,
         page_size: int = 50,
-        keyword: Optional[str] = None,
-        sort_key: Optional[str] = "total_tokens",
-        sort_direction: Optional[str] = "desc",
-    ) -> List[Dict[str, Any]]:
+        keyword: str | None = None,
+        sort_key: str | None = "total_tokens",
+        sort_direction: str | None = "desc",
+    ) -> list[dict[str, Any]]:
         """分页查询用户列表。"""
         try:
             if sort_key == "allowed_models_count":
@@ -274,7 +275,7 @@ class UserService:
             self._logger.error(f"Failed to get users: {exc}")
             return []
 
-    def get_total_users_count(self, keyword: Optional[str] = None) -> int:
+    def get_total_users_count(self, keyword: str | None = None) -> int:
         """查询用户总数。"""
         try:
             return self._repository.get_count(keyword=keyword)
@@ -285,9 +286,9 @@ class UserService:
     def update_user(
         self,
         user_id: int,
-        username: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        whitelist_access_enabled: Optional[bool] = None,
+        username: str | None = None,
+        ip_address: str | None = None,
+        whitelist_access_enabled: bool | None = None,
         *,
         model_permissions_provided: bool = False,
         model_permissions: Any = None,
@@ -304,7 +305,7 @@ class UserService:
                     self._logger.error(f"IP address already in use: {ip_address}")
                     return False
 
-            serialized_model_permissions: Optional[str] = None
+            serialized_model_permissions: str | None = None
             if model_permissions_provided:
                 serialized_model_permissions = self._serialize_model_permissions(model_permissions)
 
@@ -325,7 +326,7 @@ class UserService:
             self._logger.error(f"Failed to update user: {exc}")
             return False
 
-    def batch_update_model_permissions(self, user_ids: Any, model_permissions: Any) -> Dict[str, Any]:
+    def batch_update_model_permissions(self, user_ids: Any, model_permissions: Any) -> dict[str, Any]:
         """批量统一设置用户模型权限。"""
         normalized_user_ids = self._normalize_user_ids(user_ids)
         existing_users = self._repository.get_by_ids(normalized_user_ids)
@@ -392,7 +393,7 @@ class UserService:
         self,
         ip_address: str,
         require_whitelist_access: bool = False,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """按 IP 查询用户，可选要求白名单开关为启用。"""
         try:
             if not ip_address:
@@ -414,9 +415,9 @@ class UserService:
 
     def get_accessible_models_for_user(
         self,
-        user: Optional[Dict[str, Any]],
-        available_models: Optional[Sequence[str]] = None,
-    ) -> List[str]:
+        user: dict[str, Any] | None,
+        available_models: Sequence[str] | None = None,
+    ) -> list[str]:
         """返回用户在给定模型集合内可访问的模型。"""
         if not user:
             return []
@@ -444,9 +445,9 @@ class UserService:
 
     def can_user_access_model(
         self,
-        user: Optional[Dict[str, Any]],
+        user: dict[str, Any] | None,
         model_name: str,
-        available_models: Optional[Sequence[str]] = None,
+        available_models: Sequence[str] | None = None,
     ) -> bool:
         """判断用户是否可访问指定模型。"""
         normalized_model_name = str(model_name or "").strip()
@@ -494,12 +495,12 @@ class UserService:
             return 0
 
     @staticmethod
-    def _normalize_user_ids(user_ids: Any) -> List[int]:
+    def _normalize_user_ids(user_ids: Any) -> list[int]:
         """标准化批量操作中的用户 ID 列表。"""
         if not isinstance(user_ids, list):
             raise ValueError("User ids must be a non-empty list")
 
-        normalized_user_ids: List[int] = []
+        normalized_user_ids: list[int] = []
         seen_user_ids: set[int] = set()
         for raw_user_id in user_ids:
             try:

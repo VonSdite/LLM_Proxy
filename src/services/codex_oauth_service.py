@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
@@ -55,7 +55,7 @@ class CodexAuthCandidate:
     account_id: str
     email: str
     plan_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -77,12 +77,12 @@ class CodexOAuthService:
         self._auth_dir = ctx.root_path / "data" / "oauth" / "codex"
         self._models_file = self._auth_dir / "models.json"
         self._state_file = self._auth_dir / ".state" / "auth_files.json"
-        self._sessions: Dict[str, _CodexOAuthSession] = {}
-        self._quota_cooldowns: Dict[str, float] = {}
-        self._quota_refresh_locks: Dict[str, threading.Lock] = {}
+        self._sessions: dict[str, _CodexOAuthSession] = {}
+        self._quota_cooldowns: dict[str, float] = {}
+        self._quota_refresh_locks: dict[str, threading.Lock] = {}
         self._quota_refresh_lock_guard = threading.RLock()
 
-    def start_login(self) -> Dict[str, Any]:
+    def start_login(self) -> dict[str, Any]:
         """生成新的 Codex OAuth 授权链接。"""
         self._purge_expired_sessions()
         state = secrets.token_urlsafe(24)
@@ -117,7 +117,7 @@ class CodexOAuthService:
             "expires_at": self._format_timestamp(expires_at),
         }
 
-    def complete_login(self, callback_url: str) -> Dict[str, Any]:
+    def complete_login(self, callback_url: str) -> dict[str, Any]:
         """根据回调 URL 换取 token 并写入认证文件。"""
         parsed_callback = self._parse_callback_url(callback_url)
         state = parsed_callback["state"]
@@ -168,9 +168,9 @@ class CodexOAuthService:
             "auth_file": self._build_auth_file_entry(auth_file),
         }
 
-    def list_auth_files(self) -> Dict[str, Any]:
+    def list_auth_files(self) -> dict[str, Any]:
         """列出本地 Codex OAuth 认证文件。"""
-        files: List[Dict[str, Any]] = []
+        files: list[dict[str, Any]] = []
         state = self._load_auth_file_state()
         for path in self._iter_auth_file_paths():
             entry = self._build_auth_file_entry(path, state)
@@ -183,7 +183,7 @@ class CodexOAuthService:
             "auth_dir": str(self._auth_dir),
         }
 
-    def delete_auth_file(self, name: str) -> Dict[str, Any]:
+    def delete_auth_file(self, name: str) -> dict[str, Any]:
         """删除指定 Codex OAuth 认证文件及其本地状态。"""
         auth_file = self._resolve_auth_file(name)
         deleted_name = auth_file.name
@@ -196,7 +196,7 @@ class CodexOAuthService:
             "deleted": deleted_name,
         }
 
-    def list_models(self) -> Dict[str, Any]:
+    def list_models(self) -> dict[str, Any]:
         """返回当前 Codex OAuth 可用模型目录。"""
         models = self._build_model_entries(self._load_model_ids())
         return {
@@ -207,7 +207,7 @@ class CodexOAuthService:
             "reference_urls": list(CODEX_MODEL_REFERENCE_URLS),
         }
 
-    def add_model(self, model_id: str) -> Dict[str, Any]:
+    def add_model(self, model_id: str) -> dict[str, Any]:
         """添加一个本地 Codex 模型 ID。"""
         normalized_model_id = self._normalize_model_id(model_id)
         model_ids = list(self._load_model_ids())
@@ -217,7 +217,7 @@ class CodexOAuthService:
         self._write_model_ids(model_ids)
         return self.list_models()
 
-    def delete_model(self, model_id: str) -> Dict[str, Any]:
+    def delete_model(self, model_id: str) -> dict[str, Any]:
         """删除一个本地 Codex 模型 ID。"""
         normalized_model_id = self._normalize_model_id(model_id)
         model_ids = [
@@ -237,7 +237,7 @@ class CodexOAuthService:
         normalized_model = str(model_name or "").strip()
         return bool(normalized_model) and normalized_model in set(self.list_model_names())
 
-    def iter_auth_candidates_for_model(self, model_name: str) -> List[CodexAuthCandidate]:
+    def iter_auth_candidates_for_model(self, model_name: str) -> list[CodexAuthCandidate]:
         """按填满一个账号再使用下一个账号的策略返回认证候选。"""
         normalized_model = str(model_name or "").strip()
         if not normalized_model:
@@ -246,7 +246,7 @@ class CodexOAuthService:
         if normalized_model not in set(self._load_model_ids()):
             return []
 
-        candidates: List[CodexAuthCandidate] = []
+        candidates: list[CodexAuthCandidate] = []
         self._purge_quota_cooldowns()
         state_files = self._load_auth_file_state().get("files")
         for path in self._iter_auth_file_paths():
@@ -267,7 +267,7 @@ class CodexOAuthService:
         self,
         name: str,
         *,
-        retry_after_seconds: Optional[float] = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         """把认证文件标记为临时配额耗尽，后续请求优先尝试其他账号。"""
         normalized_name = Path(str(name or "").strip()).name
@@ -299,9 +299,9 @@ class CodexOAuthService:
         name: str,
         message: str,
         *,
-        status_code: Optional[int] = None,
-        error_type: Optional[str] = None,
-        retry_after_seconds: Optional[float] = None,
+        status_code: int | None = None,
+        error_type: str | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         """记录认证文件最近一次 Codex 模型代理失败。"""
         normalized_name = self._normalize_auth_file_name(name)
@@ -319,7 +319,7 @@ class CodexOAuthService:
             },
         )
 
-    def get_auth_file_quota(self, name: str) -> Dict[str, Any]:
+    def get_auth_file_quota(self, name: str) -> dict[str, Any]:
         """查询指定认证文件的 Codex 使用配额。"""
         auth_file = self._resolve_auth_file(name)
         quota_lock = self._get_quota_refresh_lock(auth_file.name)
@@ -402,7 +402,7 @@ class CodexOAuthService:
                 self._quota_refresh_locks[name] = quota_lock
             return quota_lock
 
-    def _build_skipped_quota_refresh_result(self, name: str) -> Dict[str, Any]:
+    def _build_skipped_quota_refresh_result(self, name: str) -> dict[str, Any]:
         """构造重复配额刷新被跳过时的兼容响应。"""
         state = self._load_auth_file_state()
         files = state.get("files")
@@ -410,8 +410,8 @@ class CodexOAuthService:
         if not isinstance(file_state, dict):
             file_state = {}
         raw_quota = file_state.get("quota")
-        quota = cast(Dict[str, Any], raw_quota) if isinstance(raw_quota, dict) else {}
-        result: Dict[str, Any] = dict(quota)
+        quota = cast(dict[str, Any], raw_quota) if isinstance(raw_quota, dict) else {}
+        result: dict[str, Any] = dict(quota)
         result.update(
             {
                 "status": "ok",
@@ -424,7 +424,7 @@ class CodexOAuthService:
         result.setdefault("windows", [])
         return result
 
-    def _request_auth_file_quota(self, payload: Dict[str, Any]) -> requests.Response:
+    def _request_auth_file_quota(self, payload: dict[str, Any]) -> requests.Response:
         access_token = str(payload.get("access_token") or "").strip()
         if not access_token:
             raise ValueError("Auth file does not contain access_token")
@@ -445,7 +445,7 @@ class CodexOAuthService:
             timeout=20,
         )
 
-    def _iter_auth_file_paths(self) -> List[Path]:
+    def _iter_auth_file_paths(self) -> list[Path]:
         if not self._auth_dir.exists():
             return []
         paths = [
@@ -453,7 +453,7 @@ class CodexOAuthService:
         ]
         return sorted(paths, key=lambda item: item.stat().st_mtime, reverse=True)
 
-    def _load_model_ids(self) -> List[str]:
+    def _load_model_ids(self) -> list[str]:
         if not self._models_file.exists():
             return list(DEFAULT_CODEX_MODEL_IDS)
         try:
@@ -464,15 +464,15 @@ class CodexOAuthService:
             return list(DEFAULT_CODEX_MODEL_IDS)
         return self._normalize_model_ids(payload)
 
-    def _write_model_ids(self, model_ids: List[str]) -> None:
+    def _write_model_ids(self, model_ids: list[str]) -> None:
         self._auth_dir.mkdir(parents=True, exist_ok=True)
         self._write_json_file(self._models_file, self._normalize_model_ids(model_ids))
 
     @staticmethod
-    def _build_model_entries(model_ids: List[str]) -> List[Dict[str, Any]]:
+    def _build_model_entries(model_ids: list[str]) -> list[dict[str, Any]]:
         return [{"id": model_id} for model_id in model_ids]
 
-    def _load_auth_file_state(self) -> Dict[str, Any]:
+    def _load_auth_file_state(self) -> dict[str, Any]:
         if not self._state_file.exists():
             return {"files": {}}
         try:
@@ -485,13 +485,13 @@ class CodexOAuthService:
             return {"files": {}}
         return {"files": files}
 
-    def _write_auth_file_state(self, payload: Dict[str, Any]) -> None:
+    def _write_auth_file_state(self, payload: dict[str, Any]) -> None:
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         next_payload = dict(payload)
         next_payload["updated_at"] = self._now_iso()
         self._write_json_file(self._state_file, next_payload)
 
-    def _update_auth_file_state(self, name: str, patch: Dict[str, Any]) -> None:
+    def _update_auth_file_state(self, name: str, patch: dict[str, Any]) -> None:
         state = self._load_auth_file_state()
         files = state.setdefault("files", {})
         if not isinstance(files, dict):
@@ -507,7 +507,7 @@ class CodexOAuthService:
         except Exception as exc:
             self._logger.warning("Codex auth file state write failed: file=%s error=%s", name, exc)
 
-    def _store_auth_file_quota(self, name: str, quota: Dict[str, Any]) -> None:
+    def _store_auth_file_quota(self, name: str, quota: dict[str, Any]) -> None:
         refreshed_at = str(quota.get("refreshed_at") or self._now_iso())
         self._update_auth_file_state(
             name,
@@ -538,7 +538,7 @@ class CodexOAuthService:
         except Exception as exc:
             self._logger.warning("Codex auth file state delete failed: file=%s error=%s", name, exc)
 
-    def _sync_quota_cooldown_from_quota(self, name: str, quota: Dict[str, Any]) -> None:
+    def _sync_quota_cooldown_from_quota(self, name: str, quota: dict[str, Any]) -> None:
         """根据最新配额刷新结果同步内存冷却状态。"""
         normalized_name = self._normalize_auth_file_name(name)
         if not normalized_name:
@@ -575,7 +575,7 @@ class CodexOAuthService:
             self._logger.warning("Codex auth file state clear failed: file=%s error=%s", name, exc)
 
     @classmethod
-    def _is_auth_failure_state(cls, file_state: Dict[str, Any]) -> bool:
+    def _is_auth_failure_state(cls, file_state: dict[str, Any]) -> bool:
         status_code = file_state.get("usage_status_code")
         try:
             if int(status_code) == 401:
@@ -636,11 +636,11 @@ class CodexOAuthService:
         return model_id
 
     @classmethod
-    def _normalize_model_ids(cls, value: Any) -> List[str]:
+    def _normalize_model_ids(cls, value: Any) -> list[str]:
         if not isinstance(value, list):
             return []
 
-        normalized: List[str] = []
+        normalized: list[str] = []
         seen_ids: set[str] = set()
         for item in value:
             if not isinstance(item, str):
@@ -655,7 +655,7 @@ class CodexOAuthService:
             normalized.append(model_id)
         return normalized
 
-    def _build_auth_candidate(self, path: Path) -> Optional[CodexAuthCandidate]:
+    def _build_auth_candidate(self, path: Path) -> CodexAuthCandidate | None:
         try:
             payload = self._read_auth_file(path)
         except Exception as exc:
@@ -703,7 +703,7 @@ class CodexOAuthService:
         return plan_type or "unknown"
 
     @staticmethod
-    def _is_quota_exhausted(quota: Dict[str, Any]) -> bool:
+    def _is_quota_exhausted(quota: dict[str, Any]) -> bool:
         windows = quota.get("windows")
         if not isinstance(windows, list):
             return False
@@ -726,7 +726,7 @@ class CodexOAuthService:
         return False
 
     @staticmethod
-    def _quota_retry_after_seconds(quota: Dict[str, Any]) -> Optional[float]:
+    def _quota_retry_after_seconds(quota: dict[str, Any]) -> float | None:
         windows = quota.get("windows")
         if not isinstance(windows, list):
             return None
@@ -751,7 +751,7 @@ class CodexOAuthService:
         expires_at = self._quota_cooldowns.get(name)
         return expires_at is not None and expires_at > time.time()
 
-    def _exchange_code_for_tokens(self, code: str, code_verifier: str) -> Dict[str, Any]:
+    def _exchange_code_for_tokens(self, code: str, code_verifier: str) -> dict[str, Any]:
         data = {
             "grant_type": "authorization_code",
             "client_id": CODEX_CLIENT_ID,
@@ -778,7 +778,7 @@ class CodexOAuthService:
             raise ValueError("Token response missing access_token")
         return payload
 
-    def _refresh_auth_file(self, auth_file: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _refresh_auth_file(self, auth_file: Path, payload: dict[str, Any]) -> dict[str, Any]:
         refresh_token = str(payload.get("refresh_token") or "").strip()
         response = self._request_with_proxy_warning_retry(
             "POST",
@@ -814,7 +814,7 @@ class CodexOAuthService:
         self._clear_auth_file_auth_failure(auth_file.name)
         return next_payload
 
-    def _write_auth_file(self, payload: Dict[str, Any], state: str) -> Path:
+    def _write_auth_file(self, payload: dict[str, Any], state: str) -> Path:
         self._auth_dir.mkdir(parents=True, exist_ok=True)
         file_name = self._build_credential_file_name(payload, state)
         auth_file = self._auth_dir / file_name
@@ -822,7 +822,7 @@ class CodexOAuthService:
         return auth_file
 
     @staticmethod
-    def _write_json_file(path: Path, payload: Dict[str, Any]) -> None:
+    def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
         with path.open("w", encoding="utf-8", newline="\n") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
@@ -863,7 +863,7 @@ class CodexOAuthService:
         except ProxyWarningRequired as exc:
             raise ValueError(str(exc)) from exc
 
-    def _build_request_options(self) -> Dict[str, Any]:
+    def _build_request_options(self) -> dict[str, Any]:
         if self._config_manager is None:
             return {
                 "proxies": None,
@@ -877,8 +877,8 @@ class CodexOAuthService:
     def _build_auth_file_entry(
         self,
         path: Path,
-        state: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self._purge_quota_cooldowns()
         payload = self._read_auth_file(path)
         token_status = "expired" if self._is_auth_payload_expired(payload) else "active"
@@ -919,10 +919,10 @@ class CodexOAuthService:
     def _build_auth_file_availability(
         self,
         name: str,
-        payload: Dict[str, Any],
-        file_state: Dict[str, Any],
-        quota: Optional[Dict[str, Any]],
-    ) -> Dict[str, str]:
+        payload: dict[str, Any],
+        file_state: dict[str, Any],
+        quota: dict[str, Any] | None,
+    ) -> dict[str, str]:
         access_token = str(payload.get("access_token") or "").strip()
         refresh_token = str(payload.get("refresh_token") or "").strip()
         usage_error_type = str(file_state.get("usage_error_type") or "").strip()
@@ -967,7 +967,7 @@ class CodexOAuthService:
             return self._availability("available", "可用：最近一次请求成功")
         return self._availability("available", "可用：未命中过滤或冷却条件")
 
-    def _build_availability_failure_reason(self, file_state: Dict[str, Any]) -> str:
+    def _build_availability_failure_reason(self, file_state: dict[str, Any]) -> str:
         message = str(file_state.get("usage_status_message") or "").strip()
         if message and message != "success":
             return self._truncate_state_text(message)
@@ -980,8 +980,8 @@ class CodexOAuthService:
         self,
         status: str,
         message: str,
-        retry_at: Optional[float] = None,
-    ) -> Dict[str, str]:
+        retry_at: float | None = None,
+    ) -> dict[str, str]:
         return {
             "status": status,
             "message": message,
@@ -989,7 +989,7 @@ class CodexOAuthService:
         }
 
     @staticmethod
-    def _read_auth_file(path: Path) -> Dict[str, Any]:
+    def _read_auth_file(path: Path) -> dict[str, Any]:
         with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
         if not isinstance(payload, dict):
@@ -1005,7 +1005,7 @@ class CodexOAuthService:
             raise ValueError("Auth file not found")
         return auth_file
 
-    def _build_credential_file_name(self, payload: Dict[str, Any], state: str) -> str:
+    def _build_credential_file_name(self, payload: dict[str, Any], state: str) -> str:
         del state
         email = str(payload.get("email") or "").strip()
         if not email:
@@ -1048,7 +1048,7 @@ class CodexOAuthService:
         return CodexOAuthService._format_datetime(datetime.now(timezone.utc))
 
     @staticmethod
-    def _parse_datetime(value: Any) -> Optional[datetime]:
+    def _parse_datetime(value: Any) -> datetime | None:
         if not isinstance(value, str) or not value.strip():
             return None
         normalized = value.strip()
@@ -1062,14 +1062,14 @@ class CodexOAuthService:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
-    def _is_auth_payload_expired(self, payload: Dict[str, Any]) -> bool:
+    def _is_auth_payload_expired(self, payload: dict[str, Any]) -> bool:
         expires_at = self._parse_datetime(payload.get("expired"))
         if expires_at is None:
             return False
         return expires_at <= datetime.now(timezone.utc)
 
     @staticmethod
-    def _parse_callback_url(callback_url: str) -> Dict[str, str]:
+    def _parse_callback_url(callback_url: str) -> dict[str, str]:
         parsed = urlparse(str(callback_url or "").strip())
         if not parsed.scheme or not parsed.netloc:
             raise ValueError("Callback URL must be a complete URL")
@@ -1081,7 +1081,7 @@ class CodexOAuthService:
         }
 
     @staticmethod
-    def _parse_jwt_claims(token: str) -> Dict[str, Any]:
+    def _parse_jwt_claims(token: str) -> dict[str, Any]:
         parts = token.split(".")
         if len(parts) != 3:
             return {}
@@ -1094,7 +1094,7 @@ class CodexOAuthService:
             return {}
         return claims if isinstance(claims, dict) else {}
 
-    def _extract_plan_type_from_payload(self, payload: Dict[str, Any]) -> str:
+    def _extract_plan_type_from_payload(self, payload: dict[str, Any]) -> str:
         claims = self._parse_jwt_claims(str(payload.get("id_token") or ""))
         auth_info = claims.get("https://api.openai.com/auth")
         if isinstance(auth_info, dict):
@@ -1123,8 +1123,8 @@ class CodexOAuthService:
         normalized = str(value or "").strip()
         return normalized[:1000]
 
-    def _build_quota_windows(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-        windows: List[Dict[str, Any]] = []
+    def _build_quota_windows(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        windows: list[dict[str, Any]] = []
         self._append_rate_limit_windows(windows, "Codex", payload.get("rate_limit") or payload.get("rateLimit"))
         self._append_rate_limit_windows(
             windows,
@@ -1146,7 +1146,7 @@ class CodexOAuthService:
                 self._append_rate_limit_windows(windows, str(label), item.get("rate_limit") or item.get("rateLimit"))
         return windows
 
-    def _append_rate_limit_windows(self, windows: List[Dict[str, Any]], label: str, rate_limit: Any) -> None:
+    def _append_rate_limit_windows(self, windows: list[dict[str, Any]], label: str, rate_limit: Any) -> None:
         if not isinstance(rate_limit, dict):
             return
         for key, fallback_label in (("primary_window", "5 小时"), ("secondary_window", "7 天")):
@@ -1171,13 +1171,13 @@ class CodexOAuthService:
         return parts[0] + "".join(part.capitalize() for part in parts[1:])
 
     @staticmethod
-    def _parse_float(value: Any) -> Optional[float]:
+    def _parse_float(value: Any) -> float | None:
         try:
             return float(value)
         except (TypeError, ValueError):
             return None
 
-    def _format_reset_label(self, window: Dict[str, Any]) -> str:
+    def _format_reset_label(self, window: dict[str, Any]) -> str:
         reset_seconds = self._parse_float(
             window.get("reset_after_seconds")
             or window.get("resetAfterSeconds")
@@ -1189,7 +1189,7 @@ class CodexOAuthService:
         reset_at = self._normalize_text(window.get("resets_at") or window.get("resetsAt"))
         return reset_at or "-"
 
-    def _resolve_reset_at(self, window: Dict[str, Any]) -> str:
+    def _resolve_reset_at(self, window: dict[str, Any]) -> str:
         reset_seconds = self._parse_float(
             window.get("reset_after_seconds")
             or window.get("resetAfterSeconds")
@@ -1206,7 +1206,7 @@ class CodexOAuthService:
         return self._normalize_text(reset_at)
 
     @classmethod
-    def _parse_epoch_or_datetime(cls, value: Any) -> Optional[datetime]:
+    def _parse_epoch_or_datetime(cls, value: Any) -> datetime | None:
         if value is None:
             return None
         parsed_number = cls._parse_float(value)

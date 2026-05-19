@@ -5,7 +5,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Dict, Iterator, Optional
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import requests
 from flask import Response, stream_with_context
@@ -33,8 +34,8 @@ class ProxyResponseBuilder:
         *,
         logger: Any,
         trace: ProxyTraceLogger,
-        filter_response_headers: Callable[[Any], Dict[str, str]],
-        extend_trace_buffer: Callable[[Optional[bytearray], Any], None],
+        filter_response_headers: Callable[[Any], dict[str, str]],
+        extend_trace_buffer: Callable[[bytearray | None, Any], None],
     ) -> None:
         self._logger = logger
         self._trace = trace
@@ -48,15 +49,15 @@ class ProxyResponseBuilder:
         translator: Translator,
         request_ctx: HookContext,
         downstream_target_format: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         opened: OpenedUpstreamResponse,
-        on_complete: Optional[Callable[[Dict[str, Any]], None]],
+        on_complete: Callable[[dict[str, Any]], None] | None,
         forward_stream_usage: bool,
-        finalize_attempt: Optional[Callable[..., None]] = None,
-        trace_id: Optional[str] = None,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
+        finalize_attempt: Callable[..., None] | None = None,
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
     ) -> Response:
         response = opened.response
         meta = self._create_empty_meta()
@@ -72,9 +73,9 @@ class ProxyResponseBuilder:
 
         def safe_on_complete(
             *,
-            error_type: Optional[HookErrorType] = None,
-            error_message: Optional[str] = None,
-            hook_abort: Optional[HookAbortError] = None,
+            error_type: HookErrorType | None = None,
+            error_message: str | None = None,
+            hook_abort: HookAbortError | None = None,
         ) -> None:
             nonlocal completed
             if completed:
@@ -104,11 +105,11 @@ class ProxyResponseBuilder:
 
         def generate() -> Iterator[bytes]:
             nonlocal terminal_sent
-            state: Dict[str, Any] = {}
-            completion_error_type: Optional[HookErrorType] = None
-            completion_trace_error_type: Optional[str] = None
-            completion_error_message: Optional[str] = None
-            completion_hook_abort: Optional[HookAbortError] = None
+            state: dict[str, Any] = {}
+            completion_error_type: HookErrorType | None = None
+            completion_trace_error_type: str | None = None
+            completion_error_message: str | None = None
+            completion_hook_abort: HookAbortError | None = None
             try:
                 upstream_chunks = self._iter_stream_chunks_with_trace(
                     response.iter_content(chunk_size=None),
@@ -262,14 +263,14 @@ class ProxyResponseBuilder:
         translator: Translator,
         request_ctx: HookContext,
         downstream_target_format: str,
-        original_request: Dict[str, Any],
-        translated_request: Dict[str, Any],
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
         opened: OpenedUpstreamResponse,
-        on_complete: Optional[Callable[[Dict[str, Any]], None]],
-        finalize_attempt: Optional[Callable[..., None]] = None,
-        trace_id: Optional[str] = None,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
+        on_complete: Callable[[dict[str, Any]], None] | None,
+        finalize_attempt: Callable[..., None] | None = None,
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
     ) -> Response:
         response = opened.response
         try:
@@ -346,12 +347,12 @@ class ProxyResponseBuilder:
         provider: LLMProvider,
         opened: OpenedUpstreamResponse,
         downstream_target_format: str,
-        trace_id: Optional[str] = None,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-        request_model: Optional[str] = None,
-        upstream_model: Optional[str] = None,
-    ) -> tuple[bytes, Dict[str, str], Optional[str]]:
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+        request_model: str | None = None,
+        upstream_model: str | None = None,
+    ) -> tuple[bytes, dict[str, str], str | None]:
         response = opened.response
         try:
             body = self._read_response_body(response)
@@ -398,12 +399,12 @@ class ProxyResponseBuilder:
         provider: LLMProvider,
         opened: OpenedUpstreamResponse,
         downstream_target_format: str,
-        trace_id: Optional[str] = None,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-        request_model: Optional[str] = None,
-        upstream_model: Optional[str] = None,
-    ) -> tuple[Response, Optional[str]]:
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+        request_model: str | None = None,
+        upstream_model: str | None = None,
+    ) -> tuple[Response, str | None]:
         body, headers, summary = self.consume_upstream_error(
             provider=provider,
             opened=opened,
@@ -435,7 +436,7 @@ class ProxyResponseBuilder:
     def _iter_stream_chunks_with_trace(
         self,
         upstream_chunks: Iterator[bytes],
-        payload_buffer: Optional[bytearray],
+        payload_buffer: bytearray | None,
     ) -> Iterator[bytes]:
         for chunk in upstream_chunks:
             if not chunk:
@@ -448,7 +449,7 @@ class ProxyResponseBuilder:
         provider: LLMProvider,
         request_ctx: HookContext,
         chunk: DownstreamChunk,
-    ) -> Optional[DownstreamChunk]:
+    ) -> DownstreamChunk | None:
         if chunk.kind == "done":
             return chunk
 
@@ -520,7 +521,7 @@ class ProxyResponseBuilder:
         ]
 
     @classmethod
-    def _summarize_upstream_error(cls, raw_body: bytes, content_type: str) -> Optional[str]:
+    def _summarize_upstream_error(cls, raw_body: bytes, content_type: str) -> str | None:
         del content_type
         if not raw_body:
             return None
@@ -540,7 +541,7 @@ class ProxyResponseBuilder:
         return cls._truncate_error_text(json.dumps(payload, ensure_ascii=False))
 
     @classmethod
-    def _extract_error_message(cls, payload: Any) -> Optional[str]:
+    def _extract_error_message(cls, payload: Any) -> str | None:
         if isinstance(payload, dict):
             error = payload.get("error")
             if isinstance(error, dict):
@@ -561,7 +562,7 @@ class ProxyResponseBuilder:
         *,
         error_type: Any = None,
         error_code: Any = None,
-    ) -> Optional[str]:
+    ) -> str | None:
         parts = []
         if message not in (None, ""):
             parts.append(str(message).strip())
@@ -590,7 +591,7 @@ class ProxyResponseBuilder:
         return text[: limit - 3] + "..."
 
     @staticmethod
-    def _create_empty_meta() -> Dict[str, Any]:
+    def _create_empty_meta() -> dict[str, Any]:
         return {
             "response_model": None,
             "total_tokens": 0,
@@ -599,7 +600,7 @@ class ProxyResponseBuilder:
         }
 
     @staticmethod
-    def _update_meta_from_payload(meta: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    def _update_meta_from_payload(meta: dict[str, Any], payload: dict[str, Any]) -> None:
         model = payload.get("model")
         if model:
             meta["response_model"] = model
@@ -646,14 +647,14 @@ class ProxyResponseBuilder:
         )
 
     @classmethod
-    def _update_meta_from_stream_state(cls, meta: Dict[str, Any], state: Dict[str, Any]) -> None:
+    def _update_meta_from_stream_state(cls, meta: dict[str, Any], state: dict[str, Any]) -> None:
         """从 translator 内部状态补充不会显式出现在下游 payload 中的元数据。"""
         response_model = cls._extract_response_model_from_stream_state(state)
         if response_model:
             meta["response_model"] = response_model
 
     @classmethod
-    def _extract_response_model_from_stream_state(cls, state: Any) -> Optional[str]:
+    def _extract_response_model_from_stream_state(cls, state: Any) -> str | None:
         if not isinstance(state, dict):
             return None
 
@@ -697,7 +698,7 @@ class ProxyResponseBuilder:
         return b"".join(response.iter_content(chunk_size=None))
 
     @staticmethod
-    def _parse_json_bytes(raw_body: bytes) -> Optional[Any]:
+    def _parse_json_bytes(raw_body: bytes) -> Any | None:
         if not raw_body:
             return None
         try:

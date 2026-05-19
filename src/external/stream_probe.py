@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """上游流式响应探测工具。"""
 
-from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+from collections.abc import Callable, Iterator
+from typing import Any
 
 
 class StaticUpstreamResponse:
@@ -11,8 +12,8 @@ class StaticUpstreamResponse:
     def __init__(
         self,
         status_code: int = 200,
-        headers: Optional[Dict[str, str]] = None,
-        on_close: Optional[Callable[[], None]] = None,
+        headers: dict[str, str] | None = None,
+        on_close: Callable[[], None] | None = None,
     ):
         self.status_code = status_code
         self.headers = headers or {}
@@ -33,7 +34,7 @@ class PrefetchedStreamResponse:
         self.status_code = response.status_code
         self.headers = response.headers
 
-    def iter_content(self, chunk_size: Optional[int] = None) -> Iterator[bytes]:
+    def iter_content(self, chunk_size: int | None = None) -> Iterator[bytes]:
         if self._first_chunk:
             yield self._first_chunk
             self._first_chunk = b""
@@ -61,7 +62,7 @@ def looks_like_sse_chunk(chunk: bytes) -> bool:
     return text.startswith("data:") or text.startswith("event:") or text.startswith(":")
 
 
-def probe_stream_response(upstream_response: Any) -> Tuple[Any, bool]:
+def probe_stream_response(upstream_response: Any) -> tuple[Any, bool]:
     chunk_iter = upstream_response.iter_content(chunk_size=None)
     first_chunk = b""
     for chunk in chunk_iter:

@@ -4,10 +4,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any
 
 from ..application.app_context import AppContext, Logger
 from ..hooks import HookErrorType
@@ -27,7 +28,7 @@ class SelectedAuthEntry:
     entry_id: str
     headers: tuple[tuple[str, str], ...]
 
-    def headers_mapping(self) -> Dict[str, str]:
+    def headers_mapping(self) -> dict[str, str]:
         return dict(self.headers)
 
 
@@ -55,9 +56,9 @@ class AuthGroupManager:
     def __init__(self, ctx: AppContext, repository: AuthGroupRepository):
         self._logger: Logger = ctx.logger
         self._repository = repository
-        self._groups_by_name: Dict[str, AuthGroupSchema] = {}
-        self._inflight_counts: Dict[tuple[str, str], int] = {}
-        self._rotation_cursor_by_group: Dict[str, int] = {}
+        self._groups_by_name: dict[str, AuthGroupSchema] = {}
+        self._inflight_counts: dict[tuple[str, str], int] = {}
+        self._rotation_cursor_by_group: dict[str, int] = {}
 
     def load_auth_groups(self, auth_groups: Sequence[AuthGroupSchema]) -> None:
         self._groups_by_name = {group.name: group for group in auth_groups}
@@ -74,7 +75,7 @@ class AuthGroupManager:
             )
         self._logger.info("Loaded auth groups: %s", list(sorted(self._groups_by_name.keys())))
 
-    def acquire(self, auth_group_name: Optional[str]) -> Optional[SelectedAuthEntry]:
+    def acquire(self, auth_group_name: str | None) -> SelectedAuthEntry | None:
         normalized_group_name = str(auth_group_name or "").strip()
         if not normalized_group_name:
             return None
@@ -116,7 +117,7 @@ class AuthGroupManager:
             headers=selected_entry.headers,
         )
 
-    def mark_request_dispatched(self, selection: Optional[SelectedAuthEntry]) -> None:
+    def mark_request_dispatched(self, selection: SelectedAuthEntry | None) -> None:
         if selection is None:
             return
         self._repository.increment_request_usage(
@@ -127,13 +128,13 @@ class AuthGroupManager:
 
     def finish(
         self,
-        selection: Optional[SelectedAuthEntry],
+        selection: SelectedAuthEntry | None,
         *,
-        status_code: Optional[int] = None,
-        error_type: Optional[HookErrorType] = None,
-        error_message: Optional[str] = None,
-        response_headers: Optional[Mapping[str, Any]] = None,
-        usage: Optional[Mapping[str, Any]] = None,
+        status_code: int | None = None,
+        error_type: HookErrorType | None = None,
+        error_message: str | None = None,
+        response_headers: Mapping[str, Any] | None = None,
+        usage: Mapping[str, Any] | None = None,
     ) -> None:
         if selection is None:
             return
@@ -156,9 +157,9 @@ class AuthGroupManager:
         disabled = bool(runtime_state.get("disabled"))
         disabled_reason = runtime_state.get("disabled_reason")
         cooldown_until = runtime_state.get("cooldown_until")
-        last_status_code: Optional[int] = runtime_state.get("last_status_code")
-        last_error_type: Optional[str] = runtime_state.get("last_error_type")
-        last_error_message: Optional[str] = runtime_state.get("last_error_message")
+        last_status_code: int | None = runtime_state.get("last_status_code")
+        last_error_type: str | None = runtime_state.get("last_error_type")
+        last_error_message: str | None = runtime_state.get("last_error_message")
 
         if status_code is not None and 200 <= int(status_code) < 400:
             disabled = False
@@ -218,10 +219,10 @@ class AuthGroupManager:
             last_error_message=last_error_message,
         )
 
-    def list_auth_group_summaries(self) -> list[Dict[str, Any]]:
+    def list_auth_group_summaries(self) -> list[dict[str, Any]]:
         return [self._build_group_summary(group) for group in self.list_explicit_auth_groups()]
 
-    def get_auth_group_runtime(self, auth_group_name: str) -> Dict[str, Any]:
+    def get_auth_group_runtime(self, auth_group_name: str) -> dict[str, Any]:
         group = self._groups_by_name.get(str(auth_group_name).strip())
         if group is None:
             raise ValueError(f"Auth group not found: {auth_group_name}")
@@ -297,7 +298,7 @@ class AuthGroupManager:
     def list_explicit_auth_groups(self) -> tuple[AuthGroupSchema, ...]:
         return tuple(self._groups_by_name[name] for name in sorted(self._groups_by_name))
 
-    def _build_group_summary(self, group: AuthGroupSchema) -> Dict[str, Any]:
+    def _build_group_summary(self, group: AuthGroupSchema) -> dict[str, Any]:
         runtime = self.get_auth_group_runtime(group.name)
         return {
             "name": group.name,
@@ -314,7 +315,7 @@ class AuthGroupManager:
         runtime_state: Mapping[str, Any],
         usage: Mapping[str, Any],
         now: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         inflight = self._inflight_counts.get((group.name, entry.id), 0)
         cooldown_until_text = runtime_state.get("cooldown_until")
         cooldown_until = parse_local_datetime(cooldown_until_text)
@@ -365,7 +366,7 @@ class AuthGroupManager:
         }
 
     @staticmethod
-    def _summarize_entries(entries: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
+    def _summarize_entries(entries: Sequence[Mapping[str, Any]]) -> dict[str, int]:
         summary = {
             "entry_count": len(entries),
             "available_count": 0,
@@ -430,7 +431,7 @@ class AuthGroupManager:
         self,
         group: AuthGroupSchema,
         entry: AuthEntrySchema,
-        response_headers: Optional[Mapping[str, Any]],
+        response_headers: Mapping[str, Any] | None,
     ) -> int:
         retry_after_seconds = self._parse_retry_after_seconds(response_headers)
         if retry_after_seconds is not None and retry_after_seconds > 0:
@@ -440,10 +441,10 @@ class AuthGroupManager:
         return group.cooldown_seconds_on_429
 
     @staticmethod
-    def _parse_retry_after_seconds(response_headers: Optional[Mapping[str, Any]]) -> Optional[int]:
+    def _parse_retry_after_seconds(response_headers: Mapping[str, Any] | None) -> int | None:
         if not response_headers:
             return None
-        retry_after_value: Optional[Any] = None
+        retry_after_value: Any | None = None
         for key, value in response_headers.items():
             if str(key).lower() == "retry-after":
                 retry_after_value = value
@@ -471,7 +472,7 @@ class AuthGroupManager:
         return (index - cursor) % max(size, 1)
 
     @staticmethod
-    def _default_runtime_state(auth_group_name: str, entry_id: str) -> Dict[str, Any]:
+    def _default_runtime_state(auth_group_name: str, entry_id: str) -> dict[str, Any]:
         return {
             "auth_group_name": auth_group_name,
             "entry_id": entry_id,
@@ -485,7 +486,7 @@ class AuthGroupManager:
         }
 
     @staticmethod
-    def _find_entry(group: AuthGroupSchema, entry_id: str) -> Optional[AuthEntrySchema]:
+    def _find_entry(group: AuthGroupSchema, entry_id: str) -> AuthEntrySchema | None:
         normalized_entry_id = str(entry_id).strip()
         for entry in group.entries:
             if entry.id == normalized_entry_id:

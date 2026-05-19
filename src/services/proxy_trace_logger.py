@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class ProxyTraceLogger:
@@ -16,29 +16,29 @@ class ProxyTraceLogger:
         self._config_manager = config_manager
         self._trace_logger = trace_logger
 
-    def is_enabled(self, trace_id: Optional[str]) -> bool:
+    def is_enabled(self, trace_id: str | None) -> bool:
         return bool(trace_id) and self._config_manager.is_llm_request_debug_enabled()
 
     def log_entry(
         self,
         *,
         stage: str,
-        trace_id: Optional[str],
+        trace_id: str | None,
         start_line: str,
-        headers: Dict[str, Any],
+        headers: dict[str, Any],
         payload: Any,
-        route_name: Optional[str] = None,
-        client_ip: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        request_model: Optional[str] = None,
-        upstream_model: Optional[str] = None,
-        target_format: Optional[str] = None,
-        status_code: Optional[int] = None,
-        stream: Optional[bool] = None,
-        attempt: Optional[int] = None,
-        completed: Optional[bool] = None,
-        error_type: Optional[str] = None,
-        error_summary: Optional[str] = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+        provider_name: str | None = None,
+        request_model: str | None = None,
+        upstream_model: str | None = None,
+        target_format: str | None = None,
+        status_code: int | None = None,
+        stream: bool | None = None,
+        attempt: int | None = None,
+        completed: bool | None = None,
+        error_type: str | None = None,
+        error_summary: str | None = None,
     ) -> None:
         if not self.is_enabled(trace_id):
             return
@@ -76,7 +76,7 @@ class ProxyTraceLogger:
         self._trace_logger.info("\n".join(message_parts))
 
     @staticmethod
-    def build_response_start_line(status_code: int, reason: Optional[str] = None) -> str:
+    def build_response_start_line(status_code: int, reason: str | None = None) -> str:
         reason_phrase = str(reason or "").strip()
         if not reason_phrase:
             try:
@@ -110,7 +110,7 @@ class ProxyTraceLogger:
     def _format_trace_http_block(
         cls,
         start_line: str,
-        headers: Dict[str, Any],
+        headers: dict[str, Any],
         payload: Any,
     ) -> str:
         normalized_headers = cls._normalize_trace_headers(headers)
@@ -131,8 +131,8 @@ class ProxyTraceLogger:
         return "-".join(part.capitalize() for part in normalized_name.split("-"))
 
     @staticmethod
-    def _normalize_trace_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
-        normalized: Dict[str, Any] = {}
+    def _normalize_trace_headers(headers: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
         for key, value in dict(headers or {}).items():
             normalized[str(key)] = ProxyTraceLogger._normalize_trace_scalar(value)
         return normalized

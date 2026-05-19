@@ -5,10 +5,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Protocol
 
 from ..external import LLMProvider
-from ..utils.compat import Protocol
 
 
 @dataclass(frozen=True)
@@ -31,10 +30,10 @@ class Executor(Protocol):
     def execute(
         self,
         provider: LLMProvider,
-        headers: Dict[str, str],
-        body: Dict[str, Any],
+        headers: dict[str, str],
+        body: dict[str, Any],
         requested_stream: bool,
         timeout_seconds: int,
         verify_ssl: bool,
-        request_proxies: Optional[Dict[str, str]],
+        request_proxies: dict[str, str] | None,
     ) -> OpenedUpstreamResponse: ...
