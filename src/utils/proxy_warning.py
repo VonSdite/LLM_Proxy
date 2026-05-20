@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import time
 from collections.abc import Callable
 from html.parser import HTMLParser
 from typing import Any
@@ -15,6 +16,12 @@ import requests
 PROXY_WARNING_CONFIRM_TIMEOUT_SECONDS = 20
 PROXY_WARNING_ERROR_CODE = "proxy_warning_required"
 PROXY_WARNING_STATUS_CODE = 511
+PROXY_WARNING_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+PROXY_WARNING_RETRY_DELAYS_SECONDS = (0.35,)
 
 
 class ProxyWarningRequired(RuntimeError):
@@ -61,9 +68,9 @@ class _ProxyWarningInputParser(HTMLParser):
         if tag.lower() != "input":
             return
         values = {str(key).lower(): value for key, value in attrs}
-        input_id = str(values.get("id") or "").strip()
-        if input_id:
-            self.inputs[input_id] = str(values.get("value") or "")
+        input_key = str(values.get("id") or values.get("name") or "").strip().lower()
+        if input_key:
+            self.inputs[input_key] = str(values.get("value") or "")
 
 
 def request_with_proxy_warning_retry(
@@ -74,8 +81,9 @@ def request_with_proxy_warning_retry(
     session_factory: Callable[[], requests.Session] | None = None,
     logger: Any = None,
     log_context: str = "",
+    retry_delays_seconds: tuple[float, ...] = PROXY_WARNING_RETRY_DELAYS_SECONDS,
 ) -> Any:
-    """执行请求；遇到代理风险页时自动确认并重试一次。"""
+    """执行请求；遇到代理风险页时自动确认并按短退避重试。"""
     response = send_request()
     confirmation_url = extract_proxy_warning_confirmation_url(response)
     if not confirmation_url:
@@ -102,13 +110,32 @@ def request_with_proxy_warning_retry(
             log_context,
             confirmation_url,
         )
-    retry_response = send_request()
-    retry_confirmation_url = extract_proxy_warning_confirmation_url(retry_response)
-    if retry_confirmation_url:
+    retry_response = None
+    retry_confirmation_url = ""
+    retry_status = upstream_status
+    for delay_seconds in retry_delays_seconds:
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+        retry_response = send_request()
+        retry_confirmation_url = extract_proxy_warning_confirmation_url(retry_response) or ""
+        if not retry_confirmation_url:
+            return retry_response
         retry_status = _get_status_code(retry_response)
         close_response(retry_response)
-        raise ProxyWarningRequired(retry_confirmation_url, retry_status)
-    return retry_response
+        if logger is not None:
+            logger.warning(
+                "Network proxy warning remained after auto-confirm: %s "
+                "status=%s confirmation_url=%s",
+                log_context,
+                retry_status,
+                retry_confirmation_url,
+            )
+
+    raise ProxyWarningRequired(
+        retry_confirmation_url or confirmation_url,
+        retry_status,
+        auto_confirm_error="retry still blocked after auto-confirm",
+    )
 
 
 def confirm_proxy_warning(
@@ -126,24 +153,39 @@ def confirm_proxy_warning(
     check_response: Any = None
     try:
         options = dict(request_options or {})
+        warning_options = build_proxy_warning_request_options(
+            options,
+            build_proxy_warning_browser_headers(),
+        )
         warning_response = active_session.get(
             confirmation_url,
             timeout=timeout_seconds,
             allow_redirects=False,
-            **options,
+            **warning_options,
         )
         status_code = _get_status_code(warning_response)
+        if 300 <= status_code < 400 and not extract_proxy_warning_confirmation_url(warning_response):
+            return None
         if status_code >= 400:
             return f"warning page returned {status_code}"
-        hidden_inputs = parse_proxy_warning_inputs(getattr(warning_response, "text", "") or "")
+        hidden_inputs = parse_proxy_warning_inputs(
+            getattr(warning_response, "text", "") or "",
+            confirmation_url=confirmation_url,
+        )
         check_url = build_proxy_warning_check_url(confirmation_url, hidden_inputs)
+        check_options = build_proxy_warning_request_options(
+            options,
+            build_proxy_warning_browser_headers(referer=confirmation_url),
+        )
         check_response = active_session.get(
             check_url,
             timeout=timeout_seconds,
             allow_redirects=False,
-            **options,
+            **check_options,
         )
         status_code = _get_status_code(check_response)
+        if 300 <= status_code < 400 and not extract_proxy_warning_confirmation_url(check_response):
+            return None
         if status_code >= 400:
             return f"confirm check returned {status_code}"
         return None
@@ -172,15 +214,47 @@ def extract_proxy_warning_confirmation_url(response: Any) -> str | None:
     return location
 
 
-def parse_proxy_warning_inputs(html: str) -> dict[str, str]:
+def parse_proxy_warning_inputs(html: str, *, confirmation_url: str = "") -> dict[str, str]:
     """解析风险确认页隐藏字段。"""
     parser = _ProxyWarningInputParser()
     parser.feed(str(html or ""))
+    uid = get_raw_query_value(confirmation_url, "uid") if confirmation_url else ""
+    if uid:
+        parser.inputs.setdefault("uid", uid)
     required = ("sessionid", "pid", "uid")
     missing = [key for key in required if not parser.inputs.get(key)]
     if missing:
         raise ValueError(f"warning page missing hidden field: {', '.join(missing)}")
     return {key: parser.inputs[key] for key in required}
+
+
+def build_proxy_warning_browser_headers(*, referer: str = "") -> dict[str, str]:
+    """构造接近浏览器点击确认页的请求头。"""
+    headers = {
+        "User-Agent": PROXY_WARNING_BROWSER_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Upgrade-Insecure-Requests": "1",
+    }
+    if referer:
+        headers["Referer"] = referer
+    return headers
+
+
+def build_proxy_warning_request_options(
+    request_options: dict[str, Any],
+    headers: dict[str, str],
+) -> dict[str, Any]:
+    """合并确认请求选项，避免 headers 参数重复。"""
+    options = dict(request_options)
+    existing_headers = options.pop("headers", {}) or {}
+    merged_headers = dict(headers)
+    if isinstance(existing_headers, dict):
+        merged_headers.update({str(key): str(value) for key, value in existing_headers.items()})
+    options["headers"] = merged_headers
+    return options
 
 
 def build_proxy_warning_check_url(
