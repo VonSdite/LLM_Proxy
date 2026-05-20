@@ -17,11 +17,9 @@ PROXY_WARNING_CONFIRM_TIMEOUT_SECONDS = 20
 PROXY_WARNING_ERROR_CODE = "proxy_warning_required"
 PROXY_WARNING_STATUS_CODE = 511
 PROXY_WARNING_BROWSER_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
-PROXY_WARNING_RETRY_DELAYS_SECONDS = (0.35,)
+PROXY_WARNING_RETRY_DELAYS_SECONDS = (1,)
 
 
 class ProxyWarningRequired(RuntimeError):
@@ -124,8 +122,7 @@ def request_with_proxy_warning_retry(
         close_response(retry_response)
         if logger is not None:
             logger.warning(
-                "Network proxy warning remained after auto-confirm: %s "
-                "status=%s confirmation_url=%s",
+                "Network proxy warning remained after auto-confirm: %s status=%s confirmation_url=%s",
                 log_context,
                 retry_status,
                 retry_confirmation_url,
