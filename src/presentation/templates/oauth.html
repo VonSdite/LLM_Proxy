@@ -52,7 +52,7 @@
                         <button type="button" class="btn btn-secondary btn-sm" onclick="copyCodexAuthLink()">复制链接</button>
                         <button type="button" class="btn btn-secondary btn-sm" onclick="openCodexAuthLink()">打开链接</button>
                     </div>
-                    <div class="oauth-hint">链接 10 分钟内有效；刷新授权链接会生成新的 state 和 PKCE 校验值。</div>
+                    <div class="oauth-hint">链接 10 分钟内有效；Codex OAuth 使用 PKCE 校验，回调地址为 <code>http://localhost:1455/auth/callback</code>。</div>
                 </div>
 
                 <div class="oauth-callback-section" id="codexCallbackSection" hidden>
@@ -280,6 +280,13 @@
                             onkeydown="handleClaudeModelInputKeydown(event)"
                         >
                         <button type="button" class="btn btn-primary" id="claudeAddModelBtn" onclick="addClaudeModel()">添加模型</button>
+                    </div>
+                    <div class="oauth-model-reference-links">
+                        <div>参考：</div>
+                        <ul>
+                            <li><a href="https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json" target="_blank" rel="noopener noreferrer">https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json</a></li>
+                            <li><a href="https://models.router-for.me/models.json" target="_blank" rel="noopener noreferrer">https://models.router-for.me/models.json</a></li>
+                        </ul>
                     </div>
                 </div>
                 <div class="oauth-model-summary" id="claudeModelSummary"></div>
