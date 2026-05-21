@@ -4781,7 +4781,7 @@
                     return;
                 }
                 console.error('拉取模型失败:', error);
-                showActionError('拉取模型', error, { fallback: '拉取模型失败' });
+                showActionError('拉取模型', error, { fallback: '拉取模型失败', detailMaxLength: 1000 });
             } finally {
                 if (fetchModelsAbortController === abortController) {
                     fetchModelsAbortController = null;
