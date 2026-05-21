@@ -69,7 +69,7 @@ class ModelDiscoveryService:
         proxies = build_requests_proxies(proxy)
 
         candidates = self._build_model_endpoint_candidates(api)
-        last_error: str | None = None
+        candidate_errors: list[str] = []
 
         with requests.Session() as session:
             for url in candidates:
@@ -93,7 +93,7 @@ class ModelDiscoveryService:
                         log_context=f"model_discovery_url={url}",
                     )
                     if response.status_code >= 400:
-                        last_error = f"{url} returned {response.status_code}"
+                        candidate_errors.append(f"{url} returned {response.status_code}")
                         continue
 
                     payload = response.json()
@@ -106,17 +106,17 @@ class ModelDiscoveryService:
                             url,
                         )
                         return models
-                    last_error = f"{url} returned no models"
+                    candidate_errors.append(f"{url} returned no models")
                 except requests.RequestException as exc:
-                    last_error = f"{url} request failed: {exc}"
+                    candidate_errors.append(f"{url} request failed: {exc}")
                 except ProxyWarningRequired as exc:
-                    last_error = f"{url} requires proxy confirmation: {exc.confirmation_url}"
+                    candidate_errors.append(f"{url} requires proxy confirmation: {exc.confirmation_url}")
                 except ValueError as exc:
-                    last_error = f"{url} returned invalid json: {exc}"
+                    candidate_errors.append(f"{url} returned invalid json: {exc}")
                 finally:
                     close_response(response)
 
-        raise ValueError(last_error or "Failed to fetch models")
+        raise ValueError("; ".join(candidate_errors) or "Failed to fetch models")
 
     @staticmethod
     def _build_model_endpoint_candidates(api: str) -> list[str]:
@@ -151,6 +151,8 @@ class ModelDiscoveryService:
             "/completions",
             "/v1/responses",
             "/responses",
+            "/v1/messages",
+            "/messages",
             "/v1/models",
             "/models",
             "/v1",

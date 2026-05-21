@@ -513,6 +513,17 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
             candidates,
         )
 
+    def test_model_discovery_trims_claude_messages_endpoint_to_base_path(self) -> None:
+        candidates = ModelDiscoveryService._build_model_endpoint_candidates("https://example.com/anthropic/v1/messages")
+
+        self.assertEqual(
+            [
+                "https://example.com/anthropic/v1/models",
+                "https://example.com/anthropic/models",
+            ],
+            candidates,
+        )
+
     def test_fetch_models_preview_merges_request_headers(self) -> None:
         logger = FakeLogger()
         ctx = AppContext(
@@ -654,6 +665,43 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
 
         self.assertEqual(["demo-model"], result["fetched_models"])
         self.assertTrue(all(response.closed for response in all_responses))
+
+    def test_fetch_models_preview_reports_all_candidate_failures(self) -> None:
+        logger = FakeLogger()
+        ctx = AppContext(
+            logger=logger,
+            config_manager=None,  # type: ignore[arg-type]
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=Flask(__name__),
+        )
+        service = ModelDiscoveryService(ctx)
+
+        class FakeResponse:
+            def __init__(self, status_code: int) -> None:
+                self.status_code = status_code
+
+        pending_responses = [FakeResponse(401), FakeResponse(404)]
+
+        class FakeSession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                del exc_type, exc, tb
+                return False
+
+            def get(self, url, headers=None, proxies=None, timeout=None, verify=None, **kwargs):
+                del url, headers, proxies, timeout, verify, kwargs
+                return pending_responses.pop(0)
+
+        with patch("src.services.model_discovery_service.requests.Session", return_value=FakeSession()):
+            with self.assertRaises(ValueError) as raised:
+                service.fetch_models_preview(api="https://example.com/v1/chat/completions")
+
+        self.assertEqual(
+            "https://example.com/v1/models returned 401; https://example.com/models returned 404",
+            str(raised.exception),
+        )
 
     def test_fetch_models_preview_replaces_case_insensitive_header_duplicates(self) -> None:
         logger = FakeLogger()
