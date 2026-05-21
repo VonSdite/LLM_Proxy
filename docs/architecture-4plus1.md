@@ -60,7 +60,7 @@ downstream request
   - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
   - 暴露系统设置读取与保存接口
 - `OAuthController`
-  - 暴露 Codex OAuth 登录、回调提交、认证文件列表、删除与配额刷新接口
+  - 暴露 Codex / Claude OAuth 登录、回调提交、认证文件列表、删除与 Codex 配额刷新接口
 - `CodexOAuthService`
   - 生成 Codex OAuth PKCE 授权链接
   - 使用回调 URL 换取 token 并写入本地认证文件
@@ -71,6 +71,11 @@ downstream request
   - 持久化认证文件最近一次配额快照、配额刷新错误与 Codex 模型代理使用状态
   - 维护本地手动 Codex OAuth 模型目录
   - 按本地模型目录、本地冷却和认证失败状态提供 Codex 请求候选账号
+- `ClaudeOAuthService`
+  - 生成 Claude OAuth PKCE 授权链接
+  - 使用回调 URL 或手动粘贴的 `code#state` 换取 token 并写入本地认证文件
+  - 列出和删除 `data/oauth/claude/*.json`
+  - token 交换遇到代理风险确认页时，会走统一自动确认重试流程
 - `CodexProxyService`
   - 代理下游直接使用的 Codex 普通模型名
   - 使用 `data/oauth/codex/*.json` 中的 OAuth access token 请求 Codex backend
@@ -212,7 +217,7 @@ Codex OAuth 模型是数据平面的例外路由：
   - 只有开启后，系统设置页才展示 OAuth 代理服务和 SSL 校验设置
 - `oauth.proxy`
   - 保存后立即影响 OAuth 控制平面请求
-  - 用于 Codex OAuth token 交换、token 刷新、配额查询与 Codex OAuth 数据面代理
+  - 用于 Codex / Claude OAuth token 交换、Codex token 刷新、配额查询与 Codex OAuth 数据面代理
   - 留空时直连上游
 - `oauth.verify_ssl`
   - 保存后立即影响 OAuth 控制平面请求和 Codex OAuth 数据面代理
@@ -229,6 +234,10 @@ Codex OAuth 模型是数据平面的例外路由：
   - 每次 token / quota / models 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
   - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件配额与最近一次模型代理状态
+- `ClaudeOAuthService`
+  - 每次 token 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
+  - 维护 OAuth PKCE 临时会话
+  - 认证文件保存在 `data/oauth/claude/`
 - `CodexProxyService`
   - 每次 Codex 数据面请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
 
@@ -362,7 +371,7 @@ provider editor form snapshot
 
 ### 3.7 Control-Plane OAuth Management
 
-OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并在页面内保留子 tab 结构。当前只有 `Codex` 子 tab。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
+OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并在页面内提供 `Codex` 与 `Claude` 子 tab。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
 
 页面与 API：
 
@@ -377,6 +386,10 @@ OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并�
   - `GET /api/oauth/codex/auth-files`
   - `DELETE /api/oauth/codex/auth-files/<name>`
   - `GET /api/oauth/codex/auth-files/<name>/quota`
+  - `POST /api/oauth/claude/session`
+  - `POST /api/oauth/claude/callback`
+  - `GET /api/oauth/claude/auth-files`
+  - `DELETE /api/oauth/claude/auth-files/<name>`
 
 Codex OAuth 登录链路如下：
 
@@ -396,17 +409,34 @@ OAuth Codex tab
   -> persist quota snapshot or quota error
 ```
 
+Claude OAuth 登录链路如下：
+
+```text
+OAuth Claude tab
+  -> create session
+  -> generate PKCE verifier / challenge and state
+  -> return claude.ai authorization URL
+  -> user opens URL and signs in
+  -> user pastes full callback URL or code#state
+  -> token exchange
+  -> write data/oauth/claude/*.json
+  -> list auth file token status
+```
+
 运行时与存储约束：
 
 - OAuth state、PKCE verifier 只保存在进程内内存中
 - 临时 OAuth 会话 TTL 为 10 分钟
 - 认证文件保存在 `data/oauth/codex/`
+- Claude 认证文件保存在 `data/oauth/claude/`
 - Codex 认证文件名沿用 CLIProxyAPI 规则：普通账号为 `codex-{email}-{plan}.json`，team 账号为 `codex-{account_id_sha256前8位}-{email}-team.json`
+- Claude 认证文件名沿用 CLIProxyAPI 规则：`claude-{email}.json`
 - Codex 模型目录缓存在 `data/oauth/codex/models.json`，文件内容只保存模型 ID 字符串数组
 - 认证文件的最近配额、配额错误和数据面使用状态保存在 `data/oauth/codex/.state/auth_files.json`
 - 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
 - OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持全选后批量刷新额度和批量删除
 - OAuth 页面删除认证文件前会用气泡确认，确认后调用删除 API
+- Claude tab 当前只负责 Claude OAuth 认证文件生成、状态展示和删除，不参与 Provider 配置自动改写
 - Codex 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
 - 查询配额时如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
@@ -415,7 +445,7 @@ OAuth Codex tab
 - 配额刷新会同步内存冷却状态：Codex 窗口耗尽时冷却该认证文件，恢复可用时立即清除冷却
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
-- token 交换、token 刷新与配额查询会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
+- token 交换、Codex token 刷新与配额查询会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
 - Codex 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
 - 出站 HTTP 请求遇到代理风险确认页时，会自动确认一次并重试原请求；自动确认失败或重试后仍被拦截时，返回 `proxy_warning_required` 和确认页 URL
 - Codex 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
@@ -449,6 +479,8 @@ OAuth Codex tab
   - 系统设置保存与生效边界
 - [src/services/codex_oauth_service.py](../src/services/codex_oauth_service.py)
   - Codex OAuth PKCE、token 文件、本地模型 ID 目录与配额查询
+- [src/services/claude_oauth_service.py](../src/services/claude_oauth_service.py)
+  - Claude OAuth PKCE、token 文件生成与认证文件管理
 - [src/services/codex_proxy_service.py](../src/services/codex_proxy_service.py)
   - Codex OAuth 数据面代理与账号配额切换
 - [src/presentation/oauth_controller.py](../src/presentation/oauth_controller.py)
@@ -468,7 +500,7 @@ OAuth Codex tab
 - [src/presentation/templates/settings.html](../src/presentation/templates/settings.html)
   - 系统设置页面与帮助说明
 - [src/presentation/templates/oauth.html](../src/presentation/templates/oauth.html)
-  - OAuth 管理页面与 Codex 子 tab
+  - OAuth 管理页面与 Codex / Claude 子 tab
 
 ## 5. Physical View
 
@@ -493,6 +525,7 @@ Client / Agent / IDE
         +--> Claude Messages upstream
         +--> Codex upstream
         +--> auth.openai.com / chatgpt.com OAuth control-plane endpoints
+        +--> claude.ai / api.anthropic.com OAuth control-plane endpoints
 ```
 
 ## 6. Scenarios

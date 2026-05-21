@@ -4,6 +4,7 @@
 
 from .auth_group_service import AuthGroupService
 from .authentication_service import AuthenticationService
+from .claude_oauth_service import ClaudeOAuthService
 from .codex_oauth_service import CodexOAuthService
 from .codex_proxy_service import CodexProxyService
 from .log_service import LogService
@@ -17,6 +18,7 @@ from .user_service import UserService
 __all__ = [
     "AuthenticationService",
     "AuthGroupService",
+    "ClaudeOAuthService",
     "CodexOAuthService",
     "CodexProxyService",
     "UserService",
