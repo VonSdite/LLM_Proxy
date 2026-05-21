@@ -250,6 +250,88 @@ class ClaudeOAuthServiceTests(unittest.TestCase):
         self.assertEqual("claude-a@example.com.json", deleted["deleted"])
         self.assertFalse(auth_file.exists())
 
+    def test_models_file_is_not_listed_as_auth_file_and_controls_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "claude"
+            auth_dir.mkdir(parents=True)
+            auth_file = auth_dir / "claude-a@example.com.json"
+            auth_file.write_text(
+                json.dumps(
+                    {
+                        "type": "claude",
+                        "access_token": "access-a",
+                        "refresh_token": "refresh-a",
+                        "email": "a@example.com",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+
+            service.add_model("claude-sonnet-4-5")
+            listed = service.list_auth_files()
+            model_names = service.list_model_names()
+            candidates = service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+            service.record_auth_file_failure("claude-a@example.com.json", "invalid bearer", status_code=401)
+            skipped_candidates = service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+            service.record_auth_file_success("claude-a@example.com.json")
+            recovered_candidates = service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+
+        self.assertEqual(["claude-a@example.com.json"], [item["name"] for item in listed["files"]])
+        self.assertEqual(("claude-sonnet-4-5",), model_names)
+        self.assertEqual(["claude-a@example.com.json"], [candidate.name for candidate in candidates])
+        self.assertEqual([], [candidate.name for candidate in skipped_candidates])
+        self.assertEqual(["claude-a@example.com.json"], [candidate.name for candidate in recovered_candidates])
+
+    def test_expired_auth_candidate_refreshes_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "claude"
+            auth_dir.mkdir(parents=True)
+            auth_file = auth_dir / "claude-a@example.com.json"
+            auth_file.write_text(
+                json.dumps(
+                    {
+                        "type": "claude",
+                        "access_token": "old-access",
+                        "refresh_token": "refresh-a",
+                        "email": "a@example.com",
+                        "expired": "2000-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            service.add_model("claude-sonnet-4-5")
+            captured: dict[str, Any] = {}
+
+            def fake_post(url, json=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del headers, timeout, proxies, verify, kwargs
+                captured["url"] = url
+                captured["json"] = dict(json or {})
+                return FakeResponse(
+                    {
+                        "access_token": "new-access",
+                        "refresh_token": "new-refresh",
+                        "expires_in": 3600,
+                        "account": {
+                            "email_address": "a@example.com",
+                        },
+                    }
+                )
+
+            with patch_requests_session(post=fake_post):
+                candidates = service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+            payload = json.loads(auth_file.read_text(encoding="utf-8"))
+
+        self.assertEqual("refresh_token", captured["json"]["grant_type"])
+        self.assertEqual("refresh-a", captured["json"]["refresh_token"])
+        self.assertEqual(["new-access"], [candidate.access_token for candidate in candidates])
+        self.assertEqual("new-access", payload["access_token"])
+        self.assertEqual("new-refresh", payload["refresh_token"])
+
 
 if __name__ == "__main__":
     unittest.main()

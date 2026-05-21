@@ -13,6 +13,7 @@ from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..hooks import HookAbortError
+from ..services.claude_proxy_service import CLAUDE_PROVIDER_NAME
 from ..services.codex_proxy_service import CODEX_PROVIDER_NAME
 from ..services.proxy_service import ProxyErrorInfo
 from ..utils import normalize_ip
@@ -32,6 +33,18 @@ class ProxyServiceLike(Protocol):
 
 
 class CodexProxyServiceLike(Protocol):
+    def has_model(self, model_name: str) -> bool: ...
+
+    def list_model_names(self) -> Iterable[str]: ...
+
+    def proxy_request(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]: ...
+
+
+class ClaudeProxyServiceLike(Protocol):
     def has_model(self, model_name: str) -> bool: ...
 
     def list_model_names(self) -> Iterable[str]: ...
@@ -97,12 +110,14 @@ class ProxyController:
         log_service: LogServiceLike,
         provider_manager: ProviderManagerLike,
         codex_proxy_service: CodexProxyServiceLike | None = None,
+        claude_proxy_service: ClaudeProxyServiceLike | None = None,
     ):
         self._app = ctx.flask_app
         self._logger = ctx.logger
         self._config_manager: ConfigManagerLike = ctx.config_manager
         self._proxy_service = proxy_service
         self._codex_proxy_service = codex_proxy_service
+        self._claude_proxy_service = claude_proxy_service
         self._user_service = user_service
         self._log_service = log_service
         self._provider_manager = provider_manager
@@ -299,7 +314,13 @@ class ProxyController:
                 codex_models = list(self._codex_proxy_service.list_model_names())
             except Exception as exc:
                 self._logger.warning("Codex model list skipped: error=%s", exc)
-        return tuple(sorted(dict.fromkeys([*provider_models, *codex_models])))
+        claude_models: list[str] = []
+        if self._claude_proxy_service is not None:
+            try:
+                claude_models = list(self._claude_proxy_service.list_model_names())
+            except Exception as exc:
+                self._logger.warning("Claude model list skipped: error=%s", exc)
+        return tuple(sorted(dict.fromkeys([*provider_models, *codex_models, *claude_models])))
 
     def chat_completions(self) -> ResponseReturnValue:
         return self._proxy_completion_request(
@@ -379,9 +400,12 @@ class ProxyController:
             model_name = model_name_value.strip()
             provider = self._provider_manager.get_provider_for_model(model_name)
             is_codex_model = False
+            is_claude_model = False
             if not provider:
                 if self._codex_proxy_service is not None and self._codex_proxy_service.has_model(model_name):
                     is_codex_model = True
+                elif self._claude_proxy_service is not None and self._claude_proxy_service.has_model(model_name):
+                    is_claude_model = True
                 else:
                     self._logger.warning("Proxy rejected: unknown model=%r route=%s", model_name, route_name)
                     return self._error_response(
@@ -412,7 +436,11 @@ class ProxyController:
                     error_format=resolved_error_format,
                 )
 
-            provider_name = CODEX_PROVIDER_NAME if is_codex_model else getattr(provider, "name", None)
+            provider_name = getattr(provider, "name", None)
+            if is_codex_model:
+                provider_name = CODEX_PROVIDER_NAME
+            elif is_claude_model:
+                provider_name = CLAUDE_PROVIDER_NAME
 
             client_requested_usage_chunk = False
             if inspect_stream_usage:
@@ -458,6 +486,17 @@ class ProxyController:
 
             if is_codex_model:
                 result, status_code, failure_info = self._codex_proxy_service.proxy_request(
+                    request_data,
+                    headers,
+                    on_complete=on_proxy_complete,
+                    forward_stream_usage=client_requested_usage_chunk,
+                    resolved_target_format=resolved_target_format,
+                    trace_id=trace_id,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                )
+            elif is_claude_model:
+                result, status_code, failure_info = self._claude_proxy_service.proxy_request(
                     request_data,
                     headers,
                     on_complete=on_proxy_complete,
@@ -575,6 +614,12 @@ class ProxyController:
                     codex_model_names = set(self._codex_proxy_service.list_model_names())
                 except Exception as exc:
                     self._logger.warning("Codex model list skipped: error=%s", exc)
+            claude_model_names = set()
+            if self._claude_proxy_service is not None:
+                try:
+                    claude_model_names = set(self._claude_proxy_service.list_model_names())
+                except Exception as exc:
+                    self._logger.warning("Claude model list skipped: error=%s", exc)
             for model_key in model_names:
                 if model_key in codex_model_names:
                     data.append(
@@ -584,6 +629,22 @@ class ProxyController:
                             "owned_by": "openai",
                             "provider_name": CODEX_PROVIDER_NAME,
                             "source_format": "openai_responses",
+                            "target_formats": [
+                                "openai_chat",
+                                "openai_responses",
+                                "claude_chat",
+                            ],
+                        }
+                    )
+                    continue
+                if model_key in claude_model_names:
+                    data.append(
+                        {
+                            "id": model_key,
+                            "object": "model",
+                            "owned_by": "anthropic",
+                            "provider_name": CLAUDE_PROVIDER_NAME,
+                            "source_format": "claude_chat",
                             "target_formats": [
                                 "openai_chat",
                                 "openai_responses",

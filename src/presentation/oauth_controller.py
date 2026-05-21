@@ -46,6 +46,11 @@ class OAuthController:
         self._app.route("/api/oauth/claude/callback", methods=["POST"])(auth(self.complete_claude_callback))
         self._app.route("/api/oauth/claude/auth-files", methods=["GET"])(auth(self.list_claude_auth_files))
         self._app.route("/api/oauth/claude/auth-files/<name>", methods=["DELETE"])(auth(self.delete_claude_auth_file))
+        self._app.route("/api/oauth/claude/models", methods=["GET"])(auth(self.list_claude_models))
+        self._app.route("/api/oauth/claude/models", methods=["POST"])(auth(self.add_claude_model))
+        self._app.route("/api/oauth/claude/models/<path:model_id>", methods=["DELETE"])(
+            auth(self.delete_claude_model)
+        )
 
     def create_codex_session(self) -> ResponseReturnValue:
         try:
@@ -137,6 +142,33 @@ class OAuthController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error deleting Claude OAuth auth file: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def list_claude_models(self) -> ResponseReturnValue:
+        try:
+            return jsonify(self._claude_oauth_service.list_models())
+        except Exception as exc:
+            self._logger.error("Error listing Claude OAuth models: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def add_claude_model(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            model_id = str(payload.get("model_id") or payload.get("id") or "").strip()
+            return jsonify(self._claude_oauth_service.add_model(model_id))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error adding Claude OAuth model: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def delete_claude_model(self, model_id: str) -> ResponseReturnValue:
+        try:
+            return jsonify(self._claude_oauth_service.delete_model(model_id))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error deleting Claude OAuth model: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def list_codex_models(self) -> ResponseReturnValue:
