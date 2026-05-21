@@ -30,6 +30,7 @@ from ..repositories import AuthGroupRepository, LogRepository, UserRepository
 from ..services import (
     AuthenticationService,
     AuthGroupService,
+    ClaudeOAuthService,
     CodexOAuthService,
     CodexProxyService,
     LogService,
@@ -260,6 +261,7 @@ class Application:
         )
         model_discovery_service = ModelDiscoveryService(self._ctx)
         codex_oauth_service = CodexOAuthService(self._ctx)
+        claude_oauth_service = ClaudeOAuthService(self._ctx)
         codex_proxy_service = CodexProxyService(self._ctx, codex_oauth_service)
         settings_service = SettingsService(
             self._ctx,
@@ -280,6 +282,7 @@ class Application:
         self._oauth_controller = OAuthController(
             self._ctx,
             codex_oauth_service,
+            claude_oauth_service,
             auth_service,
         )
         self._proxy_controller = ProxyController(

@@ -8,7 +8,7 @@
 
 {% block content %}
     <div class="oauth-page-shell">
-        <section class="oauth-toolbar-section" hidden>
+        <section class="oauth-toolbar-section">
             <div class="oauth-toolbar-card">
                 <div class="oauth-toolbar-meta">
                     <div class="oauth-tabs" role="tablist" aria-label="OAuth 视图">
@@ -21,6 +21,15 @@
                             aria-selected="true"
                             aria-controls="oauthTopTabPanel_codex"
                         >Codex</button>
+                        <button
+                            type="button"
+                            class="oauth-tab-btn"
+                            id="oauthTopTabBtn_claude"
+                            onclick="switchOAuthTab('claude')"
+                            role="tab"
+                            aria-selected="false"
+                            aria-controls="oauthTopTabPanel_claude"
+                        >Claude</button>
                     </div>
                 </div>
             </div>
@@ -198,6 +207,73 @@
                 <div class="oauth-pagination" id="codexAuthFilePagination" hidden></div>
             </div>
         </section>
+
+        <section class="oauth-tab-panel" id="oauthTopTabPanel_claude" role="tabpanel" aria-labelledby="oauthTopTabBtn_claude" hidden>
+            <div class="oauth-section">
+                <div class="oauth-card-header">
+                    <div>
+                        <h2>Claude OAuth</h2>
+                        <p>通过 Anthropic Claude OAuth 登录生成本地认证文件。</p>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="claudeRefreshAuthLinkBtn" onclick="refreshClaudeAuthLink()">刷新授权链接</button>
+                </div>
+
+                <div class="oauth-auth-url-box" id="claudeAuthUrlBox" hidden>
+                    <div class="oauth-field-label">授权链接</div>
+                    <div class="oauth-auth-url-value" id="claudeAuthUrlValue"></div>
+                    <div class="oauth-action-row">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="copyClaudeAuthLink()">复制链接</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openClaudeAuthLink()">打开链接</button>
+                    </div>
+                    <div class="oauth-hint">链接 10 分钟内有效；Claude OAuth 使用 PKCE 校验，回调地址为 <code>http://localhost:54545/callback</code>。</div>
+                </div>
+
+                <div class="oauth-callback-section" id="claudeCallbackSection" hidden>
+                    <label class="form-label" for="claudeCallbackUrlInput">回调 URL</label>
+                    <div class="oauth-callback-row">
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="claudeCallbackUrlInput"
+                            placeholder="http://localhost:54545/callback?code=...&state=..."
+                        >
+                        <button type="button" class="btn btn-primary" id="claudeSubmitCallbackBtn" onclick="submitClaudeCallbackUrl()">提交回调 URL</button>
+                    </div>
+                    <div class="oauth-hint">远程浏览器模式：登录后复制完整回调 URL 填到这里，提交后会生成认证文件。</div>
+                </div>
+
+                <div class="oauth-status-line" id="claudeOAuthStatus" hidden></div>
+            </div>
+
+            <div class="oauth-section">
+                <div class="oauth-card-header">
+                    <div>
+                        <div class="oauth-title-with-help">
+                            <h2>Claude 认证文件</h2>
+                            <div class="oauth-help-wrap">
+                                <button
+                                    type="button"
+                                    class="oauth-help-button"
+                                    aria-label="查看 Claude 认证文件说明"
+                                    aria-describedby="claudeAuthFilesHelp"
+                                >?</button>
+                                <div class="oauth-help-popover" id="claudeAuthFilesHelp" role="tooltip">
+                                    <p>这里展示本地生成的 Claude OAuth 认证文件。</p>
+                                    <ul>
+                                        <li>认证文件保存在 <code>data/oauth/claude</code>。</li>
+                                        <li>文件格式参考 CLIProxyAPI 的 Claude OAuth token storage。</li>
+                                        <li>当前页面负责生成和删除认证文件，不会自动修改 Provider 配置。</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="oauth-auth-file-list" id="claudeAuthFileList">
+                    <div class="empty-state">正在加载认证文件...</div>
+                </div>
+            </div>
+        </section>
     </div>
 {% endblock %}
 
@@ -229,6 +305,15 @@
             modelsSaving: false,
             deletingModelId: '',
             modelDeleteConfirmId: '',
+        };
+        let claudeAuthState = {
+            authorizationUrl: '',
+            state: '',
+            loading: false,
+            submitting: false,
+            authFiles: [],
+            deletingAuthFileName: '',
+            deleteConfirmName: '',
         };
 
         function switchOAuthTab(tabName) {
@@ -428,6 +513,118 @@
             } finally {
                 codexAuthState.submitting = false;
                 syncCodexAuthControls();
+            }
+        }
+
+        function setClaudeOAuthStatus(message, type = '') {
+            const element = document.getElementById('claudeOAuthStatus');
+            if (!element) return;
+            const normalizedMessage = String(message || '').trim();
+            element.hidden = !normalizedMessage;
+            element.textContent = normalizedMessage;
+            element.className = `oauth-status-line${type ? ` ${type}` : ''}`;
+        }
+
+        function syncClaudeAuthControls() {
+            const refreshButton = document.getElementById('claudeRefreshAuthLinkBtn');
+            const submitButton = document.getElementById('claudeSubmitCallbackBtn');
+            if (refreshButton) {
+                refreshButton.disabled = claudeAuthState.loading;
+                refreshButton.textContent = claudeAuthState.loading ? '生成中...' : '刷新授权链接';
+            }
+            if (submitButton) {
+                submitButton.disabled = claudeAuthState.submitting;
+                submitButton.textContent = claudeAuthState.submitting ? '提交中...' : '提交回调 URL';
+            }
+        }
+
+        function renderClaudeAuthUrl() {
+            const box = document.getElementById('claudeAuthUrlBox');
+            const value = document.getElementById('claudeAuthUrlValue');
+            const callbackSection = document.getElementById('claudeCallbackSection');
+            const hasAuthorizationUrl = Boolean(claudeAuthState.authorizationUrl);
+            if (!box || !value) return;
+            box.hidden = !hasAuthorizationUrl;
+            value.textContent = claudeAuthState.authorizationUrl || '';
+            if (callbackSection) {
+                callbackSection.hidden = !hasAuthorizationUrl;
+            }
+        }
+
+        async function refreshClaudeAuthLink() {
+            claudeAuthState.loading = true;
+            syncClaudeAuthControls();
+            setClaudeOAuthStatus('正在生成新的 Claude 授权链接...');
+            try {
+                const response = await fetch('/api/oauth/claude/session', { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '生成授权链接失败');
+                }
+                claudeAuthState.authorizationUrl = result.authorization_url || result.auth_url || '';
+                claudeAuthState.state = result.state || '';
+                renderClaudeAuthUrl();
+                setClaudeOAuthStatus('等待用户登录并提交回调 URL。', 'waiting');
+            } catch (error) {
+                console.error('生成 Claude 授权链接失败:', error);
+                setClaudeOAuthStatus(error?.message || '生成授权链接失败', 'error');
+                showActionError('生成 Claude 授权链接', error, { fallback: '生成授权链接失败' });
+            } finally {
+                claudeAuthState.loading = false;
+                syncClaudeAuthControls();
+            }
+        }
+
+        async function copyClaudeAuthLink() {
+            if (!claudeAuthState.authorizationUrl) return;
+            try {
+                await copyTextToClipboard(claudeAuthState.authorizationUrl);
+                showMessage('授权链接已复制', 'success');
+            } catch (error) {
+                console.error('复制授权链接失败:', error);
+                showActionError('复制授权链接', error, { fallback: '复制授权链接失败' });
+            }
+        }
+
+        function openClaudeAuthLink() {
+            if (!claudeAuthState.authorizationUrl) return;
+            window.open(claudeAuthState.authorizationUrl, '_blank', 'noopener,noreferrer');
+        }
+
+        async function submitClaudeCallbackUrl() {
+            const input = document.getElementById('claudeCallbackUrlInput');
+            const callbackUrl = input?.value?.trim() || '';
+            if (!callbackUrl) {
+                showMessage('请先填写回调 URL', 'error');
+                return;
+            }
+            claudeAuthState.submitting = true;
+            syncClaudeAuthControls();
+            setClaudeOAuthStatus('正在换取 token 并生成认证文件...');
+            try {
+                const response = await fetch('/api/oauth/claude/callback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ callback_url: callbackUrl }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '提交回调 URL 失败');
+                }
+                if (input) input.value = '';
+                claudeAuthState.authorizationUrl = '';
+                claudeAuthState.state = '';
+                renderClaudeAuthUrl();
+                setClaudeOAuthStatus(`认证文件已生成：${result.auth_file?.name || ''}`, 'success');
+                showMessage('Claude 认证文件已生成', 'success');
+                await loadClaudeAuthFiles();
+            } catch (error) {
+                console.error('提交 Claude 回调 URL 失败:', error);
+                setClaudeOAuthStatus(error?.message || '提交回调 URL 失败', 'error');
+                showActionError('提交 Claude 回调 URL', error, { fallback: '提交回调 URL 失败' });
+            } finally {
+                claudeAuthState.submitting = false;
+                syncClaudeAuthControls();
             }
         }
 
@@ -928,6 +1125,140 @@
             `;
         }
 
+        function renderClaudeAuthFiles() {
+            const container = document.getElementById('claudeAuthFileList');
+            if (!container) return;
+            const files = Array.isArray(claudeAuthState.authFiles) ? claudeAuthState.authFiles : [];
+            if (!files.length) {
+                container.innerHTML = '<div class="empty-state">还没有 Claude 认证文件，请先完成 OAuth 登录。</div>';
+                return;
+            }
+
+            container.innerHTML = files.map(file => {
+                const encodedName = encodeURIComponent(file.name || '');
+                const isDeleting = claudeAuthState.deletingAuthFileName === (file.name || '');
+                const isConfirmingDelete = claudeAuthState.deleteConfirmName === (file.name || '');
+                const availabilityStatus = normalizeClaudeAvailabilityStatus(file);
+                const availabilityClass = availabilityStatus.replace(/_/g, '-');
+                const availabilityLabel = formatClaudeAvailabilityStatusLabel(file, availabilityStatus);
+                return `
+                    <article class="oauth-auth-file-item">
+                        <div class="oauth-auth-file-main">
+                            <div class="oauth-auth-file-body">
+                                <div class="oauth-auth-file-title-row">
+                                    <div class="oauth-auth-file-name">${escapeHtml(file.name || '')}</div>
+                                    <div class="oauth-auth-file-title-actions">
+                                        <button
+                                            type="button"
+                                            class="oauth-icon-button oauth-icon-button-danger"
+                                            title="删除认证文件"
+                                            aria-label="删除 ${escapeHtml(file.name || '')}"
+                                            onclick="toggleClaudeAuthFileDeleteConfirm('${encodedName}')"
+                                            ${isDeleting ? 'disabled' : ''}
+                                        >${renderTrashIcon()}</button>
+                                        ${isConfirmingDelete ? `
+                                            <div class="oauth-delete-popover" role="dialog" aria-label="确认删除认证文件">
+                                                <div class="oauth-delete-popover-title">删除这个认证文件？</div>
+                                                <div class="oauth-delete-popover-actions">
+                                                    <button type="button" class="btn btn-secondary btn-sm" onclick="cancelClaudeAuthFileDelete()">取消</button>
+                                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteClaudeAuthFile('${encodedName}')" ${isDeleting ? 'disabled' : ''}>删除</button>
+                                                </div>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                                <div class="oauth-auth-file-fields">
+                                    <div><span>邮箱：</span>${escapeHtml(file.email || '-')}</div>
+                                    <div><span>过期时间：</span>${escapeHtml(formatTimestamp(file.expired))}</div>
+                                    <div><span>组织：</span>${escapeHtml(file.organization_name || '-')}</div>
+                                    <div class="oauth-auth-file-status">
+                                        <span>状态：</span>
+                                        <strong class="oauth-status-text ${availabilityClass}">${escapeHtml(availabilityLabel)}</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+                `;
+            }).join('');
+        }
+
+        function normalizeClaudeAvailabilityStatus(file) {
+            const status = String(file?.availability_status || '').trim().toLowerCase();
+            if (['available', 'refresh_required', 'auth_check_required', 'auth_failed'].includes(status)) {
+                return status;
+            }
+            return 'unknown';
+        }
+
+        function formatClaudeAvailabilityStatusLabel(file, status) {
+            const message = String(file?.availability_status_message || '').trim();
+            if (message) return message;
+            if (status === 'available') return '可用';
+            if (status === 'refresh_required') return '待刷新';
+            if (status === 'auth_check_required') return '待验证';
+            if (status === 'auth_failed') return '认证失败';
+            return '-';
+        }
+
+        function toggleClaudeAuthFileDeleteConfirm(encodedName) {
+            const name = decodeURIComponent(encodedName);
+            claudeAuthState.deleteConfirmName = claudeAuthState.deleteConfirmName === name ? '' : name;
+            renderClaudeAuthFiles();
+        }
+
+        function cancelClaudeAuthFileDelete() {
+            claudeAuthState.deleteConfirmName = '';
+            renderClaudeAuthFiles();
+        }
+
+        async function deleteClaudeAuthFile(encodedName) {
+            const name = decodeURIComponent(encodedName);
+            if (!name || claudeAuthState.deletingAuthFileName) return;
+            claudeAuthState.deletingAuthFileName = name;
+            renderClaudeAuthFiles();
+            try {
+                const response = await fetch(`/api/oauth/claude/auth-files/${encodeURIComponent(name)}`, {
+                    method: 'DELETE',
+                    cache: 'no-store',
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '删除认证文件失败');
+                }
+                claudeAuthState.authFiles = claudeAuthState.authFiles.filter(file => file.name !== name);
+                claudeAuthState.deleteConfirmName = '';
+                showMessage('Claude 认证文件已删除', 'success');
+            } catch (error) {
+                console.error('删除 Claude 认证文件失败:', error);
+                showActionError('删除 Claude 认证文件', error, { fallback: '删除认证文件失败' });
+            } finally {
+                claudeAuthState.deletingAuthFileName = '';
+                renderClaudeAuthFiles();
+            }
+        }
+
+        async function loadClaudeAuthFiles() {
+            const container = document.getElementById('claudeAuthFileList');
+            if (container) {
+                container.innerHTML = '<div class="empty-state">正在加载认证文件...</div>';
+            }
+            try {
+                const response = await fetch('/api/oauth/claude/auth-files', { cache: 'no-store' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '加载认证文件失败');
+                }
+                claudeAuthState.authFiles = Array.isArray(result.files) ? result.files : [];
+                renderClaudeAuthFiles();
+            } catch (error) {
+                console.error('加载 Claude 认证文件失败:', error);
+                if (container) {
+                    container.innerHTML = `<div class="error">${escapeHtml(error?.message || '加载认证文件失败')}</div>`;
+                }
+            }
+        }
+
         function getCodexQuotaVisibleWindows(quota) {
             if (!quota || quota.error) return [];
             const windows = Array.isArray(quota.windows) ? quota.windows : [];
@@ -1289,9 +1620,12 @@
             initThemeToggle();
             switchOAuthTab('codex');
             syncCodexAuthControls();
+            syncClaudeAuthControls();
             renderCodexAuthUrl();
+            renderClaudeAuthUrl();
             loadCodexModels();
             loadCodexAuthFiles();
+            loadClaudeAuthFiles();
         }
 
         initOAuthPage();
