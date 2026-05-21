@@ -190,6 +190,7 @@ class CodexOAuthService:
         auth_file.unlink()
         self._quota_cooldowns.pop(deleted_name, None)
         self._delete_auth_file_state_entry(deleted_name)
+        self._clear_last_success_auth_file(deleted_name)
         self._logger.info("Codex OAuth auth file deleted: file=%s", deleted_name)
         return {
             "status": "ok",
@@ -248,7 +249,8 @@ class CodexOAuthService:
 
         candidates: list[CodexAuthCandidate] = []
         self._purge_quota_cooldowns()
-        state_files = self._load_auth_file_state().get("files")
+        state = self._load_auth_file_state()
+        state_files = state.get("files")
         for path in self._iter_auth_file_paths():
             file_state = {}
             if isinstance(state_files, dict) and isinstance(state_files.get(path.name), dict):
@@ -261,7 +263,7 @@ class CodexOAuthService:
             if self._is_quota_cooling_down(candidate.name):
                 continue
             candidates.append(candidate)
-        return candidates
+        return self._prioritize_last_success_candidate(candidates, state)
 
     def mark_auth_file_quota_exhausted(
         self,
@@ -277,7 +279,7 @@ class CodexOAuthService:
         self._quota_cooldowns[normalized_name] = time.time() + max(float(cooldown_seconds), 1.0)
 
     def record_auth_file_success(self, name: str) -> None:
-        """记录认证文件最近一次 Codex 模型代理成功。"""
+        """记录认证文件最近一次 Codex 模型代理成功，并按需更新过期配额快照。"""
         normalized_name = self._normalize_auth_file_name(name)
         if not normalized_name:
             return
@@ -293,6 +295,8 @@ class CodexOAuthService:
                 "usage_status_updated_at": self._now_iso(),
             },
         )
+        self._remember_last_success_auth_file(normalized_name)
+        self._refresh_auth_file_quota_snapshot_if_due(normalized_name)
 
     def record_auth_file_failure(
         self,
@@ -321,6 +325,10 @@ class CodexOAuthService:
 
     def get_auth_file_quota(self, name: str) -> dict[str, Any]:
         """查询指定认证文件的 Codex 使用配额。"""
+        return self._get_auth_file_quota(name, record_auth_failure=True)
+
+    def _get_auth_file_quota(self, name: str, *, record_auth_failure: bool) -> dict[str, Any]:
+        """查询认证文件配额，并按调用场景决定是否写入认证失败状态。"""
         auth_file = self._resolve_auth_file(name)
         quota_lock = self._get_quota_refresh_lock(auth_file.name)
         if not quota_lock.acquire(blocking=False):
@@ -332,12 +340,13 @@ class CodexOAuthService:
                 try:
                     payload = self._refresh_auth_file(auth_file, payload)
                 except Exception as exc:
-                    self.record_auth_file_failure(
-                        auth_file.name,
-                        f"Token refresh failed: {exc}",
-                        status_code=401,
-                        error_type="token_refresh_failed",
-                    )
+                    if record_auth_failure:
+                        self.record_auth_file_failure(
+                            auth_file.name,
+                            f"Token refresh failed: {exc}",
+                            status_code=401,
+                            error_type="token_refresh_failed",
+                        )
                     raise
                 refreshed = True
 
@@ -351,17 +360,18 @@ class CodexOAuthService:
                 try:
                     payload = self._refresh_auth_file(auth_file, payload)
                 except Exception as exc:
-                    self.record_auth_file_failure(
-                        auth_file.name,
-                        f"Token refresh failed: {exc}",
-                        status_code=401,
-                        error_type="token_refresh_failed",
-                    )
+                    if record_auth_failure:
+                        self.record_auth_file_failure(
+                            auth_file.name,
+                            f"Token refresh failed: {exc}",
+                            status_code=401,
+                            error_type="token_refresh_failed",
+                        )
                     raise
                 refreshed = True
                 response = self._request_auth_file_quota(payload)
             if response.status_code >= 400:
-                if self._is_auth_error_response(response):
+                if record_auth_failure and self._is_auth_error_response(response):
                     self.record_auth_file_failure(
                         auth_file.name,
                         self._response_error_text(response),
@@ -392,6 +402,15 @@ class CodexOAuthService:
             raise
         finally:
             quota_lock.release()
+
+    def _refresh_auth_file_quota_snapshot_if_due(self, name: str) -> None:
+        """在本地配额窗口已到重置时间时，最佳努力刷新前端展示快照。"""
+        if not self._is_auth_file_quota_snapshot_refresh_due(name):
+            return
+        try:
+            self._get_auth_file_quota(name, record_auth_failure=False)
+        except Exception as exc:
+            self._logger.warning("Codex quota snapshot refresh failed: file=%s error=%s", name, exc)
 
     def _get_quota_refresh_lock(self, name: str) -> threading.Lock:
         """返回单个认证文件的配额刷新锁。"""
@@ -482,8 +501,8 @@ class CodexOAuthService:
             return {"files": {}}
         files = payload.get("files")
         if not isinstance(files, dict):
-            return {"files": {}}
-        return {"files": files}
+            payload["files"] = {}
+        return payload
 
     def _write_auth_file_state(self, payload: dict[str, Any]) -> None:
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -507,6 +526,44 @@ class CodexOAuthService:
         except Exception as exc:
             self._logger.warning("Codex auth file state write failed: file=%s error=%s", name, exc)
 
+    def _remember_last_success_auth_file(self, name: str) -> None:
+        """记录最近一次真实请求成功的认证文件，用于后续候选优先级。"""
+        state = self._load_auth_file_state()
+        state["last_success_auth_file"] = name
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Codex last success auth file write failed: file=%s error=%s", name, exc)
+
+    def _clear_last_success_auth_file(self, name: str) -> None:
+        """删除认证文件时清理最近成功指针。"""
+        state = self._load_auth_file_state()
+        if self._get_last_success_auth_file(state) != name:
+            return
+        state.pop("last_success_auth_file", None)
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Codex last success auth file clear failed: file=%s error=%s", name, exc)
+
+    @staticmethod
+    def _get_last_success_auth_file(state: dict[str, Any]) -> str:
+        value = str(state.get("last_success_auth_file") or "").strip()
+        if not value or Path(value).name != value:
+            return ""
+        return value
+
+    def _prioritize_last_success_candidate(
+        self,
+        candidates: list[CodexAuthCandidate],
+        state: dict[str, Any],
+    ) -> list[CodexAuthCandidate]:
+        """把最近成功的认证文件放到候选列表首位，其余顺序保持不变。"""
+        last_success_name = self._get_last_success_auth_file(state)
+        if not last_success_name:
+            return candidates
+        return sorted(candidates, key=lambda candidate: 0 if candidate.name == last_success_name else 1)
+
     def _store_auth_file_quota(self, name: str, quota: dict[str, Any]) -> None:
         refreshed_at = str(quota.get("refreshed_at") or self._now_iso())
         self._update_auth_file_state(
@@ -527,6 +584,38 @@ class CodexOAuthService:
                 "quota_refreshed_at": refreshed_at,
             },
         )
+
+    def _is_auth_file_quota_snapshot_refresh_due(self, name: str) -> bool:
+        """判断认证文件的本地配额快照是否已经到达刷新时间。"""
+        state = self._load_auth_file_state()
+        files = state.get("files")
+        file_state = files.get(name) if isinstance(files, dict) else None
+        if not isinstance(file_state, dict):
+            return False
+        quota = file_state.get("quota")
+        if not isinstance(quota, dict):
+            return False
+        return self._is_quota_snapshot_refresh_due(quota)
+
+    def _is_quota_snapshot_refresh_due(self, quota: dict[str, Any]) -> bool:
+        """根据配额窗口 reset_at 判断前端展示快照是否过期。"""
+        windows = quota.get("windows")
+        if not isinstance(windows, list):
+            return False
+
+        quota_windows = [window for window in windows if isinstance(window, dict)]
+        codex_windows = [
+            window
+            for window in quota_windows
+            if str(window.get("label") or "").strip().lower().startswith("codex")
+        ]
+        target_windows = codex_windows or quota_windows
+        now = datetime.now(timezone.utc)
+        for window in target_windows:
+            reset_at = self._parse_epoch_or_datetime(window.get("reset_at") or window.get("resetAt"))
+            if reset_at is not None and reset_at <= now:
+                return True
+        return False
 
     def get_auth_file_quota_refreshed_at(self, name: str) -> str:
         """读取认证文件最近一次配额刷新时间。"""
