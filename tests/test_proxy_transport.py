@@ -1108,9 +1108,14 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="claudeModelList"', html)
         claude_panel_index = html.index('id="oauthTopTabPanel_claude"')
         claude_model_index = html.index('id="claudeModelIdInput"')
+        claude_reference_index = html.index('class="oauth-model-reference-links"', claude_model_index)
         claude_auth_file_index = html.index('id="claudeAuthFileList"')
         self.assertLess(claude_panel_index, claude_model_index)
+        self.assertLess(claude_model_index, claude_reference_index)
+        self.assertLess(claude_reference_index, claude_auth_file_index)
         self.assertLess(claude_model_index, claude_auth_file_index)
+        self.assertIn("<code>http://localhost:1455/auth/callback</code>", html)
+        self.assertIn("<code>http://localhost:54545/callback</code>", html)
         self.assertIn("http://localhost:54545/callback", html)
         self.assertIn("data/oauth/claude", html)
         self.assertIn("Codex 可用模型", html)
@@ -1125,6 +1130,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertLess(codex_model_index, claude_panel_index)
         self.assertIn("https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json", html)
         self.assertIn("https://models.router-for.me/models.json", html)
+        self.assertEqual(
+            2,
+            html.count('href="https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json"'),
+        )
+        self.assertEqual(2, html.count('href="https://models.router-for.me/models.json"'))
         self.assertIn("<ul>", html)
         self.assertNotIn("function groupCodexModels", html)
         self.assertNotIn("display_name", html)
