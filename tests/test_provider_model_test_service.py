@@ -168,6 +168,66 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertTrue(result["results"][0]["available"])
         self.assertIsNone(result["results"][0]["tps"])
 
+    def test_stream_success_without_model_output_marks_unavailable(self) -> None:
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"demo-model","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":0,"total_tokens":3}}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            del provider, headers, body, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        result = self.service.test_models(
+            {
+                "api": "https://example.com/v1/chat/completions",
+                "source_format": "openai_chat",
+                "models": ["demo-model"],
+            }
+        )
+
+        self.assertFalse(result["results"][0]["available"])
+        self.assertIn("no valid model output", result["results"][0]["error"])
+
+    def test_raw_text_stream_success_marks_unavailable(self) -> None:
+        fake_response = FakeStreamResponse(
+            [b"<html><body>ok</body></html>"],
+            content_type="text/html",
+        )
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            del provider, headers, body, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/html",
+                is_stream=True,
+                stream_format="raw_text",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        result = self.service.test_models(
+            {
+                "api": "https://example.com",
+                "source_format": "openai_chat",
+                "models": ["demo-model"],
+            }
+        )
+
+        self.assertFalse(result["results"][0]["available"])
+        self.assertIn("no valid model output", result["results"][0]["error"])
+
     def test_nonstream_success_marks_available_but_without_latency_and_tps(self) -> None:
         fake_response = FakeBufferedResponse(
             (
@@ -199,6 +259,61 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertTrue(result["results"][0]["available"])
         self.assertIsNone(result["results"][0]["first_token_latency_ms"])
         self.assertIsNone(result["results"][0]["tps"])
+
+    def test_nonstream_success_without_model_output_marks_unavailable(self) -> None:
+        fake_response = FakeBufferedResponse(b'{"status":"ok"}')
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            del provider, headers, body, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="application/json",
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        result = self.service.test_models(
+            {
+                "api": "https://example.com/v1/chat/completions",
+                "source_format": "openai_chat",
+                "models": ["demo-model"],
+            }
+        )
+
+        self.assertFalse(result["results"][0]["available"])
+        self.assertIn("no valid model output", result["results"][0]["error"])
+
+    def test_nonstream_html_success_marks_unavailable(self) -> None:
+        fake_response = FakeBufferedResponse(
+            b"<html><body>ok</body></html>",
+            content_type="text/html",
+        )
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            del provider, headers, body, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/html",
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        result = self.service.test_models(
+            {
+                "api": "https://example.com",
+                "source_format": "openai_chat",
+                "models": ["demo-model"],
+            }
+        )
+
+        self.assertFalse(result["results"][0]["available"])
+        self.assertIn("no valid model output", result["results"][0]["error"])
 
     def test_legacy_api_key_mode_sends_bearer_authorization_header(self) -> None:
         captured: dict[str, object] = {}

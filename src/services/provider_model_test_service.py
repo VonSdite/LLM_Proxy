@@ -28,6 +28,9 @@ class ProviderModelTestService:
 
     _TEST_PROVIDER_NAME = "__provider_model_test__"
     _TEST_TARGET_FORMAT = "openai_chat"
+    _NO_MODEL_OUTPUT_ERROR = (
+        "Upstream returned success but no valid model output; check Provider API endpoint and source_format"
+    )
 
     def __init__(self, ctx: AppContext, runtime_factory: ProviderRuntimeFactory):
         self._logger = ctx.logger
@@ -282,6 +285,7 @@ class ProviderModelTestService:
         first_token_at: float | None = None
         completed_at = request_started_at
         stream_error: str | None = None
+        has_model_output = False
         state: dict[str, Any] = {}
 
         try:
@@ -298,13 +302,10 @@ class ProviderModelTestService:
                         self._update_meta_from_payload(meta, chunk.payload)
                         if first_token_at is None and self._has_openai_chat_output_delta(chunk.payload):
                             first_token_at = time.perf_counter()
+                            has_model_output = True
                         error_message = self._extract_error_message(chunk.payload)
                         if error_message:
                             stream_error = error_message
-                    elif chunk.kind == "text":
-                        text = str(chunk.payload or "")
-                        if first_token_at is None and text.strip():
-                            first_token_at = time.perf_counter()
             completed_at = time.perf_counter()
         finally:
             try:
@@ -317,6 +318,13 @@ class ProviderModelTestService:
                 model_name=model_name,
                 response_model=str(meta.get("response_model") or "") or None,
                 error=stream_error,
+            )
+
+        if not has_model_output:
+            return self._build_failure_result(
+                model_name=model_name,
+                response_model=str(meta.get("response_model") or "") or None,
+                error=self._NO_MODEL_OUTPUT_ERROR,
             )
 
         return self._build_success_result(
@@ -358,6 +366,13 @@ class ProviderModelTestService:
         meta = self._create_empty_meta()
         if isinstance(translated_payload, dict):
             self._update_meta_from_payload(meta, translated_payload)
+
+        if not self._has_openai_chat_nonstream_output(translated_payload):
+            return self._build_failure_result(
+                model_name=model_name,
+                response_model=str(meta.get("response_model") or "") or None,
+                error=self._NO_MODEL_OUTPUT_ERROR,
+            )
 
         return self._build_success_result(
             model_name=model_name,
@@ -461,6 +476,27 @@ class ProviderModelTestService:
                 continue
             for field_name in ("content", "reasoning_content"):
                 content = delta.get(field_name)
+                if isinstance(content, str) and content:
+                    return True
+        return False
+
+    @staticmethod
+    def _has_openai_chat_nonstream_output(payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+
+        choices = payload.get("choices")
+        if not isinstance(choices, list):
+            return False
+
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message")
+            if not isinstance(message, dict):
+                continue
+            for field_name in ("content", "reasoning_content"):
+                content = message.get(field_name)
                 if isinstance(content, str) and content:
                     return True
         return False
