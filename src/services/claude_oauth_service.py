@@ -181,6 +181,7 @@ class ClaudeOAuthService:
         deleted_name = auth_file.name
         auth_file.unlink()
         self._delete_auth_file_state_entry(deleted_name)
+        self._clear_last_success_auth_file(deleted_name)
         self._logger.info("Claude OAuth auth file deleted: file=%s", deleted_name)
         return {
             "status": "ok",
@@ -234,7 +235,8 @@ class ClaudeOAuthService:
             return []
 
         candidates: list[ClaudeAuthCandidate] = []
-        state_files = self._load_auth_file_state().get("files")
+        state = self._load_auth_file_state()
+        state_files = state.get("files")
         for path in self._iter_auth_file_paths():
             file_state = {}
             if isinstance(state_files, dict) and isinstance(state_files.get(path.name), dict):
@@ -245,7 +247,7 @@ class ClaudeOAuthService:
             if candidate is None:
                 continue
             candidates.append(candidate)
-        return candidates
+        return self._prioritize_last_success_candidate(candidates, state)
 
     def record_auth_file_success(self, name: str) -> None:
         """记录认证文件最近一次 Claude 模型代理成功。"""
@@ -262,6 +264,7 @@ class ClaudeOAuthService:
                 "usage_status_updated_at": self._now_iso(),
             },
         )
+        self._remember_last_success_auth_file(normalized_name)
 
     def record_auth_file_failure(
         self,
@@ -572,8 +575,8 @@ class ClaudeOAuthService:
             return {"files": {}}
         files = payload.get("files")
         if not isinstance(files, dict):
-            return {"files": {}}
-        return {"files": files}
+            payload["files"] = {}
+        return payload
 
     def _write_auth_file_state(self, payload: dict[str, Any]) -> None:
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -596,6 +599,44 @@ class ClaudeOAuthService:
             self._write_auth_file_state(state)
         except Exception as exc:
             self._logger.warning("Claude auth file state write failed: file=%s error=%s", name, exc)
+
+    def _remember_last_success_auth_file(self, name: str) -> None:
+        """记录最近一次真实请求成功的认证文件，用于后续候选优先级。"""
+        state = self._load_auth_file_state()
+        state["last_success_auth_file"] = name
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Claude last success auth file write failed: file=%s error=%s", name, exc)
+
+    def _clear_last_success_auth_file(self, name: str) -> None:
+        """删除认证文件时清理最近成功指针。"""
+        state = self._load_auth_file_state()
+        if self._get_last_success_auth_file(state) != name:
+            return
+        state.pop("last_success_auth_file", None)
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Claude last success auth file clear failed: file=%s error=%s", name, exc)
+
+    @staticmethod
+    def _get_last_success_auth_file(state: dict[str, Any]) -> str:
+        value = str(state.get("last_success_auth_file") or "").strip()
+        if not value or Path(value).name != value:
+            return ""
+        return value
+
+    def _prioritize_last_success_candidate(
+        self,
+        candidates: list[ClaudeAuthCandidate],
+        state: dict[str, Any],
+    ) -> list[ClaudeAuthCandidate]:
+        """把最近成功的认证文件放到候选列表首位，其余顺序保持不变。"""
+        last_success_name = self._get_last_success_auth_file(state)
+        if not last_success_name:
+            return candidates
+        return sorted(candidates, key=lambda candidate: 0 if candidate.name == last_success_name else 1)
 
     def _delete_auth_file_state_entry(self, name: str) -> None:
         state = self._load_auth_file_state()

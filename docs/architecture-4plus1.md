@@ -68,15 +68,15 @@ downstream request
   - 读取认证文件状态，并按需刷新 token 后查询 Codex 配额
   - token 交换、token 刷新与配额查询遇到代理风险确认页时，会走统一自动确认重试流程
   - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
-  - 持久化认证文件最近一次配额快照、配额刷新错误与 Codex 模型代理使用状态
+  - 持久化认证文件最近一次配额快照、配额刷新错误、最近成功认证文件与 Codex 模型代理使用状态
   - 维护本地手动 Codex OAuth 模型目录
-  - 按本地模型目录、本地冷却和认证失败状态提供 Codex 请求候选账号
+  - 按本地模型目录、本地冷却、认证失败状态和最近成功认证文件提供 Codex 请求候选账号
 - `ClaudeOAuthService`
   - 生成 Claude OAuth PKCE 授权链接
   - 使用回调 URL 或手动粘贴的 `code#state` 换取 token 并写入本地认证文件
   - 列出和删除 `data/oauth/claude/*.json`
   - 维护本地手动 Claude OAuth 模型目录
-  - 按本地模型目录和认证失败状态提供 Claude 请求候选账号
+  - 按本地模型目录、认证失败状态和最近成功认证文件提供 Claude 请求候选账号
   - token 交换与 token 刷新遇到代理风险确认页时，会走统一自动确认重试流程
 - `CodexProxyService`
   - 代理下游直接使用的 Codex 普通模型名
@@ -226,7 +226,7 @@ OAuth 模型是数据平面的例外路由：
   - 只有开启后，系统设置页才展示 OAuth 代理服务和 SSL 校验设置
 - `oauth.proxy`
   - 保存后立即影响 OAuth 控制平面请求
-  - 用于 Codex / Claude OAuth token 交换、token 刷新、配额查询与 OAuth 数据面代理
+  - 用于 Codex / Claude OAuth token 交换、token 刷新、Codex 配额查询与 OAuth 数据面代理
   - 留空时直连上游
 - `oauth.verify_ssl`
   - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
@@ -242,12 +242,12 @@ OAuth 模型是数据平面的例外路由：
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
-  - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件配额与最近一次模型代理状态
+  - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件配额、最近一次模型代理状态与最近成功认证文件
 - `ClaudeOAuthService`
   - 每次 token / models 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话
   - 认证文件保存在 `data/oauth/claude/`
-  - 在 `data/oauth/claude/.state/auth_files.json` 持久化最近一次模型代理状态
+  - 在 `data/oauth/claude/.state/auth_files.json` 持久化最近一次模型代理状态与最近成功认证文件
 - `CodexProxyService`
   - 每次 Codex 数据面请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
 - `ClaudeProxyService`
@@ -449,22 +449,24 @@ OAuth Claude tab
 - Claude 认证文件名沿用 CLIProxyAPI 规则：`claude-{email}.json`
 - Codex 模型目录缓存在 `data/oauth/codex/models.json`，文件内容只保存模型 ID 字符串数组
 - Claude 模型目录缓存在 `data/oauth/claude/models.json`，文件内容只保存模型 ID 字符串数组
-- 认证文件的最近配额、配额错误和数据面使用状态保存在 `data/oauth/codex/.state/auth_files.json`
-- Claude 认证文件最近一次数据面使用状态保存在 `data/oauth/claude/.state/auth_files.json`
+- 认证文件的最近配额、配额错误、数据面使用状态和最近成功认证文件保存在 `data/oauth/codex/.state/auth_files.json`
+- Claude 认证文件最近一次数据面使用状态和最近成功认证文件保存在 `data/oauth/claude/.state/auth_files.json`
 - 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
 - OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持全选后批量刷新额度和批量删除
 - OAuth 页面删除认证文件前会用气泡确认，确认后调用删除 API
 - Codex 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - Claude 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
-- 查询配额时如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
+- Codex 查询配额时如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
 - Claude OAuth 数据面请求前如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
+- Codex / Claude 候选列表仍会按请求重建；默认按认证文件修改时间倒序排列，但最近一次真实请求成功的认证文件如果未被过滤，会被提升为第一候选
 - 同一个认证文件的配额刷新使用进程内非阻塞锁；重复刷新请求会直接返回跳过结果，不重复访问 Codex 上游
 - 如果认证文件 access token 已过期且缺少 refresh token，请求候选筛选不会直接跳过；系统会先用当前 access token 尝试请求一次，再按上游返回的认证、配额或其他错误决定后续状态
 - 配额刷新会同步内存冷却状态：Codex 窗口耗尽时冷却该认证文件，恢复可用时立即清除冷却
+- Codex 数据面请求成功后，如果本地配额快照中的 Codex 窗口重置时间已经到期，会最佳努力刷新该认证文件的前端配额快照；刷新失败不会阻断本次模型响应
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
-- token 交换、token 刷新、配额查询与 OAuth 数据面代理会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
+- token 交换、token 刷新、Codex 配额查询与 OAuth 数据面代理会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
 - Codex 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
 - Claude OAuth 数据面请求会在转发 Anthropic Messages 前按 CPA 请求方式重签已有 Claude Code billing header 的 `cch`
 - Claude 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
@@ -589,7 +591,7 @@ sequenceDiagram
     Client->>Controller: POST /v1/chat/completions model=gpt-5-codex
     Controller->>Controller: Provider 未命中后查 Codex 模型目录
     Controller->>CodexOAuth: iter_auth_candidates_for_model()
-    CodexOAuth->>CodexOAuth: 按本地模型目录、本地冷却与认证失败状态过滤认证文件
+    CodexOAuth->>CodexOAuth: 过滤认证失败/冷却文件，并优先最近成功认证文件
     Controller->>CodexProxy: proxy_request()
     CodexProxy->>ChatGPT: POST /backend-api/codex/responses
     Note over CodexProxy,ChatGPT: 对齐 Codex backend 要求：stream=true、store=false、parallel_tool_calls=true、include encrypted content，并移除不支持字段
@@ -613,6 +615,11 @@ sequenceDiagram
     end
     ChatGPT-->>CodexProxy: Responses SSE
     CodexProxy->>CodexOAuth: record_auth_file_success()
+    CodexOAuth->>CodexOAuth: 记录最近成功认证文件
+    opt 本地配额快照 reset_at 已到期
+        CodexOAuth->>ChatGPT: GET /backend-api/wham/usage
+        CodexOAuth->>CodexOAuth: 更新认证文件配额快照
+    end
     CodexProxy-->>Controller: 下游协议响应
     Controller-->>Client: OpenAI-compatible response
 ```

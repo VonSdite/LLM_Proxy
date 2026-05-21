@@ -169,7 +169,7 @@
                     <div class="section-header settings-shell-header">
                         <div>
                             <h2 class="section-title">OAuth</h2>
-                            <p class="section-subtitle">配置 OAuth 登录、token 刷新和配额查询使用的网络参数。</p>
+                            <p class="section-subtitle">配置 OAuth 登录、token 刷新、Codex 配额查询使用的网络参数。</p>
                         </div>
                     </div>
                     <div class="settings-grid-oauth">
@@ -374,7 +374,7 @@
                 title: "OAuth 代理服务",
                 html: `
                     <p>填写 OAuth 请求使用的代理地址，例如 <code>http://127.0.0.1:7890</code>。</p>
-                    <p>留空时，Codex/Claude OAuth 登录换 token、token 刷新、配额查询和 OAuth 数据面代理都会直接连接上游。</p>
+                    <p>留空时，Codex/Claude OAuth 登录换 token、token 刷新、Codex 配额查询和 OAuth 数据面代理都会直接连接上游。</p>
                 `
             },
             oauth_enabled: {
@@ -388,7 +388,7 @@
                 title: "OAuth SSL 校验",
                 html: `
                     <p>默认关闭 SSL 证书校验，适合本地代理或抓包代理场景。</p>
-                    <p>开启后，OAuth token 请求、token 刷新、配额查询和 OAuth 数据面代理会校验上游 HTTPS 证书。</p>
+                    <p>开启后，OAuth token 请求、token 刷新、Codex 配额查询和 OAuth 数据面代理会校验上游 HTTPS 证书。</p>
                 `
             }
         };

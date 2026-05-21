@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -284,6 +285,59 @@ class ClaudeOAuthServiceTests(unittest.TestCase):
         self.assertEqual(["claude-a@example.com.json"], [candidate.name for candidate in candidates])
         self.assertEqual([], [candidate.name for candidate in skipped_candidates])
         self.assertEqual(["claude-a@example.com.json"], [candidate.name for candidate in recovered_candidates])
+
+    def test_iter_auth_candidates_prioritizes_last_success_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "claude"
+            auth_dir.mkdir(parents=True)
+            first = auth_dir / "claude-first@example.com.json"
+            second = auth_dir / "claude-second@example.com.json"
+            first.write_text(
+                json.dumps(
+                    {
+                        "type": "claude",
+                        "access_token": "access-first",
+                        "refresh_token": "refresh-first",
+                        "email": "first@example.com",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            second.write_text(
+                json.dumps(
+                    {
+                        "type": "claude",
+                        "access_token": "access-second",
+                        "refresh_token": "refresh-second",
+                        "email": "second@example.com",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            os.utime(second, (1000, 1000))
+            os.utime(first, (2000, 2000))
+            service = self._build_service(root)
+            service.add_model("claude-sonnet-4-5")
+            service.record_auth_file_success("claude-second@example.com.json")
+
+            next_service = self._build_service(root)
+            candidates = next_service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+            next_service.record_auth_file_failure(
+                "claude-second@example.com.json",
+                "invalid bearer",
+                status_code=401,
+                error_type="authentication_error",
+            )
+            failed_candidates = next_service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+
+        self.assertEqual(
+            ["claude-second@example.com.json", "claude-first@example.com.json"],
+            [candidate.name for candidate in candidates],
+        )
+        self.assertEqual(["claude-first@example.com.json"], [candidate.name for candidate in failed_candidates])
 
     def test_expired_auth_candidate_refreshes_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
