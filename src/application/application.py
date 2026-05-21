@@ -31,6 +31,7 @@ from ..services import (
     AuthenticationService,
     AuthGroupService,
     ClaudeOAuthService,
+    ClaudeProxyService,
     CodexOAuthService,
     CodexProxyService,
     LogService,
@@ -263,6 +264,7 @@ class Application:
         codex_oauth_service = CodexOAuthService(self._ctx)
         claude_oauth_service = ClaudeOAuthService(self._ctx)
         codex_proxy_service = CodexProxyService(self._ctx, codex_oauth_service)
+        claude_proxy_service = ClaudeProxyService(self._ctx, claude_oauth_service)
         settings_service = SettingsService(
             self._ctx,
             reload_logging_callback=self.reload_logging_settings,
@@ -292,6 +294,7 @@ class Application:
             log_service,
             self._provider_manager,
             codex_proxy_service=codex_proxy_service,
+            claude_proxy_service=claude_proxy_service,
         )
         self._web_controller = WebController(
             self._ctx,

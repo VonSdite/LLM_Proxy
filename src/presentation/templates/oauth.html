@@ -249,6 +249,49 @@
                 <div class="oauth-card-header">
                     <div>
                         <div class="oauth-title-with-help">
+                            <h2>Claude 可用模型</h2>
+                            <div class="oauth-help-wrap">
+                                <button
+                                    type="button"
+                                    class="oauth-help-button"
+                                    aria-label="查看 Claude 可用模型说明"
+                                    aria-describedby="claudeModelsHelp"
+                                >?</button>
+                                <div class="oauth-help-popover" id="claudeModelsHelp" role="tooltip">
+                                    <p>这里维护的是下游可见的 Claude OAuth 模型 ID。</p>
+                                    <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
+                                    <ul>
+                                        <li>模型 ID 由用户手动添加，不会自动从 Anthropic 拉取。</li>
+                                        <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
+                                        <li>命中 Claude 模型后，LLM Proxy 会转换请求格式，并使用 Claude OAuth 认证文件访问 <code>POST https://api.anthropic.com/v1/messages?beta=true</code>。</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="oauth-model-editor">
+                    <div class="oauth-model-editor-row">
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="claudeModelIdInput"
+                            placeholder="输入模型 ID，例如 claude-sonnet-4-5-20250929"
+                            onkeydown="handleClaudeModelInputKeydown(event)"
+                        >
+                        <button type="button" class="btn btn-primary" id="claudeAddModelBtn" onclick="addClaudeModel()">添加模型</button>
+                    </div>
+                </div>
+                <div class="oauth-model-summary" id="claudeModelSummary"></div>
+                <div class="oauth-model-list" id="claudeModelList">
+                    <div class="empty-state">正在加载模型...</div>
+                </div>
+            </div>
+
+            <div class="oauth-section">
+                <div class="oauth-card-header">
+                    <div>
+                        <div class="oauth-title-with-help">
                             <h2>Claude 认证文件</h2>
                             <div class="oauth-help-wrap">
                                 <button
@@ -314,6 +357,12 @@
             authFiles: [],
             deletingAuthFileName: '',
             deleteConfirmName: '',
+            models: [],
+            modelsLoading: false,
+            modelsError: '',
+            modelsSaving: false,
+            deletingModelId: '',
+            modelDeleteConfirmId: '',
         };
 
         function switchOAuthTab(tabName) {
@@ -528,6 +577,7 @@
         function syncClaudeAuthControls() {
             const refreshButton = document.getElementById('claudeRefreshAuthLinkBtn');
             const submitButton = document.getElementById('claudeSubmitCallbackBtn');
+            const addModelButton = document.getElementById('claudeAddModelBtn');
             if (refreshButton) {
                 refreshButton.disabled = claudeAuthState.loading;
                 refreshButton.textContent = claudeAuthState.loading ? '生成中...' : '刷新授权链接';
@@ -535,6 +585,10 @@
             if (submitButton) {
                 submitButton.disabled = claudeAuthState.submitting;
                 submitButton.textContent = claudeAuthState.submitting ? '提交中...' : '提交回调 URL';
+            }
+            if (addModelButton) {
+                addModelButton.disabled = claudeAuthState.modelsSaving;
+                addModelButton.textContent = claudeAuthState.modelsSaving ? '添加中...' : '添加模型';
             }
         }
 
@@ -618,6 +672,7 @@
                 setClaudeOAuthStatus(`认证文件已生成：${result.auth_file?.name || ''}`, 'success');
                 showMessage('Claude 认证文件已生成', 'success');
                 await loadClaudeAuthFiles();
+                await loadClaudeModels();
             } catch (error) {
                 console.error('提交 Claude 回调 URL 失败:', error);
                 setClaudeOAuthStatus(error?.message || '提交回调 URL 失败', 'error');
@@ -787,6 +842,176 @@
         }
 
         async function copyCodexModelName(modelName) {
+            const normalizedModelName = String(modelName || '').trim();
+            if (!normalizedModelName) return;
+            try {
+                await copyTextToClipboard(normalizedModelName);
+                showMessage('模型名已复制', 'success');
+            } catch (error) {
+                console.error('复制模型名失败:', error);
+                showActionError('复制模型名', error, { fallback: '复制模型名失败' });
+            }
+        }
+
+        function renderClaudeModels() {
+            const container = document.getElementById('claudeModelList');
+            const summary = document.getElementById('claudeModelSummary');
+            if (!container) return;
+            const models = Array.isArray(claudeAuthState.models) ? claudeAuthState.models : [];
+            if (summary) {
+                summary.textContent = '';
+            }
+            if (claudeAuthState.modelsLoading) {
+                container.innerHTML = '<div class="empty-state">正在加载模型...</div>';
+                return;
+            }
+            if (claudeAuthState.modelsError) {
+                container.innerHTML = `<div class="error">${escapeHtml(claudeAuthState.modelsError)}</div>`;
+                return;
+            }
+            if (!models.length) {
+                container.innerHTML = '<div class="empty-state">暂无可用 Claude 模型。</div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="oauth-model-grid">
+                    ${models.map(model => {
+                        const encodedModelId = encodeURIComponent(model.id || '');
+                        const isDeleting = claudeAuthState.deletingModelId === (model.id || '');
+                        const isConfirmingDelete = claudeAuthState.modelDeleteConfirmId === (model.id || '');
+                        return `
+                            <article class="oauth-model-item">
+                                <button type="button" class="oauth-model-main" onclick="copyClaudeModelName(decodeURIComponent('${encodedModelId}'))">
+                                    <span class="oauth-model-id">${escapeHtml(model.id || '')}</span>
+                                </button>
+                                <div class="oauth-model-delete-wrap">
+                                    <button
+                                        type="button"
+                                        class="oauth-icon-button oauth-icon-button-danger"
+                                        title="删除模型"
+                                        aria-label="删除模型 ${escapeHtml(model.id || '')}"
+                                        onclick="toggleClaudeModelDeleteConfirm(decodeURIComponent('${encodedModelId}'))"
+                                        ${isDeleting ? 'disabled' : ''}
+                                    >${renderTrashIcon()}</button>
+                                    ${isConfirmingDelete ? `
+                                        <div class="oauth-delete-popover" role="dialog" aria-label="确认删除模型">
+                                            <div class="oauth-delete-popover-title">删除这个模型？</div>
+                                            <div class="oauth-delete-popover-actions">
+                                                <button type="button" class="btn btn-secondary btn-sm" onclick="cancelClaudeModelDelete()">取消</button>
+                                                <button type="button" class="btn btn-danger btn-sm" onclick="deleteClaudeModel(decodeURIComponent('${encodedModelId}'))" ${isDeleting ? 'disabled' : ''}>删除</button>
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </article>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        async function loadClaudeModels() {
+            claudeAuthState.modelsLoading = true;
+            syncClaudeAuthControls();
+            renderClaudeModels();
+            try {
+                const response = await fetch('/api/oauth/claude/models', { cache: 'no-store' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '加载模型失败');
+                }
+                claudeAuthState.models = Array.isArray(result.models) ? result.models : [];
+                claudeAuthState.modelsError = '';
+            } catch (error) {
+                console.error('加载 Claude 模型失败:', error);
+                claudeAuthState.modelsError = error?.message || '加载模型失败';
+            } finally {
+                claudeAuthState.modelsLoading = false;
+                syncClaudeAuthControls();
+                renderClaudeModels();
+            }
+        }
+
+        function handleClaudeModelInputKeydown(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addClaudeModel();
+            }
+        }
+
+        async function addClaudeModel() {
+            const input = document.getElementById('claudeModelIdInput');
+            const modelId = input?.value?.trim() || '';
+            if (!modelId) {
+                showMessage('请先填写模型 ID', 'error');
+                return;
+            }
+            claudeAuthState.modelsSaving = true;
+            syncClaudeAuthControls();
+            try {
+                const response = await fetch('/api/oauth/claude/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_id: modelId }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '添加模型失败');
+                }
+                claudeAuthState.models = Array.isArray(result.models) ? result.models : [];
+                claudeAuthState.modelsError = '';
+                if (input) input.value = '';
+            } catch (error) {
+                console.error('添加 Claude 模型失败:', error);
+                showActionError('添加 Claude 模型', error, { fallback: '添加模型失败' });
+            } finally {
+                claudeAuthState.modelsSaving = false;
+                syncClaudeAuthControls();
+                renderClaudeModels();
+            }
+        }
+
+        function toggleClaudeModelDeleteConfirm(modelId) {
+            const normalizedModelId = String(modelId || '').trim();
+            claudeAuthState.modelDeleteConfirmId = claudeAuthState.modelDeleteConfirmId === normalizedModelId
+                ? ''
+                : normalizedModelId;
+            renderClaudeModels();
+        }
+
+        function cancelClaudeModelDelete() {
+            claudeAuthState.modelDeleteConfirmId = '';
+            renderClaudeModels();
+        }
+
+        async function deleteClaudeModel(modelId) {
+            const normalizedModelId = String(modelId || '').trim();
+            if (!normalizedModelId || claudeAuthState.deletingModelId) return;
+            claudeAuthState.deletingModelId = normalizedModelId;
+            renderClaudeModels();
+            try {
+                const response = await fetch(`/api/oauth/claude/models/${encodeURIComponent(normalizedModelId)}`, {
+                    method: 'DELETE',
+                    cache: 'no-store',
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '删除模型失败');
+                }
+                claudeAuthState.models = Array.isArray(result.models) ? result.models : [];
+                claudeAuthState.modelsError = '';
+                claudeAuthState.modelDeleteConfirmId = '';
+            } catch (error) {
+                console.error('删除 Claude 模型失败:', error);
+                showActionError('删除 Claude 模型', error, { fallback: '删除模型失败' });
+            } finally {
+                claudeAuthState.deletingModelId = '';
+                renderClaudeModels();
+            }
+        }
+
+        async function copyClaudeModelName(modelName) {
             const normalizedModelName = String(modelName || '').trim();
             if (!normalizedModelName) return;
             try {
@@ -1624,6 +1849,7 @@
             renderCodexAuthUrl();
             renderClaudeAuthUrl();
             loadCodexModels();
+            loadClaudeModels();
             loadCodexAuthFiles();
             loadClaudeAuthFiles();
         }

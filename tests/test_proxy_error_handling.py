@@ -202,6 +202,33 @@ class FakeCodexProxyService:
         )
 
 
+class FakeClaudeProxyService:
+    def __init__(self, models: tuple[str, ...] = ("claude-sonnet-4-5",), proxy_result=None) -> None:
+        self._models = models
+        self._proxy_result = proxy_result
+
+    def has_model(self, model_name: str) -> bool:
+        return model_name in self._models
+
+    def list_model_names(self) -> tuple[str, ...]:
+        return self._models
+
+    def proxy_request(self, *args, **kwargs):
+        del args, kwargs
+        if self._proxy_result is not None:
+            return self._proxy_result
+        return (
+            None,
+            503,
+            ProxyErrorInfo(
+                message="No available Claude OAuth account for model: claude-sonnet-4-5",
+                status_code=503,
+                error_type="upstream_error",
+                error_code="claude_auth_unavailable",
+            ),
+        )
+
+
 class ContextRecordingHook(BaseHook):
     def __init__(self) -> None:
         self.contexts: list[HookContext] = []
@@ -288,6 +315,39 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         codex_entry = next(item for item in payload["data"] if item["id"] == "gpt-5")
         self.assertEqual("codex", codex_entry["provider_name"])
         self.assertEqual("openai_responses", codex_entry["source_format"])
+
+    def test_list_models_includes_claude_oauth_models_without_provider_prefix(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("regular",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            claude_proxy_service=FakeClaudeProxyService(("claude-sonnet-4-5",)),
+        )
+
+        response = app.test_client().get("/v1/models")
+        payload = response.get_json()
+
+        self.assertEqual(200, response.status_code)
+        model_ids = [item["id"] for item in payload["data"]]
+        self.assertIn("demo/regular", model_ids)
+        self.assertIn("claude-sonnet-4-5", model_ids)
+        claude_entry = next(item for item in payload["data"] if item["id"] == "claude-sonnet-4-5")
+        self.assertEqual("claude", claude_entry["provider_name"])
+        self.assertEqual("claude_chat", claude_entry["source_format"])
 
     def test_list_models_filters_to_models_allowed_for_whitelisted_user(self) -> None:
         provider = LLMProvider(
@@ -479,6 +539,50 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         self.assertEqual("proxy_warning_required", payload["error"]["code"])
         self.assertEqual(confirmation_url, payload["error"]["details"]["confirmation_url"])
         self.assertEqual(302, payload["error"]["details"]["upstream_status"])
+
+    def test_claude_oauth_model_routes_to_claude_proxy(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            claude_proxy_service=FakeClaudeProxyService(
+                ("claude-sonnet-4-5",),
+                (
+                    None,
+                    503,
+                    ProxyErrorInfo(
+                        message="No available Claude OAuth account for model: claude-sonnet-4-5",
+                        status_code=503,
+                        error_type="upstream_error",
+                        error_code="claude_auth_unavailable",
+                    ),
+                ),
+            ),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            json={"model": "claude-sonnet-4-5", "messages": [{"role": "user", "content": "hi"}]},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        payload = response.get_json()
+
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("claude_auth_unavailable", payload["error"].get("code"))
 
     def test_responses_route_resolves_target_format_from_route(self) -> None:
         provider = LLMProvider(

@@ -75,11 +75,18 @@ downstream request
   - 生成 Claude OAuth PKCE 授权链接
   - 使用回调 URL 或手动粘贴的 `code#state` 换取 token 并写入本地认证文件
   - 列出和删除 `data/oauth/claude/*.json`
-  - token 交换遇到代理风险确认页时，会走统一自动确认重试流程
+  - 维护本地手动 Claude OAuth 模型目录
+  - 按本地模型目录和认证失败状态提供 Claude 请求候选账号
+  - token 交换与 token 刷新遇到代理风险确认页时，会走统一自动确认重试流程
 - `CodexProxyService`
   - 代理下游直接使用的 Codex 普通模型名
   - 使用 `data/oauth/codex/*.json` 中的 OAuth access token 请求 Codex backend
   - 遇到账号配额耗尽时标记临时冷却并尝试下一个账号
+  - 将每个认证文件最近一次数据面成功或失败结果写回 OAuth 状态
+- `ClaudeProxyService`
+  - 代理下游直接使用的 Claude 普通模型名
+  - 使用 `data/oauth/claude/*.json` 中的 OAuth access token 请求 Anthropic Messages
+  - 按 CPA / CLIProxyAPI 请求方式补齐 Claude Code OAuth headers，并在存在 billing header 时重签 `cch`
   - 将每个认证文件最近一次数据面成功或失败结果写回 OAuth 状态
 - `ProviderManager`
   - 加载 provider 配置
@@ -149,13 +156,15 @@ route family 直接决定当前请求的下游接口协议：
 
 - `source_format`
 
-Codex OAuth 模型是数据平面的例外路由：
+OAuth 模型是数据平面的例外路由：
 
 - Provider 配置模型仍使用 `{provider}/{model}` key
-- Codex OAuth 模型使用原始模型名，例如 `gpt-5-codex`
-- `ProxyController` 先查 Provider 映射，未命中时再查 Codex OAuth 模型目录
+- Codex / Claude OAuth 模型使用原始模型名，例如 `gpt-5-codex`、`claude-sonnet-4-5`
+- `ProxyController` 先查 Provider 映射，未命中时再查 Codex OAuth 模型目录，最后查 Claude OAuth 模型目录
 - `/v1/models` 对 Codex OAuth 暴露普通模型名，`provider_name` 固定为 `codex`
+- `/v1/models` 对 Claude OAuth 暴露普通模型名，`provider_name` 固定为 `claude`
 - Codex OAuth 代理复用 translator registry，把下游 `openai_chat` / `openai_responses` / `claude_chat` 转成 Codex backend 的 Responses 请求
+- Claude OAuth 代理复用 translator registry，把下游 `openai_chat` / `openai_responses` / `claude_chat` 转成 Anthropic Messages 请求
 
 `OPTIONS /v1/*` 由表现层 CORS 钩子直接返回 `204`，用于支持浏览器、Obsidian 插件等第三方应用的跨域预检，不进入 provider lookup、白名单校验或上游代理链路。实际 `/v1/*` 响应也会附加 CORS 响应头；后台 `/api/*` 和管理页面不开放跨域。
 
@@ -217,10 +226,10 @@ Codex OAuth 模型是数据平面的例外路由：
   - 只有开启后，系统设置页才展示 OAuth 代理服务和 SSL 校验设置
 - `oauth.proxy`
   - 保存后立即影响 OAuth 控制平面请求
-  - 用于 Codex / Claude OAuth token 交换、Codex token 刷新、配额查询与 Codex OAuth 数据面代理
+  - 用于 Codex / Claude OAuth token 交换、token 刷新、配额查询与 OAuth 数据面代理
   - 留空时直连上游
 - `oauth.verify_ssl`
-  - 保存后立即影响 OAuth 控制平面请求和 Codex OAuth 数据面代理
+  - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
   - 默认值为 `false`
   - 关闭时不校验 HTTPS 证书，便于本地代理或抓包代理场景
 
@@ -235,11 +244,14 @@ Codex OAuth 模型是数据平面的例外路由：
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
   - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件配额与最近一次模型代理状态
 - `ClaudeOAuthService`
-  - 每次 token 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
+  - 每次 token / models 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话
   - 认证文件保存在 `data/oauth/claude/`
+  - 在 `data/oauth/claude/.state/auth_files.json` 持久化最近一次模型代理状态
 - `CodexProxyService`
   - 每次 Codex 数据面请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
+- `ClaudeProxyService`
+  - 每次 Claude 数据面请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
 
 ### 3.3 Provider Runtime Contract
 
@@ -388,6 +400,9 @@ OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并�
   - `GET /api/oauth/codex/auth-files/<name>/quota`
   - `POST /api/oauth/claude/session`
   - `POST /api/oauth/claude/callback`
+  - `GET /api/oauth/claude/models`
+  - `POST /api/oauth/claude/models`
+  - `DELETE /api/oauth/claude/models/<model_id>`
   - `GET /api/oauth/claude/auth-files`
   - `DELETE /api/oauth/claude/auth-files/<name>`
 
@@ -420,6 +435,7 @@ OAuth Claude tab
   -> user pastes full callback URL or code#state
   -> token exchange
   -> write data/oauth/claude/*.json
+  -> list / manage local Claude model IDs
   -> list auth file token status
 ```
 
@@ -432,25 +448,30 @@ OAuth Claude tab
 - Codex 认证文件名沿用 CLIProxyAPI 规则：普通账号为 `codex-{email}-{plan}.json`，team 账号为 `codex-{account_id_sha256前8位}-{email}-team.json`
 - Claude 认证文件名沿用 CLIProxyAPI 规则：`claude-{email}.json`
 - Codex 模型目录缓存在 `data/oauth/codex/models.json`，文件内容只保存模型 ID 字符串数组
+- Claude 模型目录缓存在 `data/oauth/claude/models.json`，文件内容只保存模型 ID 字符串数组
 - 认证文件的最近配额、配额错误和数据面使用状态保存在 `data/oauth/codex/.state/auth_files.json`
+- Claude 认证文件最近一次数据面使用状态保存在 `data/oauth/claude/.state/auth_files.json`
 - 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
 - OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持全选后批量刷新额度和批量删除
 - OAuth 页面删除认证文件前会用气泡确认，确认后调用删除 API
-- Claude tab 当前只负责 Claude OAuth 认证文件生成、状态展示和删除，不参与 Provider 配置自动改写
 - Codex 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
+- Claude 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
 - 查询配额时如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
+- Claude OAuth 数据面请求前如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
 - 同一个认证文件的配额刷新使用进程内非阻塞锁；重复刷新请求会直接返回跳过结果，不重复访问 Codex 上游
 - 如果认证文件 access token 已过期且缺少 refresh token，请求候选筛选不会直接跳过；系统会先用当前 access token 尝试请求一次，再按上游返回的认证、配额或其他错误决定后续状态
 - 配额刷新会同步内存冷却状态：Codex 窗口耗尽时冷却该认证文件，恢复可用时立即清除冷却
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
-- token 交换、Codex token 刷新与配额查询会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
+- token 交换、token 刷新、配额查询与 OAuth 数据面代理会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
 - Codex 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
+- Claude OAuth 数据面请求会在转发 Anthropic Messages 前按 CPA 请求方式重签已有 Claude Code billing header 的 `cch`
+- Claude 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
 - 出站 HTTP 请求遇到代理风险确认页时，会自动确认一次并重试原请求；自动确认失败或重试后仍被拦截时，返回 `proxy_warning_required` 和确认页 URL
-- Codex 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
+- Codex / Claude 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
 - OAuth 登录、文件、配额与模型目录管理属于控制平面
-- Codex 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
+- Codex / Claude 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
 
 ## 4. Development View
 
@@ -480,9 +501,11 @@ OAuth Claude tab
 - [src/services/codex_oauth_service.py](../src/services/codex_oauth_service.py)
   - Codex OAuth PKCE、token 文件、本地模型 ID 目录与配额查询
 - [src/services/claude_oauth_service.py](../src/services/claude_oauth_service.py)
-  - Claude OAuth PKCE、token 文件生成与认证文件管理
+  - Claude OAuth PKCE、token 文件、本地模型 ID 目录与认证文件管理
 - [src/services/codex_proxy_service.py](../src/services/codex_proxy_service.py)
   - Codex OAuth 数据面代理与账号配额切换
+- [src/services/claude_proxy_service.py](../src/services/claude_proxy_service.py)
+  - Claude OAuth 数据面代理与账号切换
 - [src/presentation/oauth_controller.py](../src/presentation/oauth_controller.py)
   - OAuth 管理 API
 - [src/config/provider_config.py](../src/config/provider_config.py)
@@ -510,7 +533,7 @@ OAuth Claude tab
 - 一个配置文件
 - 一组滚动日志文件
 - 一组本地 OAuth 认证文件
-- 一个本地 Codex OAuth 模型目录缓存
+- 一组本地 OAuth 模型目录缓存
 - 多个 provider 指向多个真实上游
 - 下游统一接入这个代理
 
