@@ -12,6 +12,7 @@ from ..application.app_context import Logger
 from ..external import LLMProvider
 from ..hooks import HookContext, HookErrorType
 from ..translators import Translator
+from .anthropic_billing import resign_anthropic_messages_body_cch
 from .upstream_usage import ensure_upstream_usage_capture
 
 
@@ -79,6 +80,8 @@ def build_upstream_request(
         guarded_body,
         guarded_stream,
     )
+    if str(provider.source_format or "").strip().lower() == "claude_chat":
+        resign_anthropic_messages_body_cch(translated_body)
     ensure_upstream_usage_capture(provider.source_format, translated_body, guarded_stream)
     return BuiltUpstreamRequest(
         headers=headers,

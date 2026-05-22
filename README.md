@@ -198,6 +198,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - 一般按上游真实接口来选，例如 `/v1/chat/completions` 对应 `openai_chat`
 - `/v1/responses` 对应 `openai_responses`
 - `/v1/messages` 对应 `claude_chat`
+- `claude_chat` 上游如果请求体里已经带有 Claude Code billing header / `cch`，代理会在转发前重签已有 `cch`，但不会主动生成 billing header
 
 ### `auth_groups[]` 字段说明
 

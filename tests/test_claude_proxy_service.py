@@ -14,9 +14,13 @@ from flask import Flask
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
+from src.services.anthropic_billing import (
+    CLAUDE_CCH_SEED,
+    _json_body_bytes_for_requests,
+    _xxhash64,
+)
 from src.services.claude_oauth_service import ClaudeOAuthService
 from src.services.claude_proxy_service import (
-    CLAUDE_CCH_SEED,
     CLAUDE_MESSAGES_URL,
     CLAUDE_PACKAGE_VERSION,
     CLAUDE_USER_AGENT,
@@ -282,18 +286,12 @@ class ClaudeProxyServiceTests(unittest.TestCase):
         unsigned_system = [dict(item) for item in unsigned_body["system"]]
         unsigned_system[0]["text"] = f"{cch_prefix}cch=00000;{cch_suffix.split(';', 1)[1]}"
         unsigned_body["system"] = unsigned_system
-        expected_cch = (
-            ClaudeProxyService._xxhash64(
-                ClaudeProxyService._json_body_bytes_for_requests(unsigned_body),
-                CLAUDE_CCH_SEED,
-            )
-            & 0xFFFFF
-        )
+        expected_cch = _xxhash64(_json_body_bytes_for_requests(unsigned_body), CLAUDE_CCH_SEED) & 0xFFFFF
         self.assertIn(f"cch={expected_cch:05x};", signed_text)
         self.assertNotIn("cch=00000;", signed_text)
 
     def test_xxhash64_known_vector(self) -> None:
-        self.assertEqual(0xEF46DB3751D8E999, ClaudeProxyService._xxhash64(b""))
+        self.assertEqual(0xEF46DB3751D8E999, _xxhash64(b""))
 
 
 def json_module_dumps(payload: dict[str, Any]) -> bytes:
