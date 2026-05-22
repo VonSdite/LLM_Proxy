@@ -24,9 +24,45 @@
 .oauth-page .oauth-toolbar-meta {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
     gap: 14px;
     width: 100%;
+}
+
+.oauth-page .oauth-toolbar-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.oauth-page .oauth-toolbar-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.oauth-page .oauth-toolbar-pill strong {
+    margin: 0 4px;
+    color: var(--text-primary);
+}
+
+.oauth-page .oauth-toolbar-pill-primary {
+    border-color: rgba(58, 127, 237, 0.22);
+    background: rgba(58, 127, 237, 0.08);
+    color: var(--primary-active);
+}
+
+.oauth-page .oauth-toolbar-pill-primary strong {
+    color: currentColor;
 }
 
 .oauth-page .oauth-tabs {
@@ -933,6 +969,26 @@
     background: #0d1117;
 }
 
+:root[data-theme="dark"] .oauth-page .oauth-toolbar-pill {
+    border-color: #313b47;
+    background: rgba(255, 255, 255, 0.03);
+    color: #9da7b3;
+}
+
+:root[data-theme="dark"] .oauth-page .oauth-toolbar-pill strong {
+    color: #e6edf3;
+}
+
+:root[data-theme="dark"] .oauth-page .oauth-toolbar-pill-primary {
+    border-color: #2f5f97;
+    background: rgba(47, 129, 247, 0.12);
+    color: #9bc7ff;
+}
+
+:root[data-theme="dark"] .oauth-page .oauth-toolbar-pill-primary strong {
+    color: currentColor;
+}
+
 :root[data-theme="dark"] .oauth-page .oauth-tab-btn {
     color: #9da7b3;
 }
@@ -1054,6 +1110,7 @@
     }
 
     .oauth-page .oauth-toolbar-meta,
+    .oauth-page .oauth-toolbar-summary,
     .oauth-page .oauth-tabs {
         width: 100%;
     }
@@ -1068,8 +1125,16 @@
         justify-content: stretch;
     }
 
+    .oauth-page .oauth-toolbar-summary {
+        justify-content: flex-start;
+    }
+
     .oauth-page .oauth-tab-btn {
         flex: 1 1 0;
+    }
+
+    .oauth-page .oauth-toolbar-pill {
+        white-space: normal;
     }
 
     .oauth-page .oauth-card-header .btn,
