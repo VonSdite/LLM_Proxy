@@ -474,6 +474,42 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual("rewritten-model", built_request.translated_body["model"])
         self.assertEqual("rewritten-model", built_request.request_ctx.upstream_model)
 
+    def test_claude_chat_provider_resigns_existing_cch(self) -> None:
+        provider = LLMProvider(
+            name="claude-upstream",
+            api="https://example.com/v1/messages",
+            source_format="claude_chat",
+            target_formats=("claude_chat",),
+        )
+        original_billing_header = "x-anthropic-billing-header: user=demo; cch=11111; token=demo"
+
+        built_request = build_upstream_request(
+            root_path=Path(__file__).resolve().parents[1],
+            logger=FakeLogger(),
+            provider=provider,
+            request_model="claude-upstream/claude-sonnet-4-5",
+            upstream_model="claude-sonnet-4-5",
+            provider_target_format="claude_chat",
+            request_data={
+                "model": "claude-upstream/claude-sonnet-4-5",
+                "system": [{"type": "text", "text": original_billing_header}],
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
+                "stream": True,
+            },
+            request_headers={"content-type": "application/json"},
+            translator=ClaudePassthroughTranslator(),
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+            auth_group_name=None,
+            auth_entry_id=None,
+        )
+
+        signed_billing_header = built_request.translated_body["system"][0]["text"]
+        self.assertNotEqual(original_billing_header, signed_billing_header)
+        self.assertNotIn("cch=11111;", signed_billing_header)
+        self.assertRegex(signed_billing_header, r"\bcch=[0-9a-f]{5};")
+
     def test_proxy_service_sends_model_rewritten_by_request_guard_upstream(
         self,
     ) -> None:
