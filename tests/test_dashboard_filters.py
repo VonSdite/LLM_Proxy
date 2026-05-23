@@ -177,7 +177,7 @@ class DashboardFilterApiTests(unittest.TestCase):
             {(item["username"], item["request_model"]) for item in payload},
         )
 
-    def test_user_usage_summary_api_groups_by_username_and_request_model(self) -> None:
+    def test_user_usage_summary_api_groups_by_username(self) -> None:
         self._log_request("model-a", "resp-extra", 5, "10.0.0.1", datetime(2026, 4, 9, 9, 0, 0))
 
         response = self.client.get(
@@ -186,7 +186,6 @@ class DashboardFilterApiTests(unittest.TestCase):
                 ("start_date", self.DATE_FILTER["start_date"]),
                 ("end_date", self.DATE_FILTER["end_date"]),
                 ("username", "alice"),
-                ("request_model", "model-a"),
             ],
         )
 
@@ -194,9 +193,9 @@ class DashboardFilterApiTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(1, len(payload))
         self.assertEqual("alice", payload[0]["username"])
-        self.assertEqual("model-a", payload[0]["request_model"])
-        self.assertEqual(2, payload[0]["request_count"])
-        self.assertEqual(15, payload[0]["total_tokens"])
+        self.assertNotIn("request_model", payload[0])
+        self.assertEqual(3, payload[0]["request_count"])
+        self.assertEqual(35, payload[0]["total_tokens"])
         self.assertEqual(1, payload[0]["ip_count"])
         self.assertEqual("2026-04-09", payload[0]["last_request_date"])
 
@@ -287,6 +286,7 @@ class DashboardFilterApiTests(unittest.TestCase):
 
         self.assertIn("用户用量", workbook_xml)
         self.assertIn("关联 IP 数", sheet_xml)
+        self.assertNotIn("请求模型", sheet_xml)
         self.assertIn("alice", sheet_xml)
 
     def test_statistics_api_sorts_on_server(self) -> None:

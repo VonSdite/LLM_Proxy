@@ -33,7 +33,6 @@ class LogRepository:
 
     _USER_USAGE_SORT_COLUMNS = {
         "username": "COALESCE(NULLIF(u.username, ''), d.ip_address, '-')",
-        "request_model": "d.request_model",
         "request_count": "COALESCE(SUM(d.request_count), 0)",
         "total_tokens": "COALESCE(SUM(d.total_tokens), 0)",
         "prompt_tokens": "COALESCE(SUM(d.prompt_tokens), 0)",
@@ -298,7 +297,7 @@ class LogRepository:
         sort_key: str | None = None,
         sort_direction: str | None = None,
     ) -> list[sqlite3.Row]:
-        """按用户名与请求模型查询用量汇总。"""
+        """按用户名查询用量汇总。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
@@ -320,12 +319,11 @@ class LogRepository:
                 sort_key,
                 sort_direction,
                 "total_tokens",
-                "COALESCE(NULLIF(u.username, ''), d.ip_address, '-') ASC, d.request_model ASC",
+                "COALESCE(NULLIF(u.username, ''), d.ip_address, '-') ASC",
             )
             query = f"""
                 SELECT
                     COALESCE(NULLIF(u.username, ''), d.ip_address, '-') as username,
-                    d.request_model,
                     COALESCE(SUM(d.request_count), 0) as request_count,
                     COALESCE(SUM(d.total_tokens), 0) as total_tokens,
                     COALESCE(SUM(d.prompt_tokens), 0) as prompt_tokens,
@@ -335,7 +333,7 @@ class LogRepository:
                 FROM daily_request_stats d
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
-                GROUP BY COALESCE(NULLIF(u.username, ''), d.ip_address, '-'), d.request_model
+                GROUP BY COALESCE(NULLIF(u.username, ''), d.ip_address, '-')
                 {order_clause}
             """
             cursor.execute(query, params)

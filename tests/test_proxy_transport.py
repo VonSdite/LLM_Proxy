@@ -1856,6 +1856,7 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn("调用汇总</button>", index_html)
         self.assertIn("用户用量</button>", index_html)
         self.assertNotIn("用户用量汇总</button>", index_html)
+        self.assertNotIn("userUsageSortIndicator_request_model", index_html)
         self.assertIn('id="userUsageTable"', index_html)
         self.assertIn("function loadUserUsageSummary()", index_html)
         self.assertIn("function renderUserUsageSummary()", index_html)
