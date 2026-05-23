@@ -23,7 +23,7 @@ from ..external import LLMProvider
 from ..hooks import HookContext, HookErrorType
 from ..translators import build_default_translator_registry
 from ..utils.http_headers import merge_http_headers
-from ..utils.net import build_requests_proxies
+from ..utils.net import build_requests_proxy_settings
 from ..utils.proxy_warning import (
     PROXY_WARNING_ERROR_CODE,
     PROXY_WARNING_STATUS_CODE,
@@ -140,7 +140,13 @@ class ProxyService:
         timeout_seconds = provider.timeout_seconds
         max_retries = provider.max_retries
         verify_ssl = provider.verify_ssl
-        request_proxies = build_requests_proxies(provider.proxy)
+        proxy_settings = build_requests_proxy_settings(
+            provider.proxy_mode,
+            provider.proxy,
+            proxy_mode_error_message="Provider proxy_mode must be one of: direct, system, custom",
+            proxy_url_error_message="Provider proxy must be a valid absolute URL",
+        )
+        request_proxies = proxy_settings.proxies
         downstream_target_format = self._resolve_downstream_target_format(
             provider,
             resolved_target_format,

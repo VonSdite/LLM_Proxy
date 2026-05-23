@@ -19,7 +19,10 @@ from urllib.parse import parse_qs, unquote, urlencode, urlparse
 import requests
 
 from ..application.app_context import AppContext
-from ..utils.net import build_requests_proxies
+from ..utils.net import (
+    apply_requests_proxy_settings,
+    build_requests_proxy_settings,
+)
 from ..utils.proxy_warning import ProxyWarningRequired, request_with_proxy_warning_retry
 
 CLAUDE_AUTH_URL = "https://claude.ai/oauth/authorize"
@@ -321,9 +324,9 @@ class ClaudeOAuthService:
         url: str,
         **kwargs: Any,
     ) -> requests.Response:
-        request_options = self._build_request_options()
-        normalized_method = str(method or "").strip().upper()
         session = requests.Session()
+        request_options = self._build_request_options(session=session)
+        normalized_method = str(method or "").strip().upper()
 
         def send_request() -> requests.Response:
             if normalized_method == "POST":
@@ -348,16 +351,32 @@ class ClaudeOAuthService:
         finally:
             session.close()
 
-    def _build_request_options(self) -> dict[str, Any]:
+    def _build_request_options(self, *, session: requests.Session | None = None) -> dict[str, Any]:
         if self._config_manager is None:
+            if session is not None:
+                session.trust_env = False
             return {
                 "proxies": None,
                 "verify": False,
             }
+        proxy_settings = build_requests_proxy_settings(
+            self._get_oauth_proxy_mode(),
+            self._config_manager.get_oauth_proxy(),
+            proxy_mode_error_message="OAuth proxy_mode must be one of: direct, system, custom",
+            proxy_url_error_message="OAuth proxy must be a valid absolute URL",
+        )
+        if session is not None:
+            apply_requests_proxy_settings(session, proxy_settings)
         return {
-            "proxies": build_requests_proxies(self._config_manager.get_oauth_proxy()),
+            "proxies": proxy_settings.proxies,
             "verify": self._config_manager.is_oauth_verify_ssl_enabled(),
         }
+
+    def _get_oauth_proxy_mode(self) -> str | None:
+        getter = getattr(self._config_manager, "get_oauth_proxy_mode", None)
+        if callable(getter):
+            return getter()
+        return None
 
     def _refresh_auth_file(self, auth_file: Path, payload: dict[str, Any]) -> dict[str, Any]:
         refresh_token = str(payload.get("refresh_token") or "").strip()

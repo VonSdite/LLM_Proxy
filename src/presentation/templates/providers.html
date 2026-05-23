@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260419-5">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260419-6">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置{% endblock %}
@@ -173,7 +173,24 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">代理</label>
+                            <label class="form-label field-label-with-help">
+                                <span>代理模式</span>
+                                <button
+                                    type="button"
+                                    class="field-help-button"
+                                    data-provider-help-topic="proxy"
+                                    onclick="toggleProviderHelp('proxy', event)"
+                                    aria-label="查看代理模式说明"
+                                >?</button>
+                            </label>
+                            <select class="form-control" id="providerProxyMode" data-custom-select="true" onchange="syncProviderProxyFields()">
+                                <option value="direct">直连</option>
+                                <option value="system">系统代理</option>
+                                <option value="custom">自定义代理</option>
+                            </select>
+                        </div>
+                        <div class="mb-3" id="providerProxyCustomField" hidden>
+                            <label class="form-label">自定义代理</label>
                             <div class="sensitive-input-shell">
                                 <input
                                     type="text"
@@ -652,6 +669,16 @@
                     <p><strong>Legacy API Key 模式</strong> 会自动带上当前表单里的 Bearer Token。</p>
                     <p><strong>Auth Group 模式</strong> 必须显式选择一个 <code>Auth Entry</code>，并把这条 entry 的 headers 原样带去请求上游模型接口。</p>
                     <p>这一步只是帮你发现可选模型，不会修改上游协议，也不会自动替你决定 <code>source_format</code>。</p>
+                `,
+            },
+            proxy: {
+                title: '代理模式说明',
+                html: `
+                    <p><strong>直连</strong> 会关闭 <code>requests</code> 环境代理读取，不使用 <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> 等进程环境变量。</p>
+                    <p><strong>系统代理</strong> 会使用当前进程环境中的代理变量；如果环境里没有代理，实际会直连。它不保证读取操作系统桌面代理设置。</p>
+                    <p><strong>自定义代理</strong> 会使用这里填写的代理 URL，并忽略进程环境代理。</p>
+                    <p>自定义代理支持在 URL 中填写账号密码，保存时会自动转义账号密码里的特殊字符。</p>
+                    <p>如果账号密码里包含冒号，系统会把第一个冒号当成用户名和密码的分隔符；密码里包含冒号没问题，用户名里包含冒号需要手动写成 <code>%3A</code>。</p>
                 `,
             },
             model_test_auth_entry: {
@@ -2550,6 +2577,12 @@
                     return;
                 }
             }
+            const proxyMode = getProviderProxyMode();
+            const proxy = document.getElementById('providerProxy')?.value?.trim() || '';
+            if (proxyMode === 'custom' && !proxy) {
+                showMessage('请输入自定义代理地址', 'error');
+                return;
+            }
 
             rowsToTest.forEach(row => {
                 clearModelTestRowResult(row);
@@ -2660,6 +2693,19 @@
             }
             updateFetchModelsButtonState();
             renderModelTestTable();
+        }
+
+        function getProviderProxyMode() {
+            const mode = document.getElementById('providerProxyMode')?.value || 'direct';
+            return ['direct', 'system', 'custom'].includes(mode) ? mode : 'direct';
+        }
+
+        function syncProviderProxyFields() {
+            const customField = document.getElementById('providerProxyCustomField');
+            if (customField) {
+                customField.hidden = getProviderProxyMode() !== 'custom';
+            }
+            syncSensitiveInputToggle('providerProxy');
         }
 
         const providerSensitiveInputIds = ['providerApiKey', 'providerProxy'];
@@ -2809,13 +2855,15 @@
             const apiKey = authMode === 'legacy_api_key'
                 ? document.getElementById('providerApiKey').value.trim()
                 : '';
+            const proxyMode = getProviderProxyMode();
             return {
                 name: document.getElementById('providerName').value.trim(),
                 api: document.getElementById('providerApi').value.trim(),
                 source_format: document.getElementById('providerSourceFormat').value.trim() || 'openai_chat',
                 auth_group: authGroup,
                 api_key: apiKey,
-                proxy: document.getElementById('providerProxy').value.trim(),
+                proxy_mode: proxyMode,
+                proxy: proxyMode === 'custom' ? document.getElementById('providerProxy').value.trim() : '',
                 timeout_seconds: document.getElementById('providerTimeout').value.trim(),
                 max_retries: document.getElementById('providerRetries').value.trim(),
                 verify_ssl: document.getElementById('providerVerifySsl').value,
@@ -3029,6 +3077,8 @@
             setSelectValueOrFallback('providerAuthMode', authMode, 'legacy_api_key');
             renderProviderAuthGroupOptions(provider?.auth_group || '');
             document.getElementById('providerApiKey').value = provider?.api_key || '';
+            const proxyMode = provider?.proxy_mode || (provider?.proxy ? 'custom' : 'direct');
+            setSelectValueOrFallback('providerProxyMode', proxyMode, 'direct');
             document.getElementById('providerProxy').value = provider?.proxy || '';
             document.getElementById('providerTimeout').value = provider?.timeout_seconds || '';
             document.getElementById('providerRetries').value = provider?.max_retries || '';
@@ -3037,6 +3087,7 @@
             document.getElementById('providerHook').value = provider?.hook || '';
             resetProviderSensitiveInputs();
             updateProviderAuthModeFields();
+            syncProviderProxyFields();
             updateModelListCount();
             updateFetchModelsButtonState();
             renderModelTestTable();
@@ -4584,6 +4635,10 @@
                 showMessage('Auth Group 与 Legacy API Key 只能二选一', 'error');
                 return;
             }
+            if (payload.proxy_mode === 'custom' && !payload.proxy) {
+                showMessage('请输入自定义代理地址', 'error');
+                return;
+            }
 
             const isEdit = !!editingProviderName;
             const url = isEdit ? `/api/providers/${encodeURIComponent(editingProviderName)}` : '/api/providers';
@@ -4748,12 +4803,17 @@
                 showMessage('请先选择 Auth Entry', 'error');
                 return;
             }
+            if (payload.proxy_mode === 'custom' && !payload.proxy) {
+                showMessage('请输入自定义代理地址', 'error');
+                return;
+            }
 
             const params = new URLSearchParams({ api: payload.api });
             if (payload.api_key) params.set('api_key', payload.api_key);
             if (payload.auth_group) params.set('auth_group', payload.auth_group);
             if (payload.auth_group && authEntryId) params.set('auth_entry_id', authEntryId);
-            if (payload.proxy) params.set('proxy', payload.proxy);
+            if (payload.proxy_mode) params.set('proxy_mode', payload.proxy_mode);
+            if (payload.proxy_mode === 'custom' && payload.proxy) params.set('proxy', payload.proxy);
             if (payload.timeout_seconds) params.set('timeout_seconds', payload.timeout_seconds);
             if (payload.verify_ssl) params.set('verify_ssl', payload.verify_ssl);
 
@@ -4801,6 +4861,7 @@
             setupCustomSelect('providerAuthMode');
             setupCustomSelect('providerAuthGroup');
             setupCustomSelect('modelTestAuthEntry');
+            setupCustomSelect('providerProxyMode');
             setupCustomSelect('providerSourceFormat');
             setupCustomSelect('providerVerifySsl');
             setupCustomSelect('authGroupStrategy');
@@ -4919,6 +4980,7 @@
                 updateFetchModelsButtonState();
                 renderModelTestTable();
             });
+            document.getElementById('providerProxyMode').addEventListener('change', syncProviderProxyFields);
             document.getElementById('modelTestAuthEntry').addEventListener('change', function() {
                 renderModelTestTable();
             });

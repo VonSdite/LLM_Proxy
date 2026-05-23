@@ -255,6 +255,63 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual("openai_chat", runtime.primary_target_format)
         self.assertEqual(("openai_chat", "openai_responses", "claude_chat"), runtime.target_formats)
 
+    def test_provider_proxy_mode_defaults_to_direct_and_supports_system(self) -> None:
+        direct_schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "direct-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "model_list": ["demo"],
+            }
+        )
+        system_schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "system-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "proxy_mode": "system",
+                "proxy": "http://127.0.0.1:7890",
+                "model_list": ["demo"],
+            }
+        )
+
+        self.assertEqual("direct", direct_schema.proxy_mode)
+        self.assertIsNone(direct_schema.proxy)
+        self.assertNotIn("proxy_mode", direct_schema.to_mapping())
+        self.assertEqual("system", system_schema.proxy_mode)
+        self.assertIsNone(system_schema.proxy)
+        self.assertEqual("system", system_schema.to_mapping()["proxy_mode"])
+        self.assertNotIn("proxy", system_schema.to_mapping())
+
+    def test_provider_custom_proxy_encodes_credentials(self) -> None:
+        schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "custom-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "proxy_mode": "custom",
+                "proxy": "http://user:p@ss#word@127.0.0.1:7890",
+                "model_list": ["demo"],
+            }
+        )
+
+        self.assertEqual("custom", schema.proxy_mode)
+        self.assertEqual("http://user:p%40ss%23word@127.0.0.1:7890", schema.proxy)
+
+    def test_provider_custom_proxy_encodes_url_delimiters_in_credentials(self) -> None:
+        schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "custom-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "proxy_mode": "custom",
+                "proxy": "http://user:123/pa?ss#word@127.0.0.1:7890",
+                "model_list": ["demo"],
+            }
+        )
+
+        self.assertEqual("http://user:123%2Fpa%3Fss%23word@127.0.0.1:7890", schema.proxy)
+
     def test_provider_schema_rejects_target_formats_field(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): target_formats"):
             ProviderConfigSchema.from_mapping(
@@ -775,7 +832,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         self.assertIn('id="providerAuthMode"', html)
         self.assertIn('id="providerAuthGroup"', html)
+        self.assertIn('id="providerProxyMode"', html)
+        self.assertIn('id="providerProxyCustomField" hidden', html)
         self.assertIn('id="providerProxy"', html)
+        self.assertIn('data-provider-help-topic="proxy"', html)
         self.assertIn(
             'type="text"\n                                    class="form-control sensitive-input-control"\n                                    id="providerApiKey"',
             html,
@@ -786,6 +846,12 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         self.assertNotIn('data-sensitive-masked-type="password"', html)
         self.assertIn('data-sensitive-toggle-for="providerProxy"', html)
+        self.assertIn("function syncProviderProxyFields()", html)
+        self.assertIn("setupCustomSelect('providerProxyMode');", html)
+        self.assertIn("proxy_mode: proxyMode", html)
+        self.assertIn("HTTP_PROXY", html)
+        self.assertIn("它不保证读取操作系统桌面代理设置", html)
+        self.assertIn("用户名里包含冒号需要手动写成 <code>%3A</code>", html)
         self.assertIn("function handleSensitiveInputCopy(event)", html)
         self.assertIn("input?.addEventListener('copy', handleSensitiveInputCopy);", html)
         self.assertNotIn("providerTransportAutoSyncEnabled", html)
@@ -1284,9 +1350,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
 
         self.assertIn("OAuth", html)
         self.assertIn('id="oauthEnabled"', html)
+        self.assertIn('id="oauthProxyMode"', html)
+        self.assertIn('id="oauthProxyCustomField" hidden', html)
         self.assertIn('id="oauthProxy"', html)
         self.assertIn(
-            'type="text"\n                                        class="form-control sensitive-input-control"\n                                        id="oauthProxy"',
+            'type="text"\n                                                class="form-control sensitive-input-control"\n                                                id="oauthProxy"',
             html,
         )
         self.assertIn('class="form-control sensitive-input-control"', html)
@@ -1302,6 +1370,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="oauthDetailsPanel" hidden', html)
         self.assertNotIn('id="saveOAuthSettingsBtn"', html)
         self.assertIn("function collectOAuthSettingsPayload()", html)
+        self.assertIn("function getOAuthProxyMode()", html)
+        self.assertIn("function syncOAuthProxyFields()", html)
         self.assertNotIn("function scheduleOAuthSettingsSave(", html)
         self.assertNotIn("oauthAutoSaveDelayMs", html)
         self.assertIn("function syncOAuthDetailsVisibility(enabled)", html)
@@ -1313,7 +1383,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('data-settings-help-topic="oauth_enabled"', html)
         self.assertIn('data-settings-help-topic="oauth_proxy"', html)
         self.assertIn('data-settings-help-topic="oauth_verify_ssl"', html)
-        self.assertIn("Codex/Claude OAuth 登录换 token、token 刷新、Codex 配额查询和 OAuth 数据面代理", html)
+        self.assertIn("HTTP_PROXY", html)
+        self.assertIn("它不保证读取操作系统桌面代理设置", html)
+        self.assertIn("自定义代理支持在 URL 中填写账号密码", html)
+        self.assertIn("用户名里包含冒号需要手动写成 <code>%3A</code>", html)
         self.assertIn("OAuth token 请求、token 刷新、Codex 配额查询和 OAuth 数据面代理", html)
         self.assertNotIn('data-settings-help-topic="oauth_auto_confirm_proxy_warning"', html)
         self.assertIn("function showSettingsHelp(", html)
@@ -1322,6 +1395,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('popover.style.setProperty("--popover-arrow-left"', html)
         self.assertIn(".settings-page .oauth-enable-row", css)
         self.assertIn(".settings-page .oauth-details-panel[hidden]", css)
+        self.assertIn(".settings-page .oauth-settings-block", css)
+        self.assertIn(".settings-page .oauth-proxy-grid", css)
         self.assertIn(".settings-page .oauth-network-toggle", css)
         self.assertIn(".settings-page .settings-grid-oauth {", css)
         self.assertIn(".settings-page .settings-help-popover {\n    position: fixed;", css)

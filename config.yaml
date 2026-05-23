@@ -45,3 +45,4 @@ oauth:
   enabled: true
   proxy: ''
   verify_ssl: false
+  proxy_mode: direct

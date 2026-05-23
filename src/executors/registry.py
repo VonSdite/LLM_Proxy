@@ -18,6 +18,7 @@ from ..external import (
     probe_stream_response,
 )
 from ..proxy_core import resolve_stream_format
+from ..utils.net import apply_requests_proxy_settings, build_requests_proxy_settings
 from ..utils.proxy_warning import request_with_proxy_warning_retry
 from .contracts import Executor, OpenedUpstreamResponse
 
@@ -42,8 +43,15 @@ class HttpExecutor:
     ) -> OpenedUpstreamResponse:
         http_session = self._get_http_session()
         self._reset_http_session_state(http_session)
+        proxy_settings = build_requests_proxy_settings(
+            getattr(provider, "proxy_mode", None),
+            getattr(provider, "proxy", None),
+            proxy_mode_error_message="Provider proxy_mode must be one of: direct, system, custom",
+            proxy_url_error_message="Provider proxy must be a valid absolute URL",
+        )
+        apply_requests_proxy_settings(http_session, proxy_settings)
         request_options = {
-            "proxies": request_proxies,
+            "proxies": request_proxies if request_proxies is not None else proxy_settings.proxies,
             "verify": verify_ssl,
         }
         upstream_response = request_with_proxy_warning_retry(

@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from ..utils.net import normalize_proxy_url
+from ..utils.net import (
+    DEFAULT_PROXY_MODE,
+    PROXY_MODE_CUSTOM,
+    normalize_proxy_mode,
+    normalize_proxy_url,
+)
 
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 1200
 DEFAULT_PROVIDER_MAX_RETRIES = 3
@@ -34,6 +39,7 @@ SUPPORTED_PROVIDER_FIELDS = {
     "source_format",
     "api_key",
     "auth_group",
+    "proxy_mode",
     "proxy",
     "timeout_seconds",
     "max_retries",
@@ -409,6 +415,7 @@ class ProviderConfigSchema:
     target_formats: tuple[str, ...] = DEFAULT_PROVIDER_TARGET_FORMATS
     api_key: str | None = None
     auth_group: str | None = None
+    proxy_mode: str = DEFAULT_PROXY_MODE
     proxy: str | None = None
     timeout_seconds: int | None = None
     max_retries: int | None = None
@@ -442,6 +449,21 @@ class ProviderConfigSchema:
         if api_key and auth_group:
             raise ValueError("Provider must define either auth_group or api_key, not both")
 
+        proxy_mode = normalize_proxy_mode(
+            config.get("proxy_mode"),
+            proxy_value=config.get("proxy"),
+            error_message="Provider proxy_mode must be one of: direct, system, custom",
+        )
+        proxy = (
+            normalize_proxy_url(
+                config.get("proxy"),
+                required=True,
+                error_message="Provider proxy must be a valid absolute URL",
+            )
+            if proxy_mode == PROXY_MODE_CUSTOM
+            else None
+        )
+
         return cls(
             name=name,
             enabled=parse_optional_bool(
@@ -460,7 +482,8 @@ class ProviderConfigSchema:
             target_formats=DEFAULT_PROVIDER_TARGET_FORMATS,
             api_key=api_key,
             auth_group=auth_group,
-            proxy=normalize_proxy_url(config.get("proxy")),
+            proxy_mode=proxy_mode,
+            proxy=proxy,
             timeout_seconds=parse_optional_positive_int(config.get("timeout_seconds")),
             max_retries=parse_optional_positive_int(config.get("max_retries")),
             verify_ssl=parse_optional_bool(config.get("verify_ssl")),
@@ -489,6 +512,8 @@ class ProviderConfigSchema:
             config["api_key"] = self.api_key
         if self.auth_group is not None:
             config["auth_group"] = self.auth_group
+        if self.proxy_mode != DEFAULT_PROXY_MODE or self.proxy is not None:
+            config["proxy_mode"] = self.proxy_mode
         if self.proxy is not None:
             config["proxy"] = self.proxy
         if self.timeout_seconds is not None:
@@ -522,6 +547,7 @@ class RuntimeProviderSpec:
     auth_group: str | None
     model_list: tuple[str, ...]
     proxy: str | None
+    proxy_mode: str
     timeout_seconds: int
     max_retries: int
     verify_ssl: bool
@@ -544,6 +570,7 @@ class RuntimeProviderSpec:
             auth_group=config.auth_group,
             model_list=config.model_list,
             proxy=config.proxy,
+            proxy_mode=config.proxy_mode,
             timeout_seconds=config.timeout_seconds or DEFAULT_PROVIDER_TIMEOUT_SECONDS,
             max_retries=config.max_retries or DEFAULT_PROVIDER_MAX_RETRIES,
             verify_ssl=(config.verify_ssl if config.verify_ssl is not None else DEFAULT_PROVIDER_VERIFY_SSL),
@@ -569,6 +596,7 @@ class ProviderRuntimeView:
     legacy_api_key: bool
     model_list: tuple[str, ...]
     proxy: str | None
+    proxy_mode: str
     timeout_seconds: int
     max_retries: int
     verify_ssl: bool
@@ -587,6 +615,7 @@ class ProviderRuntimeView:
             legacy_api_key=legacy_api_key,
             model_list=spec.model_list,
             proxy=spec.proxy,
+            proxy_mode=spec.proxy_mode,
             timeout_seconds=spec.timeout_seconds,
             max_retries=spec.max_retries,
             verify_ssl=spec.verify_ssl,

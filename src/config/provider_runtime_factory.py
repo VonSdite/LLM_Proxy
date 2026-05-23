@@ -47,6 +47,7 @@ class ProviderRuntimeFactory:
             api_key=spec.api_key,
             auth_group=spec.auth_group,
             model_list=spec.model_list,
+            proxy_mode=spec.proxy_mode,
             proxy=spec.proxy,
             timeout_seconds=spec.timeout_seconds,
             max_retries=spec.max_retries,

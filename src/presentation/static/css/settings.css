@@ -102,16 +102,37 @@
 
 .settings-page .oauth-details-panel {
     display: grid;
-    grid-template-columns: minmax(260px, 1fr) minmax(190px, auto);
-    gap: 16px;
-    align-items: end;
+    gap: 14px;
+}
+
+.settings-page .oauth-details-panel[hidden] {
+    display: none !important;
+}
+
+.settings-page .oauth-settings-block {
+    display: grid;
+    gap: 14px;
     padding: 16px;
     border: 1px solid rgba(138, 160, 191, 0.3);
     border-radius: var(--radius-sm);
     background: rgba(248, 250, 252, 0.58);
 }
 
-.settings-page .oauth-details-panel[hidden] {
+.settings-page .oauth-settings-block-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.settings-page .oauth-proxy-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
+    gap: 16px;
+    align-items: end;
+}
+
+.settings-page .oauth-proxy-grid [hidden] {
     display: none !important;
 }
 
@@ -121,10 +142,7 @@
     justify-content: space-between;
     gap: 14px;
     min-height: 42px;
-    padding: 9px 12px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.78);
+    padding: 0;
 }
 
 .settings-page input[type="number"]::-webkit-outer-spin-button,
@@ -473,7 +491,7 @@
 }
 
 :root[data-theme="dark"] .settings-page .oauth-enable-row,
-:root[data-theme="dark"] .settings-page .oauth-details-panel {
+:root[data-theme="dark"] .settings-page .oauth-settings-block {
     border-color: #313b47;
     background: rgba(255, 255, 255, 0.03);
 }
@@ -586,7 +604,8 @@
         width: 100%;
     }
 
-    .settings-page .oauth-details-panel {
+    .settings-page .oauth-details-panel,
+    .settings-page .oauth-proxy-grid {
         grid-template-columns: 1fr;
     }
 

@@ -11,6 +11,13 @@ from typing import Any
 
 import yaml
 
+from ..utils.net import (
+    PROXY_MODE_CUSTOM,
+    PROXY_MODE_DIRECT,
+    normalize_proxy_mode,
+    normalize_proxy_url,
+)
+
 LOGGER = logging.getLogger("app")
 
 
@@ -52,11 +59,19 @@ class ConfigManager:
         return self._read_bool("logging.llm_request_debug_enabled", default=False)
 
     def get_oauth_proxy(self) -> str | None:
-        value = self.get("oauth.proxy")
-        if value is None:
+        if self.get_oauth_proxy_mode() != PROXY_MODE_CUSTOM:
             return None
-        normalized = str(value).strip()
-        return normalized or None
+        return normalize_proxy_url(
+            self.get("oauth.proxy"),
+            error_message="OAuth proxy must be a valid absolute URL",
+        )
+
+    def get_oauth_proxy_mode(self) -> str:
+        return normalize_proxy_mode(
+            self.get("oauth.proxy_mode"),
+            proxy_value=self.get("oauth.proxy"),
+            error_message="OAuth proxy_mode must be one of: direct, system, custom",
+        )
 
     def is_oauth_enabled(self) -> bool:
         return self._read_bool("oauth.enabled", default=False)
@@ -104,7 +119,7 @@ class ConfigManager:
         if changed:
             cls._write_config_file(path, normalized)
             LOGGER.info(
-                "Normalized legacy provider config fields: %s",
+                "Normalized legacy config fields: %s",
                 path,
             )
         return normalized
@@ -135,46 +150,66 @@ class ConfigManager:
     @classmethod
     def _normalize_config(cls, config: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         normalized = deepcopy(config)
-        providers = normalized.get("providers")
-        if not isinstance(providers, list):
-            return normalized, False
-
         changed = False
-        normalized_providers = []
-        for provider in providers:
-            if not isinstance(provider, dict):
-                normalized_providers.append(provider)
-                continue
+        providers = normalized.get("providers")
+        if isinstance(providers, list):
+            normalized_providers = []
+            for provider in providers:
+                if not isinstance(provider, dict):
+                    normalized_providers.append(provider)
+                    continue
 
-            normalized_provider = dict(provider)
-            # TODO: 兼容历史配置里仍在使用 `target_format` / `target_formats` 的旧版本。
-            # 当前公开配置与 API 已移除这两个字段，先在加载阶段自动删除并回写配置，
-            # 待完成几个版本的迁移窗口后删除这段兼容逻辑。
-            if "target_format" in normalized_provider:
-                normalized_provider.pop("target_format", None)
-                changed = True
-            if "target_formats" in normalized_provider:
-                normalized_provider.pop("target_formats", None)
-                changed = True
+                normalized_provider = dict(provider)
+                # TODO: 兼容历史配置里仍在使用 `target_format` / `target_formats` 的旧版本。
+                # 当前公开配置与 API 已移除这两个字段，先在加载阶段自动删除并回写配置，
+                # 待完成几个版本的迁移窗口后删除这段兼容逻辑。
+                if "target_format" in normalized_provider:
+                    normalized_provider.pop("target_format", None)
+                    changed = True
+                if "target_formats" in normalized_provider:
+                    normalized_provider.pop("target_formats", None)
+                    changed = True
 
-            # TODO: 兼容历史配置里仍在使用 `transport` 的旧版本。
-            # Provider 上游传输已固定为 HTTP，先在加载阶段自动删除并回写配置；
-            # 待完成几个版本的迁移窗口后删除这段兼容逻辑。
-            if "transport" in normalized_provider:
-                normalized_provider.pop("transport", None)
-                changed = True
+                # TODO: 兼容历史配置里仍在使用 `transport` 的旧版本。
+                # Provider 上游传输已固定为 HTTP，先在加载阶段自动删除并回写配置；
+                # 待完成几个版本的迁移窗口后删除这段兼容逻辑。
+                if "transport" in normalized_provider:
+                    normalized_provider.pop("transport", None)
+                    changed = True
 
-            # TODO: 兼容历史本地配置里仍在使用已移除的 `codex` 协议值。
-            # 先在启动加载阶段自动修正并落盘，让旧版本配置可以平滑启动；待完成几个版本的迁移窗口后删除这段兼容逻辑。
-            source_format = normalized_provider.get("source_format")
-            if isinstance(source_format, str) and source_format.strip().lower() == "codex":
-                normalized_provider["source_format"] = "openai_responses"
-                changed = True
-            normalized_providers.append(normalized_provider)
+                # TODO: 兼容历史本地配置里仍在使用已移除的 `codex` 协议值。
+                # 先在启动加载阶段自动修正并落盘，让旧版本配置可以平滑启动；待完成几个版本的迁移窗口后删除这段兼容逻辑。
+                source_format = normalized_provider.get("source_format")
+                if isinstance(source_format, str) and source_format.strip().lower() == "codex":
+                    normalized_provider["source_format"] = "openai_responses"
+                    changed = True
 
-        if changed:
-            normalized["providers"] = normalized_providers
+                if not cls._has_text_value(normalized_provider.get("proxy_mode")):
+                    normalized_provider["proxy_mode"] = (
+                        PROXY_MODE_CUSTOM
+                        if cls._has_text_value(normalized_provider.get("proxy"))
+                        else PROXY_MODE_DIRECT
+                    )
+                    changed = True
+                normalized_providers.append(normalized_provider)
+
+            if changed:
+                normalized["providers"] = normalized_providers
+        oauth = normalized.get("oauth")
+        if isinstance(oauth, dict) and not cls._has_text_value(oauth.get("proxy_mode")):
+            normalized_oauth = dict(oauth)
+            normalized_oauth["proxy_mode"] = (
+                PROXY_MODE_CUSTOM
+                if cls._has_text_value(normalized_oauth.get("proxy"))
+                else PROXY_MODE_DIRECT
+            )
+            normalized["oauth"] = normalized_oauth
+            changed = True
         return normalized, changed
+
+    @staticmethod
+    def _has_text_value(value: Any) -> bool:
+        return bool(str(value or "").strip())
 
     def _read_bool(self, key: str, default: bool = False) -> bool:
         value = self.get(key, default)

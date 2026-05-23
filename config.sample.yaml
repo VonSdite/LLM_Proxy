@@ -28,7 +28,9 @@ admin:
 
 oauth:
   enabled: false
-  # OAuth 登录、token 刷新、配额查询和 Codex 上游请求使用的代理地址。
+  # 支持 direct / system / custom；custom 时才读取 proxy。
+  proxy_mode: direct
+  # 自定义代理地址。账号密码可直接写在 URL 里，系统会规范化转义。
   proxy: ""
   verify_ssl: false
 
@@ -59,6 +61,7 @@ providers:
     api: https://api.openai.com/v1/chat/completions
     source_format: openai_chat
     auth_group: openai-shared
+    proxy_mode: direct
     verify_ssl: true
     timeout_seconds: 1200
     max_retries: 3

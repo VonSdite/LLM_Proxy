@@ -192,6 +192,7 @@ OAuth 模型是数据平面的例外路由：
 - `logging.level`
 - `logging.llm_request_debug_enabled`
 - `oauth.enabled`
+- `oauth.proxy_mode`
 - `oauth.proxy`
 - `oauth.verify_ssl`
 
@@ -225,10 +226,15 @@ OAuth 模型是数据平面的例外路由：
   - 保存后立即影响管理后台顶部 OAuth 页签是否显示
   - 默认值为 `false`
   - 只有开启后，系统设置页才展示 OAuth 代理服务和 SSL 校验设置
+- `oauth.proxy_mode`
+  - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
+  - 支持 `direct` / `system` / `custom`
+  - `direct` 会绕开进程环境代理，`system` 会使用进程环境代理，`custom` 会读取 `oauth.proxy`
 - `oauth.proxy`
   - 保存后立即影响 OAuth 控制平面请求
   - 用于 Codex / Claude OAuth token 交换、token 刷新、Codex 配额查询与 OAuth 数据面代理
-  - 留空时直连上游
+  - 仅在 `oauth.proxy_mode=custom` 时生效
+  - 自定义代理 URL 中 userinfo 的账号密码会在保存时规范化转义
 - `oauth.verify_ssl`
   - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
   - 默认值为 `false`
@@ -241,18 +247,18 @@ OAuth 模型是数据平面的例外路由：
 - `WebController`
   - 渲染后台页面时读取当前 `oauth.enabled`，用于决定是否输出 OAuth 顶层导航项
 - `CodexOAuthService`
-  - 每次 token / quota / models 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
+  - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
   - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件配额、最近一次模型代理状态与最近成功认证文件
 - `ClaudeOAuthService`
-  - 每次 token / models 请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
+  - 每次 token / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话
   - 认证文件保存在 `data/oauth/claude/`
   - 在 `data/oauth/claude/.state/auth_files.json` 持久化最近一次模型代理状态与最近成功认证文件
 - `CodexProxyService`
-  - 每次 Codex 数据面请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
+  - 每次 Codex 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
 - `ClaudeProxyService`
-  - 每次 Claude 数据面请求读取当前 `oauth.proxy` 与 `oauth.verify_ssl`
+  - 每次 Claude 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
 
 ### 3.3 Provider Runtime Contract
 
@@ -263,6 +269,7 @@ Provider 公共配置字段只有：
 - `source_format`
 - `api_key`
 - `auth_group`
+- `proxy_mode`
 - `proxy`
 - `timeout_seconds`
 - `max_retries`
@@ -274,8 +281,15 @@ Provider 公共配置字段只有：
 
 - `source_format`
   - 上游真实协议
+- `proxy_mode`
+  - 支持 `direct` / `system` / `custom`
+  - `direct` 明确绕开环境代理，`system` 使用进程环境代理，`custom` 使用 `proxy`
+- `proxy`
+  - 仅在 `proxy_mode=custom` 时生效
+  - 自定义代理 URL 中 userinfo 的账号密码会在保存时规范化转义
 
 历史配置载入时会自动删除 `target_format`、`target_formats` 和 `transport` 并回写配置文件，用于兼容迁移窗口内的旧配置。
+历史 Provider / OAuth 配置缺少 `proxy_mode` 时也会在载入阶段自动回写：有 `proxy` 的配置补为 `custom`，没有 `proxy` 的配置补为 `direct`。
 
 没有公共 `transport` 或 `stream_format` 字段；Provider 上游传输固定由 HTTP executor 处理。
 
@@ -358,6 +372,7 @@ provider editor form snapshot
 行为约束：
 
 - 这两条都是控制平面能力，不经过下游 `/v1/chat/completions` / `/v1/responses` / `/v1/messages`
+- 两条链路都会使用 Provider 表单快照中的 `proxy_mode`、`proxy` 和 `verify_ssl`
 - Provider 编辑页的 `model_list` 采用表格编辑，并以当前前端行状态作为唯一数据源
 - 只应用 request-side hook：
   - `header_hook`
@@ -467,7 +482,7 @@ OAuth Claude tab
 - Codex 数据面请求成功后，如果本地配额快照中的 Codex 窗口重置时间已经到期，会最佳努力刷新该认证文件的前端配额快照；刷新失败不会阻断本次模型响应
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
-- token 交换、token 刷新、Codex 配额查询与 OAuth 数据面代理会使用系统设置中的 `oauth.proxy` 和 `oauth.verify_ssl`
+- token 交换、token 刷新、Codex 配额查询与 OAuth 数据面代理会使用系统设置中的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`
 - Codex 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
 - Claude OAuth 数据面请求会在转发 Anthropic Messages 前按 CPA 请求方式重签已有 Claude Code billing header 的 `cch`
 - 普通 Provider 如果 `source_format=claude_chat`，也会在上游 body 已有 Claude Code billing header 时重签 `cch`；不会主动生成 billing header

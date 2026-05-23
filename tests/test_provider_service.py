@@ -152,6 +152,79 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual("openai_responses", persisted_provider["source_format"])
         self.assertNotIn("target_formats", persisted_provider)
 
+    def test_config_manager_backfills_provider_proxy_mode_on_load(self) -> None:
+        self._write_config(
+            {
+                "auth_groups": [],
+                "providers": [
+                    {
+                        "name": "direct-provider",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "sk-direct",
+                        "model_list": ["gpt-4.1"],
+                    },
+                    {
+                        "name": "custom-provider",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "sk-custom",
+                        "proxy": "http://127.0.0.1:7890",
+                        "model_list": ["gpt-4.1-mini"],
+                    },
+                ],
+            }
+        )
+
+        migrated_manager = ConfigManager(self.config_path, self.root_path)
+
+        providers = migrated_manager.get_raw_config()["providers"]
+        self.assertEqual("direct", providers[0]["proxy_mode"])
+        self.assertEqual("custom", providers[1]["proxy_mode"])
+
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        persisted_providers = persisted["providers"]
+        self.assertEqual("direct", persisted_providers[0]["proxy_mode"])
+        self.assertEqual("custom", persisted_providers[1]["proxy_mode"])
+
+    def test_config_manager_backfills_oauth_proxy_mode_on_load(self) -> None:
+        self._write_config(
+            {
+                "auth_groups": [],
+                "oauth": {
+                    "enabled": True,
+                    "proxy": "http://127.0.0.1:7890",
+                    "verify_ssl": False,
+                },
+                "providers": [],
+            }
+        )
+
+        migrated_manager = ConfigManager(self.config_path, self.root_path)
+
+        self.assertEqual("custom", migrated_manager.get_raw_config()["oauth"]["proxy_mode"])
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        self.assertEqual("custom", persisted["oauth"]["proxy_mode"])
+
+    def test_config_manager_backfills_oauth_direct_without_providers_on_load(self) -> None:
+        self._write_config(
+            {
+                "auth_groups": [],
+                "oauth": {
+                    "enabled": False,
+                    "proxy": "",
+                    "verify_ssl": False,
+                },
+            }
+        )
+
+        migrated_manager = ConfigManager(self.config_path, self.root_path)
+
+        self.assertEqual("direct", migrated_manager.get_raw_config()["oauth"]["proxy_mode"])
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        self.assertEqual("direct", persisted["oauth"]["proxy_mode"])
+
     def test_update_provider_preserves_enabled_when_payload_omits_enabled(self) -> None:
         self._seed_providers(
             [

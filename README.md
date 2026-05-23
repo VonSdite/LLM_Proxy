@@ -44,6 +44,7 @@ server:
 
 # oauth:
 #   enabled: false
+#   proxy_mode: direct
 #   proxy: ""
 #   verify_ssl: false
 
@@ -327,11 +328,12 @@ OAuth 代理是独立于常规 Provider 的运行时能力。它不需要在 `pr
 ```yaml
 oauth:
   enabled: true
+  proxy_mode: direct
   proxy: ""
   verify_ssl: false
 ```
 
-开启后，后台导航会显示 `/oauth` 页面。`proxy` 和 `verify_ssl` 会同时影响 OAuth 登录换 token、Codex 配额查询和 OAuth 上游代理请求。
+开启后，后台导航会显示 `/oauth` 页面。`proxy_mode` 支持 `direct`、`system`、`custom`；只有 `custom` 会读取 `proxy`。`proxy_mode`、`proxy` 和 `verify_ssl` 会同时影响 OAuth 登录换 token、Codex 配额查询和 OAuth 上游代理请求。自定义代理 URL 中的账号密码会由系统规范化转义。旧配置缺少 `proxy_mode` 时，启动加载会按是否存在 `proxy` 自动回写为 `custom` 或 `direct`。
 
 ### 2. 生成 OAuth 认证文件
 
