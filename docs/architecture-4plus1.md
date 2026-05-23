@@ -57,6 +57,7 @@ downstream request
   - 直接处理 `OPTIONS /v1/*` 预检请求
 - `WebController`
   - 提供 Provider、用户、统计与系统设置页面
+  - 暴露统计汇总、用户用量汇总、请求明细与当前页签 Excel 导出接口
   - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
   - 暴露系统设置读取与保存接口
 - `OAuthController`

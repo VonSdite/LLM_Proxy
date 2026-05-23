@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import ipaddress
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlparse
 

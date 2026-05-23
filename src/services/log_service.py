@@ -98,7 +98,8 @@ class LogService:
                 for row in rows
             ]
             self._logger.debug(
-                "Statistics queried: start_date=%s end_date=%s username=%s request_model=%s sort_key=%s sort_direction=%s rows=%s",
+                "Statistics queried: start_date=%s end_date=%s username=%s request_model=%s "
+                "sort_key=%s sort_direction=%s rows=%s",
                 start_date,
                 end_date,
                 username,
@@ -110,6 +111,54 @@ class LogService:
             return result
         except Exception as exc:
             self._logger.error(f"Failed to get statistics: {exc}")
+            return []
+
+    def get_user_usage_summary(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """获取用户与请求模型维度的用量汇总。"""
+        try:
+            rows = self._repository.get_user_usage_summary(
+                start_date,
+                end_date,
+                username=username,
+                request_model=request_model,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
+            )
+            result = [
+                {
+                    "username": row["username"],
+                    "request_model": row["request_model"],
+                    "request_count": row["request_count"],
+                    "total_tokens": row["total_tokens"],
+                    "prompt_tokens": row["prompt_tokens"],
+                    "completion_tokens": row["completion_tokens"],
+                    "ip_count": row["ip_count"],
+                    "last_request_date": row["last_request_date"],
+                }
+                for row in rows
+            ]
+            self._logger.debug(
+                "User usage summary queried: start_date=%s end_date=%s username=%s request_model=%s "
+                "sort_key=%s sort_direction=%s rows=%s",
+                start_date,
+                end_date,
+                username,
+                request_model,
+                sort_key,
+                sort_direction,
+                len(result),
+            )
+            return result
+        except Exception as exc:
+            self._logger.error(f"Failed to get user usage summary: {exc}")
             return []
 
     def get_request_logs(
@@ -146,6 +195,30 @@ class LogService:
                 "total_pages": 0,
                 "logs": [],
             }
+
+    def get_all_request_logs(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """获取完整请求日志列表。"""
+        try:
+            rows = self._repository.get_all_logs(
+                start_date,
+                end_date,
+                username=username,
+                request_model=request_model,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
+            )
+            return [self._normalize_log_timestamps(dict(row)) for row in rows]
+        except Exception as exc:
+            self._logger.error(f"Failed to get all request logs: {exc}")
+            return []
 
     def get_unique_usernames(self) -> list[str]:
         """获取有日志记录的用户名列表。"""
