@@ -10,7 +10,7 @@
             visibility: hidden;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/settings.css?v=20260517-2" id="settingsPageStyles">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260517-3" id="settingsPageStyles">
     <script>
         (function () {
             const root = document.documentElement;
@@ -194,29 +194,26 @@
                             <section class="oauth-settings-block">
                                 <div class="oauth-settings-block-header">
                                     <div class="setting-toggle-title-row">
-                                        <span class="setting-toggle-title">代理</span>
+                                        <span class="setting-toggle-title">OAuth 出站代理</span>
                                         <button
                                             type="button"
                                             class="field-help-button"
                                             data-settings-help-topic="oauth_proxy"
                                             onclick="toggleSettingsHelp('oauth_proxy', event)"
-                                            aria-label="查看 OAuth 代理服务说明"
+                                            aria-label="查看 OAuth 出站代理说明"
                                         >?</button>
                                     </div>
                                 </div>
-                                <div class="oauth-proxy-grid">
-                                    <div class="setting-field">
-                                        <label class="setting-label" for="oauthProxyMode">代理模式</label>
+                                <div class="oauth-proxy-grid" id="oauthProxyRow">
+                                    <div class="setting-field oauth-proxy-mode-field">
+                                        <label class="setting-label" for="oauthProxyMode">OAuth 出站代理模式</label>
                                         <select class="form-control settings-select" id="oauthProxyMode">
                                             <option value="direct">直连</option>
                                             <option value="system">系统代理</option>
                                             <option value="custom">自定义代理</option>
                                         </select>
                                     </div>
-                                    <div class="setting-field" id="oauthProxyCustomField" hidden>
-                                        <label class="setting-label" for="oauthProxy">
-                                            <span>自定义代理</span>
-                                        </label>
+                                    <div class="setting-field oauth-proxy-custom-field" id="oauthProxyCustomField" hidden>
                                         <div class="sensitive-input-shell">
                                             <input
                                                 type="text"
@@ -225,17 +222,18 @@
                                                 placeholder="例如 http://user:pass@127.0.0.1:7890"
                                                 autocomplete="off"
                                                 spellcheck="false"
+                                                aria-label="自定义 OAuth 出站代理地址"
                                             >
                                             <button
                                                 type="button"
                                                 class="sensitive-input-toggle"
                                                 data-sensitive-toggle-for="oauthProxy"
-                                                data-sensitive-label="代理服务"
+                                                data-sensitive-label="OAuth 出站代理"
                                                 onclick="toggleSensitiveInputVisibility('oauthProxy')"
                                                 aria-controls="oauthProxy"
                                                 aria-pressed="false"
-                                                aria-label="显示代理服务"
-                                                title="显示代理服务"
+                                                aria-label="显示 OAuth 出站代理"
+                                                title="显示 OAuth 出站代理"
                                             >
                                                 <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                                                     <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -247,7 +245,7 @@
                                                     <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                                                     <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                                                 </svg>
-                                                <span class="visually-hidden">显示代理服务</span>
+                                                <span class="visually-hidden">显示 OAuth 出站代理</span>
                                             </button>
                                         </div>
                                     </div>
@@ -390,8 +388,9 @@
                 `
             },
             oauth_proxy: {
-                title: "OAuth 代理服务",
+                title: "OAuth 出站代理说明",
                 html: `
+                    <p>这里的代理是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的 HTTP/HTTPS 出站代理，不是下游客户端访问本服务的入口代理。</p>
                     <p>直连会关闭 <code>requests</code> 环境代理读取，不使用 <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> 等进程环境变量。</p>
                     <p>系统代理会使用当前进程环境中的代理变量；如果环境里没有代理，实际会直连。它不保证读取操作系统桌面代理设置。</p>
                     <p>自定义代理会使用这里填写的代理 URL，并忽略进程环境代理。</p>
@@ -677,9 +676,14 @@
         }
 
         function syncOAuthProxyFields() {
+            const row = document.getElementById("oauthProxyRow");
             const customField = document.getElementById("oauthProxyCustomField");
+            const isCustom = getOAuthProxyMode() === "custom";
+            if (row) {
+                row.classList.toggle("is-custom", isCustom);
+            }
             if (customField) {
-                customField.hidden = getOAuthProxyMode() !== "custom";
+                customField.hidden = !isCustom;
             }
             syncSensitiveInputToggle("oauthProxy");
         }
@@ -786,7 +790,7 @@
 
             const payload = collectOAuthSettingsPayload();
             if (payload.oauth.enabled && payload.oauth.proxy_mode === "custom" && !payload.oauth.proxy) {
-                showMessage("请输入 OAuth 自定义代理地址", "error");
+                showMessage("请输入 OAuth 自定义出站代理地址", "error");
                 return Promise.resolve();
             }
             const savedPayloadSnapshot = JSON.stringify(payload);

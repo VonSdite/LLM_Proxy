@@ -833,15 +833,15 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="providerAuthMode"', html)
         self.assertIn('id="providerAuthGroup"', html)
         self.assertIn('id="providerProxyMode"', html)
+        self.assertIn('id="providerProxyRow"', html)
         self.assertIn('id="providerProxyCustomField" hidden', html)
+        self.assertIn('class="provider-proxy-custom-field" id="providerProxyCustomField" hidden', html)
         self.assertIn('id="providerProxy"', html)
         self.assertIn('data-provider-help-topic="proxy"', html)
+        self.assertIn("上游出站代理模式", html)
+        self.assertIn('aria-label="自定义上游出站代理地址"', html)
         self.assertIn(
             'type="text"\n                                    class="form-control sensitive-input-control"\n                                    id="providerApiKey"',
-            html,
-        )
-        self.assertIn(
-            'type="text"\n                                    class="form-control sensitive-input-control"\n                                    id="providerProxy"',
             html,
         )
         self.assertNotIn('data-sensitive-masked-type="password"', html)
@@ -849,6 +849,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function syncProviderProxyFields()", html)
         self.assertIn("setupCustomSelect('providerProxyMode');", html)
         self.assertIn("proxy_mode: proxyMode", html)
+        self.assertIn("不是下游客户端访问本服务的入口代理", html)
         self.assertIn("HTTP_PROXY", html)
         self.assertIn("它不保证读取操作系统桌面代理设置", html)
         self.assertIn("用户名里包含冒号需要手动写成 <code>%3A</code>", html)
@@ -1109,6 +1110,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page #providersContainer.providers-table-shell {", css)
         self.assertIn(':root[data-theme="dark"] .providers-page .provider-group-card {', css)
         self.assertIn(".providers-page .provider-editor-modal .provider-form-grid {", css)
+        self.assertIn(".providers-page .provider-proxy-row {", css)
+        self.assertIn(".providers-page .provider-proxy-row.is-custom {", css)
         self.assertIn(".providers-page .provider-editor-modal .provider-model-list-section {", css)
         self.assertNotIn(".providers-page .provider-modal-tabs {", css)
         self.assertNotIn(".providers-page .provider-modal-tab-btn {", css)
@@ -1351,15 +1354,14 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("OAuth", html)
         self.assertIn('id="oauthEnabled"', html)
         self.assertIn('id="oauthProxyMode"', html)
+        self.assertIn('id="oauthProxyRow"', html)
         self.assertIn('id="oauthProxyCustomField" hidden', html)
+        self.assertIn('class="setting-field oauth-proxy-custom-field" id="oauthProxyCustomField" hidden', html)
         self.assertIn('id="oauthProxy"', html)
-        self.assertIn(
-            'type="text"\n                                                class="form-control sensitive-input-control"\n                                                id="oauthProxy"',
-            html,
-        )
+        self.assertIn('aria-label="自定义 OAuth 出站代理地址"', html)
         self.assertIn('class="form-control sensitive-input-control"', html)
         self.assertIn('data-sensitive-toggle-for="oauthProxy"', html)
-        self.assertIn('data-sensitive-label="代理服务"', html)
+        self.assertIn('data-sensitive-label="OAuth 出站代理"', html)
         self.assertIn('const settingsSensitiveInputIds = ["adminPassword", "oauthProxy"];', html)
         self.assertIn("function handleSensitiveInputCopy(event)", html)
         self.assertIn('input.addEventListener("copy", handleSensitiveInputCopy);', html)
@@ -1383,6 +1385,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('data-settings-help-topic="oauth_enabled"', html)
         self.assertIn('data-settings-help-topic="oauth_proxy"', html)
         self.assertIn('data-settings-help-topic="oauth_verify_ssl"', html)
+        self.assertIn("OAuth 出站代理模式", html)
+        self.assertIn("不是下游客户端访问本服务的入口代理", html)
         self.assertIn("HTTP_PROXY", html)
         self.assertIn("它不保证读取操作系统桌面代理设置", html)
         self.assertIn("自定义代理支持在 URL 中填写账号密码", html)
@@ -1397,6 +1401,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".settings-page .oauth-details-panel[hidden]", css)
         self.assertIn(".settings-page .oauth-settings-block", css)
         self.assertIn(".settings-page .oauth-proxy-grid", css)
+        self.assertIn(".settings-page .oauth-proxy-grid.is-custom", css)
+        self.assertIn(".settings-page .oauth-settings-block-ssl", css)
         self.assertIn(".settings-page .oauth-network-toggle", css)
         self.assertIn(".settings-page .settings-grid-oauth {", css)
         self.assertIn(".settings-page .settings-help-popover {\n    position: fixed;", css)

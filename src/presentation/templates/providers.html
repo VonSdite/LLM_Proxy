@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260419-6">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260419-7">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置{% endblock %}
@@ -174,55 +174,59 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label field-label-with-help">
-                                <span>代理模式</span>
+                                <span>上游出站代理模式</span>
                                 <button
                                     type="button"
                                     class="field-help-button"
                                     data-provider-help-topic="proxy"
                                     onclick="toggleProviderHelp('proxy', event)"
-                                    aria-label="查看代理模式说明"
+                                    aria-label="查看上游出站代理说明"
                                 >?</button>
                             </label>
-                            <select class="form-control" id="providerProxyMode" data-custom-select="true" onchange="syncProviderProxyFields()">
-                                <option value="direct">直连</option>
-                                <option value="system">系统代理</option>
-                                <option value="custom">自定义代理</option>
-                            </select>
-                        </div>
-                        <div class="mb-3" id="providerProxyCustomField" hidden>
-                            <label class="form-label">自定义代理</label>
-                            <div class="sensitive-input-shell">
-                                <input
-                                    type="text"
-                                    class="form-control sensitive-input-control"
-                                    id="providerProxy"
-                                    placeholder="例如 http://127.0.0.1:7890"
-                                    autocomplete="off"
-                                    spellcheck="false"
-                                >
-                                <button
-                                    type="button"
-                                    class="sensitive-input-toggle"
-                                    data-sensitive-toggle-for="providerProxy"
-                                    data-sensitive-label="代理"
-                                    onclick="toggleSensitiveInputVisibility('providerProxy')"
-                                    aria-controls="providerProxy"
-                                    aria-pressed="false"
-                                    aria-label="显示代理"
-                                    title="显示代理"
-                                >
-                                    <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                        <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
-                                    </svg>
-                                    <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                        <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                                        <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                    <span class="visually-hidden">显示代理</span>
-                                </button>
+                            <div class="provider-proxy-row" id="providerProxyRow">
+                                <div class="provider-proxy-mode-field">
+                                    <select class="form-control" id="providerProxyMode" data-custom-select="true" onchange="syncProviderProxyFields()">
+                                        <option value="direct">直连</option>
+                                        <option value="system">系统代理</option>
+                                        <option value="custom">自定义代理</option>
+                                    </select>
+                                </div>
+                                <div class="provider-proxy-custom-field" id="providerProxyCustomField" hidden>
+                                    <div class="sensitive-input-shell">
+                                        <input
+                                            type="text"
+                                            class="form-control sensitive-input-control"
+                                            id="providerProxy"
+                                            placeholder="例如 http://127.0.0.1:7890"
+                                            autocomplete="off"
+                                            spellcheck="false"
+                                            aria-label="自定义上游出站代理地址"
+                                        >
+                                        <button
+                                            type="button"
+                                            class="sensitive-input-toggle"
+                                            data-sensitive-toggle-for="providerProxy"
+                                            data-sensitive-label="上游出站代理"
+                                            onclick="toggleSensitiveInputVisibility('providerProxy')"
+                                            aria-controls="providerProxy"
+                                            aria-pressed="false"
+                                            aria-label="显示上游出站代理"
+                                            title="显示上游出站代理"
+                                        >
+                                            <svg class="sensitive-input-icon sensitive-input-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                                <path d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12s-3.75 6.75-9.75 6.75S2.25 12 2.25 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                                <circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                                            </svg>
+                                            <svg class="sensitive-input-icon sensitive-input-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                                <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                                                <path d="M10.58 10.58A2 2 0 0 0 10 12a2 2 0 0 0 3.42 1.42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                                <path d="M9.88 5.35A10.62 10.62 0 0 1 12 5.25c6 0 9.75 6.75 9.75 6.75a18.8 18.8 0 0 1-3.04 3.83" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                                <path d="M6.31 6.31A18.14 18.14 0 0 0 2.25 12S6 18.75 12 18.75a10.7 10.7 0 0 0 5.69-1.69" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                            <span class="visually-hidden">显示上游出站代理</span>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="mb-3">
@@ -672,8 +676,9 @@
                 `,
             },
             proxy: {
-                title: '代理模式说明',
+                title: '上游出站代理说明',
                 html: `
+                    <p>这里的代理是服务端访问当前 Provider 上游 API 时使用的 HTTP/HTTPS 出站代理，不是下游客户端访问本服务的入口代理。</p>
                     <p><strong>直连</strong> 会关闭 <code>requests</code> 环境代理读取，不使用 <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> 等进程环境变量。</p>
                     <p><strong>系统代理</strong> 会使用当前进程环境中的代理变量；如果环境里没有代理，实际会直连。它不保证读取操作系统桌面代理设置。</p>
                     <p><strong>自定义代理</strong> 会使用这里填写的代理 URL，并忽略进程环境代理。</p>
@@ -2580,7 +2585,7 @@
             const proxyMode = getProviderProxyMode();
             const proxy = document.getElementById('providerProxy')?.value?.trim() || '';
             if (proxyMode === 'custom' && !proxy) {
-                showMessage('请输入自定义代理地址', 'error');
+                showMessage('请输入自定义上游出站代理地址', 'error');
                 return;
             }
 
@@ -2701,9 +2706,14 @@
         }
 
         function syncProviderProxyFields() {
+            const row = document.getElementById('providerProxyRow');
             const customField = document.getElementById('providerProxyCustomField');
+            const isCustom = getProviderProxyMode() === 'custom';
+            if (row) {
+                row.classList.toggle('is-custom', isCustom);
+            }
             if (customField) {
-                customField.hidden = getProviderProxyMode() !== 'custom';
+                customField.hidden = !isCustom;
             }
             syncSensitiveInputToggle('providerProxy');
         }
@@ -4636,7 +4646,7 @@
                 return;
             }
             if (payload.proxy_mode === 'custom' && !payload.proxy) {
-                showMessage('请输入自定义代理地址', 'error');
+                showMessage('请输入自定义上游出站代理地址', 'error');
                 return;
             }
 
@@ -4804,7 +4814,7 @@
                 return;
             }
             if (payload.proxy_mode === 'custom' && !payload.proxy) {
-                showMessage('请输入自定义代理地址', 'error');
+                showMessage('请输入自定义上游出站代理地址', 'error');
                 return;
             }
 
