@@ -127,13 +127,26 @@
 
 .settings-page .oauth-proxy-grid {
     display: grid;
-    grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
-    gap: 16px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
     align-items: end;
+}
+
+.settings-page .oauth-proxy-grid.is-custom {
+    grid-template-columns: minmax(170px, 230px) minmax(0, 1fr);
 }
 
 .settings-page .oauth-proxy-grid [hidden] {
     display: none !important;
+}
+
+.settings-page .oauth-proxy-mode-field,
+.settings-page .oauth-proxy-custom-field {
+    min-width: 0;
+}
+
+.settings-page .oauth-proxy-custom-field .sensitive-input-shell {
+    width: 100%;
 }
 
 .settings-page .oauth-network-toggle {
@@ -141,8 +154,13 @@
     align-items: center;
     justify-content: space-between;
     gap: 14px;
-    min-height: 42px;
+    width: 100%;
+    min-height: 44px;
     padding: 0;
+}
+
+.settings-page .oauth-settings-block-ssl {
+    padding-block: 14px;
 }
 
 .settings-page input[type="number"]::-webkit-outer-spin-button,
@@ -497,8 +515,7 @@
 }
 
 :root[data-theme="dark"] .settings-page .oauth-network-toggle {
-    border-color: #313b47;
-    background: rgba(13, 17, 23, 0.56);
+    background: transparent;
 }
 
 :root[data-theme="dark"] .settings-page .field-help-button {
@@ -605,7 +622,8 @@
     }
 
     .settings-page .oauth-details-panel,
-    .settings-page .oauth-proxy-grid {
+    .settings-page .oauth-proxy-grid,
+    .settings-page .oauth-proxy-grid.is-custom {
         grid-template-columns: 1fr;
     }
 

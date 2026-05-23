@@ -225,7 +225,7 @@ OAuth 模型是数据平面的例外路由：
 - `oauth.enabled`
   - 保存后立即影响管理后台顶部 OAuth 页签是否显示
   - 默认值为 `false`
-  - 只有开启后，系统设置页才展示 OAuth 代理服务和 SSL 校验设置
+  - 只有开启后，系统设置页才展示 OAuth 出站代理和 SSL 校验设置
 - `oauth.proxy_mode`
   - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
   - 支持 `direct` / `system` / `custom`
