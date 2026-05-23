@@ -27,7 +27,7 @@ from src.repositories import AuthGroupRepository
 from src.services.model_discovery_service import ModelDiscoveryService
 from src.utils.database import create_connection_factory
 from src.utils.local_time import now_local_datetime
-from src.utils.net import is_valid_ip, normalize_ip
+from src.utils.net import build_requests_proxy_settings, is_valid_ip, normalize_ip
 
 
 class FakeLogger:
@@ -312,6 +312,23 @@ class ProviderTransportTests(unittest.TestCase):
 
         self.assertEqual("http://user:123%2Fpa%3Fss%23word@127.0.0.1:7890", schema.proxy)
 
+    def test_provider_custom_proxy_allows_empty_url(self) -> None:
+        schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "custom-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "proxy_mode": "custom",
+                "proxy": "",
+                "model_list": ["demo"],
+            }
+        )
+
+        self.assertEqual("custom", schema.proxy_mode)
+        self.assertIsNone(schema.proxy)
+        self.assertEqual("custom", schema.to_mapping()["proxy_mode"])
+        self.assertNotIn("proxy", schema.to_mapping())
+
     def test_provider_schema_rejects_target_formats_field(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported provider field\\(s\\): target_formats"):
             ProviderConfigSchema.from_mapping(
@@ -539,6 +556,14 @@ class NetUtilsTests(unittest.TestCase):
 
     def test_is_valid_ip_accepts_ipv6_mapped_ipv4(self) -> None:
         self.assertTrue(is_valid_ip("::ffff:127.0.0.1"))
+
+    def test_custom_proxy_mode_without_url_behaves_as_direct(self) -> None:
+        settings = build_requests_proxy_settings("custom", "")
+
+        self.assertEqual("custom", settings.mode)
+        self.assertIsNone(settings.proxy_url)
+        self.assertIsNone(settings.proxies)
+        self.assertFalse(settings.trust_env)
 
 
 class ModelDiscoveryCandidateTests(unittest.TestCase):
@@ -852,7 +877,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("不是下游客户端访问本服务的入口代理", html)
         self.assertIn("HTTP_PROXY", html)
         self.assertIn("它不保证读取操作系统桌面代理设置", html)
+        self.assertIn("留空时等同直连", html)
         self.assertIn("用户名里包含冒号需要手动写成 <code>%3A</code>", html)
+        self.assertNotIn("请输入自定义上游出站代理地址", html)
         self.assertIn("function handleSensitiveInputCopy(event)", html)
         self.assertIn("input?.addEventListener('copy', handleSensitiveInputCopy);", html)
         self.assertNotIn("providerTransportAutoSyncEnabled", html)
@@ -1112,6 +1139,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .provider-editor-modal .provider-form-grid {", css)
         self.assertIn(".providers-page .provider-proxy-row {", css)
         self.assertIn(".providers-page .provider-proxy-row.is-custom {", css)
+        self.assertIn("grid-template-columns: minmax(126px, 150px) minmax(0, 1fr);", css)
         self.assertIn(".providers-page .provider-editor-modal .provider-model-list-section {", css)
         self.assertNotIn(".providers-page .provider-modal-tabs {", css)
         self.assertNotIn(".providers-page .provider-modal-tab-btn {", css)
@@ -1354,6 +1382,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("OAuth", html)
         self.assertIn('id="oauthEnabled"', html)
         self.assertIn('id="oauthProxyMode"', html)
+        self.assertIn('class="oauth-toggle-row"', html)
+        self.assertIn('class="oauth-toggle-card oauth-enable-row"', html)
+        self.assertIn('class="oauth-toggle-card oauth-ssl-row"', html)
         self.assertIn('id="oauthProxyRow"', html)
         self.assertIn('id="oauthProxyCustomField" hidden', html)
         self.assertIn('class="setting-field oauth-proxy-custom-field" id="oauthProxyCustomField" hidden', html)
@@ -1389,6 +1420,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("不是下游客户端访问本服务的入口代理", html)
         self.assertIn("HTTP_PROXY", html)
         self.assertIn("它不保证读取操作系统桌面代理设置", html)
+        self.assertIn("留空时等同直连", html)
         self.assertIn("自定义代理支持在 URL 中填写账号密码", html)
         self.assertIn("用户名里包含冒号需要手动写成 <code>%3A</code>", html)
         self.assertIn("OAuth token 请求、token 刷新、Codex 配额查询和 OAuth 数据面代理", html)
@@ -1397,13 +1429,17 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function initSettingsHelpInteractions()", html)
         self.assertIn("scheduleSettingsHelpPopoverHide()", html)
         self.assertIn('popover.style.setProperty("--popover-arrow-left"', html)
-        self.assertIn(".settings-page .oauth-enable-row", css)
+        self.assertIn(".settings-page .oauth-toggle-row", css)
+        self.assertIn(".settings-page .oauth-toggle-card", css)
+        self.assertIn(".settings-page .setting-toggle-inline", css)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 360px));", css)
+        self.assertIn("width: min(360px, 100%);", css)
         self.assertIn(".settings-page .oauth-details-panel[hidden]", css)
         self.assertIn(".settings-page .oauth-settings-block", css)
         self.assertIn(".settings-page .oauth-proxy-grid", css)
         self.assertIn(".settings-page .oauth-proxy-grid.is-custom", css)
-        self.assertIn(".settings-page .oauth-settings-block-ssl", css)
-        self.assertIn(".settings-page .oauth-network-toggle", css)
+        self.assertNotIn(".settings-page .oauth-settings-block-ssl", css)
+        self.assertNotIn(".settings-page .oauth-network-toggle", css)
         self.assertIn(".settings-page .settings-grid-oauth {", css)
         self.assertIn(".settings-page .settings-help-popover {\n    position: fixed;", css)
         self.assertIn("left: var(--popover-arrow-left, 24px);", css)

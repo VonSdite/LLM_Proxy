@@ -167,7 +167,7 @@ class SettingsService:
         proxy = self._parse_oauth_proxy(
             oauth_payload.get("proxy"),
             proxy_mode=proxy_mode,
-            required=enabled,
+            required=False,
         )
         verify_ssl = parse_optional_bool(oauth_payload.get("verify_ssl"))
         if verify_ssl is None:
@@ -228,7 +228,7 @@ class SettingsService:
             proxy = self._parse_oauth_proxy(
                 oauth_payload.get("proxy"),
                 proxy_mode=proxy_mode,
-                required=enabled,
+                required=False,
             )
             verify_ssl = parse_optional_bool(oauth_payload.get("verify_ssl"))
             if verify_ssl is None:

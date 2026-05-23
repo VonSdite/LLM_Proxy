@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260419-7">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260419-8">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置{% endblock %}
@@ -681,7 +681,7 @@
                     <p>这里的代理是服务端访问当前 Provider 上游 API 时使用的 HTTP/HTTPS 出站代理，不是下游客户端访问本服务的入口代理。</p>
                     <p><strong>直连</strong> 会关闭 <code>requests</code> 环境代理读取，不使用 <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> 等进程环境变量。</p>
                     <p><strong>系统代理</strong> 会使用当前进程环境中的代理变量；如果环境里没有代理，实际会直连。它不保证读取操作系统桌面代理设置。</p>
-                    <p><strong>自定义代理</strong> 会使用这里填写的代理 URL，并忽略进程环境代理。</p>
+                    <p><strong>自定义代理</strong> 会使用这里填写的代理 URL，并忽略进程环境代理；留空时等同直连。</p>
                     <p>自定义代理支持在 URL 中填写账号密码，保存时会自动转义账号密码里的特殊字符。</p>
                     <p>如果账号密码里包含冒号，系统会把第一个冒号当成用户名和密码的分隔符；密码里包含冒号没问题，用户名里包含冒号需要手动写成 <code>%3A</code>。</p>
                 `,
@@ -2582,13 +2582,6 @@
                     return;
                 }
             }
-            const proxyMode = getProviderProxyMode();
-            const proxy = document.getElementById('providerProxy')?.value?.trim() || '';
-            if (proxyMode === 'custom' && !proxy) {
-                showMessage('请输入自定义上游出站代理地址', 'error');
-                return;
-            }
-
             rowsToTest.forEach(row => {
                 clearModelTestRowResult(row);
                 row.testing = true;
@@ -4645,11 +4638,6 @@
                 showMessage('Auth Group 与 Legacy API Key 只能二选一', 'error');
                 return;
             }
-            if (payload.proxy_mode === 'custom' && !payload.proxy) {
-                showMessage('请输入自定义上游出站代理地址', 'error');
-                return;
-            }
-
             const isEdit = !!editingProviderName;
             const url = isEdit ? `/api/providers/${encodeURIComponent(editingProviderName)}` : '/api/providers';
             const method = isEdit ? 'PUT' : 'POST';
@@ -4813,11 +4801,6 @@
                 showMessage('请先选择 Auth Entry', 'error');
                 return;
             }
-            if (payload.proxy_mode === 'custom' && !payload.proxy) {
-                showMessage('请输入自定义上游出站代理地址', 'error');
-                return;
-            }
-
             const params = new URLSearchParams({ api: payload.api });
             if (payload.api_key) params.set('api_key', payload.api_key);
             if (payload.auth_group) params.set('auth_group', payload.auth_group);

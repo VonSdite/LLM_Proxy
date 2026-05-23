@@ -333,7 +333,7 @@ oauth:
   verify_ssl: false
 ```
 
-开启后，后台导航会显示 `/oauth` 页面。`proxy_mode` 支持 `direct`、`system`、`custom`；只有 `custom` 会读取 `proxy`。这里的 `proxy` 是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的出站代理，不是下游客户端访问本服务的入口代理。`proxy_mode`、`proxy` 和 `verify_ssl` 会同时影响 OAuth 登录换 token、Codex 配额查询和 OAuth 上游代理请求。自定义代理 URL 中的账号密码会由系统规范化转义。旧配置缺少 `proxy_mode` 时，启动加载会按是否存在 `proxy` 自动回写为 `custom` 或 `direct`。
+开启后，后台导航会显示 `/oauth` 页面。`proxy_mode` 支持 `direct`、`system`、`custom`；只有 `custom` 会读取 `proxy`，但 `custom` 下 `proxy` 为空时会按直连执行。这里的 `proxy` 是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的出站代理，不是下游客户端访问本服务的入口代理。`proxy_mode`、`proxy` 和 `verify_ssl` 会同时影响 OAuth 登录换 token、Codex 配额查询和 OAuth 上游代理请求。自定义代理 URL 中的账号密码会由系统规范化转义。旧配置缺少 `proxy_mode` 时，启动加载会按是否存在 `proxy` 自动回写为 `custom` 或 `direct`。
 
 ### 2. 生成 OAuth 认证文件
 
