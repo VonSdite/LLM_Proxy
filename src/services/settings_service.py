@@ -7,10 +7,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from ipaddress import ip_address
 from typing import Any
-from urllib.parse import urlparse
 
 from ..application.app_context import AppContext
 from ..config.provider_config import parse_optional_bool
+from ..utils.net import (
+    DEFAULT_PROXY_MODE,
+    PROXY_MODE_CUSTOM,
+    normalize_proxy_mode,
+    normalize_proxy_url,
+)
 
 
 class SettingsService:
@@ -42,6 +47,7 @@ class SettingsService:
             },
             "oauth": {
                 "enabled": self._config_manager.is_oauth_enabled(),
+                "proxy_mode": self._config_manager.get_oauth_proxy_mode(),
                 "proxy": self._config_manager.get_oauth_proxy() or "",
                 "verify_ssl": self._config_manager.is_oauth_verify_ssl_enabled(),
             },
@@ -154,7 +160,15 @@ class SettingsService:
         )
         if enabled is None:
             raise ValueError("OAuth enabled flag is required")
-        proxy = self._parse_oauth_proxy(oauth_payload.get("proxy"))
+        proxy_mode = self._parse_oauth_proxy_mode(
+            oauth_payload.get("proxy_mode"),
+            oauth_payload.get("proxy"),
+        )
+        proxy = self._parse_oauth_proxy(
+            oauth_payload.get("proxy"),
+            proxy_mode=proxy_mode,
+            required=enabled,
+        )
         verify_ssl = parse_optional_bool(oauth_payload.get("verify_ssl"))
         if verify_ssl is None:
             raise ValueError("OAuth SSL verify flag is required")
@@ -162,6 +176,7 @@ class SettingsService:
         config = self._config_manager.get_raw_config()
         oauth_config = self._ensure_mapping(config, "oauth")
         oauth_config["enabled"] = enabled
+        oauth_config["proxy_mode"] = proxy_mode
         oauth_config["proxy"] = proxy
         oauth_config["verify_ssl"] = verify_ssl
 
@@ -195,7 +210,7 @@ class SettingsService:
         if llm_request_debug_enabled is None:
             raise ValueError("LLM request debug flag is required")
 
-        oauth_values: tuple[bool, str, bool] | None = None
+        oauth_values: tuple[bool, str, str, bool] | None = None
         if "oauth" in payload:
             oauth_payload = payload.get("oauth")
             if not isinstance(oauth_payload, dict):
@@ -206,11 +221,19 @@ class SettingsService:
             )
             if enabled is None:
                 raise ValueError("OAuth enabled flag is required")
-            proxy = self._parse_oauth_proxy(oauth_payload.get("proxy"))
+            proxy_mode = self._parse_oauth_proxy_mode(
+                oauth_payload.get("proxy_mode"),
+                oauth_payload.get("proxy"),
+            )
+            proxy = self._parse_oauth_proxy(
+                oauth_payload.get("proxy"),
+                proxy_mode=proxy_mode,
+                required=enabled,
+            )
             verify_ssl = parse_optional_bool(oauth_payload.get("verify_ssl"))
             if verify_ssl is None:
                 raise ValueError("OAuth SSL verify flag is required")
-            oauth_values = (enabled, proxy, verify_ssl)
+            oauth_values = (enabled, proxy_mode, proxy, verify_ssl)
 
         server_restart_required = (
             str(current_settings["server"]["host"]) != host or int(current_settings["server"]["port"]) != port
@@ -239,8 +262,9 @@ class SettingsService:
         if oauth_values is not None:
             oauth_config = self._ensure_mapping(config, "oauth")
             oauth_config["enabled"] = oauth_values[0]
-            oauth_config["proxy"] = oauth_values[1]
-            oauth_config["verify_ssl"] = oauth_values[2]
+            oauth_config["proxy_mode"] = oauth_values[1]
+            oauth_config["proxy"] = oauth_values[2]
+            oauth_config["verify_ssl"] = oauth_values[3]
 
         self._config_manager.write_raw_config(config)
         if logging_settings_changed and self._reload_logging_callback is not None:
@@ -299,14 +323,23 @@ class SettingsService:
         return log_level
 
     @staticmethod
-    def _parse_oauth_proxy(value: Any) -> str:
-        proxy = str(value or "").strip()
-        if not proxy:
+    def _parse_oauth_proxy_mode(value: Any, proxy_value: Any) -> str:
+        return normalize_proxy_mode(
+            value,
+            proxy_value=proxy_value,
+            default=DEFAULT_PROXY_MODE,
+            error_message="OAuth proxy_mode must be one of: direct, system, custom",
+        )
+
+    @staticmethod
+    def _parse_oauth_proxy(value: Any, *, proxy_mode: str, required: bool) -> str:
+        if proxy_mode != PROXY_MODE_CUSTOM:
             return ""
-        parsed = urlparse(proxy)
-        if not parsed.scheme or not parsed.netloc:
-            raise ValueError("OAuth proxy must be a valid absolute URL")
-        return proxy
+        return normalize_proxy_url(
+            value,
+            required=required,
+            error_message="OAuth proxy must be a valid absolute URL",
+        ) or ""
 
     @staticmethod
     def _normalize_admin_value(value: Any) -> str:

@@ -383,6 +383,7 @@ class ProviderController:
                 api=request.args.get("api", ""),
                 api_key=api_key,
                 request_headers=request_headers,
+                proxy_mode=request.args.get("proxy_mode"),
                 proxy=request.args.get("proxy"),
                 timeout_seconds=request.args.get("timeout_seconds"),
                 verify_ssl=request.args.get("verify_ssl"),

@@ -69,9 +69,11 @@ class SettingsServiceTests(unittest.TestCase):
         settings = self.service.get_system_settings()
 
         self.assertFalse(settings["oauth"]["enabled"])
+        self.assertEqual("direct", settings["oauth"]["proxy_mode"])
         self.assertEqual("", settings["oauth"]["proxy"])
         self.assertFalse(settings["oauth"]["verify_ssl"])
         self.assertFalse(self.config_manager.is_oauth_enabled())
+        self.assertEqual("direct", self.config_manager.get_oauth_proxy_mode())
         self.assertIsNone(self.config_manager.get_oauth_proxy())
         self.assertFalse(self.config_manager.is_oauth_verify_ssl_enabled())
 
@@ -80,6 +82,7 @@ class SettingsServiceTests(unittest.TestCase):
             {
                 "oauth": {
                     "enabled": True,
+                    "proxy_mode": "custom",
                     "proxy": " http://127.0.0.1:7890 ",
                     "verify_ssl": True,
                 }
@@ -87,17 +90,75 @@ class SettingsServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(result["settings"]["oauth"]["enabled"])
+        self.assertEqual("custom", result["settings"]["oauth"]["proxy_mode"])
         self.assertEqual("http://127.0.0.1:7890", result["settings"]["oauth"]["proxy"])
         self.assertTrue(result["settings"]["oauth"]["verify_ssl"])
         self.assertTrue(self.config_manager.is_oauth_enabled())
+        self.assertEqual("custom", self.config_manager.get_oauth_proxy_mode())
         self.assertEqual("http://127.0.0.1:7890", self.config_manager.get_oauth_proxy())
         self.assertTrue(self.config_manager.is_oauth_verify_ssl_enabled())
 
         with self.config_path.open("r", encoding="utf-8") as handle:
             persisted = yaml.safe_load(handle)
         self.assertTrue(persisted["oauth"]["enabled"])
+        self.assertEqual("custom", persisted["oauth"]["proxy_mode"])
         self.assertEqual("http://127.0.0.1:7890", persisted["oauth"]["proxy"])
         self.assertTrue(persisted["oauth"]["verify_ssl"])
+
+    def test_update_oauth_settings_supports_system_proxy_mode(self) -> None:
+        result = self.service.update_oauth_settings(
+            {
+                "oauth": {
+                    "enabled": True,
+                    "proxy_mode": "system",
+                    "proxy": "http://127.0.0.1:7890",
+                    "verify_ssl": False,
+                }
+            }
+        )
+
+        self.assertEqual("system", result["settings"]["oauth"]["proxy_mode"])
+        self.assertEqual("", result["settings"]["oauth"]["proxy"])
+        self.assertEqual("system", self.config_manager.get_oauth_proxy_mode())
+        self.assertIsNone(self.config_manager.get_oauth_proxy())
+
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        self.assertEqual("system", persisted["oauth"]["proxy_mode"])
+        self.assertEqual("", persisted["oauth"]["proxy"])
+
+    def test_update_oauth_settings_encodes_custom_proxy_credentials(self) -> None:
+        result = self.service.update_oauth_settings(
+            {
+                "oauth": {
+                    "enabled": True,
+                    "proxy_mode": "custom",
+                    "proxy": "http://user:p@ss#word@127.0.0.1:7890",
+                    "verify_ssl": False,
+                }
+            }
+        )
+
+        self.assertEqual(
+            "http://user:p%40ss%23word@127.0.0.1:7890",
+            result["settings"]["oauth"]["proxy"],
+        )
+
+    def test_update_oauth_settings_allows_disabled_custom_proxy_without_url(self) -> None:
+        result = self.service.update_oauth_settings(
+            {
+                "oauth": {
+                    "enabled": False,
+                    "proxy_mode": "custom",
+                    "proxy": "",
+                    "verify_ssl": False,
+                }
+            }
+        )
+
+        self.assertFalse(result["settings"]["oauth"]["enabled"])
+        self.assertEqual("custom", result["settings"]["oauth"]["proxy_mode"])
+        self.assertEqual("", result["settings"]["oauth"]["proxy"])
 
     def test_update_oauth_settings_rejects_invalid_enabled_flag(self) -> None:
         with self.assertRaisesRegex(ValueError, "Expected a boolean value"):
@@ -105,6 +166,7 @@ class SettingsServiceTests(unittest.TestCase):
                 {
                     "oauth": {
                         "enabled": "sometimes",
+                        "proxy_mode": "direct",
                         "proxy": "",
                         "verify_ssl": False,
                     }
@@ -116,6 +178,8 @@ class SettingsServiceTests(unittest.TestCase):
             self.service.update_oauth_settings(
                 {
                     "oauth": {
+                        "enabled": True,
+                        "proxy_mode": "custom",
                         "proxy": "127.0.0.1:7890",
                         "verify_ssl": False,
                     }
@@ -148,6 +212,7 @@ class SettingsServiceTests(unittest.TestCase):
                 },
                 "oauth": {
                     "enabled": True,
+                    "proxy_mode": "custom",
                     "proxy": "http://127.0.0.1:7890",
                     "verify_ssl": True,
                 },

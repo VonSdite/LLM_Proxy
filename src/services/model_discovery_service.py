@@ -13,7 +13,7 @@ import requests
 from ..application.app_context import AppContext
 from ..config.provider_config import clean_optional_string, parse_optional_bool, parse_optional_positive_int
 from ..utils.http_headers import merge_http_headers
-from ..utils.net import build_requests_proxies, normalize_proxy_url
+from ..utils.net import apply_requests_proxy_settings, build_requests_proxy_settings
 from ..utils.proxy_warning import (
     ProxyWarningRequired,
     close_response,
@@ -32,6 +32,7 @@ class ModelDiscoveryService:
         api: str,
         api_key: str | None = None,
         request_headers: Mapping[str, str] | None = None,
+        proxy_mode: str | None = None,
         proxy: str | None = None,
         timeout_seconds: Any | None = None,
         verify_ssl: Any | None = None,
@@ -43,7 +44,8 @@ class ModelDiscoveryService:
             api=str(api).strip(),
             api_key=clean_optional_string(api_key),
             request_headers=request_headers,
-            proxy=normalize_proxy_url(proxy),
+            proxy_mode=proxy_mode,
+            proxy=proxy,
             timeout_seconds=parse_optional_positive_int(timeout_seconds, default=10) or 10,
             verify_ssl=parse_optional_bool(verify_ssl, default=False) or False,
         )
@@ -58,6 +60,7 @@ class ModelDiscoveryService:
         api: str,
         api_key: str | None,
         request_headers: Mapping[str, str] | None,
+        proxy_mode: str | None,
         proxy: str | None,
         timeout_seconds: int,
         verify_ssl: bool,
@@ -66,17 +69,23 @@ class ModelDiscoveryService:
         if api_key:
             headers["authorization"] = f"Bearer {api_key}"
         headers = merge_http_headers(headers, request_headers)
-        proxies = build_requests_proxies(proxy)
+        proxy_settings = build_requests_proxy_settings(
+            proxy_mode,
+            proxy,
+            proxy_mode_error_message="Provider proxy_mode must be one of: direct, system, custom",
+            proxy_url_error_message="Provider proxy must be a valid absolute URL",
+        )
 
         candidates = self._build_model_endpoint_candidates(api)
         candidate_errors: list[str] = []
 
         with requests.Session() as session:
+            apply_requests_proxy_settings(session, proxy_settings)
             for url in candidates:
                 response: Any = None
                 try:
                     request_options = {
-                        "proxies": proxies,
+                        "proxies": proxy_settings.proxies,
                         "verify": verify_ssl,
                     }
                     response = request_with_proxy_warning_retry(

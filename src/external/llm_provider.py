@@ -26,6 +26,7 @@ class LLMProvider:
     api_key: str | None = None
     auth_group: str | None = None
     model_list: tuple[str, ...] = ()
+    proxy_mode: str = "direct"
     proxy: str | None = None
     timeout_seconds: int = 1200
     max_retries: int = 3
