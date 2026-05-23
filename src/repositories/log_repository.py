@@ -31,6 +31,17 @@ class LogRepository:
         "completion_tokens": "COALESCE(SUM(d.completion_tokens), 0)",
     }
 
+    _USER_USAGE_SORT_COLUMNS = {
+        "username": "COALESCE(NULLIF(u.username, ''), d.ip_address, '-')",
+        "request_model": "d.request_model",
+        "request_count": "COALESCE(SUM(d.request_count), 0)",
+        "total_tokens": "COALESCE(SUM(d.total_tokens), 0)",
+        "prompt_tokens": "COALESCE(SUM(d.prompt_tokens), 0)",
+        "completion_tokens": "COALESCE(SUM(d.completion_tokens), 0)",
+        "ip_count": "COUNT(DISTINCT d.ip_address)",
+        "last_request_date": "MAX(d.stat_date)",
+    }
+
     _LOG_SORT_COLUMNS = {
         "ip_address": "COALESCE(l.ip_address, '')",
         "username": "COALESCE(u.username, '-')",
@@ -278,6 +289,58 @@ class LogRepository:
             cursor.execute(query, params)
             return cursor.fetchall()
 
+    def get_user_usage_summary(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[sqlite3.Row]:
+        """按用户名与请求模型查询用量汇总。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            conditions = []
+            params = []
+
+            if start_date:
+                conditions.append("d.stat_date >= ?")
+                params.append(start_date)
+            if end_date:
+                conditions.append("d.stat_date <= ?")
+                params.append(end_date)
+            self._append_text_filter(conditions, params, "u.username", username)
+            self._append_text_filter(conditions, params, "d.request_model", request_model)
+
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+            order_clause = self._build_order_clause(
+                self._USER_USAGE_SORT_COLUMNS,
+                sort_key,
+                sort_direction,
+                "total_tokens",
+                "COALESCE(NULLIF(u.username, ''), d.ip_address, '-') ASC, d.request_model ASC",
+            )
+            query = f"""
+                SELECT
+                    COALESCE(NULLIF(u.username, ''), d.ip_address, '-') as username,
+                    d.request_model,
+                    COALESCE(SUM(d.request_count), 0) as request_count,
+                    COALESCE(SUM(d.total_tokens), 0) as total_tokens,
+                    COALESCE(SUM(d.prompt_tokens), 0) as prompt_tokens,
+                    COALESCE(SUM(d.completion_tokens), 0) as completion_tokens,
+                    COUNT(DISTINCT d.ip_address) as ip_count,
+                    MAX(d.stat_date) as last_request_date
+                FROM daily_request_stats d
+                LEFT JOIN users u ON d.ip_address = u.ip_address
+                WHERE {where_clause}
+                GROUP BY COALESCE(NULLIF(u.username, ''), d.ip_address, '-'), d.request_model
+                {order_clause}
+            """
+            cursor.execute(query, params)
+            return cursor.fetchall()
+
     def get_logs(
         self,
         page: int = 1,
@@ -343,6 +406,50 @@ class LogRepository:
                 "total_pages": (total + page_size - 1) // page_size,
                 "logs": [dict(log) for log in logs],
             }
+
+    def get_all_logs(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[sqlite3.Row]:
+        """按条件查询完整请求日志列表。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            conditions = []
+            params = []
+
+            if start_date:
+                conditions.append("l.start_time >= ?")
+                params.append(f"{start_date} 00:00:00.000000")
+            if end_date:
+                conditions.append('l.start_time < DATE(?, "+1 day")')
+                params.append(end_date)
+            self._append_text_filter(conditions, params, "u.username", username)
+            self._append_text_filter(conditions, params, "l.request_model", request_model)
+
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+            order_clause = self._build_order_clause(
+                self._LOG_SORT_COLUMNS,
+                sort_key,
+                sort_direction,
+                "start_time",
+                "l.id DESC",
+            )
+            query = f"""
+                SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
+                       l.total_tokens, l.prompt_tokens, l.completion_tokens,
+                       l.start_time, l.end_time, l.created_at
+                FROM request_logs l
+                LEFT JOIN users u ON l.ip_address = u.ip_address
+                WHERE {where_clause}
+                {order_clause}
+            """
+            cursor.execute(query, params)
+            return cursor.fetchall()
 
     def get_unique_request_models(self) -> list[str]:
         """查询有日志记录的请求模型列表。"""

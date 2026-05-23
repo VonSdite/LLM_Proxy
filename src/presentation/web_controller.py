@@ -6,7 +6,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from io import BytesIO
 from typing import Any
+from urllib.parse import quote
+from xml.sax.saxutils import escape
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from flask import jsonify, make_response, render_template, request
 from flask.typing import ResponseReturnValue
@@ -46,6 +50,8 @@ class WebController:
         self._app.route("/settings")(auth(self.settings_page))
 
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
+        self._app.route("/api/statistics/user-usage-summary", methods=["GET"])(auth(self.get_user_usage_summary))
+        self._app.route("/api/statistics/export", methods=["GET"])(auth(self.export_statistics))
         self._app.route("/api/request-logs", methods=["GET"])(auth(self.get_request_logs))
         self._app.route("/api/usernames", methods=["GET"])(auth(self.get_usernames))
         self._app.route("/api/request-models", methods=["GET"])(auth(self.get_request_models))
@@ -153,6 +159,127 @@ class WebController:
         if end > max_end:
             raise ValueError("date range must not exceed one year")
 
+    @staticmethod
+    def _column_name(index: int) -> str:
+        """把从 1 开始的列号转换为 Excel 列名。"""
+        name = ""
+        value = index
+        while value > 0:
+            value, remainder = divmod(value - 1, 26)
+            name = chr(65 + remainder) + name
+        return name
+
+    @staticmethod
+    def _clean_excel_text(value: Any) -> str:
+        """清理 XML 1.0 不支持的控制字符。"""
+        text = str(value if value is not None else "")
+        return "".join(
+            char
+            for char in text
+            if char in {"\t", "\n", "\r"} or ord(char) >= 32
+        )
+
+    @classmethod
+    def _build_sheet_xml(cls, headers: list[str], rows: list[list[Any]]) -> str:
+        """构造单工作表 XML。"""
+        xml_rows = []
+        for row_index, row_values in enumerate([headers, *rows], start=1):
+            cells = []
+            for column_index, value in enumerate(row_values, start=1):
+                cell_ref = f"{cls._column_name(column_index)}{row_index}"
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    cells.append(f'<c r="{cell_ref}"><v>{value}</v></c>')
+                    continue
+
+                text = escape(cls._clean_excel_text(value))
+                cells.append(f'<c r="{cell_ref}" t="inlineStr"><is><t>{text}</t></is></c>')
+            xml_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            f"<sheetData>{''.join(xml_rows)}</sheetData>"
+            "</worksheet>"
+        )
+
+    @classmethod
+    def _build_xlsx(cls, sheet_name: str, headers: list[str], rows: list[list[Any]]) -> bytes:
+        """用标准库生成最小 xlsx 文件。"""
+        safe_sheet_name = escape(sheet_name[:31] or "Sheet1")
+        sheet_xml = cls._build_sheet_xml(headers, rows)
+        output = BytesIO()
+        with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml"
+ ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml"
+ ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>""",
+            )
+            archive.writestr(
+                "_rels/.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1"
+ Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+ Target="xl/workbook.xml"/>
+</Relationships>""",
+            )
+            archive.writestr(
+                "xl/workbook.xml",
+                f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="{safe_sheet_name}" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1"
+ Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+ Target="worksheets/sheet1.xml"/>
+</Relationships>""",
+            )
+            archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        return output.getvalue()
+
+    @staticmethod
+    def _dashboard_export_response(filename: str, content: bytes) -> ResponseReturnValue:
+        response = make_response(content)
+        response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        response.headers["Content-Disposition"] = (
+            f"attachment; filename={filename}; filename*=UTF-8''{quote(filename)}"
+        )
+        return response
+
+    @staticmethod
+    def _parse_log_time(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        return None
+
+    @classmethod
+    def _calculate_log_duration(cls, start_time: Any, end_time: Any) -> float:
+        start = cls._parse_log_time(start_time)
+        end = cls._parse_log_time(end_time)
+        if start is None or end is None:
+            return 0
+        return round(max((end - start).total_seconds(), 0), 2)
+
     def get_statistics(self) -> ResponseReturnValue:
         try:
             self._validate_dashboard_date_range(
@@ -181,6 +308,147 @@ class WebController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error getting statistics: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def get_user_usage_summary(self) -> ResponseReturnValue:
+        try:
+            self._validate_dashboard_date_range(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+            )
+            usernames = self._get_multi_filter_values("username")
+            request_models = self._get_multi_filter_values("request_model")
+            self._logger.debug(
+                "User usage summary queried: start_date=%s end_date=%s usernames=%s request_models=%s",
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+                usernames,
+                request_models,
+            )
+            summary = self._log_service.get_user_usage_summary(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+                usernames or None,
+                request_models or None,
+                sort_key=request.args.get("sort_key"),
+                sort_direction=request.args.get("sort_direction"),
+            )
+            return jsonify(summary)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error getting user usage summary: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def export_statistics(self) -> ResponseReturnValue:
+        try:
+            self._validate_dashboard_date_range(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+            )
+            usernames = self._get_multi_filter_values("username")
+            request_models = self._get_multi_filter_values("request_model")
+            tab = str(request.args.get("tab") or "stats").strip()
+            sort_key = request.args.get("sort_key")
+            sort_direction = request.args.get("sort_direction")
+
+            if tab == "user_usage":
+                data = self._log_service.get_user_usage_summary(
+                    request.args.get("start_date"),
+                    request.args.get("end_date"),
+                    usernames or None,
+                    request_models or None,
+                    sort_key=sort_key,
+                    sort_direction=sort_direction,
+                )
+                headers = ["用户名", "请求模型", "请求数", "输入token", "输出token", "总 Token", "关联 IP 数", "最近请求日期"]
+                rows = [
+                    [
+                        item["username"],
+                        item["request_model"],
+                        item["request_count"],
+                        item["prompt_tokens"],
+                        item["completion_tokens"],
+                        item["total_tokens"],
+                        item["ip_count"],
+                        item["last_request_date"],
+                    ]
+                    for item in data
+                ]
+                sheet_name = "用户用量"
+                file_prefix = "user-usage"
+            elif tab == "logs":
+                data = self._log_service.get_all_request_logs(
+                    request.args.get("start_date"),
+                    request.args.get("end_date"),
+                    usernames or None,
+                    request_models or None,
+                    sort_key=sort_key,
+                    sort_direction=sort_direction,
+                )
+                headers = [
+                    "IP",
+                    "用户名",
+                    "请求模型",
+                    "响应模型",
+                    "输入token",
+                    "输出token",
+                    "总 Token",
+                    "开始时间",
+                    "结束时间",
+                    "耗时(秒)",
+                ]
+                rows = [
+                    [
+                        item["ip_address"],
+                        item["username"],
+                        item["request_model"],
+                        item["response_model"],
+                        item["prompt_tokens"],
+                        item["completion_tokens"],
+                        item["total_tokens"],
+                        item["start_time"],
+                        item["end_time"],
+                        self._calculate_log_duration(item["start_time"], item["end_time"]),
+                    ]
+                    for item in data
+                ]
+                sheet_name = "请求明细"
+                file_prefix = "request-logs"
+            else:
+                data = self._log_service.get_statistics(
+                    request.args.get("start_date"),
+                    request.args.get("end_date"),
+                    usernames or None,
+                    request_models or None,
+                    sort_key=sort_key,
+                    sort_direction=sort_direction,
+                )
+                headers = ["IP", "用户名", "请求模型", "响应模型", "输入token", "输出token", "总 Token", "请求数"]
+                rows = [
+                    [
+                        item["ip_address"],
+                        item["username"],
+                        item["request_model"],
+                        item["response_model"],
+                        item["prompt_tokens"],
+                        item["completion_tokens"],
+                        item["total_tokens"],
+                        item["request_count"],
+                    ]
+                    for item in data
+                ]
+                sheet_name = "调用汇总"
+                file_prefix = "call-summary"
+
+            content = self._build_xlsx(sheet_name, headers, rows)
+            filename = f"{file_prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+            self._logger.debug("Statistics exported: tab=%s rows=%s filename=%s", tab, len(rows), filename)
+            return self._dashboard_export_response(filename, content)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error exporting statistics: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def get_request_logs(self) -> ResponseReturnValue:

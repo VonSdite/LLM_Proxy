@@ -3,9 +3,11 @@ from __future__ import annotations
 import sys
 import unittest
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
+from zipfile import ZipFile
 
 from flask import Flask
 
@@ -175,6 +177,29 @@ class DashboardFilterApiTests(unittest.TestCase):
             {(item["username"], item["request_model"]) for item in payload},
         )
 
+    def test_user_usage_summary_api_groups_by_username_and_request_model(self) -> None:
+        self._log_request("model-a", "resp-extra", 5, "10.0.0.1", datetime(2026, 4, 9, 9, 0, 0))
+
+        response = self.client.get(
+            "/api/statistics/user-usage-summary",
+            query_string=[
+                ("start_date", self.DATE_FILTER["start_date"]),
+                ("end_date", self.DATE_FILTER["end_date"]),
+                ("username", "alice"),
+                ("request_model", "model-a"),
+            ],
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(1, len(payload))
+        self.assertEqual("alice", payload[0]["username"])
+        self.assertEqual("model-a", payload[0]["request_model"])
+        self.assertEqual(2, payload[0]["request_count"])
+        self.assertEqual(15, payload[0]["total_tokens"])
+        self.assertEqual(1, payload[0]["ip_count"])
+        self.assertEqual("2026-04-09", payload[0]["last_request_date"])
+
     def test_request_logs_api_supports_multi_value_filters(self) -> None:
         response = self.client.get(
             "/api/request-logs",
@@ -197,6 +222,72 @@ class DashboardFilterApiTests(unittest.TestCase):
             {("alice", "model-a"), ("bob", "model-b")},
             {(item["username"], item["request_model"]) for item in payload["logs"]},
         )
+
+    def test_statistics_export_logs_returns_full_xlsx_without_pagination(self) -> None:
+        response = self.client.get(
+            "/api/statistics/export",
+            query_string={
+                "tab": "logs",
+                "start_date": self.DATE_FILTER["start_date"],
+                "end_date": self.DATE_FILTER["end_date"],
+                "sort_key": "total_tokens",
+                "sort_direction": "asc",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response.headers["Content-Type"],
+        )
+        self.assertIn("request-logs-", response.headers["Content-Disposition"])
+        with ZipFile(BytesIO(response.data)) as archive:
+            sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+        self.assertIn("请求模型", sheet_xml)
+        self.assertIn("model-a", sheet_xml)
+        self.assertIn("model-b", sheet_xml)
+        self.assertIn("model-c", sheet_xml)
+
+    def test_statistics_export_summary_returns_xlsx(self) -> None:
+        response = self.client.get(
+            "/api/statistics/export",
+            query_string={
+                "tab": "stats",
+                "start_date": self.DATE_FILTER["start_date"],
+                "end_date": self.DATE_FILTER["end_date"],
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn("call-summary-", response.headers["Content-Disposition"])
+        with ZipFile(BytesIO(response.data)) as archive:
+            workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
+            sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+        self.assertIn("调用汇总", workbook_xml)
+        self.assertIn("响应模型", sheet_xml)
+        self.assertIn("resp-a", sheet_xml)
+
+    def test_statistics_export_user_usage_summary_returns_xlsx(self) -> None:
+        response = self.client.get(
+            "/api/statistics/export",
+            query_string={
+                "tab": "user_usage",
+                "start_date": self.DATE_FILTER["start_date"],
+                "end_date": self.DATE_FILTER["end_date"],
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn("user-usage-", response.headers["Content-Disposition"])
+        with ZipFile(BytesIO(response.data)) as archive:
+            workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
+            sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+        self.assertIn("用户用量", workbook_xml)
+        self.assertIn("关联 IP 数", sheet_xml)
+        self.assertIn("alice", sheet_xml)
 
     def test_statistics_api_sorts_on_server(self) -> None:
         response = self.client.get(

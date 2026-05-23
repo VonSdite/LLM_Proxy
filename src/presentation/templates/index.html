@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260409-4">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260409-6">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}监控 API 请求和 Token 消耗{% endblock %}
@@ -50,6 +50,7 @@
                     </select>
                 </div>
                 <button class="btn btn-primary" onclick="applyFilters()">查询</button>
+                <button class="btn btn-primary" onclick="exportActiveDashboardTab()">导出 Excel</button>
             </div>
         </div>
 
@@ -62,7 +63,15 @@
                     onclick="switchDashboardTab('stats')"
                     aria-selected="true"
                     aria-controls="dashboardTabPanel_stats"
-                >统计汇总</button>
+                >调用汇总</button>
+                <button
+                    type="button"
+                    class="dashboard-tab-btn"
+                    id="dashboardTabBtn_userUsage"
+                    onclick="switchDashboardTab('userUsage')"
+                    aria-selected="false"
+                    aria-controls="dashboardTabPanel_userUsage"
+                >用户用量</button>
                 <button
                     type="button"
                     class="dashboard-tab-btn"
@@ -91,6 +100,30 @@
                         <tbody id="statsTable">
                             <tr>
                                 <td colspan="8" class="loading">加载统计数据...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="dashboard-tab-panel" id="dashboardTabPanel_userUsage" role="tabpanel" aria-labelledby="dashboardTabBtn_userUsage" hidden>
+                <div class="stats-container">
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('username', 'string')">用户名 <span class="sort-indicator" id="userUsageSortIndicator_username"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="userUsageSortIndicator_request_model"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="userUsageSortIndicator_prompt_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="userUsageSortIndicator_completion_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="userUsageSortIndicator_total_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('request_count', 'number')">请求数 <span class="sort-indicator" id="userUsageSortIndicator_request_count"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('ip_count', 'number')">关联 IP 数 <span class="sort-indicator" id="userUsageSortIndicator_ip_count"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('last_request_date', 'date')">最近请求日期 <span class="sort-indicator" id="userUsageSortIndicator_last_request_date"></span></button></th>
+                            </tr>
+                        </thead>
+                        <tbody id="userUsageTable">
+                            <tr>
+                                <td colspan="8" class="loading">加载用户用量...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -159,11 +192,18 @@
         let currentTotalPages = 1;
         let activeCustomSelect = null;
         let statsData = [];
+        let userUsageData = [];
         let logsData = [];
         let activeDashboardTab = 'stats';
         let statsRequestToken = 0;
+        let userUsageRequestToken = 0;
         let logsRequestToken = 0;
         const statsSortState = {
+            key: 'total_tokens',
+            direction: 'desc',
+            type: 'number'
+        };
+        const userUsageSortState = {
             key: 'total_tokens',
             direction: 'desc',
             type: 'number'
@@ -183,7 +223,7 @@
         }
 
         function syncDashboardTabUi() {
-            ['stats', 'logs'].forEach(tabName => {
+            ['stats', 'userUsage', 'logs'].forEach(tabName => {
                 const isActive = tabName === activeDashboardTab;
                 const button = getDashboardTabButton(tabName);
                 const panel = getDashboardTabPanel(tabName);
@@ -205,11 +245,15 @@
                 loadStatistics();
                 return;
             }
+            if (activeDashboardTab === 'userUsage') {
+                loadUserUsageSummary();
+                return;
+            }
             loadLogs();
         }
 
         function switchDashboardTab(tabName) {
-            if (!['stats', 'logs'].includes(tabName)) {
+            if (!['stats', 'userUsage', 'logs'].includes(tabName)) {
                 return;
             }
 
@@ -464,9 +508,7 @@
                 }
             });
 
-            const table = prefix === 'stats'
-                ? document.querySelector('#dashboardTabPanel_stats table')
-                : document.querySelector('#dashboardTabPanel_logs table');
+            const table = document.querySelector(`#dashboardTabPanel_${prefix} table`);
             if (!table) return;
 
             table.querySelectorAll('th.sortable-th').forEach(th => {
@@ -491,6 +533,17 @@
                 statsSortState.direction = type === 'string' ? 'asc' : 'desc';
             }
             loadStatistics();
+        }
+
+        function toggleUserUsageSort(key, type) {
+            if (userUsageSortState.key === key) {
+                userUsageSortState.direction = userUsageSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                userUsageSortState.key = key;
+                userUsageSortState.type = type;
+                userUsageSortState.direction = type === 'string' ? 'asc' : 'desc';
+            }
+            loadUserUsageSummary();
         }
 
         function toggleLogsSort(key, type) {
@@ -903,6 +956,7 @@
             loadUsernames();
             loadRequestModels();
             updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
+            updateSortIndicators('userUsage', userUsageSortState, ['username', 'request_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count', 'ip_count', 'last_request_date']);
             updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
             syncDashboardTabUi();
             switchDashboardTab(activeDashboardTab);
@@ -1029,6 +1083,87 @@
                 </tr>
             `;
             statsTable.innerHTML = html;
+        }
+
+        async function loadUserUsageSummary() {
+            const requestToken = ++userUsageRequestToken;
+            document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="8" class="loading">加载用户用量...</td></tr>';
+
+            try {
+                const params = buildDashboardSearchParams({
+                    sort_key: userUsageSortState.key,
+                    sort_direction: userUsageSortState.direction,
+                });
+                const response = await fetch(`/api/statistics/user-usage-summary?${params}`, { cache: 'no-store' });
+                if (handleUnauthorizedResponse(response)) return;
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.error || '加载用户用量失败');
+                }
+                if (requestToken !== userUsageRequestToken) return;
+                userUsageData = data;
+                if (!Array.isArray(userUsageData)) userUsageData = [];
+                renderUserUsageSummary();
+            } catch (error) {
+                if (requestToken !== userUsageRequestToken) return;
+                console.error('加载用户用量失败:', error);
+                document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="8" class="error">加载用户用量失败</td></tr>';
+                showMessage('加载用户用量失败，请稍后重试', 'error');
+            }
+        }
+
+        function renderUserUsageSummary() {
+            const tableBody = document.getElementById('userUsageTable');
+            updateSortIndicators('userUsage', userUsageSortState, ['username', 'request_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count', 'ip_count', 'last_request_date']);
+
+            if (userUsageData.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="8" class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
+                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <p>暂无用户用量</p>
+                            </td></tr>`;
+                return;
+            }
+
+            let html = '';
+            let totalRequests = 0;
+            let totalTokens = 0;
+            let totalPromptTokens = 0;
+            let totalCompletionTokens = 0;
+
+            userUsageData.forEach(item => {
+                totalRequests += item.request_count || 0;
+                totalTokens += item.total_tokens || 0;
+                totalPromptTokens += item.prompt_tokens || 0;
+                totalCompletionTokens += item.completion_tokens || 0;
+
+                html += `
+                    <tr>
+                        <td>${escapeHtml(item.username || '-')}</td>
+                        <td>${renderModelBadge(item.request_model)}</td>
+                        <td class="num-col">${renderNumber(item.prompt_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(item.completion_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(item.total_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(item.request_count || 0)}</td>
+                        <td class="num-col">${renderNumber(item.ip_count || 0)}</td>
+                        <td>${escapeHtml(item.last_request_date || '-')}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                <tr class="stats-total-row">
+                    <td colspan="2">总计</td>
+                    <td class="num-col">${renderNumber(totalPromptTokens)}</td>
+                    <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
+                    <td class="num-col">${renderNumber(totalTokens)}</td>
+                    <td class="num-col">${renderNumber(totalRequests)}</td>
+                    <td class="num-col">-</td>
+                    <td>-</td>
+                </tr>
+            `;
+            tableBody.innerHTML = html;
         }
 
         // 加载用户名列表
@@ -1273,8 +1408,35 @@
                 loadLogs();
             }
         }
+
+        function getActiveDashboardSortState() {
+            if (activeDashboardTab === 'userUsage') {
+                return userUsageSortState;
+            }
+            if (activeDashboardTab === 'logs') {
+                return logsSortState;
+            }
+            return statsSortState;
+        }
+
+        function getActiveExportTabName() {
+            return activeDashboardTab === 'userUsage' ? 'user_usage' : activeDashboardTab;
+        }
+
+        function exportActiveDashboardTab() {
+            const startDate = currentFilters.start_date || '';
+            const endDate = currentFilters.end_date || '';
+            if (!validateDateRangeForQuery(startDate, endDate)) {
+                return;
+            }
+
+            const sortState = getActiveDashboardSortState();
+            const params = buildDashboardSearchParams({
+                tab: getActiveExportTabName(),
+                sort_key: sortState.key,
+                sort_direction: sortState.direction,
+            });
+            window.location.href = `/api/statistics/export?${params}`;
+        }
     </script>
 {% endblock %}
-
-
-
