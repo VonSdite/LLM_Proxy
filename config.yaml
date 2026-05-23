@@ -13,7 +13,7 @@ providers:
   enabled: true
   api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
   source_format: openai_chat
-  api_key:
+  api_key: null
   verify_ssl: false
   model_list:
   - ark-code-latest
@@ -27,7 +27,7 @@ providers:
   enabled: false
   api: https://api.deepseek.com/v1/chat/completions
   source_format: openai_chat
-  api_key:
+  api_key: null
   verify_ssl: false
   model_list:
   - deepseek-chat
@@ -40,4 +40,8 @@ auth_groups:
   - id: key1
     enabled: true
     headers:
-      Authorization: "Bearer 1"
+      Authorization: Bearer 1
+oauth:
+  enabled: true
+  proxy: ''
+  verify_ssl: false
