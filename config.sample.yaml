@@ -30,7 +30,7 @@ oauth:
   enabled: false
   # 支持 direct / system / custom；custom 时才读取 proxy。
   proxy_mode: direct
-  # 服务端访问 OAuth 上游时使用的自定义出站代理地址。账号密码可直接写在 URL 里，系统会规范化转义。
+  # 服务端访问 OAuth 上游时使用的自定义出站代理地址。custom 模式下留空等同直连；账号密码可直接写在 URL 里，系统会规范化转义。
   proxy: ""
   verify_ssl: false
 

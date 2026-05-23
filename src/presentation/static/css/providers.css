@@ -1397,7 +1397,7 @@
 }
 
 .providers-page .provider-proxy-row.is-custom {
-    grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+    grid-template-columns: minmax(126px, 150px) minmax(0, 1fr);
 }
 
 .providers-page .provider-proxy-row [hidden] {

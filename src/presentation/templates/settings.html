@@ -10,7 +10,7 @@
             visibility: hidden;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/settings.css?v=20260517-3" id="settingsPageStyles">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260517-4" id="settingsPageStyles">
     <script>
         (function () {
             const root = document.documentElement;
@@ -173,21 +173,39 @@
                         </div>
                     </div>
                     <div class="settings-grid-oauth">
-                        <div class="oauth-enable-row">
-                            <div class="setting-toggle-title-row">
-                                <span class="setting-toggle-title">启用 OAuth</span>
-                                <button
-                                    type="button"
-                                    class="field-help-button"
-                                    data-settings-help-topic="oauth_enabled"
-                                    onclick="toggleSettingsHelp('oauth_enabled', event)"
-                                    aria-label="查看 OAuth 启用说明"
-                                >?</button>
+                        <div class="oauth-toggle-row">
+                            <div class="oauth-toggle-card oauth-enable-row">
+                                <div class="setting-toggle-title-row">
+                                    <span class="setting-toggle-title">启用 OAuth</span>
+                                    <button
+                                        type="button"
+                                        class="field-help-button"
+                                        data-settings-help-topic="oauth_enabled"
+                                        onclick="toggleSettingsHelp('oauth_enabled', event)"
+                                        aria-label="查看 OAuth 启用说明"
+                                    >?</button>
+                                </div>
+                                <label class="switch" aria-label="切换 OAuth 启用状态">
+                                    <input type="checkbox" id="oauthEnabled">
+                                    <span class="slider"></span>
+                                </label>
                             </div>
-                            <label class="switch" aria-label="切换 OAuth 启用状态">
-                                <input type="checkbox" id="oauthEnabled">
-                                <span class="slider"></span>
-                            </label>
+                            <div class="oauth-toggle-card oauth-ssl-row">
+                                <div class="setting-toggle-title-row">
+                                    <span class="setting-toggle-title">SSL 校验</span>
+                                    <button
+                                        type="button"
+                                        class="field-help-button"
+                                        data-settings-help-topic="oauth_verify_ssl"
+                                        onclick="toggleSettingsHelp('oauth_verify_ssl', event)"
+                                        aria-label="查看 OAuth SSL 校验说明"
+                                    >?</button>
+                                </div>
+                                <label class="switch" aria-label="切换 OAuth SSL 校验">
+                                    <input type="checkbox" id="oauthVerifySsl">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
                         </div>
 
                         <div class="oauth-details-panel" id="oauthDetailsPanel" hidden>
@@ -249,24 +267,6 @@
                                             </button>
                                         </div>
                                     </div>
-                                </div>
-                            </section>
-                            <section class="oauth-settings-block oauth-settings-block-ssl">
-                                <div class="oauth-network-toggle">
-                                    <div class="setting-toggle-title-row">
-                                        <span class="setting-toggle-title">SSL 校验</span>
-                                        <button
-                                            type="button"
-                                            class="field-help-button"
-                                            data-settings-help-topic="oauth_verify_ssl"
-                                            onclick="toggleSettingsHelp('oauth_verify_ssl', event)"
-                                            aria-label="查看 OAuth SSL 校验说明"
-                                        >?</button>
-                                    </div>
-                                    <label class="switch" aria-label="切换 OAuth SSL 校验">
-                                        <input type="checkbox" id="oauthVerifySsl">
-                                        <span class="slider"></span>
-                                    </label>
                                 </div>
                             </section>
                         </div>
@@ -393,7 +393,7 @@
                     <p>这里的代理是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的 HTTP/HTTPS 出站代理，不是下游客户端访问本服务的入口代理。</p>
                     <p>直连会关闭 <code>requests</code> 环境代理读取，不使用 <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> 等进程环境变量。</p>
                     <p>系统代理会使用当前进程环境中的代理变量；如果环境里没有代理，实际会直连。它不保证读取操作系统桌面代理设置。</p>
-                    <p>自定义代理会使用这里填写的代理 URL，并忽略进程环境代理。</p>
+                    <p>自定义代理会使用这里填写的代理 URL，并忽略进程环境代理；留空时等同直连。</p>
                     <p>自定义代理支持在 URL 中填写账号密码，保存时会自动转义账号密码里的特殊字符。</p>
                     <p>如果账号密码里包含冒号，系统会把第一个冒号当成用户名和密码的分隔符；密码里包含冒号没问题，用户名里包含冒号需要手动写成 <code>%3A</code>。</p>
                 `
@@ -402,7 +402,7 @@
                 title: "启用 OAuth",
                 html: `
                     <p>默认关闭。开启后，顶部导航会显示 OAuth 页签。</p>
-                    <p>开启后才会显示 OAuth 代理和 SSL 校验设置。</p>
+                    <p>开启后才会显示 OAuth 出站代理设置。</p>
                 `
             },
             oauth_verify_ssl: {
@@ -789,10 +789,6 @@
             }
 
             const payload = collectOAuthSettingsPayload();
-            if (payload.oauth.enabled && payload.oauth.proxy_mode === "custom" && !payload.oauth.proxy) {
-                showMessage("请输入 OAuth 自定义出站代理地址", "error");
-                return Promise.resolve();
-            }
             const savedPayloadSnapshot = JSON.stringify(payload);
             oauthSettingsSaving = true;
 

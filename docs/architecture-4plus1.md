@@ -233,7 +233,7 @@ OAuth 模型是数据平面的例外路由：
 - `oauth.proxy`
   - 保存后立即影响 OAuth 控制平面请求
   - 用于 Codex / Claude OAuth token 交换、token 刷新、Codex 配额查询与 OAuth 数据面代理
-  - 仅在 `oauth.proxy_mode=custom` 时生效
+  - 仅在 `oauth.proxy_mode=custom` 且非空时生效，`custom` 空值按直连执行
   - 自定义代理 URL 中 userinfo 的账号密码会在保存时规范化转义
 - `oauth.verify_ssl`
   - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
@@ -285,7 +285,7 @@ Provider 公共配置字段只有：
   - 支持 `direct` / `system` / `custom`
   - `direct` 明确绕开环境代理，`system` 使用进程环境代理，`custom` 使用 `proxy`
 - `proxy`
-  - 仅在 `proxy_mode=custom` 时生效
+  - 仅在 `proxy_mode=custom` 且非空时生效，`custom` 空值按直连执行
   - 自定义代理 URL 中 userinfo 的账号密码会在保存时规范化转义
 
 历史配置载入时会自动删除 `target_format`、`target_formats` 和 `transport` 并回写配置文件，用于兼容迁移窗口内的旧配置。

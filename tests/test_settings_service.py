@@ -144,11 +144,11 @@ class SettingsServiceTests(unittest.TestCase):
             result["settings"]["oauth"]["proxy"],
         )
 
-    def test_update_oauth_settings_allows_disabled_custom_proxy_without_url(self) -> None:
+    def test_update_oauth_settings_allows_custom_proxy_without_url(self) -> None:
         result = self.service.update_oauth_settings(
             {
                 "oauth": {
-                    "enabled": False,
+                    "enabled": True,
                     "proxy_mode": "custom",
                     "proxy": "",
                     "verify_ssl": False,
@@ -156,7 +156,7 @@ class SettingsServiceTests(unittest.TestCase):
             }
         )
 
-        self.assertFalse(result["settings"]["oauth"]["enabled"])
+        self.assertTrue(result["settings"]["oauth"]["enabled"])
         self.assertEqual("custom", result["settings"]["oauth"]["proxy_mode"])
         self.assertEqual("", result["settings"]["oauth"]["proxy"])
 

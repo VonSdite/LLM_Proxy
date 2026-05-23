@@ -457,7 +457,6 @@ class ProviderConfigSchema:
         proxy = (
             normalize_proxy_url(
                 config.get("proxy"),
-                required=True,
                 error_message="Provider proxy must be a valid absolute URL",
             )
             if proxy_mode == PROXY_MODE_CUSTOM

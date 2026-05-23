@@ -168,9 +168,15 @@ def build_requests_proxy_settings(
 
     proxy_url = normalize_proxy_url(
         proxy_value,
-        required=True,
         error_message=proxy_url_error_message,
     )
+    if proxy_url is None:
+        return RequestsProxySettings(
+            mode=mode,
+            proxy_url=None,
+            proxies=None,
+            trust_env=False,
+        )
     return RequestsProxySettings(
         mode=mode,
         proxy_url=proxy_url,
