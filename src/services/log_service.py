@@ -122,7 +122,7 @@ class LogService:
         sort_key: str | None = None,
         sort_direction: str | None = None,
     ) -> list[dict[str, Any]]:
-        """获取用户与请求模型维度的用量汇总。"""
+        """获取用户维度的用量汇总。"""
         try:
             rows = self._repository.get_user_usage_summary(
                 start_date,
@@ -135,7 +135,6 @@ class LogService:
             result = [
                 {
                     "username": row["username"],
-                    "request_model": row["request_model"],
                     "request_count": row["request_count"],
                     "total_tokens": row["total_tokens"],
                     "prompt_tokens": row["prompt_tokens"],

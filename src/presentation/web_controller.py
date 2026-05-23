@@ -361,11 +361,10 @@ class WebController:
                     sort_key=sort_key,
                     sort_direction=sort_direction,
                 )
-                headers = ["用户名", "请求模型", "请求数", "输入token", "输出token", "总 Token", "关联 IP 数", "最近请求日期"]
+                headers = ["用户名", "请求数", "输入token", "输出token", "总 Token", "关联 IP 数", "最近请求日期"]
                 rows = [
                     [
                         item["username"],
-                        item["request_model"],
                         item["request_count"],
                         item["prompt_tokens"],
                         item["completion_tokens"],
