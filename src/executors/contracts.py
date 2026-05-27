@@ -35,5 +35,5 @@ class Executor(Protocol):
         requested_stream: bool,
         timeout_seconds: int,
         verify_ssl: bool,
-        request_proxies: dict[str, str] | None,
+        request_proxies: dict[str, str | None] | None,
     ) -> OpenedUpstreamResponse: ...

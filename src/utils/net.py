@@ -196,8 +196,8 @@ def apply_requests_proxy_settings(session: Any, settings: RequestsProxySettings)
         pass
 
 
-def build_module_request_proxies(settings: RequestsProxySettings) -> dict[str, str | None] | None:
-    """为 requests.get/post 这种模块级调用构造代理参数。"""
+def build_requests_request_proxies(settings: RequestsProxySettings) -> dict[str, str | None] | None:
+    """为单次 requests 调用构造代理参数，并显式屏蔽 direct 模式的环境代理。"""
     if settings.trust_env:
         return None
     if settings.proxies is None:
@@ -205,6 +205,11 @@ def build_module_request_proxies(settings: RequestsProxySettings) -> dict[str, s
     proxies: dict[str, str | None] = dict(settings.proxies)
     proxies["all"] = None
     return proxies
+
+
+def build_module_request_proxies(settings: RequestsProxySettings) -> dict[str, str | None] | None:
+    """为 requests.get/post 这种模块级调用构造代理参数。"""
+    return build_requests_request_proxies(settings)
 
 
 def _disabled_environment_proxies() -> dict[str, str | None]:

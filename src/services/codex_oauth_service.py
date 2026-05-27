@@ -23,6 +23,7 @@ from ..application.app_context import AppContext
 from ..utils.net import (
     apply_requests_proxy_settings,
     build_requests_proxy_settings,
+    build_requests_request_proxies,
 )
 from ..utils.proxy_warning import ProxyWarningRequired, request_with_proxy_warning_retry
 
@@ -977,7 +978,7 @@ class CodexOAuthService:
             if session is not None:
                 session.trust_env = False
             return {
-                "proxies": None,
+                "proxies": {"http": None, "https": None, "all": None},
                 "verify": False,
             }
         proxy_settings = build_requests_proxy_settings(
@@ -989,7 +990,7 @@ class CodexOAuthService:
         if session is not None:
             apply_requests_proxy_settings(session, proxy_settings)
         return {
-            "proxies": proxy_settings.proxies,
+            "proxies": build_requests_request_proxies(proxy_settings),
             "verify": self._config_manager.is_oauth_verify_ssl_enabled(),
         }
 

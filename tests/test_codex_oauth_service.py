@@ -191,7 +191,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
             payload = json.loads(auth_file.read_text(encoding="utf-8"))
 
         self.assertEqual("authorization_code", captured["data"]["grant_type"])
-        self.assertIsNone(captured["proxies"])
+        self.assertEqual({"http": None, "https": None, "all": None}, captured["proxies"])
         self.assertFalse(captured["verify"])
         self.assertEqual("demo-code", captured["data"]["code"])
         self.assertEqual(CODEX_REDIRECT_URI, captured["data"]["redirect_uri"])
@@ -383,7 +383,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertEqual("Bearer access-demo", captured["headers"]["Authorization"])
         self.assertEqual("account-123", captured["headers"]["Chatgpt-Account-Id"])
         self.assertEqual(20, captured["timeout"])
-        self.assertIsNone(captured["proxies"])
+        self.assertEqual({"http": None, "https": None, "all": None}, captured["proxies"])
         self.assertFalse(captured["verify"])
         self.assertEqual("plus", result["plan_type"])
         self.assertEqual(75.0, result["windows"][0]["remaining_percent"])
@@ -966,6 +966,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
             {
                 "http": "http://127.0.0.1:7890",
                 "https": "http://127.0.0.1:7890",
+                "all": None,
             },
             captured["proxies"],
         )

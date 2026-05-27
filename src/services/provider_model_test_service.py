@@ -19,7 +19,7 @@ from ..hooks import HookContext, HookErrorType
 from ..proxy_core import decode_stream_events
 from ..translators import build_default_translator_registry
 from ..utils.http_headers import merge_http_headers, normalize_http_headers
-from ..utils.net import build_requests_proxy_settings
+from ..utils.net import build_requests_proxy_settings, build_requests_request_proxies
 from .upstream_request_builder import build_upstream_request
 
 
@@ -115,12 +115,14 @@ class ProviderModelTestService:
                     headers,
                     translated_request,
                     requested_stream=request_ctx.stream,
-                    request_proxies=build_requests_proxy_settings(
-                        provider.proxy_mode,
-                        provider.proxy,
-                        proxy_mode_error_message="Provider proxy_mode must be one of: direct, system, custom",
-                        proxy_url_error_message="Provider proxy must be a valid absolute URL",
-                    ).proxies,
+                    request_proxies=build_requests_request_proxies(
+                        build_requests_proxy_settings(
+                            provider.proxy_mode,
+                            provider.proxy,
+                            proxy_mode_error_message="Provider proxy_mode must be one of: direct, system, custom",
+                            proxy_url_error_message="Provider proxy must be a valid absolute URL",
+                        )
+                    ),
                     timeout_seconds=provider.timeout_seconds,
                     verify_ssl=provider.verify_ssl,
                 )
@@ -260,7 +262,7 @@ class ProviderModelTestService:
         body: dict[str, Any],
         *,
         requested_stream: bool,
-        request_proxies: dict[str, str] | None,
+        request_proxies: dict[str, str | None] | None,
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> OpenedUpstreamResponse:

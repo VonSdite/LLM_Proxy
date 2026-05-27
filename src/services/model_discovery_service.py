@@ -13,7 +13,7 @@ import requests
 from ..application.app_context import AppContext
 from ..config.provider_config import clean_optional_string, parse_optional_bool, parse_optional_positive_int
 from ..utils.http_headers import merge_http_headers
-from ..utils.net import apply_requests_proxy_settings, build_requests_proxy_settings
+from ..utils.net import apply_requests_proxy_settings, build_requests_proxy_settings, build_requests_request_proxies
 from ..utils.proxy_warning import (
     ProxyWarningRequired,
     close_response,
@@ -85,7 +85,7 @@ class ModelDiscoveryService:
                 response: Any = None
                 try:
                     request_options = {
-                        "proxies": proxy_settings.proxies,
+                        "proxies": build_requests_request_proxies(proxy_settings),
                         "verify": verify_ssl,
                     }
                     response = request_with_proxy_warning_retry(
