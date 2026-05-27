@@ -5,6 +5,9 @@ logging:
   llm_request_debug_enabled: false
 chat:
   whitelist_enabled: true
+client_ip:
+  real_ip_enabled: true
+  real_ip_header: X-Forwarded-For
 admin:
   username: admin
   password: admin

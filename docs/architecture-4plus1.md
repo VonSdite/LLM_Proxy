@@ -51,6 +51,7 @@ downstream request
 
 - `ProxyController`
   - 根据当前 route family 选择下游接口协议
+  - 根据 `client_ip.real_ip_enabled` 和 `client_ip.real_ip_header` 解析白名单、模型权限、统计和 trace 使用的客户端 IP
   - 构造标准错误体
 - `DataPlaneCors`
   - 只为 `/v1/*` 数据平面添加 CORS 响应头
@@ -189,6 +190,8 @@ OAuth 模型是数据平面的例外路由：
 - `server.port`
 - `admin.username`
 - `admin.password`
+- `client_ip.real_ip_enabled`
+- `client_ip.real_ip_header`
 - `logging.path`
 - `logging.level`
 - `logging.llm_request_debug_enabled`
@@ -209,6 +212,16 @@ OAuth 模型是数据平面的例外路由：
   - 两者都非空时启用后台登录
   - 任一为空时关闭后台登录
   - 保存后会清空进程内 session，避免旧凭据继续生效
+- `client_ip.real_ip_enabled`
+  - 归类为“基础设置”
+  - 保存后立即影响数据平面白名单、模型权限、访问日志、请求统计和 trace 中使用的客户端 IP
+  - 默认值为 `false`，关闭时使用连接到本服务的对端 IP
+- `client_ip.real_ip_header`
+  - 仅在 `client_ip.real_ip_enabled=true` 时参与客户端 IP 解析
+  - 默认值为 `X-Forwarded-For`
+  - header 值为逗号分隔列表时取第一个 IP
+  - header 缺失或首个值不是合法 IP 时回退到对端 IP
+  - 仅应在可信反向代理会覆盖该 header 的部署中开启
 - `logging.*`
   - 归类为“Debug”
   - 页面修改后自动生效
@@ -245,8 +258,12 @@ OAuth 模型是数据平面的例外路由：
 
 - `Application`
   - 在保存日志配置后可重新装配 logger handler
+  - 每次访问日志写入前读取当前 `client_ip.*` 配置解析客户端 IP
 - `WebController`
   - 渲染后台页面时读取当前 `oauth.enabled`，用于决定是否输出 OAuth 顶层导航项
+- `ProxyController`
+  - 每次数据面请求读取当前 `client_ip.*` 配置解析客户端 IP
+  - 解析结果用于白名单、模型权限、请求统计、访问日志关联和 LLM trace
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
@@ -584,6 +601,7 @@ sequenceDiagram
     participant Executor
 
     Client->>Controller: POST /v1/chat/completions
+    Controller->>Controller: 按 client_ip.* 解析客户端 IP
     Controller->>Service: proxy_request()
     Service->>Translator: openai_responses -> openai_chat
     Translator-->>Service: translated upstream request

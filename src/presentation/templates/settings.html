@@ -10,7 +10,7 @@
             visibility: hidden;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/settings.css?v=20260517-4" id="settingsPageStyles">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260517-5" id="settingsPageStyles">
     <script>
         (function () {
             const root = document.documentElement;
@@ -93,6 +93,41 @@
                                         min="1"
                                         max="65535"
                                         placeholder="例如 8080"
+                                    >
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-subcard">
+                            <div class="section-header">
+                                <div class="section-title-with-help">
+                                    <h3 class="section-title">客户端 IP</h3>
+                                    <button
+                                        type="button"
+                                        class="field-help-button"
+                                        data-settings-help-topic="real_client_ip"
+                                        onclick="toggleSettingsHelp('real_client_ip', event)"
+                                        aria-label="查看真实源 IP 说明"
+                                    >?</button>
+                                </div>
+                            </div>
+                            <div class="settings-grid">
+                                <div class="setting-toggle-inline">
+                                    <span class="setting-toggle-title">按真实源 IP 控制</span>
+                                    <label class="switch" aria-label="切换真实源 IP 控制">
+                                        <input type="checkbox" id="realIpEnabled">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-field" id="realIpHeaderField" hidden>
+                                    <label class="setting-label" for="realIpHeader">真实源 IP Header</label>
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        id="realIpHeader"
+                                        placeholder="例如 X-Forwarded-For 或 X-Real-IP"
+                                        autocomplete="off"
+                                        spellcheck="false"
                                     >
                                 </div>
                             </div>
@@ -380,6 +415,15 @@
                     <p>只要任一项为空，就会关闭登录校验，访问后台页面时不再要求登录。</p>
                 `
             },
+            real_client_ip: {
+                title: "真实源 IP",
+                html: `
+                    <p>默认关闭。关闭时，白名单、模型权限、访问日志和请求统计都使用连接到本服务的对端 IP。</p>
+                    <p>开启后，会从配置的 header 读取真实源 IP，适合服务前面还有 Nginx、Cloudflare Tunnel 或其它反向代理的部署。</p>
+                    <p>常用 header 是 <code>X-Forwarded-For</code> 或 <code>X-Real-IP</code>。如果 header 里是逗号分隔列表，系统会取第一个 IP。</p>
+                    <p>请只在可信反向代理已经正确覆盖该 header 时开启；header 缺失或不是合法 IP 时会回退到对端 IP。</p>
+                `
+            },
             llm_trace: {
                 title: "LLM Trace",
                 html: `
@@ -562,6 +606,10 @@
                 admin: {
                     username: document.getElementById("adminUsername").value.trim(),
                     password: document.getElementById("adminPassword").value
+                },
+                client_ip: {
+                    real_ip_enabled: document.getElementById("realIpEnabled").checked,
+                    real_ip_header: document.getElementById("realIpHeader").value.trim()
                 }
             };
         }
@@ -593,6 +641,9 @@
             document.getElementById("serverPort").value = settings?.server?.port || "";
             document.getElementById("adminUsername").value = settings?.admin?.username || "";
             document.getElementById("adminPassword").value = settings?.admin?.password || "";
+            document.getElementById("realIpEnabled").checked = Boolean(settings?.client_ip?.real_ip_enabled);
+            document.getElementById("realIpHeader").value = settings?.client_ip?.real_ip_header || "X-Forwarded-For";
+            syncRealIpFields();
             currentBasicSettingsSnapshot = JSON.stringify(collectBasicSettingsPayload());
             resetSensitiveInputs();
             updateBasicSettingsSaveButtonState();
@@ -661,6 +712,14 @@
                 return;
             }
             saveButton.disabled = basicSettingsSaving || !hasBasicSettingsChanged();
+        }
+
+        function syncRealIpFields() {
+            const headerField = document.getElementById("realIpHeaderField");
+            const enabled = Boolean(document.getElementById("realIpEnabled")?.checked);
+            if (headerField) {
+                headerField.hidden = !enabled;
+            }
         }
 
         function syncOAuthDetailsVisibility(enabled) {
@@ -1076,10 +1135,15 @@
                 input.addEventListener("copy", handleSensitiveInputCopy);
             });
 
-            ["serverHost", "serverPort", "adminUsername"].forEach(inputId => {
+            ["serverHost", "serverPort", "adminUsername", "realIpHeader"].forEach(inputId => {
                 const input = document.getElementById(inputId);
                 input?.addEventListener("input", updateBasicSettingsSaveButtonState);
                 input?.addEventListener("change", updateBasicSettingsSaveButtonState);
+            });
+
+            document.getElementById("realIpEnabled")?.addEventListener("change", function () {
+                syncRealIpFields();
+                updateBasicSettingsSaveButtonState();
             });
 
             document.getElementById("oauthEnabled")?.addEventListener("change", handleOAuthSettingsChanged);

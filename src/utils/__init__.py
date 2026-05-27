@@ -11,11 +11,12 @@ from .local_time import (
     now_local_datetime_text,
     parse_local_datetime,
 )
-from .net import is_valid_ip, normalize_ip
+from .net import is_valid_ip, normalize_ip, resolve_client_ip
 
 __all__ = [
     "is_valid_ip",
     "normalize_ip",
+    "resolve_client_ip",
     "ensure_local_datetime",
     "format_local_date",
     "format_local_datetime",

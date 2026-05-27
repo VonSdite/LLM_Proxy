@@ -11,10 +11,16 @@ from typing import Any
 from ..application.app_context import AppContext
 from ..config.provider_config import parse_optional_bool
 from ..utils.net import (
+    DEFAULT_REAL_CLIENT_IP_HEADER,
     DEFAULT_PROXY_MODE,
     PROXY_MODE_CUSTOM,
+    normalize_real_client_ip_header,
     normalize_proxy_mode,
     normalize_proxy_url,
+)
+
+_HTTP_HEADER_NAME_CHARS = frozenset(
+    "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
 
@@ -39,6 +45,10 @@ class SettingsService:
             "admin": {
                 "username": str(admin_config.get("username") or ""),
                 "password": str(admin_config.get("password") or ""),
+            },
+            "client_ip": {
+                "real_ip_enabled": self._config_manager.is_real_client_ip_enabled(),
+                "real_ip_header": self._config_manager.get_real_client_ip_header(),
             },
             "logging": {
                 "path": str(self._config_manager.get_log_path()),
@@ -77,17 +87,27 @@ class SettingsService:
 
         server_payload = payload.get("server")
         admin_payload = payload.get("admin")
+        client_ip_payload = payload.get("client_ip", {})
 
         if not isinstance(server_payload, dict):
             raise ValueError("Config field 'server' must be an object")
         if not isinstance(admin_payload, dict):
             raise ValueError("Config field 'admin' must be an object")
+        if not isinstance(client_ip_payload, dict):
+            raise ValueError("Config field 'client_ip' must be an object")
 
         current_settings = self.get_system_settings()
         host = self._parse_server_host(server_payload.get("host"))
         port = self._parse_server_port(server_payload.get("port"))
         username = self._normalize_admin_value(admin_payload.get("username"))
         password = self._normalize_admin_secret(admin_payload.get("password"))
+        real_ip_enabled = self._parse_real_client_ip_enabled(
+            client_ip_payload.get("real_ip_enabled"),
+            default=bool(current_settings["client_ip"]["real_ip_enabled"]),
+        )
+        real_ip_header = self._parse_real_client_ip_header(
+            client_ip_payload.get("real_ip_header", current_settings["client_ip"]["real_ip_header"])
+        )
         server_restart_required = (
             str(current_settings["server"]["host"]) != host or int(current_settings["server"]["port"]) != port
         )
@@ -95,11 +115,14 @@ class SettingsService:
         config = self._config_manager.get_raw_config()
         server_config = self._ensure_mapping(config, "server")
         admin_config = self._ensure_mapping(config, "admin")
+        client_ip_config = self._ensure_mapping(config, "client_ip")
 
         server_config["host"] = host
         server_config["port"] = port
         admin_config["username"] = username
         admin_config["password"] = password
+        client_ip_config["real_ip_enabled"] = real_ip_enabled
+        client_ip_config["real_ip_header"] = real_ip_header
 
         self._config_manager.write_raw_config(config)
 
@@ -192,12 +215,15 @@ class SettingsService:
         server_payload = payload.get("server")
         admin_payload = payload.get("admin")
         logging_payload = payload.get("logging")
+        client_ip_payload = payload.get("client_ip")
         if not isinstance(server_payload, dict):
             raise ValueError("Config field 'server' must be an object")
         if not isinstance(admin_payload, dict):
             raise ValueError("Config field 'admin' must be an object")
         if not isinstance(logging_payload, dict):
             raise ValueError("Config field 'logging' must be an object")
+        if client_ip_payload is not None and not isinstance(client_ip_payload, dict):
+            raise ValueError("Config field 'client_ip' must be an object")
 
         current_settings = self.get_system_settings()
         host = self._parse_server_host(server_payload.get("host"))
@@ -209,6 +235,17 @@ class SettingsService:
         llm_request_debug_enabled = parse_optional_bool(logging_payload.get("llm_request_debug_enabled"))
         if llm_request_debug_enabled is None:
             raise ValueError("LLM request debug flag is required")
+
+        client_ip_values: tuple[bool, str] | None = None
+        if isinstance(client_ip_payload, dict):
+            real_ip_enabled = self._parse_real_client_ip_enabled(
+                client_ip_payload.get("real_ip_enabled"),
+                default=bool(current_settings["client_ip"]["real_ip_enabled"]),
+            )
+            real_ip_header = self._parse_real_client_ip_header(
+                client_ip_payload.get("real_ip_header", current_settings["client_ip"]["real_ip_header"])
+            )
+            client_ip_values = (real_ip_enabled, real_ip_header)
 
         oauth_values: tuple[bool, str, str, bool] | None = None
         if "oauth" in payload:
@@ -258,6 +295,11 @@ class SettingsService:
         logging_config["path"] = log_path
         logging_config["level"] = log_level
         logging_config["llm_request_debug_enabled"] = llm_request_debug_enabled
+
+        if client_ip_values is not None:
+            client_ip_config = self._ensure_mapping(config, "client_ip")
+            client_ip_config["real_ip_enabled"] = client_ip_values[0]
+            client_ip_config["real_ip_header"] = client_ip_values[1]
 
         if oauth_values is not None:
             oauth_config = self._ensure_mapping(config, "oauth")
@@ -321,6 +363,20 @@ class SettingsService:
         if log_level not in allowed_levels:
             raise ValueError("Log level must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL")
         return log_level
+
+    @staticmethod
+    def _parse_real_client_ip_enabled(value: Any, *, default: bool) -> bool:
+        parsed_enabled = parse_optional_bool(value, default=default)
+        if parsed_enabled is None:
+            raise ValueError("Real client IP enabled flag is required")
+        return parsed_enabled
+
+    @staticmethod
+    def _parse_real_client_ip_header(value: Any) -> str:
+        header_name = normalize_real_client_ip_header(value or DEFAULT_REAL_CLIENT_IP_HEADER)
+        if any(char not in _HTTP_HEADER_NAME_CHARS for char in header_name):
+            raise ValueError("Real client IP header must be a valid HTTP header name")
+        return header_name
 
     @staticmethod
     def _parse_oauth_proxy_mode(value: Any, proxy_value: Any) -> str:

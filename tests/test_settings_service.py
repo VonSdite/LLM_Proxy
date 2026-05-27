@@ -72,10 +72,49 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual("direct", settings["oauth"]["proxy_mode"])
         self.assertEqual("", settings["oauth"]["proxy"])
         self.assertFalse(settings["oauth"]["verify_ssl"])
+        self.assertFalse(settings["client_ip"]["real_ip_enabled"])
+        self.assertEqual("X-Forwarded-For", settings["client_ip"]["real_ip_header"])
         self.assertFalse(self.config_manager.is_oauth_enabled())
         self.assertEqual("direct", self.config_manager.get_oauth_proxy_mode())
         self.assertIsNone(self.config_manager.get_oauth_proxy())
         self.assertFalse(self.config_manager.is_oauth_verify_ssl_enabled())
+        self.assertFalse(self.config_manager.is_real_client_ip_enabled())
+        self.assertEqual("X-Forwarded-For", self.config_manager.get_real_client_ip_header())
+
+    def test_update_basic_settings_persists_real_client_ip_settings(self) -> None:
+        result = self.service.update_basic_settings(
+            {
+                "server": {"host": "127.0.0.1", "port": 8080},
+                "admin": {"username": "", "password": ""},
+                "client_ip": {
+                    "real_ip_enabled": True,
+                    "real_ip_header": " X-Real-IP ",
+                },
+            }
+        )
+
+        self.assertTrue(result["settings"]["client_ip"]["real_ip_enabled"])
+        self.assertEqual("X-Real-IP", result["settings"]["client_ip"]["real_ip_header"])
+        self.assertTrue(self.config_manager.is_real_client_ip_enabled())
+        self.assertEqual("X-Real-IP", self.config_manager.get_real_client_ip_header())
+
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        self.assertTrue(persisted["client_ip"]["real_ip_enabled"])
+        self.assertEqual("X-Real-IP", persisted["client_ip"]["real_ip_header"])
+
+    def test_update_basic_settings_rejects_invalid_real_client_ip_header(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Real client IP header must be a valid HTTP header name"):
+            self.service.update_basic_settings(
+                {
+                    "server": {"host": "127.0.0.1", "port": 8080},
+                    "admin": {"username": "", "password": ""},
+                    "client_ip": {
+                        "real_ip_enabled": True,
+                        "real_ip_header": "X-Real-IP: nope",
+                    },
+                }
+            )
 
     def test_update_oauth_settings_persists_network_flags(self) -> None:
         result = self.service.update_oauth_settings(
@@ -205,6 +244,10 @@ class SettingsServiceTests(unittest.TestCase):
             {
                 "server": {"host": "0.0.0.0", "port": 9090},
                 "admin": {"username": "admin", "password": "secret"},
+                "client_ip": {
+                    "real_ip_enabled": True,
+                    "real_ip_header": "CF-Connecting-IP",
+                },
                 "logging": {
                     "path": str(self.root_path / "new-logs"),
                     "level": "DEBUG",
@@ -225,6 +268,8 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertTrue(result["server_restart_required"])
         self.assertTrue(result["settings"]["logging"]["llm_request_debug_enabled"])
         self.assertTrue(result["settings"]["oauth"]["enabled"])
+        self.assertTrue(result["settings"]["client_ip"]["real_ip_enabled"])
+        self.assertEqual("CF-Connecting-IP", result["settings"]["client_ip"]["real_ip_header"])
 
     def test_update_system_settings_rejects_invalid_debug_without_partial_write(self) -> None:
         with self.config_path.open("r", encoding="utf-8") as handle:
