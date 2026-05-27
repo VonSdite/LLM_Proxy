@@ -20,6 +20,12 @@ chat:
   # 开启后会按 IP 白名单控制 chat 请求与 /v1/models 返回结果。
   whitelist_enabled: false
 
+client_ip:
+  # 开启后会按指定 Header 解析真实源 IP，用于白名单、模型权限、访问日志和统计。
+  # 默认关闭，关闭时使用连接到本服务的对端 IP。
+  real_ip_enabled: false
+  real_ip_header: X-Forwarded-For
+
 admin:
   # username 和 password 同时非空时启用后台登录；
   # 只要任一为空，就关闭后台登录。
