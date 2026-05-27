@@ -10,7 +10,7 @@
             visibility: hidden;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/settings.css?v=20260517-5" id="settingsPageStyles">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260528-1" id="settingsPageStyles">
     <script>
         (function () {
             const root = document.documentElement;
@@ -101,41 +101,6 @@
                         <section class="settings-subcard">
                             <div class="section-header">
                                 <div class="section-title-with-help">
-                                    <h3 class="section-title">客户端 IP</h3>
-                                    <button
-                                        type="button"
-                                        class="field-help-button"
-                                        data-settings-help-topic="real_client_ip"
-                                        onclick="toggleSettingsHelp('real_client_ip', event)"
-                                        aria-label="查看真实源 IP 说明"
-                                    >?</button>
-                                </div>
-                            </div>
-                            <div class="settings-grid">
-                                <div class="setting-toggle-inline">
-                                    <span class="setting-toggle-title">按真实源 IP 控制</span>
-                                    <label class="switch" aria-label="切换真实源 IP 控制">
-                                        <input type="checkbox" id="realIpEnabled">
-                                        <span class="slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-field" id="realIpHeaderField" hidden>
-                                    <label class="setting-label" for="realIpHeader">真实源 IP Header</label>
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        id="realIpHeader"
-                                        placeholder="例如 X-Forwarded-For 或 X-Real-IP"
-                                        autocomplete="off"
-                                        spellcheck="false"
-                                    >
-                                </div>
-                            </div>
-                        </section>
-
-                        <section class="settings-subcard">
-                            <div class="section-header">
-                                <div class="section-title-with-help">
                                     <h3 class="section-title">后台登录</h3>
                                     <button
                                         type="button"
@@ -197,6 +162,41 @@
                                 </div>
                             </div>
                         </section>
+                    </div>
+                </section>
+
+                <section class="section-card settings-shell-card settings-shell-card-client-ip">
+                    <div class="section-header settings-shell-header">
+                        <div class="section-title-with-help">
+                            <h2 class="section-title">客户端 IP</h2>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-settings-help-topic="real_client_ip"
+                                onclick="toggleSettingsHelp('real_client_ip', event)"
+                                aria-label="查看真实源 IP 说明"
+                            >?</button>
+                        </div>
+                    </div>
+                    <div class="settings-grid settings-grid-client-ip">
+                        <div class="setting-toggle-inline">
+                            <span class="setting-toggle-title">按真实源 IP 控制</span>
+                            <label class="switch" aria-label="切换真实源 IP 控制">
+                                <input type="checkbox" id="realIpEnabled">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-field" id="realIpHeaderField" hidden>
+                            <label class="setting-label" for="realIpHeader">真实源 IP Header</label>
+                            <input
+                                type="text"
+                                class="form-control"
+                                id="realIpHeader"
+                                placeholder="例如 X-Forwarded-For 或 X-Real-IP"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                        </div>
                     </div>
                 </section>
 
@@ -375,12 +375,15 @@
     <script src="/static/js/ui-message.js?v=20260319-1"></script>
     <script>
         let basicSettingsSaving = false;
+        let clientIpSettingsSaving = false;
+        let pendingClientIpSave = false;
         let oauthSettingsSaving = false;
         let pendingOAuthSave = false;
         let debugSettingsSaving = false;
         let pendingDebugSave = false;
         let currentSettings = null;
         let currentBasicSettingsSnapshot = "";
+        let currentClientIpSettingsSnapshot = "";
         let currentOAuthSettingsSnapshot = "";
         let currentDebugSettingsSnapshot = "";
         let activeSettingsHelpTrigger = null;
@@ -606,7 +609,12 @@
                 admin: {
                     username: document.getElementById("adminUsername").value.trim(),
                     password: document.getElementById("adminPassword").value
-                },
+                }
+            };
+        }
+
+        function collectClientIpSettingsPayload() {
+            return {
                 client_ip: {
                     real_ip_enabled: document.getElementById("realIpEnabled").checked,
                     real_ip_header: document.getElementById("realIpHeader").value.trim()
@@ -641,12 +649,16 @@
             document.getElementById("serverPort").value = settings?.server?.port || "";
             document.getElementById("adminUsername").value = settings?.admin?.username || "";
             document.getElementById("adminPassword").value = settings?.admin?.password || "";
-            document.getElementById("realIpEnabled").checked = Boolean(settings?.client_ip?.real_ip_enabled);
-            document.getElementById("realIpHeader").value = settings?.client_ip?.real_ip_header || "X-Forwarded-For";
-            syncRealIpFields();
             currentBasicSettingsSnapshot = JSON.stringify(collectBasicSettingsPayload());
             resetSensitiveInputs();
             updateBasicSettingsSaveButtonState();
+        }
+
+        function fillClientIpSettingsForm(settings) {
+            document.getElementById("realIpEnabled").checked = Boolean(settings?.client_ip?.real_ip_enabled);
+            document.getElementById("realIpHeader").value = settings?.client_ip?.real_ip_header || "X-Forwarded-For";
+            syncRealIpFields();
+            currentClientIpSettingsSnapshot = JSON.stringify(collectClientIpSettingsPayload());
         }
 
         function fillDebugSettingsForm(settings) {
@@ -677,6 +689,7 @@
         function fillSettingsForm(settings) {
             currentSettings = settings;
             fillBasicSettingsForm(settings);
+            fillClientIpSettingsForm(settings);
             fillOAuthSettingsForm(settings);
             fillDebugSettingsForm(settings);
         }
@@ -696,6 +709,10 @@
 
         function hasBasicSettingsChanged() {
             return JSON.stringify(collectBasicSettingsPayload()) !== currentBasicSettingsSnapshot;
+        }
+
+        function hasClientIpSettingsChanged() {
+            return JSON.stringify(collectClientIpSettingsPayload()) !== currentClientIpSettingsSnapshot;
         }
 
         function hasDebugSettingsChanged() {
@@ -778,6 +795,11 @@
             saveOAuthSettings();
         }
 
+        function handleClientIpSettingsChanged() {
+            syncRealIpFields();
+            saveClientIpSettings();
+        }
+
         async function saveBasicSettings() {
             if (basicSettingsSaving || !hasBasicSettingsChanged()) {
                 return Promise.resolve();
@@ -805,6 +827,9 @@
 
                 currentSettings = data.settings;
                 fillBasicSettingsForm(data.settings);
+                if (!hasClientIpSettingsChanged()) {
+                    fillClientIpSettingsForm(data.settings);
+                }
                 if (!hasOAuthSettingsChanged()) {
                     fillOAuthSettingsForm(data.settings);
                 }
@@ -835,6 +860,56 @@
             } finally {
                 basicSettingsSaving = false;
                 updateBasicSettingsSaveButtonState();
+            }
+        }
+
+        async function saveClientIpSettings() {
+            if (clientIpSettingsSaving) {
+                pendingClientIpSave = true;
+                return Promise.resolve();
+            }
+            if (!hasClientIpSettingsChanged()) {
+                return Promise.resolve();
+            }
+
+            const payload = collectClientIpSettingsPayload();
+            const savedPayloadSnapshot = JSON.stringify(payload);
+            clientIpSettingsSaving = true;
+
+            try {
+                const response = await fetch("/api/settings/system/client-ip", {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        window.location.href = "/login";
+                        return;
+                    }
+                    throw new Error(data?.error || "保存客户端 IP 设置失败");
+                }
+
+                currentSettings = data.settings;
+                if (JSON.stringify(collectClientIpSettingsPayload()) === savedPayloadSnapshot) {
+                    fillClientIpSettingsForm(data.settings);
+                } else {
+                    currentClientIpSettingsSnapshot = savedPayloadSnapshot;
+                    pendingClientIpSave = true;
+                }
+            } catch (error) {
+                showActionError("保存客户端 IP 设置", error);
+            } finally {
+                clientIpSettingsSaving = false;
+                if (pendingClientIpSave && hasClientIpSettingsChanged()) {
+                    pendingClientIpSave = false;
+                    await saveClientIpSettings();
+                } else {
+                    pendingClientIpSave = false;
+                }
             }
         }
 
@@ -1135,15 +1210,18 @@
                 input.addEventListener("copy", handleSensitiveInputCopy);
             });
 
-            ["serverHost", "serverPort", "adminUsername", "realIpHeader"].forEach(inputId => {
+            ["serverHost", "serverPort", "adminUsername"].forEach(inputId => {
                 const input = document.getElementById(inputId);
                 input?.addEventListener("input", updateBasicSettingsSaveButtonState);
                 input?.addEventListener("change", updateBasicSettingsSaveButtonState);
             });
 
-            document.getElementById("realIpEnabled")?.addEventListener("change", function () {
-                syncRealIpFields();
-                updateBasicSettingsSaveButtonState();
+            document.getElementById("realIpEnabled")?.addEventListener("change", handleClientIpSettingsChanged);
+            document.getElementById("realIpHeader")?.addEventListener("change", function () {
+                saveClientIpSettings();
+            });
+            document.getElementById("realIpHeader")?.addEventListener("blur", function () {
+                saveClientIpSettings();
             });
 
             document.getElementById("oauthEnabled")?.addEventListener("change", handleOAuthSettingsChanged);

@@ -87,27 +87,17 @@ class SettingsService:
 
         server_payload = payload.get("server")
         admin_payload = payload.get("admin")
-        client_ip_payload = payload.get("client_ip", {})
 
         if not isinstance(server_payload, dict):
             raise ValueError("Config field 'server' must be an object")
         if not isinstance(admin_payload, dict):
             raise ValueError("Config field 'admin' must be an object")
-        if not isinstance(client_ip_payload, dict):
-            raise ValueError("Config field 'client_ip' must be an object")
 
         current_settings = self.get_system_settings()
         host = self._parse_server_host(server_payload.get("host"))
         port = self._parse_server_port(server_payload.get("port"))
         username = self._normalize_admin_value(admin_payload.get("username"))
         password = self._normalize_admin_secret(admin_payload.get("password"))
-        real_ip_enabled = self._parse_real_client_ip_enabled(
-            client_ip_payload.get("real_ip_enabled"),
-            default=bool(current_settings["client_ip"]["real_ip_enabled"]),
-        )
-        real_ip_header = self._parse_real_client_ip_header(
-            client_ip_payload.get("real_ip_header", current_settings["client_ip"]["real_ip_header"])
-        )
         server_restart_required = (
             str(current_settings["server"]["host"]) != host or int(current_settings["server"]["port"]) != port
         )
@@ -115,14 +105,11 @@ class SettingsService:
         config = self._config_manager.get_raw_config()
         server_config = self._ensure_mapping(config, "server")
         admin_config = self._ensure_mapping(config, "admin")
-        client_ip_config = self._ensure_mapping(config, "client_ip")
 
         server_config["host"] = host
         server_config["port"] = port
         admin_config["username"] = username
         admin_config["password"] = password
-        client_ip_config["real_ip_enabled"] = real_ip_enabled
-        client_ip_config["real_ip_header"] = real_ip_header
 
         self._config_manager.write_raw_config(config)
 
@@ -133,6 +120,33 @@ class SettingsService:
                 current_settings["admin"]["username"] != username or current_settings["admin"]["password"] != password
             ),
             "server_restart_required": server_restart_required,
+        }
+
+    def update_client_ip_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Request payload must be an object")
+
+        client_ip_payload = payload.get("client_ip")
+        if not isinstance(client_ip_payload, dict):
+            raise ValueError("Config field 'client_ip' must be an object")
+
+        current_settings = self.get_system_settings()
+        real_ip_enabled = self._parse_real_client_ip_enabled(
+            client_ip_payload.get("real_ip_enabled"),
+            default=bool(current_settings["client_ip"]["real_ip_enabled"]),
+        )
+        real_ip_header = self._parse_real_client_ip_header(
+            client_ip_payload.get("real_ip_header", current_settings["client_ip"]["real_ip_header"])
+        )
+
+        config = self._config_manager.get_raw_config()
+        client_ip_config = self._ensure_mapping(config, "client_ip")
+        client_ip_config["real_ip_enabled"] = real_ip_enabled
+        client_ip_config["real_ip_header"] = real_ip_header
+
+        self._config_manager.write_raw_config(config)
+        return {
+            "settings": self.get_system_settings(),
         }
 
     def update_debug_settings(self, payload: dict[str, Any]) -> dict[str, Any]:

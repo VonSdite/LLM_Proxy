@@ -180,6 +180,7 @@ OAuth 模型是数据平面的例外路由：
 - API
   - `GET /api/settings/system`
   - `PUT /api/settings/system/basic`
+  - `PUT /api/settings/system/client-ip`
   - `PUT /api/settings/system/oauth`
   - `PUT /api/settings/system/debug`
   - `PUT /api/settings/system`
@@ -213,10 +214,13 @@ OAuth 模型是数据平面的例外路由：
   - 任一为空时关闭后台登录
   - 保存后会清空进程内 session，避免旧凭据继续生效
 - `client_ip.real_ip_enabled`
-  - 归类为“基础设置”
+  - 归类为“客户端 IP”
+  - 页面修改后自动生效
   - 保存后立即影响数据平面白名单、模型权限、访问日志、请求统计和 trace 中使用的客户端 IP
   - 默认值为 `false`，关闭时使用连接到本服务的对端 IP
 - `client_ip.real_ip_header`
+  - 归类为“客户端 IP”
+  - 页面修改后自动生效
   - 仅在 `client_ip.real_ip_enabled=true` 时参与客户端 IP 解析
   - 默认值为 `X-Forwarded-For`
   - header 值为逗号分隔列表时取第一个 IP

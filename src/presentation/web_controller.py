@@ -58,6 +58,7 @@ class WebController:
         self._app.route("/api/settings/system", methods=["GET"])(auth(self.get_system_settings))
         self._app.route("/api/settings/system", methods=["PUT"])(auth(self.update_system_settings))
         self._app.route("/api/settings/system/basic", methods=["PUT"])(auth(self.update_basic_settings))
+        self._app.route("/api/settings/system/client-ip", methods=["PUT"])(auth(self.update_client_ip_settings))
         self._app.route("/api/settings/system/debug", methods=["PUT"])(auth(self.update_debug_settings))
         self._app.route("/api/settings/system/oauth", methods=["PUT"])(auth(self.update_oauth_settings))
 
@@ -539,6 +540,16 @@ class WebController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error updating basic settings: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def update_client_ip_settings(self) -> ResponseReturnValue:
+        try:
+            payload = require_json_object()
+            return jsonify(self._settings_service.update_client_ip_settings(payload))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating client IP settings: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def update_debug_settings(self) -> ResponseReturnValue:

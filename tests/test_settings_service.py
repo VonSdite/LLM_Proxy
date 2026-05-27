@@ -81,11 +81,9 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertFalse(self.config_manager.is_real_client_ip_enabled())
         self.assertEqual("X-Forwarded-For", self.config_manager.get_real_client_ip_header())
 
-    def test_update_basic_settings_persists_real_client_ip_settings(self) -> None:
-        result = self.service.update_basic_settings(
+    def test_update_client_ip_settings_persists_real_client_ip_settings(self) -> None:
+        result = self.service.update_client_ip_settings(
             {
-                "server": {"host": "127.0.0.1", "port": 8080},
-                "admin": {"username": "", "password": ""},
                 "client_ip": {
                     "real_ip_enabled": True,
                     "real_ip_header": " X-Real-IP ",
@@ -103,18 +101,40 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertTrue(persisted["client_ip"]["real_ip_enabled"])
         self.assertEqual("X-Real-IP", persisted["client_ip"]["real_ip_header"])
 
-    def test_update_basic_settings_rejects_invalid_real_client_ip_header(self) -> None:
+    def test_update_client_ip_settings_rejects_invalid_real_client_ip_header(self) -> None:
         with self.assertRaisesRegex(ValueError, "Real client IP header must be a valid HTTP header name"):
-            self.service.update_basic_settings(
+            self.service.update_client_ip_settings(
                 {
-                    "server": {"host": "127.0.0.1", "port": 8080},
-                    "admin": {"username": "", "password": ""},
                     "client_ip": {
                         "real_ip_enabled": True,
                         "real_ip_header": "X-Real-IP: nope",
                     },
                 }
             )
+
+    def test_update_basic_settings_does_not_change_client_ip_settings(self) -> None:
+        self.service.update_client_ip_settings(
+            {
+                "client_ip": {
+                    "real_ip_enabled": True,
+                    "real_ip_header": "X-Real-IP",
+                }
+            }
+        )
+
+        result = self.service.update_basic_settings(
+            {
+                "server": {"host": "127.0.0.1", "port": 8080},
+                "admin": {"username": "", "password": ""},
+                "client_ip": {
+                    "real_ip_enabled": False,
+                    "real_ip_header": "CF-Connecting-IP",
+                },
+            }
+        )
+
+        self.assertTrue(result["settings"]["client_ip"]["real_ip_enabled"])
+        self.assertEqual("X-Real-IP", result["settings"]["client_ip"]["real_ip_header"])
 
     def test_update_oauth_settings_persists_network_flags(self) -> None:
         result = self.service.update_oauth_settings(
