@@ -42,7 +42,7 @@ from ..services import (
     SettingsService,
     UserService,
 )
-from ..utils import normalize_ip
+from ..utils import resolve_client_ip
 from ..utils.database import create_connection_factory
 from .app_context import AppContext, Logger
 
@@ -175,7 +175,7 @@ class Application:
             if self._should_skip_access_log_request():
                 return
 
-            client_ip = normalize_ip(request.remote_addr) or "-"
+            client_ip = self._get_request_client_ip() or "-"
             requested_url = request.url
             model = None
             if self._should_read_access_log_model() and (request.content_length or 0) > 0 and request.is_json:
@@ -215,6 +215,15 @@ class Application:
     def _should_lookup_access_log_user() -> bool:
         """仅数据平面请求需要按 IP 补充用户名。"""
         return str(request.path or "").startswith("/v1/")
+
+    def _get_request_client_ip(self) -> str:
+        """按系统设置解析当前请求的客户端 IP。"""
+        return resolve_client_ip(
+            request.headers,
+            request.remote_addr,
+            real_ip_enabled=self._config_manager.is_real_client_ip_enabled(),
+            real_ip_header=self._config_manager.get_real_client_ip_header(),
+        )
 
     def _setup_context(self) -> None:
         """创建全局运行上下文。"""

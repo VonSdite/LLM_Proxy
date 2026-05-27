@@ -44,11 +44,25 @@ class FakeLogger:
 
 
 class FakeConfigManager:
-    def __init__(self, whitelist_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        whitelist_enabled: bool = False,
+        *,
+        real_ip_enabled: bool = False,
+        real_ip_header: str = "X-Forwarded-For",
+    ) -> None:
         self._whitelist_enabled = whitelist_enabled
+        self._real_ip_enabled = real_ip_enabled
+        self._real_ip_header = real_ip_header
 
     def is_chat_whitelist_enabled(self) -> bool:
         return self._whitelist_enabled
+
+    def is_real_client_ip_enabled(self) -> bool:
+        return self._real_ip_enabled
+
+    def get_real_client_ip_header(self) -> str:
+        return self._real_ip_header
 
 
 class FakeUserService:
@@ -66,13 +80,15 @@ class FakeUserService:
             else cast(dict[str, Any] | None, user)
         )
         self._accessible_models = None if accessible_models is None else list(accessible_models)
+        self.ip_lookups: list[str] = []
 
     def get_user_by_ip(
         self,
         ip_address: str,
         require_whitelist_access: bool = True,
     ) -> dict[str, Any] | None:
-        del ip_address, require_whitelist_access
+        del require_whitelist_access
+        self.ip_lookups.append(ip_address)
         return self._user
 
     def can_user_access_model(
@@ -433,6 +449,98 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         self.assertEqual(403, response.status_code)
         self.assertEqual("model_not_allowed", response.get_json()["error"]["code"])
         self.assertTrue(any("is not allowed to access model=demo/gpt-4.1" in msg for msg in logger.messages("warning")))
+
+    def test_chat_completions_uses_configured_real_ip_header_when_enabled(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(
+                whitelist_enabled=True,
+                real_ip_enabled=True,
+                real_ip_header="X-Real-IP",
+            ),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        proxy_service = RecordingProxyService(
+            (
+                app.response_class(
+                    '{"id":"chatcmpl_1","object":"chat.completion"}',
+                    status=200,
+                    mimetype="application/json",
+                ),
+                200,
+                None,
+            )
+        )
+        user_service = FakeUserService()
+        ProxyController(
+            ctx,
+            proxy_service,
+            user_service,
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"X-Real-IP": "203.0.113.20"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(["203.0.113.20"], user_service.ip_lookups)
+        self.assertEqual("203.0.113.20", proxy_service.last_kwargs["client_ip"])
+
+    def test_chat_completions_ignores_real_ip_header_when_disabled(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(whitelist_enabled=True, real_ip_enabled=False),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        proxy_service = RecordingProxyService(
+            (
+                app.response_class(
+                    '{"id":"chatcmpl_1","object":"chat.completion"}',
+                    status=200,
+                    mimetype="application/json",
+                ),
+                200,
+                None,
+            )
+        )
+        user_service = FakeUserService()
+        ProxyController(
+            ctx,
+            proxy_service,
+            user_service,
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"X-Forwarded-For": "203.0.113.20"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(["127.0.0.1"], user_service.ip_lookups)
+        self.assertEqual("127.0.0.1", proxy_service.last_kwargs["client_ip"])
 
     def test_chat_completions_returns_openai_style_error_payload_for_upstream_failures(self) -> None:
         provider = LLMProvider(

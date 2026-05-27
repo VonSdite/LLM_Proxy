@@ -16,12 +16,16 @@ from ..hooks import HookAbortError
 from ..services.claude_proxy_service import CLAUDE_PROVIDER_NAME
 from ..services.codex_proxy_service import CODEX_PROVIDER_NAME
 from ..services.proxy_service import ProxyErrorInfo
-from ..utils import normalize_ip
+from ..utils import resolve_client_ip
 from ..utils.local_time import now_local_datetime
 
 
 class ConfigManagerLike(Protocol):
     def is_chat_whitelist_enabled(self) -> bool: ...
+
+    def is_real_client_ip_enabled(self) -> bool: ...
+
+    def get_real_client_ip_header(self) -> str: ...
 
 
 class ProxyServiceLike(Protocol):
@@ -205,6 +209,15 @@ class ProxyController:
     def _is_whitelist_required(self) -> bool:
         return self._config_manager.is_chat_whitelist_enabled()
 
+    def _get_request_client_ip(self) -> str:
+        """按系统设置解析当前请求的客户端 IP。"""
+        return resolve_client_ip(
+            request.headers,
+            request.remote_addr,
+            real_ip_enabled=self._config_manager.is_real_client_ip_enabled(),
+            real_ip_header=self._config_manager.get_real_client_ip_header(),
+        )
+
     def _get_authorized_user_for_request(
         self,
         client_ip: str,
@@ -355,7 +368,7 @@ class ProxyController:
         if not resolved_target_format:
             raise ValueError("target_format must not be empty")
         resolved_error_format = error_format or resolved_target_format
-        client_ip = normalize_ip(request.remote_addr)
+        client_ip = self._get_request_client_ip()
         trace_id: str | None = None
         model_name: str | None = None
         provider_name: str | None = None
@@ -553,7 +566,7 @@ class ProxyController:
             self._logger.warning(
                 "Proxy blocked by hook: route=%s ip=%s status=%s type=%s message=%s",
                 route_name,
-                normalize_ip(request.remote_addr),
+                client_ip,
                 exc.status_code,
                 exc.error_type,
                 exc.message,
@@ -589,7 +602,7 @@ class ProxyController:
 
     def list_models(self) -> ResponseReturnValue:
         try:
-            client_ip = normalize_ip(request.remote_addr)
+            client_ip = self._get_request_client_ip()
             user, denial_response = self._get_authorized_user_for_request(
                 client_ip,
                 error_format="openai_chat",

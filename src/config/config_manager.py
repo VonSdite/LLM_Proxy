@@ -12,8 +12,10 @@ from typing import Any
 import yaml
 
 from ..utils.net import (
+    DEFAULT_REAL_CLIENT_IP_HEADER,
     PROXY_MODE_CUSTOM,
     PROXY_MODE_DIRECT,
+    normalize_real_client_ip_header,
     normalize_proxy_mode,
     normalize_proxy_url,
 )
@@ -54,6 +56,14 @@ class ConfigManager:
 
     def is_chat_whitelist_enabled(self) -> bool:
         return self._read_bool("chat.whitelist_enabled", default=False)
+
+    def is_real_client_ip_enabled(self) -> bool:
+        return self._read_bool("client_ip.real_ip_enabled", default=False)
+
+    def get_real_client_ip_header(self) -> str:
+        return normalize_real_client_ip_header(
+            self.get("client_ip.real_ip_header", DEFAULT_REAL_CLIENT_IP_HEADER)
+        )
 
     def is_llm_request_debug_enabled(self) -> bool:
         return self._read_bool("logging.llm_request_debug_enabled", default=False)

@@ -30,7 +30,13 @@ from src.repositories import AuthGroupRepository
 from src.services.model_discovery_service import ModelDiscoveryService
 from src.utils.database import create_connection_factory
 from src.utils.local_time import now_local_datetime
-from src.utils.net import build_requests_proxy_settings, build_requests_request_proxies, is_valid_ip, normalize_ip
+from src.utils.net import (
+    build_requests_proxy_settings,
+    build_requests_request_proxies,
+    is_valid_ip,
+    normalize_ip,
+    resolve_client_ip,
+)
 
 
 class FakeLogger:
@@ -695,6 +701,39 @@ class NetUtilsTests(unittest.TestCase):
 
     def test_is_valid_ip_accepts_ipv6_mapped_ipv4(self) -> None:
         self.assertTrue(is_valid_ip("::ffff:127.0.0.1"))
+
+    def test_resolve_client_ip_uses_remote_addr_when_real_ip_disabled(self) -> None:
+        self.assertEqual(
+            "127.0.0.1",
+            resolve_client_ip(
+                {"X-Forwarded-For": "203.0.113.10"},
+                "127.0.0.1",
+                real_ip_enabled=False,
+                real_ip_header="X-Forwarded-For",
+            ),
+        )
+
+    def test_resolve_client_ip_uses_first_valid_real_ip_header_value(self) -> None:
+        self.assertEqual(
+            "203.0.113.10",
+            resolve_client_ip(
+                {"x-forwarded-for": "203.0.113.10, 10.0.0.1"},
+                "127.0.0.1",
+                real_ip_enabled=True,
+                real_ip_header="X-Forwarded-For",
+            ),
+        )
+
+    def test_resolve_client_ip_falls_back_for_invalid_real_ip_header(self) -> None:
+        self.assertEqual(
+            "127.0.0.1",
+            resolve_client_ip(
+                {"X-Forwarded-For": "not-an-ip"},
+                "127.0.0.1",
+                real_ip_enabled=True,
+                real_ip_header="X-Forwarded-For",
+            ),
+        )
 
     def test_custom_proxy_mode_without_url_behaves_as_direct(self) -> None:
         settings = build_requests_proxy_settings("custom", "")
@@ -1523,6 +1562,15 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         web_controller_py = (root / "web_controller.py").read_text(encoding="utf-8")
 
         self.assertIn("OAuth", html)
+        self.assertIn("客户端 IP", html)
+        self.assertIn('id="realIpEnabled"', html)
+        self.assertIn('id="realIpHeader"', html)
+        self.assertIn('id="realIpHeaderField" hidden', html)
+        self.assertIn('data-settings-help-topic="real_client_ip"', html)
+        self.assertIn("function syncRealIpFields()", html)
+        self.assertIn("real_ip_enabled: document.getElementById", html)
+        self.assertIn("real_ip_header: document.getElementById", html)
+        self.assertIn("header 缺失或不是合法 IP 时会回退到对端 IP", html)
         self.assertIn('id="oauthEnabled"', html)
         self.assertIn('id="oauthProxyMode"', html)
         self.assertIn('<label class="setting-label" for="oauthProxyMode">模式</label>', html)

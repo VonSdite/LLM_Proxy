@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import ipaddress
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlparse
 
+DEFAULT_REAL_CLIENT_IP_HEADER = "X-Forwarded-For"
 DEFAULT_PROXY_MODE = "direct"
 PROXY_MODE_DIRECT = "direct"
 PROXY_MODE_SYSTEM = "system"
@@ -55,6 +57,32 @@ def is_valid_ip(ip_value: str | None) -> bool:
         return True
     except ValueError:
         return False
+
+
+def resolve_client_ip(
+    headers: Mapping[str, Any] | None,
+    remote_addr: str | None,
+    *,
+    real_ip_enabled: bool = False,
+    real_ip_header: str | None = None,
+) -> str:
+    """根据配置解析客户端 IP，必要时从可信上游 header 读取真实源 IP。"""
+    fallback_ip = normalize_ip(remote_addr)
+    if not real_ip_enabled:
+        return fallback_ip
+
+    header_name = normalize_real_client_ip_header(real_ip_header)
+    header_value = _get_header_value(headers, header_name)
+    candidate_ip = _extract_forwarded_ip(header_value)
+    if not is_valid_ip(candidate_ip):
+        return fallback_ip
+    return normalize_ip(candidate_ip)
+
+
+def normalize_real_client_ip_header(value: Any) -> str:
+    """规范化真实源 IP header 名称，空值回退到默认 header。"""
+    header_name = str(value or "").strip()
+    return header_name or DEFAULT_REAL_CLIENT_IP_HEADER
 
 
 @dataclass(frozen=True)
@@ -223,6 +251,30 @@ def _disabled_environment_proxies() -> dict[str, str | None]:
 
 def _has_proxy_value(value: Any) -> bool:
     return bool(str(value or "").strip())
+
+
+def _get_header_value(headers: Mapping[str, Any] | None, header_name: str) -> str | None:
+    if headers is None:
+        return None
+    if "\r" in header_name or "\n" in header_name or ":" in header_name:
+        return None
+
+    direct_value = headers.get(header_name)
+    if direct_value is not None:
+        return str(direct_value)
+
+    normalized_name = header_name.lower()
+    for key, value in headers.items():
+        if str(key).lower() == normalized_name:
+            return str(value)
+    return None
+
+
+def _extract_forwarded_ip(header_value: str | None) -> str:
+    value = str(header_value or "").strip()
+    if not value:
+        return ""
+    return value.split(",", 1)[0].strip()
 
 
 def _encode_proxy_url_userinfo(value: str) -> str:
