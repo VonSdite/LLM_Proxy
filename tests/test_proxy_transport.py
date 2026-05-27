@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -27,7 +30,7 @@ from src.repositories import AuthGroupRepository
 from src.services.model_discovery_service import ModelDiscoveryService
 from src.utils.database import create_connection_factory
 from src.utils.local_time import now_local_datetime
-from src.utils.net import build_requests_proxy_settings, is_valid_ip, normalize_ip
+from src.utils.net import build_requests_proxy_settings, build_requests_request_proxies, is_valid_ip, normalize_ip
 
 
 class FakeLogger:
@@ -100,6 +103,142 @@ class ProviderTransportTests(unittest.TestCase):
 
         self.assertEqual(1, fake_session.cookies.clear_calls)
         self.assertEqual(1, len(fake_session.post_calls))
+
+    def test_http_executor_direct_mode_passes_disabled_proxy_mapping(self) -> None:
+        logger = FakeLogger()
+        executor = HttpExecutor(logger=logger)
+        provider = type(
+            "Provider",
+            (),
+            {
+                "api": "https://example.com/v1/chat/completions",
+                "transport": "http",
+                "name": "demo",
+                "proxy_mode": "direct",
+                "proxy": None,
+            },
+        )()
+
+        class FakeCookies:
+            def clear(self) -> None:
+                pass
+
+        class FakeResponse:
+            status_code = 200
+            headers = {"Content-Type": "application/json"}
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.cookies = FakeCookies()
+                self.trust_env = True
+                self.post_calls: list[dict[str, object]] = []
+
+            def post(self, *args, **kwargs):
+                del args
+                self.post_calls.append(dict(kwargs))
+                return FakeResponse()
+
+        fake_session = FakeSession()
+        executor._http_local.session = fake_session  # type: ignore[attr-defined]
+
+        executor.execute(
+            provider,  # type: ignore[arg-type]
+            headers={"authorization": "Bearer sk-demo"},
+            body={"model": "demo/model"},
+            requested_stream=False,
+            timeout_seconds=30,
+            verify_ssl=False,
+            request_proxies=None,
+        )
+
+        self.assertFalse(fake_session.trust_env)
+        self.assertEqual(
+            {"http": None, "https": None, "all": None},
+            fake_session.post_calls[0]["proxies"],
+        )
+
+    def test_http_executor_direct_mode_ignores_process_proxy_environment(self) -> None:
+        logger = FakeLogger()
+        target_calls: list[str] = []
+        proxy_calls: list[str] = []
+
+        class TargetHandler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                target_calls.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"{\"ok\": true}")
+
+            def log_message(self, *args) -> None:
+                del args
+
+        class ProxyHandler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                proxy_calls.append(self.path)
+                self.send_response(599)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"proxy used")
+
+            def log_message(self, *args) -> None:
+                del args
+
+        target_server = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+        proxy_server = ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler)
+        target_thread = Thread(target=target_server.serve_forever, daemon=True)
+        proxy_thread = Thread(target=proxy_server.serve_forever, daemon=True)
+        old_env = {key: os.environ.get(key) for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")}
+        old_no_proxy = {key: os.environ.get(key) for key in ("NO_PROXY", "no_proxy")}
+        try:
+            target_thread.start()
+            proxy_thread.start()
+            proxy_url = f"http://127.0.0.1:{proxy_server.server_address[1]}"
+            for key in old_env:
+                os.environ[key] = proxy_url
+            for key in old_no_proxy:
+                os.environ[key] = ""
+
+            provider = type(
+                "Provider",
+                (),
+                {
+                    "api": f"http://127.0.0.1:{target_server.server_address[1]}/v1/chat/completions",
+                    "transport": "http",
+                    "name": "demo",
+                    "proxy_mode": "direct",
+                    "proxy": None,
+                },
+            )()
+            executor = HttpExecutor(logger=logger)
+            opened = executor.execute(
+                provider,  # type: ignore[arg-type]
+                headers={"authorization": "Bearer sk-demo"},
+                body={"model": "demo/model"},
+                requested_stream=False,
+                timeout_seconds=30,
+                verify_ssl=False,
+                request_proxies=None,
+            )
+
+            self.assertEqual(200, opened.status_code)
+            self.assertEqual(["/v1/chat/completions"], target_calls)
+            self.assertEqual([], proxy_calls)
+        finally:
+            target_server.shutdown()
+            proxy_server.shutdown()
+            target_server.server_close()
+            proxy_server.server_close()
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            for key, value in old_no_proxy.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
     def test_http_executor_auto_confirms_proxy_warning_and_retries_once(self) -> None:
         logger = FakeLogger()
@@ -564,6 +703,10 @@ class NetUtilsTests(unittest.TestCase):
         self.assertIsNone(settings.proxy_url)
         self.assertIsNone(settings.proxies)
         self.assertFalse(settings.trust_env)
+        self.assertEqual(
+            {"http": None, "https": None, "all": None},
+            build_requests_request_proxies(settings),
+        )
 
 
 class ModelDiscoveryCandidateTests(unittest.TestCase):

@@ -26,7 +26,7 @@ class ProxyTransportGateway:
         headers: dict[str, str],
         body: dict[str, Any],
         requested_stream: bool,
-        request_proxies: dict[str, str] | None,
+        request_proxies: dict[str, str | None] | None,
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> OpenedUpstreamResponse:

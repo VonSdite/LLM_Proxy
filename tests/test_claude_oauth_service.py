@@ -160,7 +160,7 @@ class ClaudeOAuthServiceTests(unittest.TestCase):
             payload = json.loads(auth_file.read_text(encoding="utf-8"))
 
         self.assertEqual("authorization_code", captured["json"]["grant_type"])
-        self.assertIsNone(captured["proxies"])
+        self.assertEqual({"http": None, "https": None, "all": None}, captured["proxies"])
         self.assertFalse(captured["verify"])
         self.assertEqual("demo-code", captured["json"]["code"])
         self.assertEqual(CLAUDE_REDIRECT_URI, captured["json"]["redirect_uri"])

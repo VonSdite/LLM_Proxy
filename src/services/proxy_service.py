@@ -23,7 +23,7 @@ from ..external import LLMProvider
 from ..hooks import HookContext, HookErrorType
 from ..translators import build_default_translator_registry
 from ..utils.http_headers import merge_http_headers
-from ..utils.net import build_requests_proxy_settings
+from ..utils.net import build_requests_proxy_settings, build_requests_request_proxies
 from ..utils.proxy_warning import (
     PROXY_WARNING_ERROR_CODE,
     PROXY_WARNING_STATUS_CODE,
@@ -146,7 +146,7 @@ class ProxyService:
             proxy_mode_error_message="Provider proxy_mode must be one of: direct, system, custom",
             proxy_url_error_message="Provider proxy must be a valid absolute URL",
         )
-        request_proxies = proxy_settings.proxies
+        request_proxies = build_requests_request_proxies(proxy_settings)
         downstream_target_format = self._resolve_downstream_target_format(
             provider,
             resolved_target_format,
@@ -490,7 +490,7 @@ class ProxyService:
         body: dict[str, Any],
         requested_stream: bool,
         target_url: str,
-        request_proxies: dict[str, str] | None,
+        request_proxies: dict[str, str | None] | None,
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> OpenedUpstreamResponse:
