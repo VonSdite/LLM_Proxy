@@ -104,6 +104,39 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertIsNotNone(result["results"][0]["first_token_latency_ms"])
         self.assertIsNotNone(result["results"][0]["tps"])
 
+    def test_provider_named_like_model_prefix_keeps_full_upstream_model_id(self) -> None:
+        captured: dict[str, object] = {}
+        fake_response = FakeBufferedResponse(
+            b'{"id":"chatcmpl_1","object":"chat.completion","model":"aliyun/deepseek","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}]}'
+        )
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            del provider, headers, kwargs
+            captured["body"] = body
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="application/json",
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        result = self.service.test_models(
+            {
+                "name": "aliyun",
+                "api": "https://example.com/v1/chat/completions",
+                "source_format": "openai_chat",
+                "models": ["aliyun/deepseek"],
+            }
+        )
+
+        request_body = captured["body"]
+        assert isinstance(request_body, dict)
+        self.assertEqual("aliyun/deepseek", request_body["model"])
+        self.assertTrue(result["results"][0]["available"])
+
     def test_openai_chat_stream_reasoning_delta_counts_as_first_token(self) -> None:
         fake_response = FakeStreamResponse(
             [
