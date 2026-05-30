@@ -446,7 +446,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             api="https://example.com/v1/chat/completions",
             source_format="openai_chat",
             target_formats=("openai_chat",),
-            hook=RewriteRequestModelHook("demo/rewritten-model"),
+            hook=RewriteRequestModelHook("rewritten-model"),
         )
 
         built_request = build_upstream_request(
@@ -457,7 +457,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             upstream_model="original-model",
             provider_target_format="openai_chat",
             request_data={
-                "model": "demo/original-model",
+                "model": "original-model",
                 "messages": [{"role": "user", "content": "Hello"}],
                 "stream": True,
             },
@@ -470,9 +470,42 @@ class ProxyServicePipelineTests(unittest.TestCase):
             auth_entry_id=None,
         )
 
-        self.assertEqual("demo/rewritten-model", built_request.guarded_body["model"])
+        self.assertEqual("rewritten-model", built_request.guarded_body["model"])
         self.assertEqual("rewritten-model", built_request.translated_body["model"])
         self.assertEqual("rewritten-model", built_request.request_ctx.upstream_model)
+
+    def test_build_upstream_request_keeps_provider_like_upstream_model_id(self) -> None:
+        provider = LLMProvider(
+            name="aliyun",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+        )
+
+        built_request = build_upstream_request(
+            root_path=Path(__file__).resolve().parents[1],
+            logger=FakeLogger(),
+            provider=provider,
+            request_model="aliyun/aliyun/deepseek",
+            upstream_model="aliyun/deepseek",
+            provider_target_format="openai_chat",
+            request_data={
+                "model": "aliyun/deepseek",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": True,
+            },
+            request_headers={"content-type": "application/json"},
+            translator=OpenAIChatTranslator(),
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+            auth_group_name=None,
+            auth_entry_id=None,
+        )
+
+        self.assertEqual("aliyun/deepseek", built_request.guarded_body["model"])
+        self.assertEqual("aliyun/deepseek", built_request.translated_body["model"])
+        self.assertEqual("aliyun/deepseek", built_request.request_ctx.upstream_model)
 
     def test_claude_chat_provider_resigns_existing_cch(self) -> None:
         provider = LLMProvider(
@@ -522,7 +555,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             target_formats=("openai_chat",),
             model_list=("original-model", "rewritten-model"),
             max_retries=1,
-            hook=RewriteRequestModelHook("demo/rewritten-model"),
+            hook=RewriteRequestModelHook("rewritten-model"),
         )
         captured: dict[str, Any] = {}
         fake_response = FakeStreamResponse(

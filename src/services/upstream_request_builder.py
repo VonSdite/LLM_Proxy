@@ -64,11 +64,7 @@ def build_upstream_request(
 
     headers = provider.apply_header_hook(request_ctx, dict(request_headers))
     guarded_body = provider.apply_request_guard(request_ctx, dict(request_data))
-    guarded_upstream_model = _resolve_guarded_upstream_model(
-        provider.name,
-        guarded_body,
-        upstream_model,
-    )
+    guarded_upstream_model = _resolve_guarded_upstream_model(guarded_body, upstream_model)
     if guarded_upstream_model != request_ctx.upstream_model:
         request_ctx = replace(request_ctx, upstream_model=guarded_upstream_model)
     guarded_stream = bool(guarded_body.get("stream", False))
@@ -92,7 +88,6 @@ def build_upstream_request(
 
 
 def _resolve_guarded_upstream_model(
-    provider_name: str,
     guarded_body: dict[str, Any],
     fallback_model: str,
 ) -> str:
@@ -105,7 +100,4 @@ def _resolve_guarded_upstream_model(
     if not normalized_guarded_model:
         return fallback_model
 
-    provider_prefix = f"{provider_name}/"
-    if normalized_guarded_model.startswith(provider_prefix):
-        return normalized_guarded_model[len(provider_prefix) :]
     return normalized_guarded_model

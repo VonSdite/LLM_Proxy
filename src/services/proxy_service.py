@@ -176,7 +176,7 @@ class ProxyService:
                 request_model=requested_model,
                 upstream_model=upstream_model,
                 provider_target_format=downstream_target_format,
-                request_data=request_data,
+                request_data=self._build_upstream_request_data(request_data, upstream_model),
                 request_headers=headers,
                 translator=translator,
                 attempt=attempt,
@@ -533,6 +533,12 @@ class ProxyService:
         if requested_model_name.startswith(prefix):
             return requested_model_name[len(prefix) :]
         return requested_model_name
+
+    @staticmethod
+    def _build_upstream_request_data(request_data: dict[str, Any], upstream_model: str) -> dict[str, Any]:
+        upstream_request_data = dict(request_data)
+        upstream_request_data["model"] = upstream_model
+        return upstream_request_data
 
     @staticmethod
     def _resolve_downstream_target_format(

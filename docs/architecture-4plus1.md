@@ -32,6 +32,7 @@ downstream request
   -> data-plane CORS preflight / response headers
   -> controller
   -> provider lookup
+  -> resolve route model key to upstream model id
   -> header_hook / request_guard
   -> translator.translate_request()
   -> executor
@@ -46,6 +47,13 @@ downstream request
 
 - `last_status_code`
 - `last_error_type`
+
+模型语义：
+
+- 数据平面下游请求中的 `model` 是代理路由 key，格式为 `{provider_name}/{upstream_model_id}`
+- 进入上游请求构建前会先解析出真实 `upstream_model_id`
+- `request_guard` 接收的是即将发往上游的请求体，`body["model"]` 为真实上游模型 ID
+- `HookContext.request_model` 保留下游路由 key，`HookContext.upstream_model` 保留当前真实上游模型 ID
 
 ### 2.2 Major Components
 
@@ -394,6 +402,7 @@ provider editor form snapshot
 行为约束：
 
 - 这两条都是控制平面能力，不经过下游 `/v1/chat/completions` / `/v1/responses` / `/v1/messages`
+- 测试模型列表中的模型值按真实上游模型 ID 处理，不执行 `{provider_name}/` 路由前缀裁剪
 - 两条链路都会使用 Provider 表单快照中的 `proxy_mode`、`proxy` 和 `verify_ssl`
 - Provider 编辑页的 `model_list` 采用表格编辑，并以当前前端行状态作为唯一数据源
 - 只应用 request-side hook：
