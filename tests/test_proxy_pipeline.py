@@ -440,6 +440,60 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(["Authorization"], authorization_headers)
         self.assertEqual("Bearer user-token", headers["Authorization"])
 
+    def test_nonstream_response_filters_upstream_content_type_before_setting_downstream_type(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        fake_response = FakeStreamResponse(
+            [
+                (
+                    b'{"id":"chatcmpl_1","object":"chat.completion","model":"gpt-4.1",'
+                    b'"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},'
+                    b'"finish_reason":"stop"}]}'
+                )
+            ],
+            content_type="application/json",
+        )
+        fake_response.headers = {
+            "content-type": "application/json",
+            "X-Upstream-Trace": "trace-1",
+        }
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, body, args, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="application/json",
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
+                {},
+            )
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual(["application/json; charset=utf-8"], response.headers.getlist("Content-Type"))
+        self.assertEqual("trace-1", response.headers["X-Upstream-Trace"])
+
     def test_build_upstream_request_uses_model_rewritten_by_request_guard(self) -> None:
         provider = LLMProvider(
             name="demo",
