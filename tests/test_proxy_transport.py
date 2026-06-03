@@ -1979,12 +1979,13 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         base_page_html = (root / "templates" / "base_page.html").read_text(encoding="utf-8")
         theme_js = (root / "static" / "js" / "theme.js").read_text(encoding="utf-8")
         base_admin_html = (root / "templates" / "base_admin.html").read_text(encoding="utf-8")
+        admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
         web_controller_py = (root.parent / "presentation" / "web_controller.py").read_text(encoding="utf-8")
 
         self.assertIn("/static/js/ui-message.js?v=20260319-1", login_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", users_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", index_html)
-        self.assertIn("/static/css/admin-base.css?v=20260517-1", base_page_html)
+        self.assertIn("/static/css/admin-base.css?v=20260603-1", base_page_html)
         self.assertIn("/static/js/theme.js?v=20260319-1", base_page_html)
         self.assertIn("showActionError('登录'", login_html)
         self.assertIn("showActionError('创建用户'", users_html)
@@ -1998,6 +1999,8 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn('data-nav-page="oauth"', base_admin_html)
         self.assertIn('href="/users">用户管理</a>', base_admin_html)
         self.assertIn('href="/statistics">统计概览</a>', base_admin_html)
+        self.assertIn('<span class="header-version">v2.0.14</span>', base_admin_html)
+        self.assertIn(".app-page .header-version", admin_base_css)
         self.assertLess(
             base_admin_html.index('href="/">Provider 管理</a>'),
             base_admin_html.index(oauth_link_snippet),
