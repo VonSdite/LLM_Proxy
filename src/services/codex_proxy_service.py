@@ -39,8 +39,8 @@ from .proxy_response_builder import ProxyResponseBuilder
 from .proxy_service import ProxyErrorInfo
 
 CODEX_BACKEND_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
-# 当前 Codex 模型目录中 gpt-5.5 要求客户端版本不低于 0.124.0。
-CODEX_CLIENT_VERSION = "0.124.0"
+CODEX_CLIENT_VERSION = ""
+CODEX_ORIGINATOR = "codex-tui"
 CODEX_PROVIDER_NAME = "codex"
 CODEX_PROXY_WARNING_ERROR_CODE = PROXY_WARNING_ERROR_CODE
 CODEX_PROXY_WARNING_STATUS_CODE = PROXY_WARNING_STATUS_CODE
@@ -410,19 +410,27 @@ class CodexProxyService:
         stream: bool,
     ) -> dict[str, str]:
         headers = merge_http_headers({}, request_headers)
+        client_user_agent = self._get_header(headers, "User-Agent") or CODEX_USER_AGENT
+        originator = self._get_header(headers, "Originator") or CODEX_ORIGINATOR
+        client_version = self._get_header(headers, "Version") or CODEX_CLIENT_VERSION
         headers = merge_http_headers(
             headers,
             {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {candidate.access_token}",
-                "Version": CODEX_CLIENT_VERSION,
-                "Session_id": uuid4().hex,
                 "User-Agent": CODEX_USER_AGENT,
                 "Accept": "text/event-stream" if stream else "application/json",
                 "Connection": "Keep-Alive",
-                "Originator": "codex_cli_rs",
+                "Originator": originator,
             },
         )
+        headers["User-Agent"] = client_user_agent
+        if client_version:
+            headers["Version"] = client_version
+        else:
+            headers.pop("Version", None)
+        if "Mac OS" in client_user_agent and not self._get_header(headers, "Session_id"):
+            headers["Session_id"] = str(uuid4())
         if candidate.account_id:
             headers = merge_http_headers(
                 headers,
@@ -490,7 +498,7 @@ class CodexProxyService:
                         event_type = str(event.payload.get("type") or event.event or "").strip()
                         if event_type == "response.completed":
                             completed = True
-                        elif event_type == "response.failed":
+                        elif event_type in {"response.failed", "error"}:
                             failed_payload = event.payload
                     chunks = translator.translate_stream_event(
                         model_name,
@@ -642,6 +650,12 @@ class CodexProxyService:
             return str(error.get("message"))
         if isinstance(error, dict) and error.get("type"):
             return str(error.get("type"))
+        message = str(payload.get("message") or "").strip()
+        if message:
+            return message
+        code = str(payload.get("code") or "").strip()
+        if code:
+            return code
         return "Codex stream closed before response.completed"
 
     @staticmethod
@@ -747,6 +761,14 @@ class CodexProxyService:
             "content-encoding",
         }
         return {key: value for key, value in headers.items() if key.lower() not in excluded}
+
+    @staticmethod
+    def _get_header(headers: dict[str, str], name: str) -> str:
+        lowered = name.lower()
+        for key, value in headers.items():
+            if key.lower() == lowered:
+                return str(value or "").strip()
+        return ""
 
     @staticmethod
     def _is_usage_only_stream_chunk(payload: Any) -> bool:

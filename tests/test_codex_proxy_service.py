@@ -355,8 +355,10 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertTrue(all(body["stream"] is True for body in captured_bodies))
         self.assertTrue(all(body["store"] is False for body in captured_bodies))
         self.assertTrue(all(body["parallel_tool_calls"] is True for body in captured_bodies))
-        self.assertTrue(all(headers["Version"] == CODEX_CLIENT_VERSION for headers in captured_headers))
-        self.assertTrue(all("codex_cli_rs/0.124.0" in headers["User-Agent"] for headers in captured_headers))
+        self.assertTrue(all(headers.get("Version", "") == CODEX_CLIENT_VERSION for headers in captured_headers))
+        self.assertTrue(all("codex-tui/0.135.0" in headers["User-Agent"] for headers in captured_headers))
+        self.assertTrue(all(headers["Originator"] == "codex-tui" for headers in captured_headers))
+        self.assertTrue(all(headers["Session_id"] for headers in captured_headers))
         self.assertTrue(all(body["include"] == ["reasoning.encrypted_content"] for body in captured_bodies))
         self.assertTrue(all("max_output_tokens" not in body for body in captured_bodies))
         self.assertTrue(all("temperature" not in body for body in captured_bodies))
@@ -373,6 +375,48 @@ class CodexProxyServiceTests(unittest.TestCase):
         )
         self.assertEqual("quota_cooldown", auth_entries["codex-first.json"]["availability_status"])
         self.assertEqual("success", auth_entries["codex-second.json"]["usage_status"])
+
+    def test_codex_headers_preserve_explicit_client_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            captured_headers: dict[str, str] = {}
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, json, stream, timeout, kwargs
+                captured_headers.update(dict(headers or {}))
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n'
+                    ],
+                )
+
+            with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {
+                        "model": "gpt-5.4",
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "stream": False,
+                    },
+                    {
+                        "Version": "0.115.0-alpha.27",
+                        "User-Agent": "custom-codex/9.9",
+                        "Originator": "custom-origin",
+                    },
+                    resolved_target_format="openai_chat",
+                )
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual("0.115.0-alpha.27", captured_headers["Version"])
+        self.assertEqual("custom-codex/9.9", captured_headers["User-Agent"])
+        self.assertEqual("custom-origin", captured_headers["Originator"])
 
     def test_proxy_warning_confirmation_failure_returns_confirmation_url_without_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -561,6 +605,46 @@ class CodexProxyServiceTests(unittest.TestCase):
             "invalid or expired token",
             auth_entries["codex-first.json"]["usage_status_message"],
         )
+
+    def test_stream_top_level_error_is_forwarded_and_marks_auth_file_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, headers, json, stream, timeout, kwargs
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"error","error":{"type":"invalid_request_error","code":"context_too_large","message":"too many tokens"}}\n\n'
+                    ],
+                )
+
+            with ctx.flask_app.test_request_context("/v1/chat/completions"):
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                    response, status_code, failure = proxy_service.proxy_request(
+                        {
+                            "model": "gpt-5.4",
+                            "messages": [{"role": "user", "content": "hi"}],
+                            "stream": True,
+                        },
+                        {},
+                        resolved_target_format="openai_chat",
+                    )
+                streamed = b"".join(response.response)  # type: ignore[union-attr]
+            auth_entries = {entry["name"]: entry for entry in oauth_service.list_auth_files()["files"]}
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIn(b'"error"', streamed)
+        self.assertIn(b"too many tokens", streamed)
+        self.assertEqual("error", auth_entries["codex-first.json"]["usage_status"])
+        self.assertEqual("too many tokens", auth_entries["codex-first.json"]["usage_status_message"])
+        self.assertEqual("codex_stream_failed", auth_entries["codex-first.json"]["usage_error_type"])
 
 
 if __name__ == "__main__":

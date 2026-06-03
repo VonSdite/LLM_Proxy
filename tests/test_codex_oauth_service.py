@@ -908,7 +908,11 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     {
                         "access_token": "new-access",
                         "refresh_token": "refresh-next",
-                        "id_token": build_id_token(),
+                        "id_token": build_id_token(
+                            email="codex-next@example.com",
+                            account_id="account-next",
+                            plan_type="team",
+                        ),
                         "expires_in": 3600,
                     }
                 )
@@ -924,6 +928,12 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertEqual(90.0, quota["windows"][0]["remaining_percent"])
         self.assertEqual("new-access", next_payload["access_token"])
         self.assertEqual("refresh-next", next_payload["refresh_token"])
+        self.assertEqual("account-next", next_payload["account_id"])
+        self.assertEqual("codex-next@example.com", next_payload["email"])
+        self.assertEqual("team", next_payload["plan_type"])
+        self.assertEqual("account-next", after["account_id"])
+        self.assertEqual("codex-next@example.com", after["email"])
+        self.assertEqual("team", after["plan_type"])
         self.assertEqual("available", after["availability_status"])
         self.assertEqual("", after["usage_status_message"])
         self.assertEqual("", after["usage_error_type"])
