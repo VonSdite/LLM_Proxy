@@ -139,6 +139,17 @@ body.app-page {
     padding-bottom: 22px;
 }
 
+.app-page .header-title {
+    min-width: 0;
+}
+
+.app-page .header-title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .app-page .header-title h1 {
     margin: 0;
     font-size: 28px;
@@ -148,11 +159,32 @@ body.app-page {
     color: var(--text-primary);
 }
 
+.app-page .header-version {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 8px;
+    border: 1px solid rgba(58, 127, 237, 0.24);
+    border-radius: 999px;
+    background: rgba(58, 127, 237, 0.09);
+    color: var(--primary-active);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+}
+
 .app-page .header-title p {
     margin: 8px 0 0;
     font-size: 14px;
     line-height: 1.6;
     color: var(--text-secondary);
+}
+
+:root[data-theme="dark"] .app-page .header-version {
+    border-color: rgba(108, 167, 255, 0.28);
+    background: rgba(108, 167, 255, 0.12);
+    color: #8ec5ff;
 }
 
 .app-page .header-actions {
