@@ -37,7 +37,7 @@ CODEX_MODEL_REFERENCE_URLS = (
     "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json",
     "https://models.router-for.me/models.json",
 )
-CODEX_USER_AGENT = "codex_cli_rs/0.124.0 (Debian 13.0.0; x86_64) WindowsTerminal"
+CODEX_USER_AGENT = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.135.0)"
 OAUTH_SESSION_TTL_SECONDS = 10 * 60
 DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = ()
 AUTH_FAILURE_ERROR_TYPES = {
@@ -912,6 +912,13 @@ class CodexOAuthService:
         next_payload["access_token"] = token_data.get("access_token") or payload.get("access_token") or ""
         next_payload["refresh_token"] = token_data.get("refresh_token") or refresh_token
         next_payload["id_token"] = token_data.get("id_token") or payload.get("id_token") or ""
+        claims = self._parse_jwt_claims(str(next_payload.get("id_token") or ""))
+        auth_info = claims.get("https://api.openai.com/auth")
+        if not isinstance(auth_info, dict):
+            auth_info = {}
+        next_payload["account_id"] = auth_info.get("chatgpt_account_id") or payload.get("account_id") or ""
+        next_payload["email"] = claims.get("email") or payload.get("email") or ""
+        next_payload["plan_type"] = auth_info.get("chatgpt_plan_type") or payload.get("plan_type") or ""
         next_payload["expired"] = self._format_datetime(
             datetime.now(timezone.utc) + timedelta(seconds=max(expires_in, 0))
         )

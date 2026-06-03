@@ -334,26 +334,26 @@ class OpenAIResponsesTranslator:
             outputs.append(DownstreamChunk(kind="done"))
             return outputs
 
-        if event_type == "response.failed":
+        if event_type in {"response.failed", "error"}:
             response = payload.get("response") or {}
             error_payload = response.get("error") if isinstance(response, dict) else None
+            if not isinstance(error_payload, dict):
+                error_payload = payload.get("error")
+            if not isinstance(error_payload, dict):
+                error_payload = {
+                    "message": payload.get("message") or "Upstream responses request failed",
+                    "type": payload.get("error_type") or "upstream_error",
+                    "code": payload.get("code"),
+                }
             outputs.append(
                 DownstreamChunk(
                     kind="json",
                     payload={
                         "error": {
-                            "message": (
-                                (error_payload or {}).get("message")
-                                if isinstance(error_payload, dict)
-                                else "Upstream responses request failed"
-                            ),
-                            "type": (
-                                (error_payload or {}).get("type")
-                                if isinstance(error_payload, dict)
-                                else "upstream_error"
-                            ),
+                            "message": error_payload.get("message") or "Upstream responses request failed",
+                            "type": error_payload.get("type") or "upstream_error",
                             "param": None,
-                            "code": ((error_payload or {}).get("code") if isinstance(error_payload, dict) else None),
+                            "code": error_payload.get("code"),
                         }
                     },
                 )
