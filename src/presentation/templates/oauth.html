@@ -1249,8 +1249,17 @@
         }
 
         function normalizeCodexAuthFileFilter(filter) {
-            if (filter === 'available' || filter === 'unavailable') {
-                return filter;
+            const normalized = String(filter || '').trim();
+            if ([
+                'all',
+                'available',
+                'auth_failed',
+                'quota_exhausted',
+                'quota_cooldown',
+                'filtered',
+                'other_unavailable',
+            ].includes(normalized)) {
+                return normalized;
             }
             return 'all';
         }
@@ -1277,7 +1286,11 @@
             const filters = [
                 { key: 'all', label: '总数', count: counts.all },
                 { key: 'available', label: '可用', count: counts.available },
-                { key: 'unavailable', label: '不可用', count: counts.unavailable },
+                { key: 'auth_failed', label: '认证失败', count: counts.auth_failed },
+                { key: 'quota_exhausted', label: '额度用完', count: counts.quota_exhausted },
+                { key: 'quota_cooldown', label: '额度冷却', count: counts.quota_cooldown },
+                { key: 'filtered', label: '已过滤', count: counts.filtered },
+                { key: 'other_unavailable', label: '其他不可用', count: counts.other_unavailable },
             ];
             container.hidden = false;
             container.innerHTML = filters.map(item => {
@@ -1297,22 +1310,30 @@
         }
 
         function getCodexAuthFileFilterCounts(files) {
-            return {
+            const counts = {
                 all: files.length,
-                available: files.filter(isCodexAuthFileAvailable).length,
-                unavailable: files.filter(isCodexAuthFileUnavailable).length,
+                available: 0,
+                auth_failed: 0,
+                quota_exhausted: 0,
+                quota_cooldown: 0,
+                filtered: 0,
+                other_unavailable: 0,
             };
+            files.forEach(file => {
+                const key = getCodexAuthFileFilterKey(file);
+                if (Object.prototype.hasOwnProperty.call(counts, key)) {
+                    counts[key] += 1;
+                }
+            });
+            return counts;
         }
 
         function getCodexFilteredAuthFiles(files) {
             const filter = normalizeCodexAuthFileFilter(codexAuthState.authFileFilter);
-            if (filter === 'available') {
-                return files.filter(isCodexAuthFileAvailable);
+            if (filter === 'all') {
+                return files;
             }
-            if (filter === 'unavailable') {
-                return files.filter(isCodexAuthFileUnavailable);
-            }
-            return files;
+            return files.filter(file => getCodexAuthFileFilterKey(file) === filter);
         }
 
         function getCodexFilteredAuthFileNames() {
@@ -1334,10 +1355,15 @@
                 && !isCodexAuthFileQuotaExhausted(file);
         }
 
-        function isCodexAuthFileUnavailable(file) {
+        function getCodexAuthFileFilterKey(file) {
             const status = normalizeCodexAvailabilityStatus(file);
-            return ['auth_failed', 'quota_cooldown', 'quota_exhausted', 'filtered'].includes(status)
-                || isCodexAuthFileQuotaExhausted(file);
+            if (status === 'auth_failed') return 'auth_failed';
+            if (status === 'quota_cooldown') return 'quota_cooldown';
+            if (status === 'quota_exhausted') return 'quota_exhausted';
+            if (status === 'filtered') return 'filtered';
+            if (isCodexAuthFileQuotaExhausted(file)) return 'quota_exhausted';
+            if (isCodexAuthFileAvailable(file)) return 'available';
+            return 'other_unavailable';
         }
 
         function isCodexAuthFileQuotaExhausted(file) {
