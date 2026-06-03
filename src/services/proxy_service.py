@@ -602,6 +602,7 @@ class ProxyService:
             "set-cookie",
             "content-length",
             "content-encoding",
+            "content-type",
         }
         return {key: value for key, value in headers.items() if key.lower() not in excluded}
 
