@@ -7,10 +7,7 @@
         <div class="header">
             <div class="header-content">
                 <div class="header-title">
-                    <div class="header-title-row">
-                        <h1>{% block header_title %}{% endblock %}</h1>
-                        <span class="header-version">v2.0.14</span>
-                    </div>
+                    <h1>{% block header_title %}{% endblock %}</h1>
                     <p>{% block header_subtitle %}{% endblock %}</p>
                 </div>
                 <div class="header-actions">
@@ -37,6 +34,7 @@
                     <a class="header-nav-link header-nav-link-logout" href="/logout">退出登录</a>
                     {% endif %}
                 </div>
+                <span class="header-version" aria-label="当前版本">v2.0.14</span>
             </div>
         </div>
         {% block content %}{% endblock %}

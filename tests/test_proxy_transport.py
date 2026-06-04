@@ -174,7 +174,7 @@ class ProviderTransportTests(unittest.TestCase):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b"{\"ok\": true}")
+                self.wfile.write(b'{"ok": true}')
 
             def log_message(self, *args) -> None:
                 del args
@@ -1479,14 +1479,21 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("POST /v1/messages", html)
         self.assertIn("https://chatgpt.com/backend-api/codex/responses", html)
         self.assertIn("认证失败", html)
-        self.assertIn("配额已耗尽", html)
+        self.assertIn("额度用完", html)
         self.assertIn("{ key: 'auth_failed', label: '认证失败', count: counts.auth_failed }", html)
         self.assertIn("{ key: 'quota_exhausted', label: '额度用完', count: counts.quota_exhausted }", html)
-        self.assertIn("{ key: 'quota_cooldown', label: '额度冷却', count: counts.quota_cooldown }", html)
-        self.assertIn("{ key: 'other_unavailable', label: '其他不可用', count: counts.other_unavailable }", html)
+        self.assertIn("{ key: 'other_unavailable', label: '其他', count: counts.other_unavailable }", html)
         self.assertIn("function getCodexAuthFileFilterKey(file)", html)
+        self.assertIn("if (status === 'quota_cooldown') return 'quota_exhausted';", html)
+        self.assertIn("if (status === 'quota_cooldown' || status === 'quota_exhausted') return '额度用完';", html)
         self.assertIn("return files.filter(file => getCodexAuthFileFilterKey(file) === filter);", html)
         self.assertNotIn("{ key: 'unavailable', label: '不可用'", html)
+        self.assertNotIn("{ key: 'quota_cooldown', label: '额度冷却'", html)
+        self.assertNotIn("{ key: 'filtered', label: '已过滤'", html)
+        self.assertNotIn("配额冷却中", html)
+        self.assertNotIn("配额已耗尽", html)
+        self.assertNotIn("quota_cooldown: 0", html)
+        self.assertNotIn("filtered: 0", html)
         self.assertNotIn("“信息”只显示最近一次非 success 的数据面错误摘要", html)
         self.assertIn('class="oauth-auth-file-status"', html)
         self.assertIn('class="oauth-auth-file-info"', html)
@@ -1985,7 +1992,7 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn("/static/js/ui-message.js?v=20260319-1", login_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", users_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", index_html)
-        self.assertIn("/static/css/admin-base.css?v=20260603-1", base_page_html)
+        self.assertIn("/static/css/admin-base.css?v=20260603-4", base_page_html)
         self.assertIn("/static/js/theme.js?v=20260319-1", base_page_html)
         self.assertIn("showActionError('登录'", login_html)
         self.assertIn("showActionError('创建用户'", users_html)
@@ -1999,8 +2006,20 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn('data-nav-page="oauth"', base_admin_html)
         self.assertIn('href="/users">用户管理</a>', base_admin_html)
         self.assertIn('href="/statistics">统计概览</a>', base_admin_html)
-        self.assertIn('<span class="header-version">v2.0.14</span>', base_admin_html)
+        version_snippet = '<span class="header-version" aria-label="当前版本">v2.0.14</span>'
+        settings_link_snippet = 'href="/settings">系统设置</a>'
+        self.assertIn(version_snippet, base_admin_html)
         self.assertIn(".app-page .header-version", admin_base_css)
+        self.assertIn("position: absolute;", admin_base_css)
+        self.assertIn("top: -22px;", admin_base_css)
+        self.assertLess(
+            base_admin_html.index(settings_link_snippet),
+            base_admin_html.index(version_snippet),
+        )
+        self.assertLess(
+            base_admin_html.index("</nav>"),
+            base_admin_html.index(version_snippet),
+        )
         self.assertLess(
             base_admin_html.index('href="/">Provider 管理</a>'),
             base_admin_html.index(oauth_link_snippet),
@@ -2069,7 +2088,9 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn("function renderUserUsageSummary()", index_html)
         self.assertIn("function toggleUserUsageSort(", index_html)
         self.assertIn("function exportActiveDashboardTab()", index_html)
-        self.assertIn('<button class="btn btn-primary" onclick="exportActiveDashboardTab()">导出 Excel</button>', index_html)
+        self.assertIn(
+            '<button class="btn btn-primary" onclick="exportActiveDashboardTab()">导出 Excel</button>', index_html
+        )
         self.assertIn('id="username"', index_html)
         self.assertIn('id="requestModel"', index_html)
         self.assertIn('data-visible-chip-count="3"', index_html)
