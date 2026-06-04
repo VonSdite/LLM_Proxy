@@ -114,6 +114,7 @@ body.app-page {
 }
 
 .app-page .header-content {
+    position: relative;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -143,13 +144,6 @@ body.app-page {
     min-width: 0;
 }
 
-.app-page .header-title-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
 .app-page .header-title h1 {
     margin: 0;
     font-size: 28px;
@@ -160,9 +154,14 @@ body.app-page {
 }
 
 .app-page .header-version {
+    position: absolute;
+    top: -22px;
+    right: -39px;
+    z-index: 2;
+    pointer-events: none;
     display: inline-flex;
     align-items: center;
-    min-height: 24px;
+    min-height: 20px;
     padding: 0 8px;
     border: 1px solid rgba(58, 127, 237, 0.24);
     border-radius: 999px;

@@ -145,8 +145,7 @@
                                         <li><strong>待刷新</strong>：access_token 已过期，但有 refresh_token，请求前会自动刷新。</li>
                                         <li><strong>待验证</strong>：access_token 已过期且缺少 refresh_token，会先用当前 access_token 真实请求一次。</li>
                                         <li><strong>认证失败</strong>：上游认证错误、缺少 access_token 或 refresh_token 刷新失败；会跳过，直到重新登录、刷新 token 成功或后续请求成功。</li>
-                                        <li><strong>配额冷却中</strong>：上游返回配额限制，冷却期间优先跳过该文件。</li>
-                                        <li><strong>配额已耗尽</strong>：最近一次配额刷新显示 Codex 窗口无剩余额度。</li>
+                                        <li><strong>额度用完</strong>：上游返回配额限制，或最近一次配额刷新显示 Codex 窗口无剩余额度；请求时会优先跳过该文件。</li>
                                     </ul>
                                 </div>
                             </div>
@@ -1255,8 +1254,6 @@
                 'available',
                 'auth_failed',
                 'quota_exhausted',
-                'quota_cooldown',
-                'filtered',
                 'other_unavailable',
             ].includes(normalized)) {
                 return normalized;
@@ -1288,9 +1285,7 @@
                 { key: 'available', label: '可用', count: counts.available },
                 { key: 'auth_failed', label: '认证失败', count: counts.auth_failed },
                 { key: 'quota_exhausted', label: '额度用完', count: counts.quota_exhausted },
-                { key: 'quota_cooldown', label: '额度冷却', count: counts.quota_cooldown },
-                { key: 'filtered', label: '已过滤', count: counts.filtered },
-                { key: 'other_unavailable', label: '其他不可用', count: counts.other_unavailable },
+                { key: 'other_unavailable', label: '其他', count: counts.other_unavailable },
             ];
             container.hidden = false;
             container.innerHTML = filters.map(item => {
@@ -1315,8 +1310,6 @@
                 available: 0,
                 auth_failed: 0,
                 quota_exhausted: 0,
-                quota_cooldown: 0,
-                filtered: 0,
                 other_unavailable: 0,
             };
             files.forEach(file => {
@@ -1358,9 +1351,9 @@
         function getCodexAuthFileFilterKey(file) {
             const status = normalizeCodexAvailabilityStatus(file);
             if (status === 'auth_failed') return 'auth_failed';
-            if (status === 'quota_cooldown') return 'quota_cooldown';
+            if (status === 'quota_cooldown') return 'quota_exhausted';
             if (status === 'quota_exhausted') return 'quota_exhausted';
-            if (status === 'filtered') return 'filtered';
+            if (status === 'filtered') return 'other_unavailable';
             if (isCodexAuthFileQuotaExhausted(file)) return 'quota_exhausted';
             if (isCodexAuthFileAvailable(file)) return 'available';
             return 'other_unavailable';
@@ -1406,14 +1399,13 @@
         }
 
         function formatCodexAvailabilityStatusLabel(file, status) {
+            if (status === 'quota_cooldown' || status === 'quota_exhausted') return '额度用完';
             const message = String(file?.availability_status_message || '').trim();
             if (message) return message;
             if (status === 'available') return '可用';
             if (status === 'refresh_required') return '待刷新';
             if (status === 'auth_check_required') return '待验证';
             if (status === 'auth_failed') return '认证失败';
-            if (status === 'quota_cooldown') return '配额冷却中';
-            if (status === 'quota_exhausted') return '配额已耗尽';
             if (status === 'filtered') return '已过滤';
             return '-';
         }
