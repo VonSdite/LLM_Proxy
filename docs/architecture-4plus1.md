@@ -19,7 +19,7 @@
 
 这个版本不保留 Gemini / Antigravity。配置加载阶段会清理少量历史废弃字段并回写配置文件；除此之外不再继续扩展旧字段兼容逻辑。
 
-控制平面除了 Provider、Auth Group、用户、统计和系统设置，还可以在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成和查看 CLI/OAuth 类本地认证文件。
+控制平面除了 Provider、Auth Group、用户、统计和系统设置，还可以在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成、查看、导入、导出和归档删除 CLI/OAuth 类本地认证文件。
 
 ## 2. Logical View
 
@@ -70,11 +70,13 @@ downstream request
   - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
   - 暴露系统设置读取与保存接口
 - `OAuthController`
-  - 暴露 Codex / Claude OAuth 登录、回调提交、认证文件列表、删除与 Codex 配额刷新接口
+  - 暴露 Codex / Claude OAuth 登录、回调提交、认证文件列表、JSON/ZIP 导入、ZIP 导出、归档删除与 Codex 配额刷新接口
 - `CodexOAuthService`
   - 生成 Codex OAuth PKCE 授权链接
   - 使用回调 URL 换取 token 并写入本地认证文件
-  - 删除本地认证文件时同步清理该文件的本地状态
+  - 导入认证文件时支持多 JSON 和多 ZIP，逐个校验合法内容后写入
+  - 导出选中认证文件时始终打包为 ZIP
+  - 删除本地认证文件时移动到 `data/oauth/codex/deleted/`，并同步清理该文件的本地状态
   - 读取认证文件状态，并按需刷新 token 后查询 Codex 配额
   - token 交换、token 刷新与配额查询遇到代理风险确认页时，会走统一自动确认重试流程
   - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
@@ -84,7 +86,7 @@ downstream request
 - `ClaudeOAuthService`
   - 生成 Claude OAuth PKCE 授权链接
   - 使用回调 URL 或手动粘贴的 `code#state` 换取 token 并写入本地认证文件
-  - 列出和删除 `data/oauth/claude/*.json`
+  - 列出、JSON/ZIP 导入、ZIP 导出和归档删除 `data/oauth/claude/*.json`
   - 维护本地手动 Claude OAuth 模型目录
   - 按本地模型目录、认证失败状态和最近成功认证文件提供 Claude 请求候选账号
   - token 交换与 token 刷新遇到代理风险确认页时，会走统一自动确认重试流程
@@ -443,6 +445,8 @@ OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并�
   - `POST /api/oauth/codex/models`
   - `DELETE /api/oauth/codex/models/<model_id>`
   - `GET /api/oauth/codex/auth-files`
+  - `POST /api/oauth/codex/auth-files/export`
+  - `POST /api/oauth/codex/auth-files/import`
   - `DELETE /api/oauth/codex/auth-files/<name>`
   - `GET /api/oauth/codex/auth-files/<name>/quota`
   - `POST /api/oauth/claude/session`
@@ -451,6 +455,8 @@ OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并�
   - `POST /api/oauth/claude/models`
   - `DELETE /api/oauth/claude/models/<model_id>`
   - `GET /api/oauth/claude/auth-files`
+  - `POST /api/oauth/claude/auth-files/export`
+  - `POST /api/oauth/claude/auth-files/import`
   - `DELETE /api/oauth/claude/auth-files/<name>`
 
 Codex OAuth 登录链路如下：
@@ -492,6 +498,8 @@ OAuth Claude tab
 - 临时 OAuth 会话 TTL 为 10 分钟
 - 认证文件保存在 `data/oauth/codex/`
 - Claude 认证文件保存在 `data/oauth/claude/`
+- 删除认证文件不会直接 `unlink`；Codex / Claude 都会移动到各自认证目录下的 `deleted/` 子目录
+- 删除归档文件名前缀为删除时的本地年月日时分秒，例如 `20260605123045_<原文件名>`；如果目标文件已存在，会在扩展名前追加 `-1`、`-2`、`-3`
 - Codex 认证文件名沿用 CLIProxyAPI 规则：普通账号为 `codex-{email}-{plan}.json`，team 账号为 `codex-{account_id_sha256前8位}-{email}-team.json`
 - Claude 认证文件名沿用 CLIProxyAPI 规则：`claude-{email}.json`
 - Codex 模型目录缓存在 `data/oauth/codex/models.json`，文件内容只保存模型 ID 字符串数组
@@ -499,8 +507,11 @@ OAuth Claude tab
 - 认证文件的最近配额、配额错误、数据面使用状态和最近成功认证文件保存在 `data/oauth/codex/.state/auth_files.json`
 - Claude 认证文件最近一次数据面使用状态和最近成功认证文件保存在 `data/oauth/claude/.state/auth_files.json`
 - 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
-- OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持全选后批量刷新额度和批量删除
-- OAuth 页面删除认证文件前会用气泡确认，确认后调用删除 API
+- OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持多文件导入、全选后批量刷新额度、ZIP 导出和批量归档删除
+- OAuth 页面导入认证文件时支持选择多个 JSON 文件或多个 ZIP 包；ZIP 必须是导出 API 生成的根目录 JSON 文件结构；每个 JSON 都会校验 provider 类型、access token、email 和过期时间，合法才写入认证目录
+- OAuth 页面导入完成后按导入结果 toast 提示成功数量和失败数量
+- OAuth 页面导出选中认证文件时调用导出 API，单个文件也会以 ZIP 下载
+- OAuth 页面删除认证文件前会用气泡确认，确认后调用删除 API 把文件移动到 `deleted/`
 - Codex 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - Claude 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
@@ -552,6 +563,8 @@ OAuth Claude tab
   - Codex OAuth PKCE、token 文件、本地模型 ID 目录与配额查询
 - [src/services/claude_oauth_service.py](../src/services/claude_oauth_service.py)
   - Claude OAuth PKCE、token 文件、本地模型 ID 目录与认证文件管理
+- [src/services/oauth_auth_file_archive.py](../src/services/oauth_auth_file_archive.py)
+  - OAuth 认证文件 ZIP 导出、JSON/ZIP 导入展开与删除归档移动
 - [src/services/codex_proxy_service.py](../src/services/codex_proxy_service.py)
   - Codex OAuth 数据面代理与账号配额切换
 - [src/services/claude_proxy_service.py](../src/services/claude_proxy_service.py)

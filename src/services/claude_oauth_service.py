@@ -25,6 +25,13 @@ from ..utils.net import (
     build_requests_request_proxies,
 )
 from ..utils.proxy_warning import ProxyWarningRequired, request_with_proxy_warning_retry
+from .oauth_auth_file_archive import (
+    OAuthAuthFileExport,
+    OAuthAuthFileImportResult,
+    build_auth_files_zip,
+    expand_auth_file_import_sources,
+    move_auth_file_to_deleted,
+)
 
 CLAUDE_AUTH_URL = "https://claude.ai/oauth/authorize"
 CLAUDE_TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"
@@ -71,6 +78,7 @@ class ClaudeOAuthService:
         self._logger = ctx.logger
         self._config_manager = ctx.config_manager
         self._auth_dir = ctx.root_path / "data" / "oauth" / "claude"
+        self._deleted_dir = self._auth_dir / "deleted"
         self._models_file = self._auth_dir / "models.json"
         self._state_file = self._auth_dir / ".state" / "auth_files.json"
         self._sessions: dict[str, _ClaudeOAuthSession] = {}
@@ -180,17 +188,64 @@ class ClaudeOAuthService:
         }
 
     def delete_auth_file(self, name: str) -> dict[str, Any]:
-        """删除指定 Claude OAuth 认证文件。"""
+        """把指定 Claude OAuth 认证文件移动到删除归档目录。"""
         auth_file = self._resolve_auth_file(name)
         deleted_name = auth_file.name
-        auth_file.unlink()
+        archived_file = move_auth_file_to_deleted(auth_file, self._deleted_dir)
         self._delete_auth_file_state_entry(deleted_name)
         self._clear_last_success_auth_file(deleted_name)
-        self._logger.info("Claude OAuth auth file deleted: file=%s", deleted_name)
+        self._logger.info(
+            "Claude OAuth auth file moved to deleted directory: file=%s archived_file=%s",
+            deleted_name,
+            archived_file.name,
+        )
         return {
             "status": "ok",
             "deleted": deleted_name,
+            "archived": archived_file.name,
+            "archived_path": str(archived_file),
         }
+
+    def export_auth_files(self, names: Any) -> OAuthAuthFileExport:
+        """导出选中的 Claude OAuth 认证文件 ZIP。"""
+        auth_files = self._resolve_auth_files(names)
+        result = build_auth_files_zip(auth_files, "claude")
+        self._logger.info("Claude OAuth auth files exported: count=%s", result.count)
+        return result
+
+    def import_auth_files(self, sources: list[tuple[str, bytes]]) -> OAuthAuthFileImportResult:
+        """导入 Claude OAuth 认证文件，支持 JSON 和导出结构一致的 ZIP。"""
+        items, failures = expand_auth_file_import_sources(sources)
+        imported_names: list[str] = []
+        for item in items:
+            try:
+                import_name = self._normalize_import_auth_file_name(item.name)
+                payload = self._read_import_auth_payload(item.content)
+                self._validate_import_auth_payload(payload)
+                self._auth_dir.mkdir(parents=True, exist_ok=True)
+                auth_file = self._auth_dir / import_name
+                self._write_json_file(auth_file, payload)
+                self._delete_auth_file_state_entry(import_name)
+                self._clear_last_success_auth_file(import_name)
+                imported_names.append(import_name)
+            except ValueError as exc:
+                failures.append({"name": item.name, "source": item.source, "reason": str(exc)})
+            except Exception as exc:
+                self._logger.warning("Claude OAuth auth file import failed: file=%s error=%s", item.name, exc)
+                failures.append({"name": item.name, "source": item.source, "reason": str(exc)})
+        result = OAuthAuthFileImportResult(
+            imported=len(imported_names),
+            failed=len(failures),
+            total=len(imported_names) + len(failures),
+            imported_files=tuple(imported_names),
+            failed_files=tuple(failures),
+        )
+        self._logger.info(
+            "Claude OAuth auth files imported: imported=%s failed=%s",
+            result.imported,
+            result.failed,
+        )
+        return result
 
     def list_models(self) -> dict[str, Any]:
         """返回当前 Claude OAuth 可用模型目录。"""
@@ -535,7 +590,8 @@ class ClaudeOAuthService:
                     "refresh_required", "待刷新：access_token 已过期，请求前会使用 refresh_token 自动刷新"
                 )
             return self._availability(
-                "auth_check_required", "待验证：access_token 已过期且缺少 refresh_token，会先用当前 access_token 请求一次"
+                "auth_check_required",
+                "待验证：access_token 已过期且缺少 refresh_token，会先用当前 access_token 请求一次",
             )
         usage_status = str(file_state.get("usage_status") or "").strip()
         if usage_status == "success":
@@ -766,10 +822,67 @@ class ClaudeOAuthService:
         cleaned_name = Path(str(name or "").strip()).name
         if not cleaned_name or cleaned_name != str(name or "").strip():
             raise ValueError("Invalid auth file name")
+        if cleaned_name == self._models_file.name:
+            raise ValueError("Auth file not found")
         auth_file = self._auth_dir / cleaned_name
         if not auth_file.exists() or not auth_file.is_file():
             raise ValueError("Auth file not found")
         return auth_file
+
+    def _resolve_auth_files(self, names: Any) -> list[Path]:
+        """解析认证文件名列表，并按输入顺序去重。"""
+        if not isinstance(names, (list, tuple)):
+            raise ValueError("Auth file names must be a list")
+        auth_files: list[Path] = []
+        seen_names: set[str] = set()
+        for name in names:
+            auth_file = self._resolve_auth_file(str(name or ""))
+            if auth_file.name in seen_names:
+                continue
+            seen_names.add(auth_file.name)
+            auth_files.append(auth_file)
+        if not auth_files:
+            raise ValueError("Please select at least one auth file")
+        return auth_files
+
+    def _normalize_import_auth_file_name(self, name: str) -> str:
+        """校验导入目标文件名。"""
+        cleaned_name = Path(str(name or "").strip()).name
+        if not cleaned_name or cleaned_name != str(name or "").strip():
+            raise ValueError("Invalid auth file name")
+        if not cleaned_name.lower().endswith(".json") or cleaned_name == self._models_file.name:
+            raise ValueError("Invalid auth file name")
+        return cleaned_name
+
+    def _read_import_auth_payload(self, content: bytes) -> dict[str, Any]:
+        """从导入内容读取认证 JSON。"""
+        try:
+            payload = json.loads(content.decode("utf-8-sig"))
+        except UnicodeDecodeError as exc:
+            raise ValueError("Auth file must be UTF-8 JSON") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError("Auth file must contain valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("Auth file must contain a JSON object")
+        return payload
+
+    def _validate_import_auth_payload(self, payload: dict[str, Any]) -> None:
+        """校验 Claude OAuth 认证文件内容。"""
+        if str(payload.get("type") or "").strip() != "claude":
+            raise ValueError("Auth file type must be claude")
+        self._require_import_text_field(payload, "access_token")
+        self._require_import_text_field(payload, "email")
+        expired = self._require_import_text_field(payload, "expired")
+        if self._parse_datetime(expired) is None:
+            raise ValueError("Auth file expired must be an ISO datetime")
+
+    @staticmethod
+    def _require_import_text_field(payload: dict[str, Any], field: str) -> str:
+        """读取导入 JSON 中必需的非空字符串字段。"""
+        value = payload.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Auth file missing required field: {field}")
+        return value.strip()
 
     @staticmethod
     def _build_credential_file_name(payload: dict[str, Any]) -> str:

@@ -5,10 +5,12 @@ import os
 import sys
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
+from zipfile import ZipFile
 
 from flask import Flask
 
@@ -245,11 +247,91 @@ class ClaudeOAuthServiceTests(unittest.TestCase):
 
             listed = service.list_auth_files()
             deleted = service.delete_auth_file("claude-a@example.com.json")
+            after_delete = service.list_auth_files()
+            archived_file = Path(deleted["archived_path"])
+            original_exists = auth_file.exists()
+            archived_exists = archived_file.exists()
 
         self.assertEqual(1, listed["total"])
         self.assertEqual("available", listed["files"][0]["availability_status"])
         self.assertEqual("claude-a@example.com.json", deleted["deleted"])
-        self.assertFalse(auth_file.exists())
+        self.assertRegex(deleted["archived"], r"^\d{14}_claude-a@example\.com\.json$")
+        self.assertEqual(0, after_delete["total"])
+        self.assertFalse(original_exists)
+        self.assertTrue(archived_exists)
+
+    def test_export_auth_files_builds_zip_with_selected_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "claude"
+            auth_dir.mkdir(parents=True)
+            for name in ("claude-a@example.com.json", "claude-b@example.com.json"):
+                (auth_dir / name).write_text(
+                    json.dumps(
+                        {
+                            "type": "claude",
+                            "access_token": f"access-{name}",
+                            "refresh_token": "refresh-a",
+                            "email": f"{name}@example.com",
+                            "expired": "2999-01-01T00:00:00Z",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            service = self._build_service(root)
+
+            result = service.export_auth_files(
+                ["claude-b@example.com.json", "claude-a@example.com.json", "claude-b@example.com.json"]
+            )
+
+        self.assertRegex(result.filename, r"^claude-oauth-auth-files-\d{14}\.zip$")
+        self.assertEqual(2, result.count)
+        self.assertEqual(("claude-b@example.com.json", "claude-a@example.com.json"), result.names)
+        with ZipFile(BytesIO(result.content)) as archive:
+            self.assertEqual(["claude-b@example.com.json", "claude-a@example.com.json"], archive.namelist())
+            payload = json.loads(archive.read("claude-b@example.com.json").decode("utf-8"))
+        self.assertEqual("access-claude-b@example.com.json", payload["access_token"])
+
+    def test_import_auth_files_accepts_valid_json_and_flat_zip_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            service = self._build_service(root)
+            direct_payload = {
+                "type": "claude",
+                "email": "direct@example.com",
+                "access_token": "access-direct",
+                "expired": "2999-01-01T00:00:00Z",
+            }
+            zipped_payload = {
+                "type": "claude",
+                "email": "zip@example.com",
+                "access_token": "access-zip",
+                "expired": "2999-01-01T00:00:00Z",
+            }
+            zip_output = BytesIO()
+            with ZipFile(zip_output, "w") as archive:
+                archive.writestr("claude-zip.json", json.dumps(zipped_payload))
+                archive.writestr("claude-invalid.json", json.dumps({"type": "codex", "email": "bad@example.com"}))
+                archive.writestr("nested/claude-nested.json", json.dumps(zipped_payload))
+
+            result = service.import_auth_files(
+                [
+                    ("claude-direct.json", json.dumps(direct_payload).encode("utf-8")),
+                    ("bundle.zip", zip_output.getvalue()),
+                    ("claude-bad.json", b"{not-json"),
+                    ("note.txt", b"ignored"),
+                ]
+            )
+            listed = service.list_auth_files()
+            imported_direct_payload = json.loads(
+                (root / "data" / "oauth" / "claude" / "claude-direct.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(2, result.imported)
+        self.assertEqual(4, result.failed)
+        self.assertEqual(("claude-direct.json", "claude-zip.json"), result.imported_files)
+        self.assertEqual(["claude-direct.json", "claude-zip.json"], [item["name"] for item in listed["files"]])
+        self.assertEqual("access-direct", imported_direct_payload["access_token"])
 
     def test_models_file_is_not_listed_as_auth_file_and_controls_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -279,6 +361,10 @@ class ClaudeOAuthServiceTests(unittest.TestCase):
             skipped_candidates = service.iter_auth_candidates_for_model("claude-sonnet-4-5")
             service.record_auth_file_success("claude-a@example.com.json")
             recovered_candidates = service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+            with self.assertRaisesRegex(ValueError, "Auth file not found"):
+                service.export_auth_files(["models.json"])
+            with self.assertRaisesRegex(ValueError, "Auth file not found"):
+                service.delete_auth_file("models.json")
 
         self.assertEqual(["claude-a@example.com.json"], [item["name"] for item in listed["files"]])
         self.assertEqual(("claude-sonnet-4-5",), model_names)

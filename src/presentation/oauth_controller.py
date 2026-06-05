@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
-from flask import jsonify
+import io
+
+from flask import jsonify, request, send_file
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
@@ -35,6 +37,8 @@ class OAuthController:
         self._app.route("/api/oauth/codex/session", methods=["POST"])(auth(self.create_codex_session))
         self._app.route("/api/oauth/codex/callback", methods=["POST"])(auth(self.complete_codex_callback))
         self._app.route("/api/oauth/codex/auth-files", methods=["GET"])(auth(self.list_codex_auth_files))
+        self._app.route("/api/oauth/codex/auth-files/export", methods=["POST"])(auth(self.export_codex_auth_files))
+        self._app.route("/api/oauth/codex/auth-files/import", methods=["POST"])(auth(self.import_codex_auth_files))
         self._app.route("/api/oauth/codex/auth-files/<name>", methods=["DELETE"])(auth(self.delete_codex_auth_file))
         self._app.route("/api/oauth/codex/auth-files/<name>/quota", methods=["GET"])(
             auth(self.get_codex_auth_file_quota)
@@ -45,12 +49,12 @@ class OAuthController:
         self._app.route("/api/oauth/claude/session", methods=["POST"])(auth(self.create_claude_session))
         self._app.route("/api/oauth/claude/callback", methods=["POST"])(auth(self.complete_claude_callback))
         self._app.route("/api/oauth/claude/auth-files", methods=["GET"])(auth(self.list_claude_auth_files))
+        self._app.route("/api/oauth/claude/auth-files/export", methods=["POST"])(auth(self.export_claude_auth_files))
+        self._app.route("/api/oauth/claude/auth-files/import", methods=["POST"])(auth(self.import_claude_auth_files))
         self._app.route("/api/oauth/claude/auth-files/<name>", methods=["DELETE"])(auth(self.delete_claude_auth_file))
         self._app.route("/api/oauth/claude/models", methods=["GET"])(auth(self.list_claude_models))
         self._app.route("/api/oauth/claude/models", methods=["POST"])(auth(self.add_claude_model))
-        self._app.route("/api/oauth/claude/models/<path:model_id>", methods=["DELETE"])(
-            auth(self.delete_claude_model)
-        )
+        self._app.route("/api/oauth/claude/models/<path:model_id>", methods=["DELETE"])(auth(self.delete_claude_model))
 
     def create_codex_session(self) -> ResponseReturnValue:
         try:
@@ -125,6 +129,82 @@ class OAuthController:
         if refreshed_at:
             payload["quota_refreshed_at"] = refreshed_at
         return payload
+
+    def export_codex_auth_files(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            result = self._codex_oauth_service.export_auth_files(self._get_export_auth_file_names(payload))
+            return self._send_auth_file_export(result.content, result.filename)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error exporting Codex OAuth auth files: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def export_claude_auth_files(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            result = self._claude_oauth_service.export_auth_files(self._get_export_auth_file_names(payload))
+            return self._send_auth_file_export(result.content, result.filename)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error exporting Claude OAuth auth files: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def import_codex_auth_files(self) -> ResponseReturnValue:
+        try:
+            result = self._codex_oauth_service.import_auth_files(self._get_uploaded_auth_files())
+            return jsonify(result.to_dict())
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error importing Codex OAuth auth files: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def import_claude_auth_files(self) -> ResponseReturnValue:
+        try:
+            result = self._claude_oauth_service.import_auth_files(self._get_uploaded_auth_files())
+            return jsonify(result.to_dict())
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error importing Claude OAuth auth files: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    @staticmethod
+    def _send_auth_file_export(content: bytes, filename: str) -> ResponseReturnValue:
+        """发送认证文件 ZIP 导出响应。"""
+        return send_file(
+            io.BytesIO(content),
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=filename,
+            max_age=0,
+        )
+
+    @staticmethod
+    def _get_export_auth_file_names(payload: dict[str, object]) -> object:
+        """读取导出接口里的认证文件名列表。"""
+        if "names" in payload:
+            return payload.get("names")
+        return payload.get("files")
+
+    @staticmethod
+    def _get_uploaded_auth_files() -> list[tuple[str, bytes]]:
+        """读取导入接口上传的文件内容。"""
+        uploaded_files = request.files.getlist("files")
+        if not uploaded_files:
+            raise ValueError("Please select at least one file")
+        sources: list[tuple[str, bytes]] = []
+        for uploaded_file in uploaded_files:
+            filename = str(uploaded_file.filename or "").strip()
+            if not filename:
+                continue
+            sources.append((filename, uploaded_file.read()))
+        if not sources:
+            raise ValueError("Please select at least one file")
+        return sources
 
     def delete_codex_auth_file(self, name: str) -> ResponseReturnValue:
         try:
