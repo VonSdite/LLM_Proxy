@@ -8,10 +8,13 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
+from zipfile import ZipFile
 
 from flask import Flask
 
@@ -327,15 +330,97 @@ class CodexOAuthServiceTests(unittest.TestCase):
                 )
             service = self._build_service(root)
             service.record_auth_file_failure("codex-a.json", "bad token", status_code=401)
+            deleted_dir = auth_dir / "deleted"
+            deleted_dir.mkdir()
+            (deleted_dir / "20260605123045_codex-a.json").write_text("{}", encoding="utf-8")
 
             before_delete = service.list_auth_files()
-            delete_result = service.delete_auth_file("codex-a.json")
+            with patch(
+                "src.services.oauth_auth_file_archive.now_local_datetime",
+                return_value=datetime(2026, 6, 5, 12, 30, 45),
+            ):
+                delete_result = service.delete_auth_file("codex-a.json")
             after_delete = service.list_auth_files()
+            archived_file = Path(delete_result["archived_path"])
+            original_exists = (root / "data" / "oauth" / "codex" / "codex-a.json").exists()
+            archived_exists = archived_file.exists()
 
         self.assertEqual(["codex-a.json", "codex-b.json"], [item["name"] for item in before_delete["files"]])
         self.assertEqual("codex-a.json", delete_result["deleted"])
+        self.assertEqual("20260605123045_codex-a-1.json", delete_result["archived"])
         self.assertEqual(["codex-b.json"], [item["name"] for item in after_delete["files"]])
-        self.assertFalse((root / "data" / "oauth" / "codex" / "codex-a.json").exists())
+        self.assertFalse(original_exists)
+        self.assertTrue(archived_exists)
+
+    def test_export_auth_files_builds_zip_with_selected_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            for name in ("codex-a.json", "codex-b.json"):
+                (auth_dir / name).write_text(
+                    json.dumps(
+                        {
+                            "type": "codex",
+                            "email": f"{name}@example.com",
+                            "access_token": f"access-{name}",
+                            "expired": "2999-01-01T00:00:00Z",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            service = self._build_service(root)
+
+            result = service.export_auth_files(["codex-b.json", "codex-a.json", "codex-b.json"])
+
+        self.assertRegex(result.filename, r"^codex-oauth-auth-files-\d{14}\.zip$")
+        self.assertEqual(2, result.count)
+        self.assertEqual(("codex-b.json", "codex-a.json"), result.names)
+        with ZipFile(BytesIO(result.content)) as archive:
+            self.assertEqual(["codex-b.json", "codex-a.json"], archive.namelist())
+            payload = json.loads(archive.read("codex-b.json").decode("utf-8"))
+        self.assertEqual("access-codex-b.json", payload["access_token"])
+
+    def test_import_auth_files_accepts_valid_json_and_flat_zip_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            service = self._build_service(root)
+            direct_payload = {
+                "type": "codex",
+                "email": "direct@example.com",
+                "access_token": "access-direct",
+                "expired": "2999-01-01T00:00:00Z",
+            }
+            zipped_payload = {
+                "type": "codex",
+                "email": "zip@example.com",
+                "access_token": "access-zip",
+                "expired": "2999-01-01T00:00:00Z",
+            }
+            zip_output = BytesIO()
+            with ZipFile(zip_output, "w") as archive:
+                archive.writestr("codex-zip.json", json.dumps(zipped_payload))
+                archive.writestr("codex-invalid.json", json.dumps({"type": "codex", "email": "bad@example.com"}))
+                archive.writestr("nested/codex-nested.json", json.dumps(zipped_payload))
+
+            result = service.import_auth_files(
+                [
+                    ("codex-direct.json", json.dumps(direct_payload).encode("utf-8")),
+                    ("bundle.zip", zip_output.getvalue()),
+                    ("codex-bad.json", b"{not-json"),
+                    ("note.txt", b"ignored"),
+                ]
+            )
+            listed = service.list_auth_files()
+            imported_direct_payload = json.loads(
+                (root / "data" / "oauth" / "codex" / "codex-direct.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(2, result.imported)
+        self.assertEqual(4, result.failed)
+        self.assertEqual(("codex-direct.json", "codex-zip.json"), result.imported_files)
+        self.assertEqual(["codex-direct.json", "codex-zip.json"], [item["name"] for item in listed["files"]])
+        self.assertEqual("access-direct", imported_direct_payload["access_token"])
 
     def test_get_auth_file_quota_uses_access_token_and_account_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -466,9 +551,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertTrue(sessions[0].closed)
         self.assertEqual(CODEX_USAGE_URL, sessions[0].get_calls[0][0])
         self.assertEqual(confirmation_url, sessions[0].get_calls[1][0])
-        self.assertTrue(
-            sessions[0].get_calls[2][0].startswith("http://114.114.114.114:9421/proxycontrolwarn/check?")
-        )
+        self.assertTrue(sessions[0].get_calls[2][0].startswith("http://114.114.114.114:9421/proxycontrolwarn/check?"))
         self.assertEqual(CODEX_USAGE_URL, sessions[0].get_calls[3][0])
 
     def test_get_auth_file_quota_persists_error_state(self) -> None:
@@ -1006,6 +1089,10 @@ class CodexOAuthServiceTests(unittest.TestCase):
             added_payload = json.loads(models_file.read_text(encoding="utf-8"))
             deleted = service.delete_model("gpt-custom")
             deleted_payload = json.loads(models_file.read_text(encoding="utf-8"))
+            with self.assertRaisesRegex(ValueError, "Auth file not found"):
+                service.export_auth_files(["models.json"])
+            with self.assertRaisesRegex(ValueError, "Auth file not found"):
+                service.delete_auth_file("models.json")
 
         self.assertIn("gpt-custom", [model["id"] for model in added["models"]])
         self.assertEqual([], [model["id"] for model in deleted["models"]])
