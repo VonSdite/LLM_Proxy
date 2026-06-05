@@ -2027,7 +2027,7 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn('data-nav-page="oauth"', base_admin_html)
         self.assertIn('href="/users">用户管理</a>', base_admin_html)
         self.assertIn('href="/statistics">统计概览</a>', base_admin_html)
-        version_snippet = '<span class="header-version" aria-label="当前版本">v2.0.14</span>'
+        version_snippet = '<span class="header-version" aria-label="当前版本">v2.0.15</span>'
         settings_link_snippet = 'href="/settings">系统设置</a>'
         self.assertIn(version_snippet, base_admin_html)
         self.assertIn(".app-page .header-version", admin_base_css)
