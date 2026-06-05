@@ -9,3 +9,4 @@ logs
 .vscode
 uv.lock
 *.db
+.codegraph
