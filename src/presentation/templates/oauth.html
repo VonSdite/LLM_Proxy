@@ -163,6 +163,21 @@
                         <span>全选</span>
                     </label>
                     <span class="oauth-selected-count" id="codexSelectedAuthFileCount">已选择 0 个</span>
+                    <button
+                        type="button"
+                        class="oauth-icon-button"
+                        id="codexRefreshSelectedQuotaBtn"
+                        title="刷新选中额度"
+                        aria-label="刷新选中额度"
+                        onclick="refreshSelectedCodexQuotas()"
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M20 11a8 8 0 0 0-14.5-4.7L4 8"></path>
+                            <path d="M4 4v4h4"></path>
+                            <path d="M4 13a8 8 0 0 0 14.5 4.7L20 16"></path>
+                            <path d="M20 20v-4h-4"></path>
+                        </svg>
+                    </button>
                     <input
                         type="file"
                         id="codexImportAuthFilesInput"
@@ -181,23 +196,8 @@
                     >
                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <path d="M17 8l-5-5-5 5"></path>
-                            <path d="M12 3v12"></path>
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="oauth-icon-button"
-                        id="codexRefreshSelectedQuotaBtn"
-                        title="刷新选中额度"
-                        aria-label="刷新选中额度"
-                        onclick="refreshSelectedCodexQuotas()"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                            <path d="M20 11a8 8 0 0 0-14.5-4.7L4 8"></path>
-                            <path d="M4 4v4h4"></path>
-                            <path d="M4 13a8 8 0 0 0 14.5 4.7L20 16"></path>
-                            <path d="M20 20v-4h-4"></path>
+                            <path d="M7 10l5 5 5-5"></path>
+                            <path d="M12 15V3"></path>
                         </svg>
                     </button>
                     <button
@@ -210,8 +210,8 @@
                     >
                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <path d="M7 10l5 5 5-5"></path>
-                            <path d="M12 15V3"></path>
+                            <path d="M17 8l-5-5-5 5"></path>
+                            <path d="M12 3v12"></path>
                         </svg>
                     </button>
                     <div class="oauth-toolbar-action-wrap">
@@ -386,8 +386,8 @@
                     >
                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <path d="M17 8l-5-5-5 5"></path>
-                            <path d="M12 3v12"></path>
+                            <path d="M7 10l5 5 5-5"></path>
+                            <path d="M12 15V3"></path>
                         </svg>
                     </button>
                     <button
@@ -400,8 +400,8 @@
                     >
                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <path d="M7 10l5 5 5-5"></path>
-                            <path d="M12 15V3"></path>
+                            <path d="M17 8l-5-5-5 5"></path>
+                            <path d="M12 3v12"></path>
                         </svg>
                     </button>
                     <div class="oauth-toolbar-action-wrap">
