@@ -71,7 +71,7 @@
                                     type="text"
                                     id="userSearchInput"
                                     class="form-control"
-                                    placeholder="用户名 / IP"
+                                    placeholder="搜索用户名 / IP"
                                     autocomplete="off"
                                     spellcheck="false"
                                 >
@@ -79,13 +79,13 @@
                                     type="button"
                                     class="search-clear-button"
                                     id="clearUserSearchBtn"
+                                    onmousedown="event.preventDefault()"
                                     onclick="clearUserSearch()"
                                     aria-label="清空搜索"
                                     title="清空搜索"
                                     hidden
                                 >&times;</button>
                             </div>
-                            <button type="button" class="btn btn-primary search-submit-button" onclick="applyUserSearch()">搜索</button>
                         </div>
                     </div>
                     <div class="users-table-shell" id="usersTableContainer">
@@ -149,7 +149,6 @@
                 <div class="modal-header border-bottom-0">
                     <div>
                         <h5 class="modal-title fw-semibold" id="permissionModalLabel">模型权限</h5>
-                        <p class="modal-subtitle mb-0" id="permissionModalSubtitle">为用户设置可访问的模型。</p>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
@@ -760,6 +759,9 @@
                     applyUserSearch();
                 }
             });
+            userSearchInput.addEventListener('blur', function() {
+                applyUserSearch();
+            });
         }
 
         function updateUserSearchUi(syncInput = false) {
@@ -777,6 +779,13 @@
         function applyUserSearch() {
             const userSearchInput = document.getElementById('userSearchInput');
             const nextKeyword = userSearchInput ? userSearchInput.value.trim() : '';
+            if (userSearchInput) {
+                userSearchInput.value = nextKeyword;
+            }
+            if (nextKeyword === currentSearchKeyword) {
+                updateUserSearchUi();
+                return;
+            }
             currentSearchKeyword = nextKeyword;
             currentPage = 1;
             updateUserSearchUi();
@@ -1411,7 +1420,6 @@
                     <div class="permission-picker-header">
                         <div class="permission-picker-title-group">
                             <span class="permission-picker-title">选择可访问模型</span>
-                            <span class="permission-picker-note" id="permissionModelCatalogMeta">模型变化后，刷新时会自动清理已删除项。</span>
                         </div>
                         <div class="permission-picker-stats" aria-live="polite">
                             <span class="permission-picker-stats-label">已选</span>
@@ -1574,20 +1582,10 @@
 
         function updatePermissionModalUi() {
             const title = document.getElementById('permissionModalLabel');
-            const subtitle = document.getElementById('permissionModalSubtitle');
             const saveButton = document.getElementById('savePermissionBtn');
 
             if (title) {
                 title.textContent = permissionModalMode === 'batch' ? '批量设置模型权限' : '模型权限';
-            }
-            if (subtitle) {
-                if (permissionModalMode === 'batch') {
-                    subtitle.textContent = permissionDraftMixedSource
-                        ? `已选择 ${permissionTargetUserIds.length} 个用户，当前权限不一致，保存后将统一覆盖。`
-                        : `已选择 ${permissionTargetUserIds.length} 个用户，将统一应用下方权限。`;
-                } else {
-                    subtitle.textContent = '设置该用户可访问的模型。';
-                }
             }
             if (saveButton) {
                 saveButton.disabled = permissionSaving;

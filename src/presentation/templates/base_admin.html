@@ -25,6 +25,9 @@
                         {% if oauth_enabled %}
                         <a class="header-nav-link{% if active_page == 'oauth' %} active{% endif %}" href="/oauth" data-nav-page="oauth">OAuth</a>
                         {% endif %}
+                        {% if api_key_management_enabled %}
+                        <a class="header-nav-link{% if active_page == 'api_keys' %} active{% endif %}" href="/api-keys" data-nav-page="api_keys">API Key</a>
+                        {% endif %}
                         <a class="header-nav-link{% if active_page == 'users' %} active{% endif %}" href="/users">用户管理</a>
                         <a class="header-nav-link{% if active_page == 'index' %} active{% endif %}" href="/statistics">统计概览</a>
                         <a class="header-nav-link{% if active_page == 'settings' %} active{% endif %}" href="/settings">系统设置</a>
@@ -34,7 +37,7 @@
                     <a class="header-nav-link header-nav-link-logout" href="/logout">退出登录</a>
                     {% endif %}
                 </div>
-                <span class="header-version" aria-label="当前版本">v2.0.15</span>
+                <span class="header-version" aria-label="当前版本">v2.0.16</span>
             </div>
         </div>
         {% block content %}{% endblock %}

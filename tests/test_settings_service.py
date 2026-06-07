@@ -80,6 +80,24 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertFalse(self.config_manager.is_oauth_verify_ssl_enabled())
         self.assertFalse(self.config_manager.is_real_client_ip_enabled())
         self.assertEqual("X-Forwarded-For", self.config_manager.get_real_client_ip_header())
+        self.assertFalse(settings["api_keys"]["enabled"])
+        self.assertFalse(self.config_manager.is_api_key_management_enabled())
+
+    def test_update_api_key_settings_persists_enabled_flag(self) -> None:
+        result = self.service.update_api_key_settings(
+            {
+                "api_keys": {
+                    "enabled": True,
+                },
+            }
+        )
+
+        self.assertTrue(result["settings"]["api_keys"]["enabled"])
+        self.assertTrue(self.config_manager.is_api_key_management_enabled())
+
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        self.assertTrue(persisted["api_keys"]["enabled"])
 
     def test_update_client_ip_settings_persists_real_client_ip_settings(self) -> None:
         result = self.service.update_client_ip_settings(

@@ -3,6 +3,7 @@
 """表现层导出。"""
 
 from .app_factory import create_flask_app
+from .api_key_controller import ApiKeyController
 from .auth_controller import AuthenticationController
 from .oauth_controller import OAuthController
 from .provider_controller import ProviderController
@@ -12,6 +13,7 @@ from .web_controller import WebController
 
 __all__ = [
     "create_flask_app",
+    "ApiKeyController",
     "AuthenticationController",
     "OAuthController",
     "ProviderController",

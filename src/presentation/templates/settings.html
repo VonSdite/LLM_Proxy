@@ -200,6 +200,28 @@
                     </div>
                 </section>
 
+                <section class="section-card settings-shell-card settings-shell-card-api-keys">
+                    <div class="section-header settings-shell-header">
+                        <div class="section-title-with-help">
+                            <h2 class="section-title">API Key</h2>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-settings-help-topic="api_key_management"
+                                onclick="toggleSettingsHelp('api_key_management', event)"
+                                aria-label="查看 API Key 管理说明"
+                            >?</button>
+                        </div>
+                    </div>
+                    <div class="setting-toggle-inline">
+                        <span class="setting-toggle-title">启用 API Key 管理</span>
+                        <label class="switch" aria-label="切换 API Key 管理">
+                            <input type="checkbox" id="apiKeyManagementEnabled">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </section>
+
                 <section class="section-card settings-shell-card settings-shell-card-oauth">
                     <div class="section-header settings-shell-header">
                         <div>
@@ -377,6 +399,8 @@
         let basicSettingsSaving = false;
         let clientIpSettingsSaving = false;
         let pendingClientIpSave = false;
+        let apiKeySettingsSaving = false;
+        let pendingApiKeySave = false;
         let oauthSettingsSaving = false;
         let pendingOAuthSave = false;
         let debugSettingsSaving = false;
@@ -384,6 +408,7 @@
         let currentSettings = null;
         let currentBasicSettingsSnapshot = "";
         let currentClientIpSettingsSnapshot = "";
+        let currentApiKeySettingsSnapshot = "";
         let currentOAuthSettingsSnapshot = "";
         let currentDebugSettingsSnapshot = "";
         let activeSettingsHelpTrigger = null;
@@ -425,6 +450,16 @@
                     <p>开启后，会从配置的 header 读取真实源 IP，适合服务前面还有 Nginx、Cloudflare Tunnel 或其它反向代理的部署。</p>
                     <p>常用 header 是 <code>X-Forwarded-For</code> 或 <code>X-Real-IP</code>。如果 header 里是逗号分隔列表，系统会取第一个 IP。</p>
                     <p>请只在可信反向代理已经正确覆盖该 header 时开启；header 缺失或不是合法 IP 时会回退到对端 IP。</p>
+                `
+            },
+            api_key_management: {
+                title: "API Key",
+                html: `
+                    <p>开启后，顶部导航会显示 API Key 页签。</p>
+                    <p>开启后，下游访问模型接口必须携带已启用的 API Key。</p>
+                    <p>支持 <code>Authorization: Bearer sk-...</code> 或 <code>X-API-Key</code>。</p>
+                    <p>每个 API Key 可以单独设置模型权限和总 token 使用上限。</p>
+                    <p>如果同时开启 Chat 白名单，最终可访问模型会取用户模型权限和 API Key 模型权限的交集。</p>
                 `
             },
             llm_trace: {
@@ -622,6 +657,14 @@
             };
         }
 
+        function collectApiKeySettingsPayload() {
+            return {
+                api_keys: {
+                    enabled: document.getElementById("apiKeyManagementEnabled").checked
+                }
+            };
+        }
+
         function collectDebugSettingsPayload() {
             return {
                 logging: {
@@ -661,6 +704,13 @@
             currentClientIpSettingsSnapshot = JSON.stringify(collectClientIpSettingsPayload());
         }
 
+        function fillApiKeySettingsForm(settings) {
+            const enabled = Boolean(settings?.api_keys?.enabled);
+            document.getElementById("apiKeyManagementEnabled").checked = enabled;
+            syncApiKeyNavLink(enabled);
+            currentApiKeySettingsSnapshot = JSON.stringify(collectApiKeySettingsPayload());
+        }
+
         function fillDebugSettingsForm(settings) {
             document.getElementById("logPath").value = settings?.logging?.path || "";
             document.getElementById("logLevel").value = settings?.logging?.level || "INFO";
@@ -690,6 +740,7 @@
             currentSettings = settings;
             fillBasicSettingsForm(settings);
             fillClientIpSettingsForm(settings);
+            fillApiKeySettingsForm(settings);
             fillOAuthSettingsForm(settings);
             fillDebugSettingsForm(settings);
         }
@@ -713,6 +764,10 @@
 
         function hasClientIpSettingsChanged() {
             return JSON.stringify(collectClientIpSettingsPayload()) !== currentClientIpSettingsSnapshot;
+        }
+
+        function hasApiKeySettingsChanged() {
+            return JSON.stringify(collectApiKeySettingsPayload()) !== currentApiKeySettingsSnapshot;
         }
 
         function hasDebugSettingsChanged() {
@@ -783,8 +838,32 @@
             oauthLink.href = "/oauth";
             oauthLink.dataset.navPage = "oauth";
             oauthLink.textContent = "OAuth";
+            const apiKeyLink = nav.querySelector('[data-nav-page="api_keys"]');
             const usersLink = nav.querySelector('a[href="/users"]');
-            nav.insertBefore(oauthLink, usersLink || null);
+            nav.insertBefore(oauthLink, apiKeyLink || usersLink || null);
+        }
+
+        function syncApiKeyNavLink(enabled) {
+            const nav = document.querySelector(".header-nav");
+            if (!nav) {
+                return;
+            }
+            const existing = nav.querySelector('[data-nav-page="api_keys"]');
+            if (!enabled) {
+                existing?.remove();
+                return;
+            }
+            if (existing) {
+                return;
+            }
+
+            const apiKeyLink = document.createElement("a");
+            apiKeyLink.className = "header-nav-link";
+            apiKeyLink.href = "/api-keys";
+            apiKeyLink.dataset.navPage = "api_keys";
+            apiKeyLink.textContent = "API Key";
+            const usersLink = nav.querySelector('a[href="/users"]');
+            nav.insertBefore(apiKeyLink, usersLink || null);
         }
 
         function handleOAuthSettingsChanged() {
@@ -793,6 +872,12 @@
             syncOAuthProxyFields();
             syncOAuthNavLink(enabled);
             saveOAuthSettings();
+        }
+
+        function handleApiKeySettingsChanged() {
+            const enabled = Boolean(document.getElementById("apiKeyManagementEnabled")?.checked);
+            syncApiKeyNavLink(enabled);
+            saveApiKeySettings();
         }
 
         function handleClientIpSettingsChanged() {
@@ -832,6 +917,9 @@
                 }
                 if (!hasOAuthSettingsChanged()) {
                     fillOAuthSettingsForm(data.settings);
+                }
+                if (!hasApiKeySettingsChanged()) {
+                    fillApiKeySettingsForm(data.settings);
                 }
                 if (!hasDebugSettingsChanged()) {
                     fillDebugSettingsForm(data.settings);
@@ -959,6 +1047,60 @@
                     await saveOAuthSettings();
                 } else {
                     pendingOAuthSave = false;
+                }
+            }
+        }
+
+        async function saveApiKeySettings() {
+            if (apiKeySettingsSaving) {
+                pendingApiKeySave = true;
+                return Promise.resolve();
+            }
+            if (!hasApiKeySettingsChanged()) {
+                return Promise.resolve();
+            }
+
+            const payload = collectApiKeySettingsPayload();
+            const savedPayloadSnapshot = JSON.stringify(payload);
+            apiKeySettingsSaving = true;
+
+            try {
+                const response = await fetch("/api/settings/system/api-keys", {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        window.location.href = "/login";
+                        return;
+                    }
+                    throw new Error(data?.error || "保存 API Key 管理设置失败");
+                }
+
+                currentSettings = data.settings;
+                if (JSON.stringify(collectApiKeySettingsPayload()) === savedPayloadSnapshot) {
+                    fillApiKeySettingsForm(data.settings);
+                } else {
+                    currentApiKeySettingsSnapshot = savedPayloadSnapshot;
+                    pendingApiKeySave = true;
+                }
+            } catch (error) {
+                showActionError("保存 API Key 管理设置", error);
+                const savedSettings = currentSettings;
+                if (savedSettings) {
+                    fillApiKeySettingsForm(savedSettings);
+                }
+            } finally {
+                apiKeySettingsSaving = false;
+                if (pendingApiKeySave && hasApiKeySettingsChanged()) {
+                    pendingApiKeySave = false;
+                    await saveApiKeySettings();
+                } else {
+                    pendingApiKeySave = false;
                 }
             }
         }
@@ -1223,6 +1365,8 @@
             document.getElementById("realIpHeader")?.addEventListener("blur", function () {
                 saveClientIpSettings();
             });
+
+            document.getElementById("apiKeyManagementEnabled")?.addEventListener("change", handleApiKeySettingsChanged);
 
             document.getElementById("oauthEnabled")?.addEventListener("change", handleOAuthSettingsChanged);
 

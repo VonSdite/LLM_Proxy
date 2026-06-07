@@ -1,0 +1,242 @@
+.api-keys-page .api-key-toolbar {
+    justify-content: flex-end;
+}
+
+.api-keys-page .api-key-toolbar-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    width: 100%;
+}
+
+.api-keys-page .api-key-create-button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.api-keys-page .api-keys-table {
+    min-width: 1280px;
+}
+
+.api-keys-page .api-keys-table .name-col {
+    width: 180px;
+    min-width: 150px;
+    max-width: 180px;
+}
+
+.api-keys-page .api-key-name-text {
+    display: block;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.api-keys-page .api-keys-table .permission-col {
+    width: 160px;
+    min-width: 130px;
+    max-width: 160px;
+}
+
+.api-keys-page .api-keys-table .model-permission-summary {
+    max-width: 160px;
+}
+
+.api-keys-page .api-keys-table .permission-chip {
+    max-width: 110px;
+}
+
+.api-keys-page .token-limit-col {
+    min-width: 118px;
+}
+
+.api-keys-page .api-key-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    position: relative;
+}
+
+.api-keys-page .api-key-preview {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    min-height: 26px;
+    padding: 0 10px;
+    border: 1px solid rgba(100, 116, 139, 0.2);
+    border-radius: 9px;
+    background: rgba(15, 23, 42, 0.04);
+    color: #334155;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.api-keys-page .api-key-copy-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid rgba(100, 116, 139, 0.22);
+    border-radius: 8px;
+    background: rgba(248, 250, 252, 0.8);
+    color: #475569;
+    cursor: pointer;
+    transition: color var(--transition), border-color var(--transition), background-color var(--transition);
+}
+
+.api-keys-page .api-key-copy-icon-button:hover,
+.api-keys-page .api-key-copy-icon-button:focus-visible {
+    border-color: rgba(37, 99, 235, 0.38);
+    background: rgba(37, 99, 235, 0.08);
+    color: #2563eb;
+}
+
+.api-keys-page .api-key-copy-icon-button svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.api-keys-page .api-key-copy-bubble {
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    z-index: 30;
+    max-width: 520px;
+    padding: 8px 10px;
+    border: 1px solid rgba(37, 99, 235, 0.26);
+    border-radius: 8px;
+    background: #f8fbff;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: var(--shadow-soft);
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+.api-keys-page .token-limit-value,
+.api-keys-page .token-limit-empty {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 58px;
+    font-size: 13px;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.api-keys-page .token-limit-value {
+    color: var(--text-primary);
+}
+
+.api-keys-page .token-limit-empty {
+    color: var(--text-muted);
+}
+
+.api-keys-page .api-key-form-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.api-keys-page .api-key-form-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+    gap: 14px;
+    align-items: start;
+}
+
+.api-keys-page .api-key-edit-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 48px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(248, 250, 252, 0.72);
+}
+
+.api-keys-page .api-key-edit-status-label {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.api-keys-page .table-footer .right-controls {
+    gap: 10px;
+}
+
+.api-keys-page .page-size-controls .custom-select {
+    min-width: 92px;
+}
+
+.api-keys-page .page-size-controls .custom-select-trigger {
+    width: 92px;
+}
+
+:root[data-theme="dark"] .api-keys-page .api-key-preview {
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.08);
+    color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .api-keys-page .api-key-copy-icon-button {
+    border-color: rgba(148, 163, 184, 0.2);
+    background: rgba(148, 163, 184, 0.08);
+    color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .api-keys-page .api-key-copy-icon-button:hover,
+:root[data-theme="dark"] .api-keys-page .api-key-copy-icon-button:focus-visible {
+    border-color: rgba(88, 166, 255, 0.42);
+    background: rgba(88, 166, 255, 0.14);
+    color: #d9eaff;
+}
+
+:root[data-theme="dark"] .api-keys-page .api-key-copy-bubble {
+    border-color: rgba(88, 166, 255, 0.34);
+    background: #0d1117;
+    color: #d9eaff;
+    box-shadow: 0 14px 34px rgba(1, 4, 9, 0.72);
+}
+
+:root[data-theme="dark"] .api-keys-page .api-key-edit-status-row {
+    border-color: #313b47;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+@media (max-width: 640px) {
+    .api-keys-page .api-key-toolbar-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .api-keys-page .api-key-create-button {
+        width: 100%;
+    }
+
+    .api-keys-page .api-key-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
