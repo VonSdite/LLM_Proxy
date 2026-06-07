@@ -66,6 +66,7 @@ class LogRepository:
                 """
                 CREATE TABLE IF NOT EXISTS request_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    api_key_id INTEGER,
                     ip_address TEXT,
                     request_model TEXT NOT NULL,
                     response_model TEXT,
@@ -78,8 +79,14 @@ class LogRepository:
                 )
                 """
             )
+            request_log_columns = {
+                str(row["name"]).strip() for row in cursor.execute("PRAGMA table_info(request_logs)").fetchall()
+            }
+            if "api_key_id" not in request_log_columns:
+                cursor.execute("ALTER TABLE request_logs ADD COLUMN api_key_id INTEGER")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_start_time ON request_logs(start_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_address ON request_logs(ip_address)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_api_key ON request_logs(api_key_id)")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS daily_request_stats (
@@ -111,6 +118,7 @@ class LogRepository:
         start_time: object | None = None,
         end_time: object | None = None,
         ip_address: str | None = None,
+        api_key_id: int | None = None,
     ) -> int | None:
         """写入单条请求日志，并同步更新日聚合统计。"""
         start_time_value = ensure_local_datetime(start_time)
@@ -126,11 +134,12 @@ class LogRepository:
             cursor.execute(
                 """
                 INSERT INTO request_logs
-                (ip_address, request_model, response_model, total_tokens,
+                (api_key_id, ip_address, request_model, response_model, total_tokens,
                  prompt_tokens, completion_tokens, start_time, end_time, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    api_key_id,
                     ip_address,
                     request_model,
                     response_model,
@@ -142,6 +151,7 @@ class LogRepository:
                     now_text,
                 ),
             )
+            log_id = cursor.lastrowid
             stat_date = format_local_date(start_time_value)
             cursor.execute(
                 """
@@ -172,7 +182,29 @@ class LogRepository:
                     now_text,
                 ),
             )
-            return cursor.lastrowid
+            if api_key_id is not None:
+                cursor.execute(
+                    """
+                    UPDATE api_keys
+                    SET
+                        total_request_count = total_request_count + 1,
+                        total_tokens = total_tokens + ?,
+                        prompt_tokens = prompt_tokens + ?,
+                        completion_tokens = completion_tokens + ?,
+                        last_used_at = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        safe_total_tokens,
+                        safe_prompt_tokens,
+                        safe_completion_tokens,
+                        now_text,
+                        now_text,
+                        int(api_key_id),
+                    ),
+                )
+            return log_id
 
     @staticmethod
     def _normalize_filter_values(values: str | Sequence[str] | None) -> list[str]:

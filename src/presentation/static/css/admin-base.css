@@ -156,19 +156,16 @@ body.app-page {
 .app-page .header-version {
     position: absolute;
     top: -22px;
-    right: -39px;
+    left: -28px;
     z-index: 2;
     pointer-events: none;
     display: inline-flex;
     align-items: center;
-    min-height: 20px;
-    padding: 0 8px;
-    border: 1px solid rgba(58, 127, 237, 0.24);
-    border-radius: 999px;
-    background: rgba(58, 127, 237, 0.09);
-    color: var(--primary-active);
+    min-height: 18px;
+    padding: 0;
+    color: var(--text-muted);
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1;
     white-space: nowrap;
 }
@@ -181,9 +178,7 @@ body.app-page {
 }
 
 :root[data-theme="dark"] .app-page .header-version {
-    border-color: rgba(108, 167, 255, 0.28);
-    background: rgba(108, 167, 255, 0.12);
-    color: #8ec5ff;
+    color: #7d8590;
 }
 
 .app-page .header-actions {

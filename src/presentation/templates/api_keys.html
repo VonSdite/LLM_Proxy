@@ -1,0 +1,1259 @@
+{% extends "base_admin.html" %}
+
+{% block page_title %}API Key 管理{% endblock %}
+{% block page_css %}
+    <link rel="stylesheet" href="/static/css/users.css?v=20260403-19">
+    <link rel="stylesheet" href="/static/css/api_keys.css?v=20260608-3">
+{% endblock %}
+{% block body_class %}users-page api-keys-page{% endblock %}
+{% block header_title %}API Key 管理{% endblock %}
+{% block header_subtitle %}管理下游访问凭据、模型权限与用量统计{% endblock %}
+
+{% block content %}
+        <section class="users-section">
+                <div class="users-data-shell">
+                    <div class="section-toolbar">
+                        <div class="section-heading-inline">
+                            <div class="section-title-group">
+                                <h2>API Key 列表</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="users-batch-toolbar api-key-toolbar">
+                        <div class="api-key-toolbar-actions">
+                            <div class="section-search users-table-search" role="search" aria-label="搜索 API Key">
+                                <div class="section-search-field">
+                                    <input
+                                        type="text"
+                                        id="apiKeySearchInput"
+                                        class="form-control"
+                                        placeholder="搜索名称 / Key"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    >
+                                    <button
+                                        type="button"
+                                        class="search-clear-button"
+                                        id="clearApiKeySearchBtn"
+                                        onmousedown="event.preventDefault()"
+                                        onclick="clearApiKeySearch()"
+                                        aria-label="清空搜索"
+                                        title="清空搜索"
+                                        hidden
+                                    >&times;</button>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-primary api-key-create-button" onclick="openCreateModal()">创建 API Key</button>
+                        </div>
+                    </div>
+                    <div class="users-table-shell" id="apiKeysTableContainer">
+                        <div class="loading">加载 API Key 数据...</div>
+                    </div>
+                    <div class="table-footer" id="tableFooter" style="display: none;">
+                        <div class="right-controls">
+                            <div class="pagination-controls">
+                                <span id="prevBtn" class="page-nav-text disabled" onclick="prevPage()">&lt;</span>
+                                <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
+                                <span id="nextBtn" class="page-nav-text disabled" onclick="nextPage()">&gt;</span>
+                            </div>
+                            <div class="quick-jump">
+                                <label for="pageJumpInput">跳至</label>
+                                <input id="pageJumpInput" type="number" min="1" value="1">
+                            </div>
+                            <div class="page-size-controls">
+                                <label for="pageSizeSelect">每页显示:</label>
+                                <select id="pageSizeSelect" data-custom-select="true" onchange="changePageSize()">
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                </select>
+                            </div>
+                            <span class="total-count" id="totalCount">共 0 条</span>
+                        </div>
+                    </div>
+                </div>
+        </section>
+{% endblock %}
+
+{% block after_container %}
+    <div class="modal fade" id="editApiKeyModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg permission-modal-dialog">
+            <div class="modal-content border-0 shadow permission-modal-content">
+                <div class="modal-header border-bottom-0">
+                    <div>
+                        <h5 class="modal-title fw-semibold" id="apiKeyFormModalTitle">编辑 API Key</h5>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0 api-key-form-body">
+                    <div class="api-key-form-grid">
+                        <div class="setting-field">
+                            <label class="form-label" for="editApiKeyName">名称</label>
+                            <input type="text" class="form-control" id="editApiKeyName" placeholder="例如 default-client">
+                        </div>
+                        <div class="setting-field">
+                            <label class="form-label" for="editApiKeyTokenLimitK">Token 使用上限(k)</label>
+                            <input
+                                type="number"
+                                class="form-control"
+                                id="editApiKeyTokenLimitK"
+                                min="1"
+                                step="1"
+                                placeholder="留空表示不限额"
+                            >
+                        </div>
+                    </div>
+                    <div class="api-key-edit-status-row">
+                        <span class="api-key-edit-status-label">启用状态</span>
+                        <label class="switch" aria-label="切换 API Key 启用状态">
+                            <input type="checkbox" id="editApiKeyEnabled">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="permission-modal-body" id="permissionModalBody"></div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="saveApiKeyFormBtn" onclick="saveApiKeyForm()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="inline-confirm-popover floating-delete-popover" id="apiKeyDeletePopover" data-placement="bottom" hidden>
+        <div class="inline-confirm-text">确认删除？</div>
+        <div class="inline-confirm-actions">
+            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelDeleteApiKeyConfirm(event)">取消</button>
+            <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteApiKeyBtn" onclick="confirmDeleteApiKey(event)">确认</button>
+        </div>
+    </div>
+{% endblock %}
+
+{% block page_scripts %}
+    <script src="/static/js/ui-message.js?v=20260319-1"></script>
+    <script>
+        let apiKeys = [];
+        let availableModels = [];
+        let editingApiKeyId = null;
+        let currentPage = 1;
+        let pageSize = 50;
+        let totalApiKeys = 0;
+        let currentTotalPages = 1;
+        let currentSearchKeyword = "";
+        let jumpDebounceTimer = null;
+        let activeCustomSelect = null;
+        let editApiKeyModalInstance = null;
+        let apiKeyFormMode = "create";
+        let apiKeyFormSaving = false;
+        let copiedApiKeyId = null;
+        let copiedApiKeyBubbleTimer = null;
+        let pendingDeleteApiKeyId = null;
+        let deletingApiKeyId = null;
+        let permissionDraftMode = "all";
+        let permissionDraftSelectedModels = new Set();
+        let apiKeysSortState = {
+            key: "created_at",
+            direction: "desc",
+            type: "date"
+        };
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
+        function closeAllCustomSelects() {
+            document.querySelectorAll(".custom-select.open").forEach(select => {
+                select.classList.remove("open");
+                const trigger = select.querySelector(".custom-select-trigger");
+                if (trigger) {
+                    trigger.setAttribute("aria-expanded", "false");
+                }
+            });
+            activeCustomSelect = null;
+        }
+
+        function normalizeNumber(value) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : 0;
+        }
+
+        function renderNumber(value) {
+            const display = normalizeNumber(value).toLocaleString();
+            return `<span class="numeric-value" title="${display}">${display}</span>`;
+        }
+
+        function renderTokenLimit(apiKey) {
+            const tokenLimitK = Number(apiKey?.token_limit_k || 0);
+            if (!Number.isFinite(tokenLimitK) || tokenLimitK < 1) {
+                return '<span class="token-limit-empty" title="不限额">不限额</span>';
+            }
+
+            const display = `${tokenLimitK.toLocaleString()}k`;
+            const used = normalizeNumber(apiKey?.total_tokens);
+            const limitTokens = tokenLimitK * 1000;
+            const remaining = Math.max(limitTokens - used, 0).toLocaleString();
+            return `<span class="token-limit-value" title="剩余 ${remaining} token">${display}</span>`;
+        }
+
+        function getAvailableModelCount() {
+            return Array.isArray(availableModels) ? availableModels.length : 0;
+        }
+
+        function normalizeApiKeyPermissionState(apiKey) {
+            if (!apiKey || apiKey.model_permissions === "*" || apiKey.model_permissions_mode === "all") {
+                return { mode: "all", models: [] };
+            }
+            const models = Array.isArray(apiKey.model_permissions)
+                ? apiKey.model_permissions.filter(item => typeof item === "string" && item.trim())
+                : [];
+            return { mode: "selected", models: Array.from(new Set(models)) };
+        }
+
+        function getSortedSelectedPermissionModels() {
+            return availableModels.filter(modelName => permissionDraftSelectedModels.has(modelName));
+        }
+
+        function getPermissionPreview(models, limit = 2) {
+            const items = Array.isArray(models) ? models : [];
+            const visible = items.slice(0, limit);
+            return {
+                visible: visible,
+                hiddenCount: Math.max(items.length - visible.length, 0),
+                total: items.length
+            };
+        }
+
+        function renderModelPermissionSummary(apiKey) {
+            const permissionState = normalizeApiKeyPermissionState(apiKey);
+            if (permissionState.mode === "all") {
+                return `
+                    <div class="model-permission-summary">
+                        <span class="permission-chip permission-chip-all" title="全部模型">*</span>
+                    </div>
+                `;
+            }
+
+            if (!permissionState.models.length) {
+                return `
+                    <div class="model-permission-summary">
+                        <span class="permission-chip permission-chip-empty" title="当前未授权任何模型">未授权模型</span>
+                    </div>
+                `;
+            }
+
+            const preview = getPermissionPreview(permissionState.models, 2);
+            const chips = preview.visible
+                .map(modelName => `<span class="permission-chip" title="${escapeHtml(modelName)}">${escapeHtml(modelName)}</span>`)
+                .join("");
+            const more = preview.hiddenCount > 0
+                ? `<span class="permission-chip permission-chip-count" title="还有 ${preview.hiddenCount} 个模型">+${preview.hiddenCount}</span>`
+                : "";
+            return `<div class="model-permission-summary">${chips}${more}</div>`;
+        }
+
+        function getApiKeyPlaintext(apiKey) {
+            return String(apiKey?.api_key || "").trim();
+        }
+
+        function getApiKeyDisplayValue(apiKey) {
+            const plaintext = getApiKeyPlaintext(apiKey);
+            return apiKey?.key_preview || plaintext || "-";
+        }
+
+        function renderCopyIcon() {
+            return `
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="9" y="9" width="10" height="10" rx="2"></rect>
+                    <path d="M5 15V7a2 2 0 0 1 2-2h8"></path>
+                </svg>
+            `;
+        }
+
+        function renderApiKeyCell(apiKey) {
+            const keyId = Number(apiKey.id);
+            const plaintext = getApiKeyPlaintext(apiKey);
+            const displayValue = getApiKeyDisplayValue(apiKey);
+            const isCopied = plaintext && Number(copiedApiKeyId) === keyId;
+            const copyButton = plaintext
+                ? `
+                    <button
+                        type="button"
+                        class="api-key-copy-icon-button"
+                        onclick="copyApiKeyFromTable(event, ${keyId})"
+                        aria-label="复制 API Key"
+                        title="复制"
+                    >${renderCopyIcon()}</button>
+                `
+                : "";
+            const copiedBubble = isCopied
+                ? `<span class="api-key-copy-bubble" role="status">${escapeHtml(plaintext)}</span>`
+                : "";
+            return `
+                <div class="api-key-cell">
+                    <span class="api-key-preview" title="${plaintext ? "API Key 预览" : "当前 API Key 无明文可复制"}">${escapeHtml(displayValue)}</span>
+                    ${copyButton}
+                    ${copiedBubble}
+                </div>
+            `;
+        }
+
+        function parseLocalDateTime(value) {
+            if (value instanceof Date) {
+                return Number.isFinite(value.getTime()) ? value : null;
+            }
+            if (value === null || value === undefined) {
+                return null;
+            }
+
+            const text = String(value).trim();
+            if (!text) {
+                return null;
+            }
+
+            const match = text.match(
+                /^(\d{4})-(\d{2})-(\d{2})[\sT](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/
+            );
+            if (!match) {
+                return null;
+            }
+
+            const microseconds = (match[7] || "").padEnd(6, "0").slice(0, 6);
+            const milliseconds = Math.floor(Number(microseconds) / 1000);
+            const date = new Date(
+                Number(match[1]),
+                Number(match[2]) - 1,
+                Number(match[3]),
+                Number(match[4]),
+                Number(match[5]),
+                Number(match[6]),
+                milliseconds
+            );
+            return Number.isFinite(date.getTime()) ? date : null;
+        }
+
+        function formatDateTime(value) {
+            const date = parseLocalDateTime(value);
+            if (!date) {
+                return "-";
+            }
+            return date.toLocaleString("zh-CN", {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit"
+            });
+        }
+
+        function getSortIndicator(activeKey, activeDirection, key) {
+            if (activeKey !== key) return "";
+            return activeDirection === "asc" ? "&uarr;" : "&darr;";
+        }
+
+        function getAriaSort(activeKey, activeDirection, key) {
+            if (activeKey !== key) return "none";
+            return activeDirection === "asc" ? "ascending" : "descending";
+        }
+
+        function toggleApiKeysSort(key, type) {
+            if (apiKeysSortState.key === key) {
+                apiKeysSortState.direction = apiKeysSortState.direction === "asc" ? "desc" : "asc";
+            } else {
+                apiKeysSortState.key = key;
+                apiKeysSortState.type = type;
+                apiKeysSortState.direction = type === "string" ? "asc" : "desc";
+            }
+            currentPage = 1;
+            loadApiKeys();
+        }
+
+        async function loadApiKeys() {
+            try {
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    page_size: pageSize,
+                    sort_key: apiKeysSortState.key,
+                    sort_direction: apiKeysSortState.direction
+                });
+                if (currentSearchKeyword) {
+                    params.set("keyword", currentSearchKeyword);
+                }
+                const response = await fetch(`/api/api-keys?${params}`);
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "加载 API Key 失败");
+                }
+
+                apiKeys = data.api_keys || [];
+                totalApiKeys = data.total || apiKeys.length;
+                availableModels = Array.isArray(data.available_models) ? data.available_models : [];
+                pendingDeleteApiKeyId = null;
+                deletingApiKeyId = null;
+                hideApiKeyDeletePopover();
+
+                updateApiKeySearchUi();
+                renderApiKeys();
+                updatePagination();
+            } catch (error) {
+                console.error("加载 API Key 失败:", error);
+                document.getElementById("apiKeysTableContainer").innerHTML =
+                    '<div class="error">加载 API Key 数据失败</div>';
+                document.getElementById("tableFooter").style.display = "none";
+            }
+        }
+
+        function renderApiKeys() {
+            const container = document.getElementById("apiKeysTableContainer");
+
+            if (apiKeys.length === 0) {
+                container.innerHTML = `<div class="empty-state">${currentSearchKeyword ? "未找到匹配的 API Key" : "暂无 API Key 数据"}</div>`;
+                document.getElementById("tableFooter").style.display = "none";
+                return;
+            }
+
+            let html = `
+                <table class="users-table api-keys-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable-th name-col" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "name")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('name', 'string')">
+                                    名称 <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "name")}</span>
+                                </button>
+                            </th>
+                            <th>Key</th>
+                            <th class="sortable-th permission-col" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "allowed_models_count")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('allowed_models_count', 'number')">
+                                    模型权限 <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "allowed_models_count")}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "prompt_tokens")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('prompt_tokens', 'number')">
+                                    输入token <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "prompt_tokens")}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "completion_tokens")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('completion_tokens', 'number')">
+                                    输出token <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "completion_tokens")}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "total_tokens")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('total_tokens', 'number')">
+                                    总 Token <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "total_tokens")}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col token-limit-col" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "token_limit_k")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('token_limit_k', 'number')">
+                                    Token 上限(k) <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "token_limit_k")}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th num-col" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "total_request_count")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('total_request_count', 'number')">
+                                    总请求数 <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "total_request_count")}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "enabled")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('enabled', 'number')">
+                                    启用 <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "enabled")}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "last_used_at")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('last_used_at', 'date')">
+                                    最近使用 <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "last_used_at")}</span>
+                                </button>
+                            </th>
+                            <th class="sortable-th" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "created_at")}">
+                                <button type="button" class="sort-button" onclick="toggleApiKeysSort('created_at', 'date')">
+                                    创建时间 <span class="sort-indicator">${getSortIndicator(apiKeysSortState.key, apiKeysSortState.direction, "created_at")}</span>
+                                </button>
+                            </th>
+                            <th class="actions-col">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            apiKeys.forEach(apiKey => {
+                html += `
+                    <tr>
+                        <td class="name-col"><span class="api-key-name-text" title="${escapeHtml(apiKey.name)}">${escapeHtml(apiKey.name)}</span></td>
+                        <td>${renderApiKeyCell(apiKey)}</td>
+                        <td class="permission-col">${renderModelPermissionSummary(apiKey)}</td>
+                        <td class="num-col">${renderNumber(apiKey.prompt_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(apiKey.completion_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(apiKey.total_tokens || 0)}</td>
+                        <td class="num-col token-limit-col">${renderTokenLimit(apiKey)}</td>
+                        <td class="num-col">${renderNumber(apiKey.total_request_count || 0)}</td>
+                        <td>
+                            <label class="switch">
+                                <input type="checkbox" ${apiKey.enabled ? "checked" : ""} onchange="toggleApiKey(${Number(apiKey.id)})">
+                                <span class="slider"></span>
+                            </label>
+                        </td>
+                        <td>${formatDateTime(apiKey.last_used_at)}</td>
+                        <td>${formatDateTime(apiKey.created_at)}</td>
+                        <td class="actions-col">
+                            <div class="action-buttons">
+                                <button class="btn-action btn-edit" onclick="openEditModal(${Number(apiKey.id)})">编辑</button>
+                                <button
+                                    class="btn-action btn-delete ${pendingDeleteApiKeyId === Number(apiKey.id) ? "is-active" : ""}"
+                                    data-api-key-delete-trigger="${Number(apiKey.id)}"
+                                    onclick="openDeleteApiKeyConfirm(event, ${Number(apiKey.id)})"
+                                >删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += "</tbody></table>";
+            container.innerHTML = html;
+        }
+
+        function updatePagination() {
+            const totalPages = Math.ceil(totalApiKeys / pageSize) || 1;
+            currentTotalPages = totalPages;
+            document.getElementById("pageInfo").textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
+            document.getElementById("prevBtn").classList.toggle("disabled", currentPage <= 1);
+            document.getElementById("nextBtn").classList.toggle("disabled", currentPage >= totalPages);
+            document.getElementById("totalCount").textContent = `共 ${totalApiKeys} 条`;
+            document.getElementById("pageSizeSelect").value = pageSize;
+            syncCustomSelectValue("pageSizeSelect");
+            const pageJumpInput = document.getElementById("pageJumpInput");
+            pageJumpInput.max = totalPages;
+            pageJumpInput.value = currentPage;
+            document.getElementById("tableFooter").style.display = "flex";
+        }
+
+        function jumpToPage(force = false) {
+            const totalPages = Math.ceil(totalApiKeys / pageSize) || 1;
+            const input = document.getElementById("pageJumpInput");
+            const page = parseInt(input.value, 10);
+            if (Number.isNaN(page)) {
+                if (force) input.value = currentPage;
+                return;
+            }
+            const target = Math.min(totalPages, Math.max(1, page));
+            if (target === currentPage) {
+                input.value = currentPage;
+                return;
+            }
+            currentPage = target;
+            loadApiKeys();
+        }
+
+        function prevPage() {
+            if (currentPage <= 1) return;
+            currentPage--;
+            loadApiKeys();
+        }
+
+        function nextPage() {
+            if (currentPage >= currentTotalPages) return;
+            currentPage++;
+            loadApiKeys();
+        }
+
+        function changePageSize() {
+            const newPageSize = parseInt(document.getElementById("pageSizeSelect").value, 10);
+            if (newPageSize !== pageSize) {
+                pageSize = newPageSize;
+                currentPage = 1;
+                loadApiKeys();
+            }
+        }
+
+        function initApiKeySearch() {
+            const searchInput = document.getElementById("apiKeySearchInput");
+            if (!searchInput) return;
+
+            searchInput.value = currentSearchKeyword;
+            updateApiKeySearchUi(true);
+            searchInput.addEventListener("input", function() {
+                updateApiKeySearchUi();
+            });
+            searchInput.addEventListener("keydown", function(event) {
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    applyApiKeySearch();
+                }
+            });
+            searchInput.addEventListener("blur", function() {
+                applyApiKeySearch();
+            });
+        }
+
+        function updateApiKeySearchUi(syncInput = false) {
+            const searchInput = document.getElementById("apiKeySearchInput");
+            const clearButton = document.getElementById("clearApiKeySearchBtn");
+            if (searchInput && syncInput) {
+                searchInput.value = currentSearchKeyword;
+            }
+            const keywordDraft = searchInput ? searchInput.value.trim() : currentSearchKeyword;
+            if (clearButton) {
+                clearButton.hidden = !keywordDraft;
+            }
+        }
+
+        function applyApiKeySearch() {
+            const searchInput = document.getElementById("apiKeySearchInput");
+            const nextKeyword = searchInput ? searchInput.value.trim() : "";
+            if (searchInput) {
+                searchInput.value = nextKeyword;
+            }
+            if (nextKeyword === currentSearchKeyword) {
+                updateApiKeySearchUi();
+                return;
+            }
+            currentSearchKeyword = nextKeyword;
+            currentPage = 1;
+            updateApiKeySearchUi();
+            loadApiKeys();
+        }
+
+        function clearApiKeySearch() {
+            const searchInput = document.getElementById("apiKeySearchInput");
+            if (!currentSearchKeyword && !searchInput?.value.trim()) {
+                return;
+            }
+
+            currentSearchKeyword = "";
+            if (searchInput) {
+                searchInput.value = "";
+            }
+            currentPage = 1;
+            updateApiKeySearchUi();
+            loadApiKeys();
+            searchInput?.focus();
+        }
+
+        function resetApiKeyFormState() {
+            editingApiKeyId = null;
+            apiKeyFormMode = "create";
+            apiKeyFormSaving = false;
+            permissionDraftMode = "all";
+            permissionDraftSelectedModels = new Set();
+
+            const nameInput = document.getElementById("editApiKeyName");
+            const tokenLimitInput = document.getElementById("editApiKeyTokenLimitK");
+            const enabledInput = document.getElementById("editApiKeyEnabled");
+            if (nameInput) nameInput.value = "";
+            if (tokenLimitInput) tokenLimitInput.value = "";
+            if (enabledInput) enabledInput.checked = true;
+        }
+
+        function updateApiKeyFormTitles() {
+            const title = document.getElementById("apiKeyFormModalTitle");
+            if (apiKeyFormMode === "create") {
+                if (title) title.textContent = "创建 API Key";
+            } else {
+                if (title) title.textContent = "编辑 API Key";
+            }
+        }
+
+        function openCreateModal() {
+            resetApiKeyFormState();
+            updateApiKeyFormModalUi();
+            editApiKeyModalInstance?.show();
+        }
+
+        function openEditModal(keyId) {
+            const apiKey = apiKeys.find(item => Number(item.id) === Number(keyId));
+            if (!apiKey) return;
+
+            resetApiKeyFormState();
+            apiKeyFormMode = "edit";
+            editingApiKeyId = Number(keyId);
+            document.getElementById("editApiKeyName").value = apiKey.name || "";
+            document.getElementById("editApiKeyEnabled").checked = Boolean(apiKey.enabled);
+            document.getElementById("editApiKeyTokenLimitK").value =
+                Number(apiKey.token_limit_k || 0) > 0 ? String(apiKey.token_limit_k) : "";
+
+            const currentState = normalizeApiKeyPermissionState(apiKey);
+            permissionDraftMode = currentState.mode;
+            permissionDraftSelectedModels = new Set(currentState.models);
+            updateApiKeyFormModalUi();
+            editApiKeyModalInstance?.show();
+        }
+
+        function collectApiKeyFormPayload() {
+            const name = document.getElementById("editApiKeyName").value.trim();
+            const tokenLimitInput = document.getElementById("editApiKeyTokenLimitK");
+            const tokenLimitText = tokenLimitInput ? tokenLimitInput.value.trim() : "";
+            let tokenLimitK = null;
+            if (tokenLimitText) {
+                const tokenLimitNumber = Number(tokenLimitText);
+                if (!Number.isInteger(tokenLimitNumber) || tokenLimitNumber < 1) {
+                    showMessage("Token 使用上限最小为 1k", "error");
+                    tokenLimitInput?.focus();
+                    return null;
+                }
+                tokenLimitK = tokenLimitNumber;
+            }
+
+            return {
+                name: name,
+                enabled: document.getElementById("editApiKeyEnabled").checked,
+                token_limit_k: tokenLimitK,
+                model_permissions: permissionDraftMode === "all" ? "*" : getSortedSelectedPermissionModels()
+            };
+        }
+
+        async function saveApiKeyForm() {
+            if (apiKeyFormSaving) return;
+
+            const payload = collectApiKeyFormPayload();
+            if (!payload) return;
+
+            const isCreate = apiKeyFormMode === "create";
+            if (!isCreate && !editingApiKeyId) return;
+
+            apiKeyFormSaving = true;
+            updateApiKeyFormModalUi();
+
+            try {
+                const response = await fetch(isCreate ? "/api/api-keys" : `/api/api-keys/${editingApiKeyId}`, {
+                    method: isCreate ? "POST" : "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || (isCreate ? "创建 API Key 失败" : "更新 API Key 失败"));
+                }
+
+                editApiKeyModalInstance?.hide();
+                if (isCreate) {
+                    showMessage("API Key 创建成功", "success");
+                } else {
+                    showMessage("API Key 更新成功", "success");
+                }
+                await loadApiKeys();
+            } catch (error) {
+                console.error(isCreate ? "创建 API Key 失败:" : "更新 API Key 失败:", error);
+                showActionError(isCreate ? "创建 API Key" : "更新 API Key", error, {
+                    fallback: isCreate ? "创建 API Key 失败" : "更新 API Key 失败"
+                });
+            } finally {
+                apiKeyFormSaving = false;
+                updateApiKeyFormModalUi();
+            }
+        }
+
+        async function copyTextToClipboard(value) {
+            try {
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+                    await navigator.clipboard.writeText(value);
+                } else {
+                    const textarea = document.createElement("textarea");
+                    textarea.value = value;
+                    textarea.setAttribute("readonly", "readonly");
+                    textarea.style.position = "fixed";
+                    textarea.style.left = "-9999px";
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(textarea);
+                }
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        function showCopiedApiKeyBubble(keyId) {
+            copiedApiKeyId = Number(keyId);
+            clearTimeout(copiedApiKeyBubbleTimer);
+            renderApiKeys();
+            copiedApiKeyBubbleTimer = setTimeout(function() {
+                if (Number(copiedApiKeyId) === Number(keyId)) {
+                    copiedApiKeyId = null;
+                    renderApiKeys();
+                }
+            }, 2600);
+        }
+
+        async function copyApiKeyFromTable(event, keyId) {
+            event?.stopPropagation();
+            const apiKey = apiKeys.find(item => Number(item.id) === Number(keyId));
+            const plaintext = getApiKeyPlaintext(apiKey);
+            if (!plaintext) {
+                showMessage("当前 API Key 无明文可复制", "error");
+                return;
+            }
+
+            try {
+                await copyTextToClipboard(plaintext);
+                showCopiedApiKeyBubble(keyId);
+                showMessage("API Key 已复制", "success");
+            } catch (error) {
+                console.error("复制 API Key 失败:", error);
+                showMessage("复制 API Key 失败", "error");
+            }
+        }
+
+        async function toggleApiKey(keyId) {
+            try {
+                const response = await fetch(`/api/api-keys/${keyId}/toggle`, {
+                    method: "POST"
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || "切换 API Key 状态失败");
+                }
+                loadApiKeys();
+            } catch (error) {
+                console.error("切换 API Key 状态失败:", error);
+                showActionError("切换 API Key 状态", error, { fallback: "切换 API Key 状态失败" });
+                loadApiKeys();
+            }
+        }
+
+        function getApiKeyDeletePopoverElement() {
+            return document.getElementById("apiKeyDeletePopover");
+        }
+
+        function getApiKeyDeleteTrigger(keyId) {
+            return document.querySelector(`[data-api-key-delete-trigger="${keyId}"]`);
+        }
+
+        function hideApiKeyDeletePopover() {
+            const popover = getApiKeyDeletePopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty("top");
+            popover.style.removeProperty("left");
+            popover.style.removeProperty("--popover-arrow-left");
+            popover.dataset.placement = "bottom";
+        }
+
+        function syncApiKeyDeletePopover() {
+            const popover = getApiKeyDeletePopoverElement();
+            if (!popover) return;
+
+            if (pendingDeleteApiKeyId === null) {
+                hideApiKeyDeletePopover();
+                return;
+            }
+
+            const trigger = getApiKeyDeleteTrigger(pendingDeleteApiKeyId);
+            if (!trigger) {
+                pendingDeleteApiKeyId = null;
+                deletingApiKeyId = null;
+                hideApiKeyDeletePopover();
+                return;
+            }
+
+            popover.hidden = false;
+            const confirmButton = document.getElementById("confirmDeleteApiKeyBtn");
+            if (confirmButton) {
+                confirmButton.disabled = deletingApiKeyId === pendingDeleteApiKeyId;
+                confirmButton.textContent = deletingApiKeyId === pendingDeleteApiKeyId ? "删除中..." : "确认";
+            }
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 10;
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const left = Math.min(
+                window.innerWidth - popoverRect.width - viewportPadding,
+                Math.max(viewportPadding, triggerRect.left + ((triggerRect.width - popoverRect.width) / 2))
+            );
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? "bottom" : "top";
+            popover.style.top = `${top}px`;
+            popover.style.left = `${left}px`;
+            popover.style.setProperty("--popover-arrow-left", `${arrowLeft}px`);
+        }
+
+        function openDeleteApiKeyConfirm(event, keyId) {
+            event?.stopPropagation();
+            pendingDeleteApiKeyId = Number(keyId);
+            deletingApiKeyId = null;
+            renderApiKeys();
+            requestAnimationFrame(syncApiKeyDeletePopover);
+        }
+
+        function cancelDeleteApiKeyConfirm(event) {
+            event?.stopPropagation();
+            if (pendingDeleteApiKeyId === null && deletingApiKeyId === null) {
+                return;
+            }
+            pendingDeleteApiKeyId = null;
+            deletingApiKeyId = null;
+            hideApiKeyDeletePopover();
+            renderApiKeys();
+        }
+
+        async function confirmDeleteApiKey(event) {
+            event?.stopPropagation();
+            if (pendingDeleteApiKeyId === null || deletingApiKeyId !== null) {
+                return;
+            }
+
+            const keyId = pendingDeleteApiKeyId;
+            deletingApiKeyId = keyId;
+            renderApiKeys();
+            requestAnimationFrame(syncApiKeyDeletePopover);
+
+            try {
+                const response = await fetch(`/api/api-keys/${keyId}`, {
+                    method: "DELETE"
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || "删除 API Key 失败");
+                }
+                pendingDeleteApiKeyId = null;
+                deletingApiKeyId = null;
+                hideApiKeyDeletePopover();
+                showMessage("API Key 删除成功", "success");
+                loadApiKeys();
+            } catch (error) {
+                console.error("删除 API Key 失败:", error);
+                deletingApiKeyId = null;
+                renderApiKeys();
+                requestAnimationFrame(syncApiKeyDeletePopover);
+                showActionError("删除 API Key", error, { fallback: "删除 API Key 失败" });
+            }
+        }
+
+        function togglePermissionMode(allowAll) {
+            permissionDraftMode = allowAll ? "all" : "selected";
+            updateApiKeyFormModalUi();
+        }
+
+        function getFilteredPermissionModels() {
+            const searchInput = document.getElementById("permissionModelSearchInput");
+            const keyword = searchInput ? searchInput.value.trim().toLowerCase() : "";
+            if (!keyword) return availableModels.slice();
+            return availableModels.filter(modelName => modelName.toLowerCase().includes(keyword));
+        }
+
+        function renderPermissionModalBody() {
+            const body = document.getElementById("permissionModalBody");
+            if (!body) return;
+
+            const selectedCount = permissionDraftMode === "all"
+                ? getAvailableModelCount()
+                : permissionDraftSelectedModels.size;
+            body.innerHTML = `
+                <div class="permission-mode-card" id="permissionModeCard">
+                    <div class="permission-mode-copy">
+                        <div class="permission-mode-heading">
+                            <span class="permission-mode-label">允许全部模型</span>
+                        </div>
+                        <p class="permission-mode-description">
+                            ${permissionDraftMode === "all"
+                                ? "开启后自动继承当前与后续新增模型。"
+                                : "关闭后，仅允许访问下方勾选的模型。"}
+                        </p>
+                    </div>
+                    <label class="switch permission-mode-switch" aria-label="切换全部模型权限">
+                        <input type="checkbox" id="permissionAllowAllToggle" ${permissionDraftMode === "all" ? "checked" : ""} ${apiKeyFormSaving ? "disabled" : ""} onchange="togglePermissionMode(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="permission-picker" id="permissionPicker" ${permissionDraftMode === "all" ? "hidden data-disabled=\"true\"" : ""}>
+                    <div class="permission-picker-header">
+                        <div class="permission-picker-title-group">
+                            <span class="permission-picker-title">选择可访问模型</span>
+                        </div>
+                        <div class="permission-picker-stats" aria-live="polite">
+                            <span class="permission-picker-stats-label">已选</span>
+                            <strong id="permissionSelectedCount">${selectedCount}</strong>
+                            <span class="permission-picker-stats-total">/ ${getAvailableModelCount()}</span>
+                        </div>
+                    </div>
+                    <div class="permission-picker-toolbar">
+                        <div class="permission-picker-search">
+                            <input
+                                type="text"
+                                class="form-control"
+                                id="permissionModelSearchInput"
+                                placeholder="搜索模型，例如 demo/gpt-4.1"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                        </div>
+                        <div class="permission-picker-actions">
+                            <button type="button" class="btn btn-toolbar-secondary" id="selectPermissionModelsBtn" onclick="selectVisiblePermissionModels(true)">全部选中</button>
+                            <button type="button" class="btn btn-toolbar-secondary" id="clearPermissionModelsBtn" onclick="selectVisiblePermissionModels(false)">全部取消</button>
+                        </div>
+                    </div>
+                    <div class="permission-model-list" id="permissionModelList"></div>
+                </div>
+                <div class="permission-empty-state" id="permissionEmptyState" ${getAvailableModelCount() > 0 ? "hidden" : ""}>当前还没有可配置模型，请先到 Provider 管理里配置模型列表。</div>
+            `;
+            const searchInput = document.getElementById("permissionModelSearchInput");
+            if (searchInput) {
+                searchInput.addEventListener("input", function() {
+                    renderPermissionModelOptions();
+                });
+            }
+            updatePermissionPickerActionLabels();
+            renderPermissionModelOptions();
+        }
+
+        function updateApiKeyFormModalUi() {
+            updateApiKeyFormTitles();
+            const saveButton = document.getElementById("saveApiKeyFormBtn");
+            if (saveButton) {
+                saveButton.disabled = apiKeyFormSaving;
+                if (apiKeyFormMode === "create") {
+                    saveButton.textContent = apiKeyFormSaving ? "创建中..." : "创建";
+                } else {
+                    saveButton.textContent = apiKeyFormSaving ? "保存中..." : "保存";
+                }
+            }
+            renderPermissionModalBody();
+        }
+
+        function renderPermissionModelOptions() {
+            const listElement = document.getElementById("permissionModelList");
+            const selectedCountLabel = document.getElementById("permissionSelectedCount");
+            if (!listElement) return;
+
+            const visibleModels = getFilteredPermissionModels();
+            const selectedCount = permissionDraftMode === "all"
+                ? getAvailableModelCount()
+                : permissionDraftSelectedModels.size;
+            if (selectedCountLabel) {
+                selectedCountLabel.textContent = String(selectedCount);
+            }
+            updatePermissionPickerActionLabels();
+
+            if (!visibleModels.length) {
+                listElement.innerHTML = '<div class="permission-list-empty">没有匹配的模型</div>';
+                return;
+            }
+
+            listElement.innerHTML = visibleModels.map(modelName => {
+                const isSelected = permissionDraftSelectedModels.has(modelName);
+                const optionClassName = [
+                    "permission-model-option",
+                    isSelected ? "is-selected" : "",
+                    permissionDraftMode === "all" ? "is-disabled" : ""
+                ].filter(Boolean).join(" ");
+                return `
+                    <label class="${optionClassName}">
+                        <input
+                            type="checkbox"
+                            class="permission-model-checkbox"
+                            value="${escapeHtml(modelName)}"
+                            ${isSelected ? "checked" : ""}
+                            ${permissionDraftMode === "all" ? "disabled" : ""}
+                            onchange='togglePermissionModelSelection(${JSON.stringify(modelName)}, this.checked)'
+                        >
+                        <span class="permission-model-text">${escapeHtml(modelName)}</span>
+                    </label>
+                `;
+            }).join("");
+        }
+
+        function updatePermissionPickerActionLabels() {
+            const searchInput = document.getElementById("permissionModelSearchInput");
+            const selectButton = document.getElementById("selectPermissionModelsBtn");
+            const clearButton = document.getElementById("clearPermissionModelsBtn");
+            if (!selectButton || !clearButton) return;
+
+            const hasKeyword = Boolean(searchInput && searchInput.value.trim());
+            selectButton.textContent = hasKeyword ? "选中搜索结果" : "全部选中";
+            clearButton.textContent = hasKeyword ? "取消结果选中" : "全部取消";
+        }
+
+        function togglePermissionModelSelection(modelName, checked) {
+            const normalizedModelName = String(modelName || "").trim();
+            if (!normalizedModelName) return;
+
+            if (checked) {
+                permissionDraftSelectedModels.add(normalizedModelName);
+            } else {
+                permissionDraftSelectedModels.delete(normalizedModelName);
+            }
+            renderPermissionModelOptions();
+        }
+
+        function selectVisiblePermissionModels(checked) {
+            if (permissionDraftMode === "all") {
+                return;
+            }
+
+            const visibleModels = getFilteredPermissionModels();
+            visibleModels.forEach(modelName => {
+                if (checked) {
+                    permissionDraftSelectedModels.add(modelName);
+                } else {
+                    permissionDraftSelectedModels.delete(modelName);
+                }
+            });
+            renderPermissionModelOptions();
+        }
+
+        function syncCustomSelectValue(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect) return;
+
+            const trigger = customSelect.querySelector(".custom-select-trigger");
+            const selectedOption = nativeSelect.options[nativeSelect.selectedIndex] || nativeSelect.options[0];
+            if (trigger) {
+                trigger.textContent = selectedOption ? selectedOption.textContent : "请选择";
+            }
+
+            customSelect.querySelectorAll(".custom-select-option").forEach(option => {
+                option.classList.toggle("selected", option.dataset.value === nativeSelect.value);
+            });
+        }
+
+        function renderCustomSelectOptions(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            const customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!nativeSelect || !customSelect) return;
+
+            const menu = customSelect.querySelector(".custom-select-menu");
+            if (!menu) return;
+            menu.innerHTML = "";
+
+            Array.from(nativeSelect.options).forEach(option => {
+                const optionButton = document.createElement("button");
+                optionButton.type = "button";
+                optionButton.className = "custom-select-option";
+                optionButton.textContent = option.textContent;
+                optionButton.dataset.value = option.value;
+                optionButton.addEventListener("click", function() {
+                    if (nativeSelect.value !== option.value) {
+                        nativeSelect.value = option.value;
+                        nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+                    }
+                    syncCustomSelectValue(selectId);
+                    closeAllCustomSelects();
+                });
+                menu.appendChild(optionButton);
+            });
+
+            syncCustomSelectValue(selectId);
+        }
+
+        function setupCustomSelect(selectId) {
+            const nativeSelect = document.getElementById(selectId);
+            if (!nativeSelect) return;
+
+            nativeSelect.classList.add("native-select-hidden");
+
+            let customSelect = document.querySelector(`.custom-select[data-for="${selectId}"]`);
+            if (!customSelect) {
+                customSelect = document.createElement("div");
+                customSelect.className = "custom-select";
+                customSelect.dataset.for = selectId;
+                customSelect.innerHTML = `
+                    <button type="button" class="custom-select-trigger" aria-haspopup="listbox" aria-expanded="false"></button>
+                    <div class="custom-select-menu" role="listbox"></div>
+                `;
+                nativeSelect.insertAdjacentElement("afterend", customSelect);
+
+                const trigger = customSelect.querySelector(".custom-select-trigger");
+                trigger.addEventListener("click", function(event) {
+                    event.stopPropagation();
+                    const isOpen = customSelect.classList.contains("open");
+                    closeAllCustomSelects();
+                    if (!isOpen) {
+                        const rect = customSelect.getBoundingClientRect();
+                        const spaceBelow = window.innerHeight - rect.bottom;
+                        customSelect.classList.toggle("drop-up", spaceBelow < 236);
+                        customSelect.classList.add("open");
+                        trigger.setAttribute("aria-expanded", "true");
+                        activeCustomSelect = customSelect;
+                    }
+                });
+
+                trigger.addEventListener("keydown", function(event) {
+                    if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
+                        event.preventDefault();
+                        trigger.click();
+                    } else if (event.key === "Escape") {
+                        closeAllCustomSelects();
+                    }
+                });
+
+                nativeSelect.addEventListener("change", function() {
+                    syncCustomSelectValue(selectId);
+                });
+            }
+
+            renderCustomSelectOptions(selectId);
+        }
+
+        function initApiKeysPage() {
+            initThemeToggle();
+            initApiKeySearch();
+            setupCustomSelect("pageSizeSelect");
+            loadApiKeys();
+            document.getElementById("pageSizeSelect").value = pageSize;
+            syncCustomSelectValue("pageSizeSelect");
+
+            const editModalElement = document.getElementById("editApiKeyModal");
+            if (editModalElement && window.bootstrap) {
+                editApiKeyModalInstance = new bootstrap.Modal(editModalElement);
+                editModalElement.addEventListener("hidden.bs.modal", function() {
+                    resetApiKeyFormState();
+                });
+            }
+
+            const pageJumpInput = document.getElementById("pageJumpInput");
+            pageJumpInput.addEventListener("keydown", function(e) {
+                if (e.key === "Enter") {
+                    jumpToPage(true);
+                }
+            });
+            pageJumpInput.addEventListener("blur", function() {
+                jumpToPage(true);
+            });
+            pageJumpInput.addEventListener("input", function() {
+                clearTimeout(jumpDebounceTimer);
+                jumpDebounceTimer = setTimeout(function() {
+                    jumpToPage(false);
+                }, 450);
+            });
+        }
+
+        document.addEventListener("click", function(event) {
+            if (!event.target.closest(".custom-select")) {
+                closeAllCustomSelects();
+            }
+            if (!event.target.closest("[data-api-key-delete-trigger]") && !event.target.closest("#apiKeyDeletePopover")) {
+                cancelDeleteApiKeyConfirm(event);
+            }
+        });
+
+        document.addEventListener("keydown", function(event) {
+            if (event.key === "Escape") {
+                closeAllCustomSelects();
+                cancelDeleteApiKeyConfirm(event);
+            }
+        });
+
+        window.addEventListener("resize", function() {
+            syncApiKeyDeletePopover();
+        });
+
+        window.addEventListener("scroll", function() {
+            syncApiKeyDeletePopover();
+        }, true);
+
+        initApiKeysPage();
+    </script>
+{% endblock %}

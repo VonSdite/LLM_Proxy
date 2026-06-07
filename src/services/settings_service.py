@@ -61,6 +61,9 @@ class SettingsService:
                 "proxy": self._config_manager.get_oauth_proxy() or "",
                 "verify_ssl": self._config_manager.is_oauth_verify_ssl_enabled(),
             },
+            "api_keys": {
+                "enabled": self._config_manager.is_api_key_management_enabled(),
+            },
             "auth_enabled": self._config_manager.is_auth_enabled(),
         }
 
@@ -222,6 +225,30 @@ class SettingsService:
             "settings": self.get_system_settings(),
         }
 
+    def update_api_key_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Request payload must be an object")
+
+        api_keys_payload = payload.get("api_keys")
+        if not isinstance(api_keys_payload, dict):
+            raise ValueError("Config field 'api_keys' must be an object")
+
+        enabled = parse_optional_bool(
+            api_keys_payload.get("enabled"),
+            default=self._config_manager.is_api_key_management_enabled(),
+        )
+        if enabled is None:
+            raise ValueError("API key management enabled flag is required")
+
+        config = self._config_manager.get_raw_config()
+        api_keys_config = self._ensure_mapping(config, "api_keys")
+        api_keys_config["enabled"] = enabled
+
+        self._config_manager.write_raw_config(config)
+        return {
+            "settings": self.get_system_settings(),
+        }
+
     def update_system_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
@@ -286,6 +313,19 @@ class SettingsService:
                 raise ValueError("OAuth SSL verify flag is required")
             oauth_values = (enabled, proxy_mode, proxy, verify_ssl)
 
+        api_key_values: tuple[bool] | None = None
+        if "api_keys" in payload:
+            api_keys_payload = payload.get("api_keys")
+            if not isinstance(api_keys_payload, dict):
+                raise ValueError("Config field 'api_keys' must be an object")
+            enabled = parse_optional_bool(
+                api_keys_payload.get("enabled"),
+                default=self._config_manager.is_api_key_management_enabled(),
+            )
+            if enabled is None:
+                raise ValueError("API key management enabled flag is required")
+            api_key_values = (enabled,)
+
         server_restart_required = (
             str(current_settings["server"]["host"]) != host or int(current_settings["server"]["port"]) != port
         )
@@ -321,6 +361,10 @@ class SettingsService:
             oauth_config["proxy_mode"] = oauth_values[1]
             oauth_config["proxy"] = oauth_values[2]
             oauth_config["verify_ssl"] = oauth_values[3]
+
+        if api_key_values is not None:
+            api_keys_config = self._ensure_mapping(config, "api_keys")
+            api_keys_config["enabled"] = api_key_values[0]
 
         self._config_manager.write_raw_config(config)
         if logging_settings_changed and self._reload_logging_callback is not None:

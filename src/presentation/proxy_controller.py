@@ -23,6 +23,8 @@ from ..utils.local_time import now_local_datetime
 class ConfigManagerLike(Protocol):
     def is_chat_whitelist_enabled(self) -> bool: ...
 
+    def is_api_key_management_enabled(self) -> bool: ...
+
     def is_real_client_ip_enabled(self) -> bool: ...
 
     def get_real_client_ip_header(self) -> str: ...
@@ -81,6 +83,27 @@ class UserServiceLike(Protocol):
     ) -> list[str]: ...
 
 
+class ApiKeyServiceLike(Protocol):
+    def extract_api_key_from_headers(self, headers: Any) -> str: ...
+
+    def authenticate_api_key(self, raw_api_key: str) -> dict[str, Any] | None: ...
+
+    def can_api_key_access_model(
+        self,
+        api_key: dict[str, Any] | None,
+        model_name: str,
+        available_models: Sequence[str] | None = None,
+    ) -> bool: ...
+
+    def get_accessible_models_for_api_key(
+        self,
+        api_key: dict[str, Any] | None,
+        available_models: Sequence[str] | None = None,
+    ) -> list[str]: ...
+
+    def is_token_limit_exceeded(self, api_key: dict[str, Any] | None) -> bool: ...
+
+
 class LogServiceLike(Protocol):
     def log_request(
         self,
@@ -92,6 +115,7 @@ class LogServiceLike(Protocol):
         start_time: Any = None,
         end_time: Any = None,
         ip_address: str | None = None,
+        api_key_id: int | None = None,
     ) -> int | None: ...
 
 
@@ -115,6 +139,7 @@ class ProxyController:
         provider_manager: ProviderManagerLike,
         codex_proxy_service: CodexProxyServiceLike | None = None,
         claude_proxy_service: ClaudeProxyServiceLike | None = None,
+        api_key_service: ApiKeyServiceLike | None = None,
     ):
         self._app = ctx.flask_app
         self._logger = ctx.logger
@@ -125,6 +150,7 @@ class ProxyController:
         self._user_service = user_service
         self._log_service = log_service
         self._provider_manager = provider_manager
+        self._api_key_service = api_key_service
         self._register_routes()
 
     def _log_downstream_request_trace_safe(
@@ -209,6 +235,12 @@ class ProxyController:
     def _is_whitelist_required(self) -> bool:
         return self._config_manager.is_chat_whitelist_enabled()
 
+    def _is_api_key_required(self) -> bool:
+        read_enabled = getattr(self._config_manager, "is_api_key_management_enabled", None)
+        if read_enabled is None:
+            return False
+        return bool(read_enabled())
+
     def _get_request_client_ip(self) -> str:
         """按系统设置解析当前请求的客户端 IP。"""
         return resolve_client_ip(
@@ -238,6 +270,49 @@ class ProxyController:
             403,
             error_type="permission_error",
             code="ip_not_whitelisted",
+            error_format=error_format,
+        )
+
+    def _get_authorized_api_key_for_request(
+        self,
+        *,
+        error_format: str,
+    ) -> tuple[dict[str, Any] | None, tuple[Response, int] | None]:
+        """在启用 API Key 管理时解析当前请求携带的 key。"""
+        if not self._is_api_key_required():
+            return None, None
+
+        if self._api_key_service is None:
+            self._logger.error("API key management is enabled but API key service is not configured")
+            return None, self._error_response(
+                "API key service is not configured",
+                500,
+                error_type="server_error",
+                code="api_key_service_unavailable",
+                error_format=error_format,
+            )
+
+        raw_api_key = self._api_key_service.extract_api_key_from_headers(request.headers)
+        if not raw_api_key:
+            self._logger.warning("Proxy denied: missing API key")
+            return None, self._error_response(
+                "Missing API key",
+                401,
+                error_type="authentication_error",
+                code="missing_api_key",
+                error_format=error_format,
+            )
+
+        api_key = self._api_key_service.authenticate_api_key(raw_api_key)
+        if api_key:
+            return api_key, None
+
+        self._logger.warning("Proxy denied: invalid API key")
+        return None, self._error_response(
+            "Invalid API key",
+            401,
+            error_type="authentication_error",
+            code="invalid_api_key",
             error_format=error_format,
         )
 
@@ -319,6 +394,28 @@ class ProxyController:
         candidate_formats = getattr(provider, "target_formats", ())
         return tuple(str(item or "").strip().lower() for item in candidate_formats if str(item or "").strip())
 
+    @staticmethod
+    def _get_api_key_id(api_key: dict[str, Any] | None) -> int | None:
+        """提取 API Key ID，异常数据返回 None。"""
+        if not api_key:
+            return None
+        try:
+            return int(api_key.get("id"))
+        except (TypeError, ValueError):
+            return None
+
+    def _log_request(self, **kwargs: Any) -> int | None:
+        """兼容旧测试替身的请求日志写入封装。"""
+        api_key_id = kwargs.get("api_key_id")
+        try:
+            return self._log_service.log_request(**kwargs)
+        except TypeError as exc:
+            if api_key_id is None or "api_key_id" not in str(exc):
+                raise
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs.pop("api_key_id", None)
+            return self._log_service.log_request(**fallback_kwargs)
+
     def _list_available_model_names(self) -> tuple[str, ...]:
         provider_models = list(self._provider_manager.list_model_names())
         codex_models: list[str] = []
@@ -376,6 +473,11 @@ class ProxyController:
             self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
             user, denial_response = self._get_authorized_user_for_request(
                 client_ip,
+                error_format=resolved_error_format,
+            )
+            if denial_response is not None:
+                return denial_response
+            api_key, denial_response = self._get_authorized_api_key_for_request(
                 error_format=resolved_error_format,
             )
             if denial_response is not None:
@@ -448,6 +550,40 @@ class ProxyController:
                     code="model_not_allowed",
                     error_format=resolved_error_format,
                 )
+            if self._is_api_key_required() and not self._api_key_service.can_api_key_access_model(
+                api_key,
+                model_name,
+                available_models=available_model_names,
+            ):
+                key_preview = str(api_key.get("key_preview") or api_key.get("id") or "") if api_key else ""
+                self._logger.warning(
+                    "Proxy denied: api_key=%s is not allowed to access model=%s route=%s",
+                    key_preview,
+                    model_name,
+                    route_name,
+                )
+                return self._error_response(
+                    f"API key is not allowed to access model {model_name}",
+                    403,
+                    error_type="permission_error",
+                    code="api_key_model_not_allowed",
+                    error_format=resolved_error_format,
+                )
+            if self._is_api_key_required() and self._api_key_service.is_token_limit_exceeded(api_key):
+                key_preview = str(api_key.get("key_preview") or api_key.get("id") or "") if api_key else ""
+                self._logger.warning(
+                    "Proxy denied: api_key=%s token limit exceeded route=%s model=%s",
+                    key_preview,
+                    route_name,
+                    model_name,
+                )
+                return self._error_response(
+                    "API key token limit exceeded",
+                    429,
+                    error_type="rate_limit_error",
+                    code="api_key_token_limit_exceeded",
+                    error_format=resolved_error_format,
+                )
 
             provider_name = getattr(provider, "name", None)
             if is_codex_model:
@@ -466,7 +602,7 @@ class ProxyController:
             self._log_downstream_request_trace_safe(
                 trace_id=trace_id,
                 start_line=self._build_request_start_line(request.method, request.full_path),
-                headers=self._copy_headers(request.headers),
+                headers=self._copy_headers(request.headers, redact_api_key=self._is_api_key_required()),
                 payload=request_data,
                 route_name=route_name,
                 client_ip=client_ip,
@@ -474,8 +610,12 @@ class ProxyController:
                 request_model=model_name,
                 target_format=resolved_target_format,
             )
-            headers = self._filter_request_headers(request.headers)
+            headers = self._filter_request_headers(
+                request.headers,
+                drop_downstream_api_key=self._is_api_key_required(),
+            )
             start_time = now_local_datetime()
+            api_key_id = self._get_api_key_id(api_key)
 
             def on_proxy_complete(response_meta: dict[str, Any]) -> None:
                 self._logger.info(
@@ -486,16 +626,19 @@ class ProxyController:
                     response_meta.get("total_tokens", 0),
                     client_ip,
                 )
-                self._log_service.log_request(
-                    request_model=model_name,
-                    response_model=response_meta.get("response_model"),
-                    total_tokens=response_meta.get("total_tokens", 0),
-                    prompt_tokens=response_meta.get("prompt_tokens", 0),
-                    completion_tokens=response_meta.get("completion_tokens", 0),
-                    start_time=start_time,
-                    end_time=now_local_datetime(),
-                    ip_address=client_ip,
-                )
+                log_kwargs = {
+                    "request_model": model_name,
+                    "response_model": response_meta.get("response_model"),
+                    "total_tokens": response_meta.get("total_tokens", 0),
+                    "prompt_tokens": response_meta.get("prompt_tokens", 0),
+                    "completion_tokens": response_meta.get("completion_tokens", 0),
+                    "start_time": start_time,
+                    "end_time": now_local_datetime(),
+                    "ip_address": client_ip,
+                }
+                if api_key_id is not None:
+                    log_kwargs["api_key_id"] = api_key_id
+                self._log_request(**log_kwargs)
 
             if is_codex_model:
                 result, status_code, failure_info = self._codex_proxy_service.proxy_request(
@@ -609,12 +752,25 @@ class ProxyController:
             )
             if denial_response is not None:
                 return denial_response
+            api_key, denial_response = self._get_authorized_api_key_for_request(
+                error_format="openai_chat",
+            )
+            if denial_response is not None:
+                return denial_response
 
             model_names = list(self._list_available_model_names())
             if self._is_whitelist_required():
                 allowed_models = set(
                     self._user_service.get_accessible_models_for_user(
                         user,
+                        available_models=model_names,
+                    )
+                )
+                model_names = [model_name for model_name in model_names if model_name in allowed_models]
+            if self._is_api_key_required():
+                allowed_models = set(
+                    self._api_key_service.get_accessible_models_for_api_key(
+                        api_key,
                         available_models=model_names,
                     )
                 )
@@ -691,7 +847,11 @@ class ProxyController:
             )
 
     @staticmethod
-    def _filter_request_headers(headers: Any) -> dict[str, str]:
+    def _filter_request_headers(
+        headers: Any,
+        *,
+        drop_downstream_api_key: bool = False,
+    ) -> dict[str, str]:
         excluded = {
             "host",
             "content-length",
@@ -704,11 +864,20 @@ class ProxyController:
             "transfer-encoding",
             "upgrade",
         }
+        if drop_downstream_api_key:
+            excluded.update({"authorization", "x-api-key"})
         return {k: v for k, v in headers.items() if k.lower() not in excluded}
 
     @staticmethod
-    def _copy_headers(headers: Any) -> dict[str, str]:
-        return {key: value for key, value in headers.items()}
+    def _copy_headers(headers: Any, *, redact_api_key: bool = False) -> dict[str, str]:
+        copied_headers = {key: value for key, value in headers.items()}
+        if not redact_api_key:
+            return copied_headers
+
+        for key in list(copied_headers):
+            if key.lower() in {"authorization", "x-api-key"}:
+                copied_headers[key] = "[redacted]"
+        return copied_headers
 
     @staticmethod
     def _build_request_start_line(method: str, full_path: str) -> str:

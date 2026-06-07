@@ -20,6 +20,11 @@ chat:
   # 开启后会按 IP 白名单控制 chat 请求与 /v1/models 返回结果。
   whitelist_enabled: false
 
+api_keys:
+  # 开启后下游模型请求必须携带已启用的 API Key。
+  # API Key 支持在后台页面创建，并可独立设置模型权限。
+  enabled: false
+
 client_ip:
   # 开启后会按指定 Header 解析真实源 IP，用于白名单、模型权限、访问日志和统计。
   # 默认关闭，关闭时使用连接到本服务的对端 IP。

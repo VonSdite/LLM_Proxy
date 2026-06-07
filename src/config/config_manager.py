@@ -86,6 +86,9 @@ class ConfigManager:
     def is_oauth_enabled(self) -> bool:
         return self._read_bool("oauth.enabled", default=False)
 
+    def is_api_key_management_enabled(self) -> bool:
+        return self._read_bool("api_keys.enabled", default=False)
+
     def is_oauth_verify_ssl_enabled(self) -> bool:
         return self._read_bool("oauth.verify_ssl", default=False)
 

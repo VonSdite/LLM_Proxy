@@ -19,7 +19,10 @@
 
 这个版本不保留 Gemini / Antigravity。配置加载阶段会清理少量历史废弃字段并回写配置文件；除此之外不再继续扩展旧字段兼容逻辑。
 
-控制平面除了 Provider、Auth Group、用户、统计和系统设置，还可以在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成、查看、导入、导出和归档删除 CLI/OAuth 类本地认证文件。
+控制平面除了 Provider、Auth Group、用户、统计和系统设置，还可以：
+
+- 在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成、查看、导入、导出和归档删除 CLI/OAuth 类本地认证文件
+- 在启用 `api_keys.enabled` 后提供 API Key 管理入口，用于创建下游访问 key、设置模型权限、设置总 token 上限并查看 key 级用量
 
 ## 2. Logical View
 
@@ -60,15 +63,25 @@ downstream request
 - `ProxyController`
   - 根据当前 route family 选择下游接口协议
   - 根据 `client_ip.real_ip_enabled` 和 `client_ip.real_ip_header` 解析白名单、模型权限、统计和 trace 使用的客户端 IP
+  - 在 `api_keys.enabled=true` 时校验下游 API Key，并按 key 模型权限与总 token 上限收窄可访问模型和请求
+  - 同时启用 Chat 白名单和 API Key 管理时，最终模型权限为用户权限与 key 权限的交集
   - 构造标准错误体
 - `DataPlaneCors`
   - 只为 `/v1/*` 数据平面添加 CORS 响应头
   - 直接处理 `OPTIONS /v1/*` 预检请求
 - `WebController`
-  - 提供 Provider、用户、统计与系统设置页面
+  - 提供 Provider、用户、API Key、统计与系统设置页面
   - 暴露统计汇总、用户用量汇总、请求明细与当前页签 Excel 导出接口
   - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
+  - 在 `api_keys.enabled=true` 时显示 API Key 管理顶层导航入口
   - 暴露系统设置读取与保存接口
+- `ApiKeyController`
+  - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限和 token 上限更新接口
+- `ApiKeyService`
+  - 生成 `sk-` 前缀的下游 API Key
+  - 持久化明文 key 供管理端复制和显示，同时保留 hash 用于数据面鉴权
+  - 复用 `*` / 显式模型列表语义维护 key 模型权限
+  - 校验数据面请求携带的 `Authorization: Bearer sk-...` 或 `X-API-Key`
 - `OAuthController`
   - 暴露 Codex / Claude OAuth 登录、回调提交、认证文件列表、JSON/ZIP 导入、ZIP 导出、归档删除与 Codex 配额刷新接口
 - `CodexOAuthService`
@@ -118,7 +131,7 @@ downstream request
   - 在协议支持时显式请求 usage 返回
   - 批量测试按前端当前选择的模型行逐条执行并逐条回填结果
 - `SettingsService`
-  - 维护 `server`、`admin`、`oauth` 与 `logging`
+  - 维护 `server`、`admin`、`oauth`、`api_keys` 与 `logging`
   - 管理立即生效项与重启生效项的边界
 - `ProviderRuntimeFactory`
   - 负责临时 / 正式 Provider 运行时对象构建
@@ -169,6 +182,14 @@ route family 直接决定当前请求的下游接口协议：
 
 - `source_format`
 
+当 `api_keys.enabled=true` 时，`GET /v1/models` 与模型请求接口一样必须携带有效 API Key。返回模型列表会按以下顺序收窄：
+
+1. 当前运行时可用模型
+2. 如果启用 Chat 白名单，取当前客户端 IP 对应用户可访问模型
+3. 如果启用 API Key 管理，再取当前 key 可访问模型
+
+因此同时启用用户模型权限和 API Key 模型权限时，下游最终看到和能请求的模型是两者交集。
+
 OAuth 模型是数据平面的例外路由：
 
 - Provider 配置模型仍使用 `{provider}/{model}` key
@@ -192,6 +213,7 @@ OAuth 模型是数据平面的例外路由：
   - `PUT /api/settings/system/basic`
   - `PUT /api/settings/system/client-ip`
   - `PUT /api/settings/system/oauth`
+  - `PUT /api/settings/system/api-keys`
   - `PUT /api/settings/system/debug`
   - `PUT /api/settings/system`
 
@@ -210,6 +232,7 @@ OAuth 模型是数据平面的例外路由：
 - `oauth.proxy_mode`
 - `oauth.proxy`
 - `oauth.verify_ssl`
+- `api_keys.enabled`
 
 行为约束：
 
@@ -267,6 +290,12 @@ OAuth 模型是数据平面的例外路由：
   - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
   - 默认值为 `false`
   - 关闭时不校验 HTTPS 证书，便于本地代理或抓包代理场景
+- `api_keys.enabled`
+  - 归类为“API Key 管理”
+  - 页面修改后自动生效
+  - 保存后立即影响后台顶部 API Key 管理页签是否显示
+  - 保存后立即影响数据平面 `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 和 `/v1/models` 是否要求下游携带 API Key
+  - 默认值为 `false`
 
 运行时内存状态补充：
 
@@ -275,9 +304,13 @@ OAuth 模型是数据平面的例外路由：
   - 每次访问日志写入前读取当前 `client_ip.*` 配置解析客户端 IP
 - `WebController`
   - 渲染后台页面时读取当前 `oauth.enabled`，用于决定是否输出 OAuth 顶层导航项
+  - 渲染后台页面时读取当前 `api_keys.enabled`，用于决定是否输出 API Key 管理顶层导航项
 - `ProxyController`
   - 每次数据面请求读取当前 `client_ip.*` 配置解析客户端 IP
   - 解析结果用于白名单、模型权限、请求统计、访问日志关联和 LLM trace
+  - 每次数据面请求读取当前 `api_keys.enabled`，开启时要求有效 API Key
+  - 开启 API Key 管理时会从转发给上游的 header 中移除下游 `Authorization` 和 `X-API-Key`，避免泄露下游 key
+  - 请求完成回调写日志时会带上 `api_key_id`，用于同步累加 key 级用量
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
@@ -534,6 +567,85 @@ OAuth Claude tab
 - OAuth 登录、文件、配额与模型目录管理属于控制平面
 - Codex / Claude 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
 
+### 3.8 Control-Plane API Key Management
+
+API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` 导航项。`api_keys.enabled` 默认关闭，因此新配置默认不会展示 API Key 页签，也不会要求下游请求携带 key。
+
+页面与 API：
+
+- 页面
+  - `GET /api-keys`
+- API
+  - `GET /api/api-keys`
+  - `POST /api/api-keys`
+  - `GET /api/api-keys/<key_id>`
+  - `PUT /api/api-keys/<key_id>`
+  - `DELETE /api/api-keys/<key_id>`
+  - `POST /api/api-keys/<key_id>/toggle`
+
+创建与存储约束：
+
+- 新建 key 使用 `sk-` 前缀随机字符串
+- 明文 key 会保存在 SQLite 中，管理端列表可点击复制图标复制，复制后短暂在 key 旁显示明文气泡
+- 创建和编辑都可以设置名称、模型权限、总 token 使用上限和启用状态
+- SQLite `api_keys` 表保存：
+  - `api_key`
+  - `key_hash`
+  - `key_prefix`
+  - `key_suffix`
+  - `enabled`
+  - `model_permissions`
+  - `token_limit_k`
+  - 累计请求数与 token 用量
+  - 创建、更新和最近使用时间
+- `model_permissions='*'` 表示允许全部模型
+- 显式模型权限以 JSON 数组保存，值使用 `{provider}/{model}` 路由 key
+- `token_limit_k=NULL` 表示不限额；非空时单位为 k，最小有效值为 `1`，按 `api_keys.total_tokens` 计量
+- Provider 模型变化后，`Application.reload_providers()` 会同步清理 API Key 显式授权中已经不存在的模型
+
+数据面 API Key 鉴权链路如下：
+
+```text
+/v1 request
+  -> resolve client IP
+  -> optional Chat whitelist user lookup
+  -> optional API Key lookup by hash
+  -> request body model validation
+  -> provider / OAuth model lookup
+  -> user model permission check
+  -> API Key model permission check
+  -> API Key token limit check
+  -> upstream proxy
+  -> request log insert
+  -> API Key usage counter update
+```
+
+行为约束：
+
+- `api_keys.enabled=false`
+  - 数据面不要求下游 key
+  - API Key 管理页签不显示
+- `api_keys.enabled=true`
+  - `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 和 `/v1/models` 必须携带有效且启用的 key
+  - 支持 `Authorization: Bearer sk-...`
+  - 支持 `X-API-Key`
+  - 缺少 key 返回 `missing_api_key`
+  - key 不存在或已停用返回 `invalid_api_key`
+  - key 无权访问请求模型返回 `api_key_model_not_allowed`
+  - key 的累计 `total_tokens` 已达到 `token_limit_k * 1000` 时返回 `api_key_token_limit_exceeded`
+- 同时开启 Chat 白名单时：
+  - 白名单仍按客户端 IP 解析用户
+  - 用户模型权限和 API Key 模型权限都必须允许目标模型
+  - `/v1/models` 只返回两者交集
+- 请求完成后：
+  - `request_logs.api_key_id` 记录本次使用的 key
+  - `api_keys.total_request_count`
+  - `api_keys.prompt_tokens`
+  - `api_keys.completion_tokens`
+  - `api_keys.total_tokens`
+  - `api_keys.last_used_at`
+  - 这些字段与请求日志在同一 SQLite 事务中更新
+
 ## 4. Development View
 
 ### 4.1 Directory Responsibilities
@@ -559,6 +671,10 @@ OAuth Claude tab
   - 主代理 orchestration
 - [src/services/settings_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/settings_service.py)
   - 系统设置保存与生效边界
+- [src/services/api_key_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/api_key_service.py)
+  - API Key 生成、hash 鉴权、模型权限、token 上限和 key 级用量管理
+- [src/repositories/api_key_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/api_key_repository.py)
+  - API Key 持久化、列表排序和累计用量字段
 - [src/services/codex_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/codex_oauth_service.py)
   - Codex OAuth PKCE、token 文件、本地模型 ID 目录与配额查询
 - [src/services/claude_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/claude_oauth_service.py)
@@ -571,6 +687,8 @@ OAuth Claude tab
   - Claude OAuth 数据面代理与账号切换
 - [src/presentation/oauth_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/oauth_controller.py)
   - OAuth 管理 API
+- [src/presentation/api_key_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/api_key_controller.py)
+  - API Key 管理 API
 - [src/config/provider_config.py](/root/.ww/code/002llm/000LLM_Proxy/src/config/provider_config.py)
   - Provider schema
 - [src/executors/registry.py](/root/.ww/code/002llm/000LLM_Proxy/src/executors/registry.py)
@@ -585,6 +703,8 @@ OAuth Claude tab
   - Provider 页面与 `source_format` / Auth Group 编辑
 - [src/presentation/templates/settings.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/settings.html)
   - 系统设置页面与帮助说明
+- [src/presentation/templates/api_keys.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/api_keys.html)
+  - API Key 管理页面、创建/编辑弹窗、模型权限选择、Key 复制气泡和用量表格
 - [src/presentation/templates/oauth.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/oauth.html)
   - OAuth 管理页面与 Codex / Claude 子 tab
 
@@ -594,6 +714,7 @@ OAuth Claude tab
 
 - 一个 Flask 应用
 - 一个配置文件
+- 一个 SQLite 数据库，保存用户、请求日志、日聚合统计与 API Key
 - 一组滚动日志文件
 - 一组本地 OAuth 认证文件
 - 一组本地 OAuth 模型目录缓存
@@ -628,6 +749,9 @@ sequenceDiagram
 
     Client->>Controller: POST /v1/chat/completions
     Controller->>Controller: 按 client_ip.* 解析客户端 IP
+    opt api_keys.enabled=true
+        Controller->>Controller: 校验 API Key hash、key 模型权限和 token 上限
+    end
     Controller->>Service: proxy_request()
     Service->>Translator: openai_responses -> openai_chat
     Translator-->>Service: translated upstream request

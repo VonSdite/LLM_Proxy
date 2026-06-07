@@ -18,6 +18,7 @@ from ..config import (
     build_provider_schemas,
 )
 from ..presentation import (
+    ApiKeyController,
     AuthenticationController,
     OAuthController,
     ProviderController,
@@ -26,8 +27,9 @@ from ..presentation import (
     WebController,
     create_flask_app,
 )
-from ..repositories import AuthGroupRepository, LogRepository, UserRepository
+from ..repositories import ApiKeyRepository, AuthGroupRepository, LogRepository, UserRepository
 from ..services import (
+    ApiKeyService,
     AuthenticationService,
     AuthGroupService,
     ClaudeOAuthService,
@@ -239,6 +241,7 @@ class Application:
         db_path = Path(self._config_manager.get_database_path())
         self._db_connection_factory = create_connection_factory(db_path)
         self._user_repository = UserRepository(self._db_connection_factory)
+        self._api_key_repository = ApiKeyRepository(self._db_connection_factory)
         self._log_repository = LogRepository(self._db_connection_factory)
         self._auth_group_repository = AuthGroupRepository(self._db_connection_factory)
 
@@ -255,8 +258,11 @@ class Application:
         """初始化服务层并完成路由注册。"""
         auth_service = AuthenticationService(self._ctx)
         user_service = UserService(self._ctx, self._user_repository)
+        api_key_service = ApiKeyService(self._ctx, self._api_key_repository)
         self._user_service = user_service
+        self._api_key_service = api_key_service
         self._user_service.sync_model_permissions()
+        self._api_key_service.sync_model_permissions()
         proxy_service = ProxyService(self._ctx, self._auth_group_manager)
         log_service = LogService(self._ctx, self._log_repository)
         provider_service = ProviderService(self._ctx, self.reload_providers)
@@ -281,6 +287,7 @@ class Application:
 
         self._auth_controller = AuthenticationController(self._ctx, auth_service)
         self._user_controller = UserController(self._ctx, user_service, auth_service)
+        self._api_key_controller = ApiKeyController(self._ctx, api_key_service, auth_service)
         self._provider_controller = ProviderController(
             self._ctx,
             provider_service,
@@ -304,6 +311,7 @@ class Application:
             self._provider_manager,
             codex_proxy_service=codex_proxy_service,
             claude_proxy_service=claude_proxy_service,
+            api_key_service=api_key_service,
         )
         self._web_controller = WebController(
             self._ctx,
@@ -332,6 +340,8 @@ class Application:
         self._provider_manager.load_providers(provider_schemas)
         if hasattr(self, "_user_service"):
             self._user_service.sync_model_permissions()
+        if hasattr(self, "_api_key_service"):
+            self._api_key_service.sync_model_permissions()
 
     def run(self) -> None:
         """启动 WSGI 服务。"""

@@ -51,3 +51,5 @@ oauth:
   proxy: ''
   verify_ssl: false
   proxy_mode: direct
+api_keys:
+  enabled: true
