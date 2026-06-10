@@ -155,7 +155,7 @@ body.app-page {
 
 .app-page .header-version {
     position: absolute;
-    top: -22px;
+    top: -18px;
     left: -28px;
     z-index: 2;
     pointer-events: none;
