@@ -6,6 +6,7 @@ from pathlib import Path
 
 from flask import Flask
 
+from ..utils.app_version import get_app_version
 from .cors import register_data_plane_cors
 
 
@@ -22,4 +23,14 @@ def create_flask_app() -> Flask:
     )
     app.config["JSON_AS_ASCII"] = False
     register_data_plane_cors(app)
+
+    app_version = get_app_version()
+
+    @app.context_processor
+    def inject_template_versions() -> dict[str, str]:
+        """注入模板统一使用的版本信息。"""
+        return {
+            "app_version": app_version,
+        }
+
     return app

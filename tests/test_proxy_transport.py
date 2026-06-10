@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,7 +12,7 @@ from threading import Thread
 from unittest.mock import patch
 from uuid import uuid4
 
-from flask import Flask
+from flask import Flask, render_template
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -26,8 +27,10 @@ from src.config.provider_manager import ProviderManager
 from src.executors import HttpExecutor
 from src.external.stream_probe import probe_stream_response
 from src.proxy_core import resolve_stream_format
+from src.presentation.app_factory import create_flask_app
 from src.repositories import AuthGroupRepository
 from src.services.model_discovery_service import ModelDiscoveryService
+from src.utils.app_version import get_app_version
 from src.utils.database import create_connection_factory
 from src.utils.local_time import now_local_datetime
 from src.utils.net import (
@@ -1990,6 +1993,30 @@ process.stdout.write(JSON.stringify({{
 
 
 class FrontendMessageLocalizationTests(unittest.TestCase):
+    def test_app_version_matches_pyproject_version(self) -> None:
+        pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(pyproject["project"]["version"], get_app_version())
+
+    def test_rendered_templates_use_unified_app_version(self) -> None:
+        app = create_flask_app()
+        app_version = get_app_version()
+        expected_version = f'<span class="header-version" aria-label="当前版本">v{app_version}</span>'
+
+        with app.test_request_context("/"):
+            html = render_template(
+                "providers.html",
+                active_page="providers",
+                chat_whitelist_enabled=False,
+                current_username="",
+                auth_enabled=False,
+                oauth_enabled=False,
+                api_key_management_enabled=False,
+            )
+
+        self.assertIn(expected_version, html)
+
     def test_ui_message_script_contains_localized_error_formatter(self) -> None:
         script_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "js" / "ui-message.js"
         script = script_path.read_text(encoding="utf-8")
@@ -2009,6 +2036,7 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         base_admin_html = (root / "templates" / "base_admin.html").read_text(encoding="utf-8")
         admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
         web_controller_py = (root.parent / "presentation" / "web_controller.py").read_text(encoding="utf-8")
+        app_version_expression = "{{ app_version|default('0.0.0') }}"
 
         self.assertIn("/static/js/ui-message.js?v=20260319-1", login_html)
         self.assertIn("/static/js/ui-message.js?v=20260319-1", users_html)
@@ -2027,12 +2055,12 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn('data-nav-page="oauth"', base_admin_html)
         self.assertIn('href="/users">用户管理</a>', base_admin_html)
         self.assertIn('href="/statistics">统计概览</a>', base_admin_html)
-        version_snippet = '<span class="header-version" aria-label="当前版本">v2.0.16</span>'
+        version_snippet = f'<span class="header-version" aria-label="当前版本">v{app_version_expression}</span>'
         settings_link_snippet = 'href="/settings">系统设置</a>'
         self.assertIn(version_snippet, base_admin_html)
         self.assertIn(".app-page .header-version", admin_base_css)
         self.assertIn("position: absolute;", admin_base_css)
-        self.assertIn("top: -22px;", admin_base_css)
+        self.assertIn("top: -18px;", admin_base_css)
         self.assertLess(
             base_admin_html.index(settings_link_snippet),
             base_admin_html.index(version_snippet),
