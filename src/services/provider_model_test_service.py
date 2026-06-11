@@ -26,7 +26,7 @@ from .upstream_request_builder import build_upstream_request
 class ProviderModelTestService:
     """直连上游 provider 测试模型可用性、首字延迟与 TPS。"""
 
-    _TEST_PROVIDER_NAME = "__provider_model_test__"
+    _TEST_PROVIDER_NAME = "ProviderModelTest"
     _TEST_TARGET_FORMAT = "openai_chat"
     _NO_MODEL_OUTPUT_ERROR = (
         "Upstream returned success but no valid model output; check Provider API endpoint and source_format"
@@ -77,7 +77,7 @@ class ProviderModelTestService:
 
     def _build_provider(self, payload: dict[str, Any], models: list[str]):
         provider_payload = {str(key): value for key, value in payload.items() if str(key) in SUPPORTED_PROVIDER_FIELDS}
-        provider_payload["name"] = str(provider_payload.get("name") or "").strip() or self._TEST_PROVIDER_NAME
+        provider_payload["name"] = self._TEST_PROVIDER_NAME
         provider_payload["model_list"] = list(models)
         provider_config = ProviderConfigSchema.from_payload(provider_payload)
         return self._runtime_factory.build_provider_from_schema(provider_config)

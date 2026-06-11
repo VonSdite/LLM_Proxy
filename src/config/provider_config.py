@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -28,6 +29,8 @@ SUPPORTED_PROVIDER_PROTOCOLS = (
     "claude_chat",
 )
 DEFAULT_PROVIDER_TARGET_FORMATS = SUPPORTED_PROVIDER_PROTOCOLS
+PROVIDER_NAME_MAX_LENGTH = 64
+PROVIDER_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 DEFAULT_AUTH_GROUP_STRATEGY = "least_inflight"
 DEFAULT_AUTH_GROUP_COOLDOWN_SECONDS_ON_429 = 60
 SUPPORTED_PROVIDER_API_SCHEMES = {"http", "https"}
@@ -71,6 +74,19 @@ def clean_optional_string(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def normalize_provider_name(value: Any, *, validate_format: bool = True) -> str:
+    name = clean_optional_string(value)
+    if name is None:
+        raise ValueError("Provider name is required")
+    if not validate_format:
+        return name
+    if len(name) > PROVIDER_NAME_MAX_LENGTH:
+        raise ValueError(f"Provider name must be {PROVIDER_NAME_MAX_LENGTH} characters or less")
+    if not PROVIDER_NAME_PATTERN.fullmatch(name):
+        raise ValueError("Provider name must start with a letter and contain only letters, numbers, and underscores")
+    return name
 
 
 def parse_optional_positive_int(
@@ -425,25 +441,28 @@ class ProviderConfigSchema:
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "ProviderConfigSchema":
-        return cls._from_mapping(payload)
+        return cls._from_mapping(payload, validate_name_format=True)
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> "ProviderConfigSchema":
-        return cls._from_mapping(config)
+        return cls._from_mapping(config, validate_name_format=False)
 
     @classmethod
-    def _from_mapping(cls, config: Mapping[str, Any]) -> "ProviderConfigSchema":
+    def _from_mapping(
+        cls,
+        config: Mapping[str, Any],
+        *,
+        validate_name_format: bool,
+    ) -> "ProviderConfigSchema":
         if not isinstance(config, Mapping):
             raise ValueError("Provider config must be an object")
 
         validate_provider_fields(config)
 
-        name = clean_optional_string(config.get("name"))
+        name = normalize_provider_name(config.get("name"), validate_format=validate_name_format)
         api = clean_optional_string(config.get("api"))
         api_key = clean_optional_string(config.get("api_key"))
         auth_group = clean_optional_string(config.get("auth_group"))
-        if name is None:
-            raise ValueError("Provider name is required")
         if api is None:
             raise ValueError("Provider api is required")
         if api_key and auth_group:

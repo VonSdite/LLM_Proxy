@@ -99,7 +99,16 @@
                     <div class="provider-form-grid">
                         <div class="mb-3">
                             <label class="form-label">Provider 名称 *</label>
-                            <input type="text" class="form-control" id="providerName" placeholder="例如 openai">
+                            <input
+                                type="text"
+                                class="form-control"
+                                id="providerName"
+                                maxlength="64"
+                                pattern="[A-Za-z][A-Za-z0-9_]*"
+                                title="英文开头，仅支持英文、数字和下划线"
+                                autocomplete="off"
+                                placeholder="例如 openai"
+                            >
                         </div>
                         <div class="mb-3">
                             <label class="form-label">API 地址 *</label>
@@ -603,6 +612,8 @@
         let providerDragTargetElement = null;
         let modelTestDragState = null;
         let modelTestDragTargetElement = null;
+        const providerNameMaxLength = 64;
+        const providerNamePattern = /^[A-Za-z][A-Za-z0-9_]*$/;
         const providerHelpTopics = {
             source_format: {
                 title: '上游格式怎么选',
@@ -2875,6 +2886,36 @@
             };
         }
 
+        function getProviderNameValidationError(name) {
+            if (!name) {
+                return '请输入 provider 名称';
+            }
+            if (name.length > providerNameMaxLength) {
+                return `Provider 名称最多 ${providerNameMaxLength} 个字符`;
+            }
+            if (!providerNamePattern.test(name)) {
+                return 'Provider 名称必须英文开头，且只能包含英文、数字和下划线';
+            }
+            return '';
+        }
+
+        function updateProviderNameValidity() {
+            const input = document.getElementById('providerName');
+            if (!input) {
+                return;
+            }
+            if (typeof input.setCustomValidity === 'function') {
+                input.setCustomValidity(getProviderNameValidationError(input.value.trim()));
+            }
+        }
+
+        function clearProviderNameValidity() {
+            const input = document.getElementById('providerName');
+            if (input && typeof input.setCustomValidity === 'function') {
+                input.setCustomValidity('');
+            }
+        }
+
         function buildMultiSelectTriggerMarkup(nativeSelect, selectedLabels) {
             const placeholder = nativeSelect.dataset.placeholder || '请选择';
             const configuredValue = Number.parseInt(nativeSelect?.dataset?.visibleChipCount || '', 10);
@@ -3075,6 +3116,7 @@
                 ? (provider.auth_group ? 'auth_group' : 'legacy_api_key')
                 : 'legacy_api_key';
             document.getElementById('providerName').value = provider?.name || '';
+            clearProviderNameValidity();
             document.getElementById('providerApi').value = provider?.api || '';
             setSelectValueOrFallback('providerSourceFormat', provider?.source_format, 'openai_chat');
             setSelectValueOrFallback('providerAuthMode', authMode, 'legacy_api_key');
@@ -4622,8 +4664,10 @@
         async function saveProvider() {
             const payload = collectFormData();
             const authMode = document.getElementById('providerAuthMode')?.value || 'legacy_api_key';
-            if (!payload.name) {
-                showMessage('请输入 provider 名称', 'error');
+            const providerNameError = getProviderNameValidationError(payload.name);
+            updateProviderNameValidity();
+            if (providerNameError) {
+                showMessage(providerNameError, 'error');
                 return;
             }
             if (!payload.api) {
@@ -4963,7 +5007,10 @@
                 document.getElementById('modelSearchInput').value = '';
                 document.getElementById('modelDetailList').innerHTML = '';
             });
-            document.getElementById('providerName').addEventListener('input', updateFetchModelsButtonState);
+            document.getElementById('providerName').addEventListener('input', function() {
+                updateProviderNameValidity();
+                updateFetchModelsButtonState();
+            });
             document.getElementById('providerApi').addEventListener('input', handleProviderApiInput);
             document.getElementById('providerAuthMode').addEventListener('change', function() {
                 updateFetchModelsButtonState();

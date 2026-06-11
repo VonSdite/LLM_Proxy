@@ -431,6 +431,20 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertEqual(("demo-model",), provider.model_list)
         self.assertEqual("sk-legacy-demo", provider.api_key)
 
+    def test_build_provider_uses_internal_name_for_legacy_invalid_provider_name(self) -> None:
+        provider = self.service._build_provider(
+            {
+                "name": "legacy/provider",
+                "api": "https://example.com/v1/chat/completions",
+                "source_format": "openai_chat",
+                "models": ["demo-model"],
+            },
+            ["demo-model"],
+        )
+
+        self.assertEqual("ProviderModelTest", provider.name)
+        self.assertEqual(("demo-model",), provider.model_list)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -38,6 +38,7 @@ class FakeAuthService:
 class FakeProviderService:
     def __init__(self) -> None:
         self.reorder_calls: list[list[str]] = []
+        self.enabled_calls: list[tuple[str, bool]] = []
         self.raise_error: Exception | None = None
 
     def reorder_providers(self, names: list[str]) -> dict:
@@ -47,6 +48,15 @@ class FakeProviderService:
         return {
             "count": len(names),
             "names": list(names),
+        }
+
+    def set_provider_enabled(self, name: str, enabled: bool) -> dict:
+        self.enabled_calls.append((name, enabled))
+        if self.raise_error is not None:
+            raise self.raise_error
+        return {
+            "name": name,
+            "enabled": enabled,
         }
 
 
@@ -195,6 +205,19 @@ class ProviderControllerOrderRouteTests(unittest.TestCase):
             },
             response.get_json(),
         )
+
+    def test_disable_provider_route_accepts_encoded_slash_in_legacy_name(self) -> None:
+        response = self.client.post("/api/providers/legacy%2Fprovider/disable")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {
+                "name": "legacy/provider",
+                "enabled": False,
+            },
+            response.get_json(),
+        )
+        self.assertEqual([("legacy/provider", False)], self.provider_service.enabled_calls)
 
 
 class ProviderControllerFetchModelsRouteTests(unittest.TestCase):

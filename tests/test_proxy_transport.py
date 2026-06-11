@@ -348,6 +348,65 @@ class ProviderTransportTests(unittest.TestCase):
         runtime = RuntimeProviderSpec.from_schema(schema)
         self.assertTrue(runtime.enabled)
 
+    def test_provider_schema_accepts_safe_provider_name_payload(self) -> None:
+        schema = ProviderConfigSchema.from_payload(
+            {
+                "name": " openai_1 ",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "model_list": ["gpt-4.1"],
+            }
+        )
+
+        self.assertEqual("openai_1", schema.name)
+
+    def test_provider_schema_rejects_invalid_provider_name_payloads(self) -> None:
+        cases = [
+            ("1provider", "Provider name must start with a letter"),
+            ("bad-provider", "Provider name must start with a letter"),
+            ("bad.provider", "Provider name must start with a letter"),
+            ("bad provider", "Provider name must start with a letter"),
+            ("中文", "Provider name must start with a letter"),
+            ("a" * 65, "Provider name must be 64 characters or less"),
+        ]
+
+        for name, error_pattern in cases:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, error_pattern):
+                    ProviderConfigSchema.from_payload(
+                        {
+                            "name": name,
+                            "api": "https://example.com/v1/chat/completions",
+                            "api_key": "demo-key",
+                            "model_list": ["gpt-4.1"],
+                        }
+                    )
+
+    def test_provider_schema_keeps_legacy_provider_names_from_mapping(self) -> None:
+        cases = [
+            "1provider",
+            "bad/provider",
+            "bad_provider",
+            "bad-provider",
+            "bad.provider",
+            "bad provider",
+            "中文",
+            "a" * 65,
+        ]
+
+        for name in cases:
+            with self.subTest(name=name):
+                schema = ProviderConfigSchema.from_mapping(
+                    {
+                        "name": name,
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "demo-key",
+                        "model_list": ["gpt-4.1"],
+                    }
+                )
+
+                self.assertEqual(name, schema.name)
+
     def test_provider_timeout_defaults_to_1200_seconds(self) -> None:
         schema = ProviderConfigSchema.from_mapping(
             {
@@ -1042,6 +1101,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         self.assertIn('id="providerAuthMode"', html)
         self.assertIn('id="providerAuthGroup"', html)
+        self.assertIn('id="providerName"', html)
+        self.assertIn('maxlength="64"', html)
+        self.assertIn('pattern="[A-Za-z][A-Za-z0-9_]*"', html)
+        self.assertIn("function getProviderNameValidationError(name)", html)
+        self.assertIn("Provider 名称必须英文开头，且只能包含英文、数字和下划线", html)
         self.assertIn('id="providerProxyMode"', html)
         self.assertIn('id="providerProxyRow"', html)
         self.assertIn('id="providerProxyCustomField" hidden', html)
@@ -1990,6 +2054,47 @@ process.stdout.write(JSON.stringify({{
         )
         self.assertIsNone(payload["crossGroup"])
         self.assertFalse(payload["mutationIdle"])
+
+    def test_provider_name_validation_helper_matches_input_limit(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
+        html = template_path.read_text(encoding="utf-8")
+        script = "\n".join(
+            [
+                "const providerNameMaxLength = 64;",
+                "const providerNamePattern = /^[A-Za-z][A-Za-z0-9_]*$/;",
+                html[
+                    html.index("function getProviderNameValidationError")
+                    : html.index("function updateProviderNameValidity")
+                ],
+            ]
+        )
+
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{ console }};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+process.stdout.write(JSON.stringify({{
+  empty: sandbox.getProviderNameValidationError(""),
+  safe: sandbox.getProviderNameValidationError("openai_1"),
+  hyphen: sandbox.getProviderNameValidationError("openai-demo"),
+  digitStart: sandbox.getProviderNameValidationError("1openai"),
+  longName: sandbox.getProviderNameValidationError("a".repeat(65)),
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual("请输入 provider 名称", payload["empty"])
+        self.assertEqual("", payload["safe"])
+        self.assertEqual("Provider 名称必须英文开头，且只能包含英文、数字和下划线", payload["hyphen"])
+        self.assertEqual("Provider 名称必须英文开头，且只能包含英文、数字和下划线", payload["digitStart"])
+        self.assertEqual("Provider 名称最多 64 个字符", payload["longName"])
 
 
 class FrontendMessageLocalizationTests(unittest.TestCase):

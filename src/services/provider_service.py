@@ -96,7 +96,7 @@ class ProviderService:
         target_index = providers.index(target)
         normalized = ProviderConfigSchema.from_mapping(target).to_storage_mapping()
         normalized["enabled"] = bool(enabled)
-        provider_config = ProviderConfigSchema.from_payload(normalized)
+        provider_config = ProviderConfigSchema.from_mapping(normalized)
         providers[target_index] = provider_config.to_storage_mapping()
         providers = self._regroup_providers_by_enabled(providers)
         self._save_providers(config, providers)
@@ -111,7 +111,7 @@ class ProviderService:
         for target_index in target_indexes:
             normalized = ProviderConfigSchema.from_mapping(providers[target_index]).to_storage_mapping()
             normalized["enabled"] = bool(enabled)
-            providers[target_index] = ProviderConfigSchema.from_payload(normalized).to_storage_mapping()
+            providers[target_index] = ProviderConfigSchema.from_mapping(normalized).to_storage_mapping()
 
         providers = self._regroup_providers_by_enabled(providers)
         self._save_providers(config, providers)
