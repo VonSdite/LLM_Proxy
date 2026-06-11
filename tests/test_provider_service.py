@@ -304,19 +304,78 @@ class ProviderServiceTests(unittest.TestCase):
 
         created = self.service.create_provider(
             {
-                "name": "enabled-b",
+                "name": "enabledB",
                 "api": "https://example.com/v1/chat/completions",
                 "api_key": "sk-c",
                 "model_list": ["gpt-4.1-nano"],
             }
         )
 
-        self.assertEqual("enabled-b", created["name"])
+        self.assertEqual("enabledB", created["name"])
         self.assertEqual(1, self.reload_count)
         self.assertEqual(
-            ["enabled-a", "enabled-b", "disabled-a"],
+            ["enabled-a", "enabledB", "disabled-a"],
             self._current_provider_names(),
         )
+
+    def test_legacy_invalid_provider_name_can_be_listed_and_toggled(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "legacy/provider",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-legacy",
+                    "model_list": ["gpt-4.1"],
+                }
+            ]
+        )
+
+        listed = self.service.list_providers()
+        updated = self.service.set_provider_enabled("legacy/provider", False)
+
+        self.assertEqual("legacy/provider", listed[0]["name"])
+        self.assertEqual("legacy/provider", updated["name"])
+        self.assertFalse(updated["enabled"])
+        self.assertEqual(1, self.reload_count)
+        current_config = self.config_manager.get_raw_config()
+        self.assertEqual("legacy/provider", current_config["providers"][0]["name"])
+        self.assertFalse(current_config["providers"][0]["enabled"])
+
+    def test_update_provider_rejects_legacy_invalid_name_until_renamed(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "legacy/provider",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-legacy",
+                    "model_list": ["gpt-4.1"],
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "Provider name must start with a letter"):
+            self.service.update_provider(
+                "legacy/provider",
+                {
+                    "name": "legacy/provider",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-legacy",
+                    "model_list": ["gpt-4.1"],
+                },
+            )
+
+        updated = self.service.update_provider(
+            "legacy/provider",
+            {
+                "name": "legacyProvider1",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "sk-legacy",
+                "model_list": ["gpt-4.1"],
+            },
+        )
+
+        self.assertEqual("legacyProvider1", updated["name"])
+        self.assertEqual(["legacyProvider1"], self._current_provider_names())
 
     def test_set_provider_enabled_moves_disabled_provider_to_first_disabled_position(self) -> None:
         self._seed_providers(

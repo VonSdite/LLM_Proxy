@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.external import LLMProvider
-from src.hooks import BaseHook, HookContext
+from src.hooks import BaseHook, HookAbortError, HookContext
 
 
 class FakeLogger:
@@ -109,6 +110,25 @@ class HookContractsTests(unittest.TestCase):
 
         self.assertEqual(request_body, provider.apply_request_guard(ctx, request_body))
         self.assertEqual(response_body, provider.apply_response_guard(ctx, response_body))
+
+    def test_example_hook_demonstrates_hook_abort_error(self) -> None:
+        hook_path = Path(__file__).resolve().parents[1] / "hooks" / "example_hook.py"
+        spec = importlib.util.spec_from_file_location("example_hook_under_test", hook_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        hook = module.Hook()
+        ctx = self._ctx()
+
+        request_body = {"messages": [{"role": "user", "content": "hello"}]}
+        guarded_body = hook.request_guard(ctx, request_body)
+
+        self.assertEqual("[PREFIX] hello", guarded_body["messages"][0]["content"])
+        with self.assertRaises(HookAbortError) as caught:
+            hook.request_guard(ctx, {"messages": [{"role": "user", "content": "[HOOK_ABORT_EXAMPLE]"}]})
+        self.assertEqual(400, caught.exception.status_code)
+        self.assertEqual("example_hook_abort", caught.exception.error_type)
 
 
 if __name__ == "__main__":

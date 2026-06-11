@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.hooks import BaseHook, HookContext, HookErrorType
+from src.hooks import BaseHook, HookAbortError, HookContext, HookErrorType
 
 
 class Hook(BaseHook):
-    """Example hook that demonstrates the header/guard extension points."""
+    """演示 header_hook、request_guard 和 response_guard 扩展点。"""
 
     def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
         ctx.logger.info(
@@ -34,6 +34,13 @@ class Hook(BaseHook):
             for msg in messages:
                 if isinstance(msg, dict) and msg.get("role") == "user":
                     original = str(msg.get("content", ""))
+                    # 业务需要主动拒绝请求时，可以抛出 HookAbortError 并指定下游状态码。
+                    if original.strip() == "[HOOK_ABORT_EXAMPLE]":
+                        raise HookAbortError(
+                            "Request blocked by example hook",
+                            status_code=400,
+                            error_type="example_hook_abort",
+                        )
                     msg["content"] = f"[PREFIX] {original}"
         return body
 
