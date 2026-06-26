@@ -14,7 +14,7 @@ from flask import Flask
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
-from src.services.codex_oauth_service import CodexOAuthService
+from src.services.codex_oauth_service import CODEX_USER_AGENT, CodexOAuthService
 from src.services.codex_proxy_service import (
     CODEX_BACKEND_RESPONSES_URL,
     CODEX_CLIENT_VERSION,
@@ -376,7 +376,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual("quota_cooldown", auth_entries["codex-first.json"]["availability_status"])
         self.assertEqual("success", auth_entries["codex-second.json"]["usage_status"])
 
-    def test_codex_headers_preserve_explicit_client_version(self) -> None:
+    def test_codex_headers_sanitize_downstream_user_agent_and_keep_codex_signals(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
@@ -407,6 +407,11 @@ class CodexProxyServiceTests(unittest.TestCase):
                         "Version": "0.115.0-alpha.27",
                         "User-Agent": "custom-codex/9.9",
                         "Originator": "custom-origin",
+                        "X-Codex-Beta-Features": "responses",
+                        "X-Codex-Turn-Metadata": "turn-meta",
+                        "X-Client-Request-Id": "request-id",
+                        "Cookie": "session=downstream",
+                        "Host": "example.invalid",
                     },
                     resolved_target_format="openai_chat",
                 )
@@ -415,8 +420,13 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual(200, status_code)
         self.assertIsNotNone(response)
         self.assertEqual("0.115.0-alpha.27", captured_headers["Version"])
-        self.assertEqual("custom-codex/9.9", captured_headers["User-Agent"])
+        self.assertEqual(CODEX_USER_AGENT, captured_headers["User-Agent"])
         self.assertEqual("custom-origin", captured_headers["Originator"])
+        self.assertEqual("responses", captured_headers["X-Codex-Beta-Features"])
+        self.assertEqual("turn-meta", captured_headers["X-Codex-Turn-Metadata"])
+        self.assertEqual("request-id", captured_headers["X-Client-Request-Id"])
+        self.assertNotIn("Cookie", captured_headers)
+        self.assertNotIn("Host", captured_headers)
 
     def test_proxy_warning_confirmation_failure_returns_confirmation_url_without_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
