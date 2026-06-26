@@ -22,7 +22,6 @@ from ..proxy_core import (
     is_terminal_chunk,
     should_emit_terminal_chunk,
 )
-from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_module_request_proxies, build_requests_proxy_settings
 from ..utils.proxy_warning import (
     PROXY_WARNING_ERROR_CODE,
@@ -409,33 +408,31 @@ class CodexProxyService:
         *,
         stream: bool,
     ) -> dict[str, str]:
-        headers = merge_http_headers({}, request_headers)
-        client_user_agent = self._get_header(headers, "User-Agent") or CODEX_USER_AGENT
-        originator = self._get_header(headers, "Originator") or CODEX_ORIGINATOR
-        client_version = self._get_header(headers, "Version") or CODEX_CLIENT_VERSION
-        headers = merge_http_headers(
-            headers,
-            {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {candidate.access_token}",
-                "User-Agent": CODEX_USER_AGENT,
-                "Accept": "text/event-stream" if stream else "application/json",
-                "Connection": "Keep-Alive",
-                "Originator": originator,
-            },
-        )
-        headers["User-Agent"] = client_user_agent
+        source_headers = request_headers or {}
+        originator = self._get_header(source_headers, "Originator") or CODEX_ORIGINATOR
+        client_version = self._get_header(source_headers, "Version") or CODEX_CLIENT_VERSION
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {candidate.access_token}",
+            "User-Agent": CODEX_USER_AGENT,
+            "Accept": "text/event-stream" if stream else "application/json",
+            "Connection": "Keep-Alive",
+            "Originator": originator,
+        }
+        for header_name in (
+            "X-Codex-Beta-Features",
+            "X-Codex-Turn-Metadata",
+            "X-Client-Request-Id",
+        ):
+            header_value = self._get_header(source_headers, header_name)
+            if header_value:
+                headers[header_name] = header_value
         if client_version:
             headers["Version"] = client_version
-        else:
-            headers.pop("Version", None)
-        if "Mac OS" in client_user_agent and not self._get_header(headers, "Session_id"):
-            headers["Session_id"] = str(uuid4())
+        if "Mac OS" in CODEX_USER_AGENT:
+            headers["Session_id"] = self._get_header(source_headers, "Session_id") or str(uuid4())
         if candidate.account_id:
-            headers = merge_http_headers(
-                headers,
-                {"Chatgpt-Account-Id": candidate.account_id},
-            )
+            headers["Chatgpt-Account-Id"] = candidate.account_id
         return headers
 
     def _build_request_options(self) -> dict[str, Any]:
