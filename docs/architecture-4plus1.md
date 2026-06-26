@@ -119,6 +119,9 @@ downstream request
 - `AuthGroupManager`
   - 加载 `auth_groups`
   - 选择 `auth_entry`
+  - 支持 `least_inflight` 与 `sticky_failover` 两种 entry 选择策略
+  - 维护进程内 inflight 计数和组级选择游标
+  - 该游标在 `least_inflight` 中用于同负载轮转，在 `sticky_failover` 中表示当前粘滞 entry
   - 持久化冷却、禁用与配额运行态
 - `ProxyService`
   - 组装整条代理链路

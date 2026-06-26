@@ -398,6 +398,7 @@
                             </label>
                             <select class="form-control" id="authGroupStrategy" data-custom-select="true">
                                 <option value="least_inflight">least_inflight</option>
+                                <option value="sticky_failover">sticky_failover</option>
                             </select>
                         </div>
                         <div class="mb-3">
@@ -654,12 +655,17 @@
             auth_group_strategy: {
                 title: '策略怎么选',
                 html: `
-                    <p>当前只支持 <code>least_inflight</code>。</p>
                     <ul>
                         <li><strong>least_inflight</strong>：优先选择当前进行中请求数最少的 entry。</li>
-                        <li><strong>适合场景</strong>：有长流式请求、多个 key 并发能力不同，想让流量更均匀地落在空闲 entry 上。</li>
+                        <li>
+                            <strong>sticky_failover</strong>：持续使用当前 entry；当它冷却、禁用、配额耗尽或并发饱和时，
+                            再按顺序切到下一个可用 entry。
+                        </li>
                     </ul>
-                    <p>如果多个 entry 当前 inflight 一样，系统还会按轮转游标继续打散，避免持续偏向同一条凭证。</p>
+                    <p>
+                        <code>least_inflight</code> 适合长流式请求和均匀分摊；
+                        <code>sticky_failover</code> 适合优先消耗固定凭证、失效后再切换的场景。
+                    </p>
                 `,
             },
             auth_entries_editor: {
