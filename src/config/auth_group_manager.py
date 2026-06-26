@@ -15,6 +15,7 @@ from ..hooks import HookErrorType
 from ..repositories import AuthGroupRepository
 from ..utils.local_time import format_local_datetime, now_local_datetime, parse_local_datetime
 from .provider_config import (
+    AUTH_GROUP_STRATEGY_STICKY_FAILOVER,
     AuthEntrySchema,
     AuthGroupSchema,
 )
@@ -91,14 +92,13 @@ class AuthGroupManager:
         runtime_states = self._repository.list_group_runtime_states(group.name)
         usage_by_entry = self._repository.list_current_usage(group.name, (entry.id for entry in group.entries), now)
 
-        candidates: list[tuple[int, int, int, AuthEntrySchema]] = []
+        candidates: list[tuple[int, AuthEntrySchema]] = []
         for index, entry in enumerate(group.entries):
             runtime_state = runtime_states.get(entry.id) or self._default_runtime_state(group.name, entry.id)
             usage = usage_by_entry.get(entry.id) or {}
             if not self._is_entry_available(group, entry, runtime_state, usage, now):
                 continue
-            inflight = self._inflight_counts.get((group.name, entry.id), 0)
-            candidates.append((inflight, self._rotation_distance(group.name, index, len(group.entries)), index, entry))
+            candidates.append((index, entry))
 
         if not candidates:
             raise AuthGroupSelectionError(
@@ -106,10 +106,10 @@ class AuthGroupManager:
                 error_code="auth_entry_unavailable",
             )
 
-        _, _, selected_index, selected_entry = min(candidates, key=lambda item: (item[0], item[1], item[2]))
+        selected_index, selected_entry = self._select_entry(group, candidates)
         key = (group.name, selected_entry.id)
         self._inflight_counts[key] = self._inflight_counts.get(key, 0) + 1
-        self._rotation_cursor_by_group[group.name] = (selected_index + 1) % max(len(group.entries), 1)
+        self._store_selection_cursor(group, selected_index)
 
         return SelectedAuthEntry(
             auth_group_name=group.name,
@@ -470,6 +470,55 @@ class AuthGroupManager:
     def _rotation_distance(self, group_name: str, index: int, size: int) -> int:
         cursor = self._rotation_cursor_by_group.get(group_name, 0)
         return (index - cursor) % max(size, 1)
+
+    def _select_entry(
+        self,
+        group: AuthGroupSchema,
+        candidates: Sequence[tuple[int, AuthEntrySchema]],
+    ) -> tuple[int, AuthEntrySchema]:
+        if group.strategy == AUTH_GROUP_STRATEGY_STICKY_FAILOVER:
+            return self._select_sticky_failover_entry(group, candidates)
+        return self._select_least_inflight_entry(group, candidates)
+
+    def _select_least_inflight_entry(
+        self,
+        group: AuthGroupSchema,
+        candidates: Sequence[tuple[int, AuthEntrySchema]],
+    ) -> tuple[int, AuthEntrySchema]:
+        _, _, selected_index, selected_entry = min(
+            (
+                (
+                    self._inflight_counts.get((group.name, entry.id), 0),
+                    self._rotation_distance(group.name, index, len(group.entries)),
+                    index,
+                    entry,
+                )
+                for index, entry in candidates
+            ),
+            key=lambda item: (item[0], item[1], item[2]),
+        )
+        return selected_index, selected_entry
+
+    def _select_sticky_failover_entry(
+        self,
+        group: AuthGroupSchema,
+        candidates: Sequence[tuple[int, AuthEntrySchema]],
+    ) -> tuple[int, AuthEntrySchema]:
+        size = len(group.entries)
+        cursor = self._rotation_cursor_by_group.get(group.name, 0) % max(size, 1)
+        available_by_index = {index: entry for index, entry in candidates}
+        for offset in range(size):
+            index = (cursor + offset) % size
+            entry = available_by_index.get(index)
+            if entry is not None:
+                return index, entry
+        return candidates[0]
+
+    def _store_selection_cursor(self, group: AuthGroupSchema, selected_index: int) -> None:
+        if group.strategy == AUTH_GROUP_STRATEGY_STICKY_FAILOVER:
+            self._rotation_cursor_by_group[group.name] = selected_index
+            return
+        self._rotation_cursor_by_group[group.name] = (selected_index + 1) % max(len(group.entries), 1)
 
     @staticmethod
     def _default_runtime_state(auth_group_name: str, entry_id: str) -> dict[str, Any]:

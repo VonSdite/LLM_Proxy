@@ -47,6 +47,7 @@ oauth:
 
 auth_groups:
   - name: openai-shared
+    # 支持 least_inflight / sticky_failover
     strategy: least_inflight
     cooldown_seconds_on_429: 60
     entries:

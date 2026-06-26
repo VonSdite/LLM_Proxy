@@ -92,6 +92,22 @@ class AuthGroupConfigTests(unittest.TestCase):
 
         self.assertEqual({"Authorization": ""}, entry.to_mapping()["headers"])
 
+    def test_auth_group_accepts_sticky_failover_strategy(self) -> None:
+        group = AuthGroupSchema.from_mapping(
+            {
+                "name": "pool-a",
+                "strategy": "sticky_failover",
+                "entries": [
+                    {
+                        "id": "key-a",
+                        "headers": {"Authorization": "Bearer sk-a"},
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual("sticky_failover", group.strategy)
+
 
 class AuthGroupManagerTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -144,6 +160,82 @@ class AuthGroupManagerTests(unittest.TestCase):
 
         self.assertEqual("key-a", first.entry_id)
         self.assertEqual("key-b", second.entry_id)
+
+    def test_sticky_failover_keeps_current_entry_until_unavailable(self) -> None:
+        self.manager.load_auth_groups(
+            (
+                AuthGroupSchema.from_mapping(
+                    {
+                        "name": "pool-a",
+                        "strategy": "sticky_failover",
+                        "entries": [
+                            {
+                                "id": "key-a",
+                                "headers": {"Authorization": "Bearer sk-a"},
+                                "max_concurrency": 2,
+                            },
+                            {
+                                "id": "key-b",
+                                "headers": {"Authorization": "Bearer sk-b"},
+                                "max_concurrency": 2,
+                            },
+                        ],
+                    }
+                ),
+            )
+        )
+
+        first = self.manager.acquire("pool-a")
+        second = self.manager.acquire("pool-a")
+        third = self.manager.acquire("pool-a")
+        assert first is not None
+        assert second is not None
+        assert third is not None
+
+        self.assertEqual(["key-a", "key-a", "key-b"], [first.entry_id, second.entry_id, third.entry_id])
+
+    def test_sticky_failover_stays_on_next_entry_after_original_restores(self) -> None:
+        self.manager.load_auth_groups(
+            (
+                AuthGroupSchema.from_mapping(
+                    {
+                        "name": "pool-a",
+                        "strategy": "sticky_failover",
+                        "entries": [
+                            {
+                                "id": "key-a",
+                                "headers": {"Authorization": "Bearer sk-a"},
+                            },
+                            {
+                                "id": "key-b",
+                                "headers": {"Authorization": "Bearer sk-b"},
+                            },
+                        ],
+                    }
+                ),
+            )
+        )
+
+        first = self.manager.acquire("pool-a")
+        assert first is not None
+        self.manager.finish(
+            first,
+            status_code=429,
+            response_headers={"Retry-After": "120"},
+            error_message="rate limited",
+        )
+
+        failover = self.manager.acquire("pool-a")
+        assert failover is not None
+        self.manager.finish(failover, status_code=200)
+        self.manager.clear_entry_cooldown("pool-a", "key-a")
+
+        next_selection = self.manager.acquire("pool-a")
+        assert next_selection is not None
+
+        self.assertEqual("key-a", first.entry_id)
+        self.assertEqual("key-b", failover.entry_id)
+        self.assertEqual("key-b", next_selection.entry_id)
 
     def test_finish_success_persists_request_and_token_usage(self) -> None:
         selection = self.manager.acquire("pool-a")
