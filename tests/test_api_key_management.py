@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.application.app_context import AppContext
 from src.presentation.proxy_controller import ProxyController
 from src.repositories import ApiKeyRepository, LogRepository
-from src.services import ApiKeyService, LogService
+from src.services import ApiKeyService, LogService, ModelCatalogService
 from src.services.proxy_service import ProxyErrorInfo
 from src.utils.database import create_connection_factory
 
@@ -59,6 +59,14 @@ class FakeConfigManager:
 
     def get_real_client_ip_header(self) -> str:
         return "X-Forwarded-For"
+
+
+class FakeOAuthModelService:
+    def __init__(self, model_names: tuple[str, ...]) -> None:
+        self._model_names = model_names
+
+    def list_model_names(self) -> tuple[str, ...]:
+        return self._model_names
 
 
 class FakeUserService:
@@ -230,6 +238,25 @@ class ApiKeyManagementTests(unittest.TestCase):
         self.assertEqual(3, stored["token_limit_k"])
         self.assertEqual(3000, stored["token_limit_tokens"])
         self.assertEqual(3000, stored["token_limit_remaining"])
+
+    def test_api_key_permissions_support_oauth_models(self) -> None:
+        model_catalog = ModelCatalogService(
+            self.ctx,
+            codex_oauth_service=FakeOAuthModelService(("gpt-5-codex",)),
+            claude_oauth_service=FakeOAuthModelService(("claude-sonnet-4-5",)),
+        )
+        service = ApiKeyService(self.ctx, self.api_key_repository, model_catalog)
+
+        created = service.create_api_key(
+            name="client-a",
+            model_permissions=["gpt-5-codex", "claude-sonnet-4-5"],
+        )
+
+        self.assertIn("gpt-5-codex", service.get_available_models())
+        self.assertIn("claude-sonnet-4-5", service.get_available_models())
+        self.assertEqual(["gpt-5-codex", "claude-sonnet-4-5"], created["model_permissions"])
+        self.assertTrue(service.can_api_key_access_model(created, "gpt-5-codex"))
+        self.assertTrue(service.can_api_key_access_model(created, "claude-sonnet-4-5"))
 
     def test_api_key_token_limit_must_be_at_least_one_k(self) -> None:
         with self.assertRaises(ValueError):

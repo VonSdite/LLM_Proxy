@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
 from src.repositories import UserRepository
-from src.services import UserService
+from src.services import ModelCatalogService, UserService
 from src.utils.database import create_connection_factory
 
 
@@ -35,6 +35,14 @@ class FakeConfigManager:
 
     def get_raw_config(self):
         return deepcopy(self.payload)
+
+
+class FakeOAuthModelService:
+    def __init__(self, model_names: tuple[str, ...]):
+        self._model_names = model_names
+
+    def list_model_names(self) -> tuple[str, ...]:
+        return self._model_names
 
 
 class UserModelPermissionTests(unittest.TestCase):
@@ -93,6 +101,33 @@ class UserModelPermissionTests(unittest.TestCase):
         self.assertEqual(["demo/gpt-4.1-mini"], user["model_permissions"])
         self.assertFalse(self._service.can_user_access_model(user, "demo/gpt-4.1"))
         self.assertTrue(self._service.can_user_access_model(user, "demo/gpt-4.1-mini"))
+
+    def test_update_user_model_permissions_supports_oauth_models(self) -> None:
+        model_catalog = ModelCatalogService(
+            self._ctx,
+            codex_oauth_service=FakeOAuthModelService(("gpt-5-codex",)),
+            claude_oauth_service=FakeOAuthModelService(("claude-sonnet-4-5",)),
+        )
+        service = UserService(self._ctx, self._repository, model_catalog)
+        user_id = self._repository.create("alice", "127.0.0.1")
+        self.assertIsNotNone(user_id)
+        assert user_id is not None
+
+        updated = service.update_user(
+            user_id,
+            model_permissions_provided=True,
+            model_permissions=["gpt-5-codex", "claude-sonnet-4-5"],
+        )
+        user = service.get_user_by_id(user_id)
+
+        self.assertTrue(updated)
+        self.assertIn("gpt-5-codex", service.get_available_models())
+        self.assertIn("claude-sonnet-4-5", service.get_available_models())
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertEqual(["gpt-5-codex", "claude-sonnet-4-5"], user["model_permissions"])
+        self.assertTrue(service.can_user_access_model(user, "gpt-5-codex"))
+        self.assertTrue(service.can_user_access_model(user, "claude-sonnet-4-5"))
 
     def test_sync_model_permissions_prunes_deleted_models_from_explicit_users(self) -> None:
         user_id = self._repository.create("alice", "127.0.0.1")

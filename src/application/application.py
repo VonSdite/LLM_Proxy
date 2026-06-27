@@ -37,6 +37,7 @@ from ..services import (
     CodexOAuthService,
     CodexProxyService,
     LogService,
+    ModelCatalogService,
     ModelDiscoveryService,
     ProviderModelTestService,
     ProviderService,
@@ -257,8 +258,15 @@ class Application:
     def _setup_controllers(self) -> None:
         """初始化服务层并完成路由注册。"""
         auth_service = AuthenticationService(self._ctx)
-        user_service = UserService(self._ctx, self._user_repository)
-        api_key_service = ApiKeyService(self._ctx, self._api_key_repository)
+        codex_oauth_service = CodexOAuthService(self._ctx)
+        claude_oauth_service = ClaudeOAuthService(self._ctx)
+        model_catalog_service = ModelCatalogService(
+            self._ctx,
+            codex_oauth_service=codex_oauth_service,
+            claude_oauth_service=claude_oauth_service,
+        )
+        user_service = UserService(self._ctx, self._user_repository, model_catalog_service)
+        api_key_service = ApiKeyService(self._ctx, self._api_key_repository, model_catalog_service)
         self._user_service = user_service
         self._api_key_service = api_key_service
         self._user_service.sync_model_permissions()
@@ -276,8 +284,6 @@ class Application:
             self._auth_group_manager,
         )
         model_discovery_service = ModelDiscoveryService(self._ctx)
-        codex_oauth_service = CodexOAuthService(self._ctx)
-        claude_oauth_service = ClaudeOAuthService(self._ctx)
         codex_proxy_service = CodexProxyService(self._ctx, codex_oauth_service)
         claude_proxy_service = ClaudeProxyService(self._ctx, claude_oauth_service)
         settings_service = SettingsService(

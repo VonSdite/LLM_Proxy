@@ -82,6 +82,11 @@ downstream request
   - 持久化明文 key 供管理端复制和显示，同时保留 hash 用于数据面鉴权
   - 复用 `*` / 显式模型列表语义维护 key 模型权限
   - 校验数据面请求携带的 `Authorization: Bearer sk-...` 或 `X-API-Key`
+- `ModelCatalogService`
+  - 汇总模型权限控制平面的可选模型目录
+  - Provider 模型从配置中的 `providers[].model_list` 读取，继续包含已禁用 Provider 的模型
+  - OAuth 模型从 Codex / Claude OAuth 服务读取当前可用模型目录
+  - 供用户模型权限与 API Key 模型权限的选择、保存校验、展示计数和同步清理共用
 - `OAuthController`
   - 暴露 Codex / Claude OAuth 登录、回调提交、认证文件列表、JSON/ZIP 导入、ZIP 导出、归档删除与 Codex 配额刷新接口
 - `CodexOAuthService`
@@ -197,6 +202,8 @@ OAuth 模型是数据平面的例外路由：
 
 - Provider 配置模型仍使用 `{provider}/{model}` key
 - Codex / Claude OAuth 模型使用原始模型名，例如 `gpt-5-codex`、`claude-sonnet-4-5`
+- 用户模型权限和 API Key 模型权限的可选目录同时包含 Provider 模型和当前可用 OAuth 模型
+- 权限字段保存显式列表时，Provider 模型保存 `{provider}/{model}`，OAuth 模型保存原始模型名
 - `ProxyController` 先查 Provider 映射，未命中时再查 Codex OAuth 模型目录，最后查 Claude OAuth 模型目录
 - `/v1/models` 对 Codex OAuth 暴露普通模型名，`provider_name` 固定为 `codex`
 - `/v1/models` 对 Claude OAuth 暴露普通模型名，`provider_name` 固定为 `claude`
@@ -314,6 +321,9 @@ OAuth 模型是数据平面的例外路由：
   - 每次数据面请求读取当前 `api_keys.enabled`，开启时要求有效 API Key
   - 开启 API Key 管理时会从转发给上游的 header 中移除下游 `Authorization` 和 `X-API-Key`，避免泄露下游 key
   - 请求完成回调写日志时会带上 `api_key_id`，用于同步累加 key 级用量
+- `ModelCatalogService`
+  - 每次用户 / API Key 权限管理读取当前 Provider 配置模型和 Codex / Claude OAuth 可用模型
+  - 不缓存模型目录，OAuth 模型变化后管理端重新加载即可出现在权限选择列表
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
@@ -602,9 +612,9 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 累计请求数与 token 用量
   - 创建、更新和最近使用时间
 - `model_permissions='*'` 表示允许全部模型
-- 显式模型权限以 JSON 数组保存，值使用 `{provider}/{model}` 路由 key
+- 显式模型权限以 JSON 数组保存，Provider 模型使用 `{provider}/{model}` 路由 key，OAuth 模型使用原始模型名
 - `token_limit_k=NULL` 表示不限额；非空时单位为 k，最小有效值为 `1`，按 `api_keys.total_tokens` 计量
-- Provider 模型变化后，`Application.reload_providers()` 会同步清理 API Key 显式授权中已经不存在的模型
+- Provider 模型变化后，`Application.reload_providers()` 会按当前模型权限目录同步清理 API Key 显式授权中已经不存在的模型
 
 数据面 API Key 鉴权链路如下：
 
@@ -676,6 +686,8 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 系统设置保存与生效边界
 - [src/services/api_key_service.py](../src/services/api_key_service.py)
   - API Key 生成、hash 鉴权、模型权限、token 上限和 key 级用量管理
+- [src/services/model_catalog_service.py](../src/services/model_catalog_service.py)
+  - 汇总 Provider 配置模型与 Codex / Claude OAuth 可用模型，供用户和 API Key 模型权限共用
 - [src/repositories/api_key_repository.py](../src/repositories/api_key_repository.py)
   - API Key 持久化、列表排序和累计用量字段
 - [src/services/codex_oauth_service.py](../src/services/codex_oauth_service.py)

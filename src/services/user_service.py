@@ -10,10 +10,10 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from ..application.app_context import AppContext
-from ..config.provider_config import normalize_model_list
 from ..repositories import UserRepository
 from ..utils import is_valid_ip
 from ..utils.local_time import normalize_local_datetime_text
+from .model_catalog_service import ModelCatalogService
 
 
 class UserService:
@@ -21,9 +21,14 @@ class UserService:
 
     MODEL_PERMISSIONS_ALL = UserRepository.MODEL_PERMISSIONS_ALL
 
-    def __init__(self, ctx: AppContext, repository: UserRepository):
+    def __init__(
+        self,
+        ctx: AppContext,
+        repository: UserRepository,
+        model_catalog_service: ModelCatalogService | None = None,
+    ):
         self._logger = ctx.logger
-        self._config_manager = getattr(ctx, "config_manager", None)
+        self._model_catalog_service = model_catalog_service or ModelCatalogService(ctx)
         self._repository = repository
         self._cache_lock = threading.RLock()
         self._user_by_ip_cache: dict[str, dict[str, Any] | None] = {}
@@ -71,43 +76,8 @@ class UserService:
         return normalized_models
 
     def _get_available_model_names(self) -> tuple[str, ...]:
-        """读取配置中声明的模型列表，包含已禁用 Provider 的模型。"""
-        if self._config_manager is None:
-            return ()
-
-        try:
-            config = self._config_manager.get_raw_config()
-        except Exception as exc:
-            self._logger.error("Failed to load config model catalog: %s", exc)
-            return ()
-
-        raw_providers = config.get("providers", [])
-        if raw_providers is None or not isinstance(raw_providers, list):
-            return ()
-
-        model_names: list[str] = []
-        seen_models: set[str] = set()
-        for raw_provider in raw_providers:
-            if not isinstance(raw_provider, dict):
-                continue
-
-            provider_name = str(raw_provider.get("name") or "").strip()
-            if not provider_name:
-                continue
-
-            try:
-                provider_models = normalize_model_list(raw_provider.get("model_list"))
-            except ValueError:
-                continue
-
-            for provider_model in provider_models:
-                model_key = f"{provider_name}/{provider_model}"
-                if model_key in seen_models:
-                    continue
-                seen_models.add(model_key)
-                model_names.append(model_key)
-
-        return tuple(sorted(model_names))
+        """读取模型权限可选目录，包含 Provider 与 OAuth 模型。"""
+        return self._model_catalog_service.list_permission_model_names()
 
     @classmethod
     def _deserialize_model_permissions(cls, raw_value: Any) -> tuple[str, ...] | None:
