@@ -11,7 +11,7 @@ from src.application.app_context import AppContext
 from src.executors import OpenedUpstreamResponse
 from src.external import LLMProvider
 from src.hooks import BaseHook, HookAbortError
-from src.proxy_core import decode_stream_events
+from src.proxy_core import StreamEvent, decode_stream_events
 from src.services.proxy_service import ProxyService
 from src.services.upstream_request_builder import build_upstream_request
 from src.translators import (
@@ -179,6 +179,78 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual(["reasoning.encrypted_content"], translated["include"])
         self.assertTrue(translated["parallel_tool_calls"])
 
+    def test_openai_responses_translator_maps_chat_reasoning_effort(self) -> None:
+        translator = OpenAIResponsesTranslator()
+
+        translated = translator.translate_request(
+            "gpt-5.4",
+            {
+                "messages": [{"role": "user", "content": "Hello"}],
+                "reasoning_effort": "unknown-effort",
+            },
+            False,
+        )
+
+        self.assertEqual({"effort": "xhigh"}, translated["reasoning"])
+
+    def test_openai_chat_responses_translator_maps_responses_reasoning(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+
+        translated = translator.translate_request(
+            "gpt-5.4",
+            {
+                "input": "Hello",
+                "reasoning": {"effort": "medium"},
+            },
+            False,
+        )
+
+        self.assertEqual("medium", translated["reasoning_effort"])
+
+    def test_openai_chat_responses_translator_falls_back_to_xhigh_reasoning(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+
+        translated = translator.translate_request(
+            "gpt-5.4",
+            {
+                "input": "Hello",
+                "reasoning": {"effort": "not-a-level"},
+            },
+            False,
+        )
+
+        self.assertEqual("xhigh", translated["reasoning_effort"])
+
+    def test_composed_claude_to_responses_maps_thinking_effort(self) -> None:
+        translator = build_default_translator_registry().get("openai_responses", "claude_chat")
+
+        translated = translator.translate_request(
+            "gpt-5.4",
+            {
+                "messages": [{"role": "user", "content": "Hello"}],
+                "thinking": {"type": "mystery"},
+                "max_tokens": 1000,
+            },
+            False,
+        )
+
+        self.assertEqual({"effort": "xhigh"}, translated["reasoning"])
+
+    def test_composed_responses_to_claude_maps_reasoning_effort(self) -> None:
+        translator = build_default_translator_registry().get("claude_chat", "openai_responses")
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "input": "Hello",
+                "reasoning": {"effort": "not-a-level"},
+                "max_output_tokens": 20000,
+            },
+            False,
+        )
+
+        self.assertEqual({"type": "enabled", "budget_tokens": 16384}, translated["thinking"])
+
     def test_claude_chat_translator_maps_chat_request(self) -> None:
         translator = ClaudeChatTranslator()
 
@@ -198,6 +270,51 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual("user", translated["messages"][0]["role"])
         self.assertEqual("Hello", translated["messages"][0]["content"][0]["text"])
         self.assertTrue(translated["stream"])
+
+    def test_claude_chat_translator_maps_chat_reasoning_effort(self) -> None:
+        translator = ClaudeChatTranslator()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "messages": [{"role": "user", "content": "Hello"}],
+                "reasoning_effort": "xhigh",
+                "max_tokens": 20000,
+            },
+            False,
+        )
+
+        self.assertEqual({"type": "enabled", "budget_tokens": 16384}, translated["thinking"])
+
+    def test_claude_chat_translator_raises_max_tokens_for_thinking_budget(self) -> None:
+        translator = ClaudeChatTranslator()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "messages": [{"role": "user", "content": "Hello"}],
+                "reasoning_effort": "xhigh",
+                "max_tokens": 1000,
+            },
+            False,
+        )
+
+        self.assertEqual({"type": "enabled", "budget_tokens": 16384}, translated["thinking"])
+        self.assertEqual(16385, translated["max_tokens"])
+
+    def test_claude_chat_translator_disables_thinking_from_reasoning_effort(self) -> None:
+        translator = ClaudeChatTranslator()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "messages": [{"role": "user", "content": "Hello"}],
+                "reasoning_effort": "none",
+            },
+            False,
+        )
+
+        self.assertEqual({"type": "disabled"}, translated["thinking"])
 
     def test_openai_chat_claude_translator_preserves_responses_extension_fields(
         self,
@@ -223,6 +340,176 @@ class TranslatorTests(unittest.TestCase):
         self.assertFalse(translated["store"])
         self.assertEqual(["reasoning.encrypted_content"], translated["include"])
         self.assertTrue(translated["parallel_tool_calls"])
+
+    def test_openai_chat_claude_translator_falls_back_to_xhigh_thinking_effort(self) -> None:
+        translator = OpenAIChatClaudeTranslator()
+
+        translated = translator.translate_request(
+            "gpt-5-codex",
+            {
+                "max_tokens": 256,
+                "thinking": {"type": "mystery"},
+                "messages": [
+                    {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
+                ],
+            },
+            False,
+        )
+
+        self.assertEqual("xhigh", translated["reasoning_effort"])
+
+    def test_openai_chat_claude_translator_maps_reasoning_details_stream(self) -> None:
+        translator = OpenAIChatClaudeTranslator()
+        state: dict[str, Any] = {}
+
+        first_chunks = translator.translate_stream_event(
+            "minimax-m3",
+            {"messages": [], "stream": True},
+            {"model": "minimax-m3"},
+            StreamEvent(
+                kind="json",
+                payload={
+                    "id": "chatcmpl_1",
+                    "model": "minimax-m3",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"reasoning_details": [{"text": "Think"}]},
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+            ),
+            state,
+        )
+        second_chunks = translator.translate_stream_event(
+            "minimax-m3",
+            {"messages": [], "stream": True},
+            {"model": "minimax-m3"},
+            StreamEvent(
+                kind="json",
+                payload={
+                    "id": "chatcmpl_1",
+                    "model": "minimax-m3",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"reasoning_details": [{"text": "Think more"}]},
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+            ),
+            state,
+        )
+
+        first_delta = [chunk for chunk in first_chunks if chunk.payload.get("type") == "content_block_delta"][-1]
+        second_delta = [chunk for chunk in second_chunks if chunk.payload.get("type") == "content_block_delta"][-1]
+        self.assertEqual("Think", first_delta.payload["delta"]["thinking"])
+        self.assertEqual(" more", second_delta.payload["delta"]["thinking"])
+
+    def test_openai_chat_claude_translator_maps_reasoning_details_nonstream(self) -> None:
+        translator = OpenAIChatClaudeTranslator()
+
+        translated = translator.translate_nonstream_response(
+            "minimax-m3",
+            {"messages": []},
+            {"model": "minimax-m3"},
+            {
+                "id": "chatcmpl_1",
+                "model": "minimax-m3",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Answer",
+                            "reasoning_details": [{"text": "Think"}],
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual({"type": "thinking", "thinking": "Think"}, translated["content"][0])
+        self.assertEqual({"type": "text", "text": "Answer"}, translated["content"][1])
+
+    def test_openai_chat_responses_translator_maps_reasoning_details_stream(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+
+        chunks = translator.translate_stream_event(
+            "minimax-m3",
+            {"input": "Hello", "stream": True},
+            {"model": "minimax-m3"},
+            StreamEvent(
+                kind="json",
+                payload={
+                    "id": "chatcmpl_1",
+                    "model": "minimax-m3",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"reasoning_details": [{"text": "Think"}]},
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+            ),
+            {},
+        )
+
+        reasoning_delta = [chunk for chunk in chunks if chunk.event == "response.reasoning_summary_text.delta"][-1]
+        self.assertEqual("Think", reasoning_delta.payload["delta"])
+
+    def test_openai_chat_responses_translator_maps_reasoning_details_nonstream(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+
+        translated = translator.translate_nonstream_response(
+            "minimax-m3",
+            {"input": "Hello"},
+            {"model": "minimax-m3"},
+            {
+                "id": "chatcmpl_1",
+                "model": "minimax-m3",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Answer",
+                            "reasoning_details": [{"text": "Think"}],
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual("reasoning", translated["output"][0]["type"])
+        self.assertEqual("Think", translated["output"][0]["summary"][0]["text"])
+
+    def test_openai_chat_passthrough_keeps_reasoning_details_shape(self) -> None:
+        translator = OpenAIChatTranslator()
+        payload = {
+            "choices": [
+                {
+                    "delta": {
+                        "reasoning_details": [{"text": "Think"}],
+                    }
+                }
+            ]
+        }
+
+        chunks = translator.translate_stream_event(
+            "minimax-m3",
+            {"messages": [], "stream": True},
+            {"model": "minimax-m3"},
+            StreamEvent(kind="json", payload=payload),
+            {},
+        )
+
+        delta = chunks[0].payload["choices"][0]["delta"]
+        self.assertEqual([{"text": "Think"}], delta["reasoning_details"])
+        self.assertNotIn("reasoning_content", delta)
 
     def test_openai_chat_responses_translator_maps_nonstream_payload(self) -> None:
         translator = OpenAIChatResponsesTranslator()

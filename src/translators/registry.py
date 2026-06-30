@@ -29,6 +29,10 @@ from .responses_bridge import (
 from .responses_bridge import (
     translate_openai_chat_downstream_chunk_to_responses as _translate_openai_chat_downstream_chunk_to_responses,
 )
+from .reasoning_utils import (
+    openai_reasoning_effort_to_claude_thinking,
+    openai_reasoning_effort_to_responses_reasoning,
+)
 from .tool_result_utils import normalize_tool_result_content
 
 
@@ -167,6 +171,9 @@ class OpenAIResponsesTranslator:
             translated["include"] = body.get("include")
         if body.get("parallel_tool_calls") is not None:
             translated["parallel_tool_calls"] = body.get("parallel_tool_calls")
+        reasoning = openai_reasoning_effort_to_responses_reasoning(body.get("reasoning_effort"))
+        if reasoning is not None:
+            translated["reasoning"] = reasoning
 
         tools = _to_openai_responses_tools(body.get("tools"))
         if tools:
@@ -505,6 +512,15 @@ class ClaudeChatTranslator:
             translated["stop_sequences"] = [str(item) for item in stop if str(item).strip()]
         elif stop not in (None, ""):
             translated["stop_sequences"] = [str(stop)]
+        thinking = openai_reasoning_effort_to_claude_thinking(
+            body.get("reasoning_effort"),
+            max_tokens=translated["max_tokens"],
+        )
+        if thinking is not None:
+            translated["thinking"] = thinking
+            budget_tokens = int(thinking.get("budget_tokens") or 0)
+            if budget_tokens > 0 and int(translated["max_tokens"]) <= budget_tokens:
+                translated["max_tokens"] = budget_tokens + 1
 
         system_parts: list[str] = []
         for message in body.get("messages", []) or []:

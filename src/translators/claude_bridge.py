@@ -10,6 +10,11 @@ from typing import Any
 
 from ..proxy_core.contracts import DownstreamChunk
 from .event_chunk_utils import build_json_event_chunk as _emit_event
+from .reasoning_utils import (
+    extract_openai_reasoning_delta,
+    extract_openai_reasoning_text,
+    openai_reasoning_effort_from_claude_thinking,
+)
 from .tool_result_utils import normalize_tool_result_content
 
 
@@ -46,12 +51,9 @@ def convert_claude_request_to_openai_chat_request(
             translated["stop"] = stops
 
     thinking = body.get("thinking")
-    if isinstance(thinking, dict):
-        thinking_type = str(thinking.get("type") or "").strip().lower()
-        if thinking_type == "disabled":
-            translated["reasoning_effort"] = "none"
-        elif thinking_type in {"enabled", "adaptive", "auto"}:
-            translated["reasoning_effort"] = _budget_to_reasoning_effort(thinking.get("budget_tokens"))
+    reasoning_effort = openai_reasoning_effort_from_claude_thinking(thinking)
+    if reasoning_effort is not None:
+        translated["reasoning_effort"] = reasoning_effort
 
     system_message = _convert_claude_system_to_openai(body.get("system"))
     if system_message is not None:
@@ -205,8 +207,12 @@ def translate_openai_chat_stream_payload_to_claude(
         if not isinstance(delta, dict):
             delta = {}
 
-        reasoning_content = delta.get("reasoning_content")
-        if isinstance(reasoning_content, str) and reasoning_content:
+        reasoning_content = extract_openai_reasoning_delta(
+            delta,
+            state,
+            f"reasoning_details:{int(choice.get('index') or 0)}",
+        )
+        if reasoning_content:
             outputs.extend(_finalize_text_block(state))
             outputs.extend(_ensure_reasoning_open(state))
             reasoning_state = state["reasoning"]
@@ -660,7 +666,7 @@ def _finalize_tool_blocks(state: dict[str, Any]) -> list[DownstreamChunk]:
 
 def _convert_openai_message_to_claude_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
     content_blocks: list[dict[str, Any]] = []
-    reasoning_content = str(message.get("reasoning_content") or "").strip()
+    reasoning_content = extract_openai_reasoning_text(message).strip()
     if reasoning_content:
         content_blocks.append({"type": "thinking", "thinking": reasoning_content})
 
@@ -705,20 +711,6 @@ def _coerce_tool_input(arguments: Any) -> dict[str, Any]:
             return parsed
         return {"value": parsed}
     return {}
-
-
-def _budget_to_reasoning_effort(budget_tokens: Any) -> str:
-    try:
-        budget = int(budget_tokens)
-    except (TypeError, ValueError):
-        return "high"
-    if budget <= 0:
-        return "none"
-    if budget < 2048:
-        return "low"
-    if budget < 8192:
-        return "medium"
-    return "high"
 
 
 def _map_openai_finish_reason_to_claude(reason: Any) -> str:
