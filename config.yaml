@@ -12,30 +12,15 @@ admin:
   username: admin
   password: admin
 providers:
-- name: volc_code
-  enabled: true
-  api: https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions
-  source_format: openai_chat
-  api_key: null
-  verify_ssl: false
-  model_list:
-  - ark-code-latest
-  - kimi-k2.5
-  - MiniMax-M2.5
-  - GLM-4.7
-  - DeepSeek-V3.2
-  - Doubao-Seed-2.0-Code
-  - Doubao-Seed-2.0-pro
-  proxy_mode: direct
 - name: deepseek
-  enabled: false
-  api: https://api.deepseek.com/v1/chat/completions
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
   source_format: openai_chat
-  api_key: null
+  api_key: sk-1234
   verify_ssl: false
   model_list:
-  - deepseek-chat
-  - deepseek-reasoner
+  - deepseek-v4-flash
+  - deepseek-v4-pro
   proxy_mode: direct
 auth_groups:
 - name: group1
