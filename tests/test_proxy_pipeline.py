@@ -85,9 +85,30 @@ class RewriteRequestModelHook(BaseHook):
 
     def request_guard(self, ctx: Any, body: dict[str, Any]) -> dict[str, Any]:
         del ctx
-        guarded_body = dict(body)
-        guarded_body["model"] = self._target_model
-        return guarded_body
+        rewritten_body = dict(body)
+        rewritten_body["model"] = self._target_model
+        return rewritten_body
+
+
+class RequestBodyRecordingHook(BaseHook):
+    def __init__(self) -> None:
+        self.bodies: list[dict[str, Any]] = []
+
+    def request_guard(self, ctx: Any, body: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        self.bodies.append(dict(body))
+        return body
+
+
+class RewriteRequestStreamHook(BaseHook):
+    def __init__(self, stream: bool) -> None:
+        self._stream = stream
+
+    def request_guard(self, ctx: Any, body: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        rewritten_body = dict(body)
+        rewritten_body["stream"] = self._stream
+        return rewritten_body
 
 
 class HeaderRecordingHook(BaseHook):
@@ -494,7 +515,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(["application/json; charset=utf-8"], response.headers.getlist("Content-Type"))
         self.assertEqual("trace-1", response.headers["X-Upstream-Trace"])
 
-    def test_build_upstream_request_uses_model_rewritten_by_request_guard(self) -> None:
+    def test_build_upstream_request_applies_request_guard_to_translated_body(self) -> None:
         provider = LLMProvider(
             name="demo",
             api="https://example.com/v1/chat/completions",
@@ -524,9 +545,85 @@ class ProxyServicePipelineTests(unittest.TestCase):
             auth_entry_id=None,
         )
 
-        self.assertEqual("rewritten-model", built_request.guarded_body["model"])
+        self.assertEqual("original-model", built_request.original_body["model"])
         self.assertEqual("rewritten-model", built_request.translated_body["model"])
         self.assertEqual("rewritten-model", built_request.request_ctx.upstream_model)
+
+    def test_build_upstream_request_passes_translated_body_to_request_guard(self) -> None:
+        hook = RequestBodyRecordingHook()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("claude_chat",),
+            hook=hook,
+        )
+
+        built_request = build_upstream_request(
+            root_path=Path(__file__).resolve().parents[1],
+            logger=FakeLogger(),
+            provider=provider,
+            request_model="chat-upstream/gpt-4.1",
+            upstream_model="gpt-4.1",
+            provider_target_format="claude_chat",
+            request_data={
+                "model": "chat-upstream/gpt-4.1",
+                "max_tokens": 256,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "Hello"}],
+                    },
+                ],
+                "stream": True,
+            },
+            request_headers={"content-type": "application/json"},
+            translator=OpenAIChatClaudeTranslator(),
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+            auth_group_name=None,
+            auth_entry_id=None,
+        )
+
+        self.assertEqual("chat-upstream/gpt-4.1", built_request.original_body["model"])
+        self.assertEqual("gpt-4.1", hook.bodies[0]["model"])
+        self.assertEqual("Hello", hook.bodies[0]["messages"][0]["content"])
+        self.assertEqual(hook.bodies[0]["messages"], built_request.translated_body["messages"])
+
+    def test_build_upstream_request_uses_stream_rewritten_by_request_guard(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            hook=RewriteRequestStreamHook(True),
+        )
+
+        built_request = build_upstream_request(
+            root_path=Path(__file__).resolve().parents[1],
+            logger=FakeLogger(),
+            provider=provider,
+            request_model="demo/gpt-4.1",
+            upstream_model="gpt-4.1",
+            provider_target_format="openai_chat",
+            request_data={
+                "model": "gpt-4.1",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
+            request_headers={"content-type": "application/json"},
+            translator=OpenAIChatTranslator(),
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+            auth_group_name=None,
+            auth_entry_id=None,
+        )
+
+        self.assertTrue(built_request.request_ctx.stream)
+        self.assertTrue(built_request.translated_body["stream"])
+        self.assertTrue(built_request.translated_body["stream_options"]["include_usage"])
 
     def test_build_upstream_request_keeps_provider_like_upstream_model_id(self) -> None:
         provider = LLMProvider(
@@ -557,7 +654,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             auth_entry_id=None,
         )
 
-        self.assertEqual("aliyun/deepseek", built_request.guarded_body["model"])
+        self.assertEqual("aliyun/deepseek", built_request.original_body["model"])
         self.assertEqual("aliyun/deepseek", built_request.translated_body["model"])
         self.assertEqual("aliyun/deepseek", built_request.request_ctx.upstream_model)
 

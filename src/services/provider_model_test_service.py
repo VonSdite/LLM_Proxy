@@ -226,7 +226,7 @@ class ProviderModelTestService:
         )
         return (
             built_request.headers,
-            built_request.guarded_body,
+            built_request.original_body,
             built_request.translated_body,
             built_request.request_ctx,
         )

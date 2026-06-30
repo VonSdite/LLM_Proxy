@@ -187,7 +187,7 @@ class ProxyService:
             )
             return (
                 built_request.headers,
-                built_request.guarded_body,
+                built_request.original_body,
                 built_request.translated_body,
                 built_request.request_ctx,
             )
@@ -223,7 +223,7 @@ class ProxyService:
                 if self._auth_group_manager is not None and provider.auth_group:
                     selected_auth = self._auth_group_manager.acquire(provider.auth_group)
 
-                headers, guarded_body, translated_body, request_ctx = build_request(attempt, selected_auth)
+                headers, original_body, translated_body, request_ctx = build_request(attempt, selected_auth)
                 requested_stream = request_ctx.stream
                 effective_upstream_model = request_ctx.upstream_model
                 translated_upstream_model = translated_body["model"]
@@ -366,7 +366,7 @@ class ProxyService:
                         translator=translator,
                         request_ctx=request_ctx,
                         downstream_target_format=downstream_target_format,
-                        original_request=guarded_body,
+                        original_request=original_body,
                         translated_request=translated_body,
                         opened=opened,
                         on_complete=on_complete,
@@ -382,7 +382,7 @@ class ProxyService:
                         translator=translator,
                         request_ctx=request_ctx,
                         downstream_target_format=downstream_target_format,
-                        original_request=guarded_body,
+                        original_request=original_body,
                         translated_request=translated_body,
                         opened=opened,
                         on_complete=on_complete,

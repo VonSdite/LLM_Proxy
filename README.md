@@ -493,10 +493,10 @@ from src.hooks import BaseHook, HookContext
    - 适合补充或覆盖 Header、Cookie、Token 等信息
 
 2. `request_guard`
-   - 在协议转换之前调用
-   - 拿到的是下游原始请求体，而不是翻译给上游后的请求体
-   - 适合改写 `messages`、补字段、调整 `stream`，或者做请求校验与护栏
-   - 返回 `None` 时，代理会保留原始请求体
+   - 在协议转换之后、发送上游之前调用
+   - 拿到的是翻译给上游后的请求体，`body["model"]` 为真实上游模型 ID
+   - 适合改写上游请求字段、补充 Provider 私有参数、调整 `stream`，或者做请求校验与护栏
+   - 返回 `None` 时，代理会保留当前上游请求体
 
 3. `response_guard`
    - 在协议转换之后调用

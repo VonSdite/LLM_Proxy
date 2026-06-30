@@ -122,9 +122,9 @@ class HookContractsTests(unittest.TestCase):
         ctx = self._ctx()
 
         request_body = {"messages": [{"role": "user", "content": "hello"}]}
-        guarded_body = hook.request_guard(ctx, request_body)
+        rewritten_body = hook.request_guard(ctx, request_body)
 
-        self.assertEqual("[PREFIX] hello", guarded_body["messages"][0]["content"])
+        self.assertEqual("[PREFIX] hello", rewritten_body["messages"][0]["content"])
         with self.assertRaises(HookAbortError) as caught:
             hook.request_guard(ctx, {"messages": [{"role": "user", "content": "[HOOK_ABORT_EXAMPLE]"}]})
         self.assertEqual(400, caught.exception.status_code)
