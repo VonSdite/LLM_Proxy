@@ -1332,6 +1332,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function insertAuthEntryYamlTemplate(", html)
         self.assertIn("function getSingleAuthEntryYamlTemplate(", html)
         self.assertIn("function saveAuthEntriesFromYaml(", html)
+        self.assertIn("function validateAuthGroupEntriesBeforeSave(", html)
+        self.assertIn("请输入第 ${entryNumber} 个 Auth Entry 的 Entry ID", html)
+        self.assertIn("if (!validateAuthGroupEntriesBeforeSave())", html)
         self.assertIn("function toggleDeleteAuthGroupConfirm(", html)
         self.assertIn("function confirmDeleteAuthGroup(", html)
         self.assertIn("function closeDeleteAuthGroupConfirm(", html)
@@ -2128,6 +2131,8 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
 
         self.assertIn("function formatActionErrorMessage(", script)
         self.assertIn("window.showActionError = showActionError;", script)
+        self.assertIn('["auth entry id is required", "请输入 Auth Entry ID"]', script)
+        self.assertNotIn('["auth entry id is required", "请选择一个 Auth Entry"]', script)
         self.assertNotIn("failed to fetch models", script)
         self.assertNotIn("failed to toggle user status", script)
 
@@ -2143,9 +2148,9 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         web_controller_py = (root.parent / "presentation" / "web_controller.py").read_text(encoding="utf-8")
         app_version_expression = "{{ app_version|default('0.0.0') }}"
 
-        self.assertIn("/static/js/ui-message.js?v=20260319-1", login_html)
-        self.assertIn("/static/js/ui-message.js?v=20260319-1", users_html)
-        self.assertIn("/static/js/ui-message.js?v=20260319-1", index_html)
+        self.assertIn("/static/js/ui-message.js?v=20260630-1", login_html)
+        self.assertIn("/static/js/ui-message.js?v=20260630-1", users_html)
+        self.assertIn("/static/js/ui-message.js?v=20260630-1", index_html)
         self.assertIn("/static/css/admin-base.css?v=20260603-4", base_page_html)
         self.assertIn("/static/js/theme.js?v=20260319-1", base_page_html)
         self.assertIn("showActionError('登录'", login_html)

@@ -566,7 +566,7 @@
 {% endblock %}
 
 {% block page_scripts %}
-    <script src="/static/js/ui-message.js?v=20260319-1"></script>
+    <script src="/static/js/ui-message.js?v=20260630-1"></script>
     <script src="/static/vendor/ace/ace.js?v=1.43.6"></script>
     <script src="/static/vendor/ace/mode-yaml.js?v=1.43.6"></script>
     <script src="/static/vendor/ace/theme-textmate.js?v=1.43.6"></script>
@@ -3849,6 +3849,34 @@
             };
         }
 
+        function validateAuthGroupEntriesBeforeSave() {
+            const cards = Array.from(document.querySelectorAll('#authEntriesContainer .auth-entry-card'));
+            for (const [index, card] of cards.entries()) {
+                const entryNumber = index + 1;
+                const idInput = card.querySelector('.auth-entry-id');
+                const entryId = idInput?.value?.trim() || '';
+                if (!entryId) {
+                    expandAuthEntryCard(card);
+                    showMessage(`请输入第 ${entryNumber} 个 Auth Entry 的 Entry ID`, 'error');
+                    focusElementSafely(idInput);
+                    return false;
+                }
+
+                const headerRows = Array.from(card.querySelectorAll('.auth-header-row'));
+                const hasHeader = headerRows.some(row => {
+                    const key = row.querySelector('.auth-header-key')?.value?.trim() || '';
+                    return key !== '';
+                });
+                if (!hasHeader) {
+                    expandAuthEntryCard(card);
+                    showMessage(`请至少为第 ${entryNumber} 个 Auth Entry 配置一个 Header`, 'error');
+                    focusElementSafely(card.querySelector('.auth-header-key'));
+                    return false;
+                }
+            }
+            return true;
+        }
+
         function getAuthEntryYamlTemplate(entryId = 'key-1') {
             const templateLines = [
                 "entries:",
@@ -4464,6 +4492,9 @@
             }
             if (!Array.isArray(payload.entries) || payload.entries.length === 0) {
                 showMessage('请至少配置一个 Auth Entry', 'error');
+                return;
+            }
+            if (!validateAuthGroupEntriesBeforeSave()) {
                 return;
             }
 
