@@ -153,6 +153,8 @@ downstream request
   - 将上游流拆成统一事件
 - `TranslatorRegistry`
   - 负责协议适配
+  - 维护 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 与 Claude `thinking` 的请求语义映射
+  - 将 OpenAI Chat 上游 reasoning 内容转换为下游协议对应的 thinking / reasoning 输出
 - `Encoder`
   - 将统一 chunk 编码成下游协议
 - `Hook`
@@ -677,7 +679,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - `src/proxy_core/`
   - decoder、encoder、shared contracts
 - `src/translators/`
-  - protocol translators
+  - protocol translators and shared reasoning helpers
 - `src/hooks/`
   - hook contracts
 
@@ -717,6 +719,8 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 下游编码
 - [src/translators/registry.py](../src/translators/registry.py)
   - 4x4 translator registry
+- [src/translators/reasoning_utils.py](../src/translators/reasoning_utils.py)
+  - reasoning / thinking 语义映射与 OpenAI 兼容 reasoning 字段提取
 - [src/presentation/templates/providers.html](../src/presentation/templates/providers.html)
   - Provider 页面与 `source_format` / Auth Group 编辑
 - [src/presentation/templates/settings.html](../src/presentation/templates/settings.html)

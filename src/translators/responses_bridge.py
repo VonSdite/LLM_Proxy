@@ -9,6 +9,11 @@ from typing import Any
 
 from ..proxy_core.contracts import DownstreamChunk
 from .event_chunk_utils import build_json_event_chunk as _emit_event
+from .reasoning_utils import (
+    extract_openai_reasoning_delta,
+    extract_openai_reasoning_text,
+    openai_reasoning_effort_from_responses_reasoning,
+)
 from .tool_result_utils import normalize_tool_result_content
 
 
@@ -90,6 +95,9 @@ def convert_openai_responses_request_to_chat_request(
         translated["user"] = body.get("user")
     if body.get("metadata") is not None:
         translated["metadata"] = body.get("metadata")
+    reasoning_effort = openai_reasoning_effort_from_responses_reasoning(body.get("reasoning"))
+    if reasoning_effort is not None:
+        translated["reasoning_effort"] = reasoning_effort
 
     chat_tools = []
     for tool in body.get("tools") or []:
@@ -228,8 +236,12 @@ def translate_openai_chat_stream_payload_to_responses(
         if not isinstance(delta, dict):
             delta = {}
 
-        reasoning_content = delta.get("reasoning_content")
-        if isinstance(reasoning_content, str) and reasoning_content:
+        reasoning_content = extract_openai_reasoning_delta(
+            delta,
+            state,
+            f"reasoning_details:{int(choice.get('index') or 0)}",
+        )
+        if reasoning_content:
             outputs.extend(_ensure_reasoning_open(state))
             reasoning_state = state["reasoning"]
             reasoning_state["text"] += reasoning_content
@@ -779,7 +791,7 @@ def convert_openai_chat_response_to_responses(
     response_id = payload.get("id") or f"resp_{model_name}_{int(time.time() * 1000)}"
     response_model = payload.get("model") or translated_request.get("model") or model_name
     output_items: list[dict[str, Any]] = []
-    reasoning_content = str(message.get("reasoning_content") or "")
+    reasoning_content = extract_openai_reasoning_text(message)
     if reasoning_content:
         output_items.append(
             {
