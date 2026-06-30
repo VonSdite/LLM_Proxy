@@ -21,7 +21,7 @@ class BuiltUpstreamRequest:
     """标准化后的上游请求构建结果。"""
 
     headers: dict[str, str]
-    guarded_body: dict[str, Any]
+    original_body: dict[str, Any]
     translated_body: dict[str, Any]
     request_ctx: HookContext
 
@@ -43,7 +43,7 @@ def build_upstream_request(
     auth_group_name: str | None,
     auth_entry_id: str | None,
 ) -> BuiltUpstreamRequest:
-    """构建经过 hook 和翻译后的上游请求。"""
+    """构建经过翻译和 hook 后的上游请求。"""
     initial_stream = bool(request_data.get("stream", False))
     request_ctx = HookContext(
         retry=attempt,
@@ -63,41 +63,42 @@ def build_upstream_request(
     )
 
     headers = provider.apply_header_hook(request_ctx, dict(request_headers))
-    guarded_body = provider.apply_request_guard(request_ctx, dict(request_data))
-    guarded_upstream_model = _resolve_guarded_upstream_model(guarded_body, upstream_model)
-    if guarded_upstream_model != request_ctx.upstream_model:
-        request_ctx = replace(request_ctx, upstream_model=guarded_upstream_model)
-    guarded_stream = bool(guarded_body.get("stream", False))
-    if guarded_stream != request_ctx.stream:
-        request_ctx = replace(request_ctx, stream=guarded_stream)
-
     translated_body = translator.translate_request(
-        guarded_upstream_model,
-        guarded_body,
-        guarded_stream,
+        upstream_model,
+        dict(request_data),
+        initial_stream,
     )
+
+    upstream_body = provider.apply_request_guard(request_ctx, dict(translated_body))
+    final_upstream_model = _resolve_final_upstream_model(upstream_body, upstream_model)
+    if final_upstream_model != request_ctx.upstream_model:
+        request_ctx = replace(request_ctx, upstream_model=final_upstream_model)
+    final_stream = bool(upstream_body.get("stream", False))
+    if final_stream != request_ctx.stream:
+        request_ctx = replace(request_ctx, stream=final_stream)
+
     if str(provider.source_format or "").strip().lower() == "claude_chat":
-        resign_anthropic_messages_body_cch(translated_body)
-    ensure_upstream_usage_capture(provider.source_format, translated_body, guarded_stream)
+        resign_anthropic_messages_body_cch(upstream_body)
+    ensure_upstream_usage_capture(provider.source_format, upstream_body, final_stream)
     return BuiltUpstreamRequest(
         headers=headers,
-        guarded_body=guarded_body,
-        translated_body=translated_body,
+        original_body=dict(request_data),
+        translated_body=upstream_body,
         request_ctx=request_ctx,
     )
 
 
-def _resolve_guarded_upstream_model(
-    guarded_body: dict[str, Any],
+def _resolve_final_upstream_model(
+    upstream_body: dict[str, Any],
     fallback_model: str,
 ) -> str:
-    """解析 request_guard 修改后的实际上游模型名。"""
-    guarded_model_value = guarded_body.get("model")
-    if not isinstance(guarded_model_value, str):
+    """解析最终上游请求体中的实际上游模型名。"""
+    upstream_model_value = upstream_body.get("model")
+    if not isinstance(upstream_model_value, str):
         return fallback_model
 
-    normalized_guarded_model = guarded_model_value.strip()
-    if not normalized_guarded_model:
+    normalized_upstream_model = upstream_model_value.strip()
+    if not normalized_upstream_model:
         return fallback_model
 
-    return normalized_guarded_model
+    return normalized_upstream_model

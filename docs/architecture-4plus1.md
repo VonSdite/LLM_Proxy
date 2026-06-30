@@ -36,8 +36,10 @@ downstream request
   -> controller
   -> provider lookup
   -> resolve route model key to upstream model id
-  -> header_hook / request_guard
+  -> header_hook
   -> translator.translate_request()
+  -> request_guard
+  -> usage request enrichment / provider protocol signing
   -> executor
   -> decoder
   -> translator.translate_response()
@@ -425,8 +427,9 @@ provider editor form snapshot
   -> controller
   -> auth header resolve (api_key or auth_group + auth_entry)
   -> ProviderRuntimeFactory
-  -> request_guard / header_hook
+  -> header_hook
   -> translator.translate_request()
+  -> request_guard
   -> usage request enrichment when protocol supports it
   -> executor
   -> decoder
@@ -471,10 +474,10 @@ provider editor form snapshot
 - 每一条测试结果一返回就立即回填到对应表格行
 - 批量测试属于当前页面会话内行为；页面刷新或离开后，尚未开始的后续测试不会继续执行
 
-补充说明：
+能力边界：
 
-- 数据平面主代理链路未变化
-- 新增的是 Provider 编辑页上的控制平面上游模型拉取与性能测试链路
+- 数据平面主代理链路独立于 Provider 编辑页联通性测试链路
+- Provider 编辑页提供控制平面的上游模型拉取与性能测试能力
 
 ### 3.7 Control-Plane OAuth Management
 
@@ -846,22 +849,22 @@ sequenceDiagram
     Service-->>Client: Claude-style SSE
 ```
 
-## 7. Design Decisions
+## 7. Runtime Boundaries
 
-### 7.1 Why only four protocol families
+### 7.1 Protocol Families
 
-因为项目当前的目标客户端只需要：
+当前协议族面向以下目标客户端：
 
 - OpenCode
 - Codex
 - Claude Code
 - Cherry Studio
 
-Gemini / Antigravity 这类协议面会显著增加配置复杂度，但对当前目标收益很低，因此本版直接移除。
+系统内置协议族聚焦 OpenAI Chat Completions、OpenAI Responses / Codex 与 Claude Messages。Gemini / Antigravity 等协议面不属于当前内置协议族范围。
 
-### 7.2 Why no public `stream_format`
+### 7.2 Stream Format Ownership
 
-因为流格式判断应该是代理内部责任，而不是用户负担。
+流格式判断属于代理内部责任。
 
 用户只需要清楚：
 
