@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 OPENAI_REASONING_FALLBACK_EFFORT = "xhigh"
 OPENAI_REASONING_EFFORTS = {
     "none",

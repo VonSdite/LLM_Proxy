@@ -172,6 +172,77 @@ class UserModelPermissionTests(unittest.TestCase):
         self.assertEqual(["demo/gpt-4.1-mini"], alice["model_permissions"])
         self.assertEqual(["demo/gpt-4.1-mini"], bob["model_permissions"])
 
+    def test_export_users_uses_portable_model_permissions(self) -> None:
+        alice_id = self._repository.create("alice", "127.0.0.1")
+        self.assertIsNotNone(alice_id)
+        assert alice_id is not None
+        self._service.update_user(
+            alice_id,
+            model_permissions_provided=True,
+            model_permissions=["demo/gpt-4.1-mini"],
+        )
+
+        exported = self._service.export_users([alice_id])
+
+        self.assertEqual("llm_proxy.users", exported["kind"])
+        self.assertEqual(
+            [
+                {
+                    "username": "alice",
+                    "ip_address": "127.0.0.1",
+                    "whitelist_access_enabled": True,
+                    "model_permissions": ["demo/gpt-4.1-mini"],
+                }
+            ],
+            exported["users"],
+        )
+
+    def test_import_users_skips_duplicate_ip(self) -> None:
+        existing_id = self._repository.create("alice", "127.0.0.1")
+        self.assertIsNotNone(existing_id)
+
+        result = self._service.import_users(
+            {
+                "users": [
+                    {
+                        "username": "alice-copy",
+                        "ip_address": "127.0.0.1",
+                        "model_permissions": "*",
+                    },
+                    {
+                        "username": "bob",
+                        "ip_address": "127.0.0.2",
+                        "whitelist_access_enabled": False,
+                        "model_permissions": ["demo/gpt-4.1"],
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(1, result["count"])
+        self.assertEqual(["127.0.0.1"], result["skipped_ip_addresses"])
+        users = self._repository.list_all()
+        self.assertEqual(["alice", "bob"], [user["username"] for user in users])
+        bob = self._service.get_user_by_ip("127.0.0.2")
+        self.assertIsNotNone(bob)
+        assert bob is not None
+        self.assertFalse(bool(bob["whitelist_access_enabled"]))
+        self.assertEqual(["demo/gpt-4.1"], bob["model_permissions"])
+
+    def test_batch_delete_users_removes_selected_users(self) -> None:
+        alice_id = self._repository.create("alice", "127.0.0.1")
+        bob_id = self._repository.create("bob", "127.0.0.2")
+        self.assertIsNotNone(alice_id)
+        self.assertIsNotNone(bob_id)
+        assert alice_id is not None
+        assert bob_id is not None
+
+        result = self._service.batch_delete_users([alice_id, bob_id])
+
+        self.assertEqual(2, result["count"])
+        self.assertEqual([alice_id, bob_id], result["user_ids"])
+        self.assertEqual([], self._repository.list_all())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,11 +4,14 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 from ..application.app_context import AppContext
 from ..config.provider_config import (
+    PROVIDER_NAME_MAX_LENGTH,
     ProviderConfigSchema,
     parse_optional_bool,
     validate_auth_group_provider_definitions,
@@ -85,6 +88,81 @@ class ProviderService:
 
         providers.remove(target)
         self._save_providers(config, providers)
+
+    def copy_provider(self, name: str) -> dict[str, Any]:
+        """复制 Provider，并把新项插入到源 Provider 下方。"""
+        config = self._config_manager.get_raw_config()
+        providers = read_provider_entries(config)
+        target = self._find_provider(providers, name)
+        if target is None:
+            raise ValueError(f"Provider not found: {name}")
+
+        existing_names = set(self._list_provider_names(providers))
+        copied_provider = deepcopy(target)
+        copied_provider["name"] = self._build_unique_provider_name(
+            copied_provider.get("name"),
+            existing_names,
+        )
+        provider_config = ProviderConfigSchema.from_payload(copied_provider)
+        stored = provider_config.to_storage_mapping()
+        providers.insert(providers.index(target) + 1, stored)
+        self._save_providers(config, providers)
+        return provider_config.to_mapping()
+
+    def export_providers(self, names: Any) -> dict[str, Any]:
+        """导出指定 Provider 配置。"""
+        normalized_names = self._normalize_provider_names(names, reject_duplicates=False)
+        config = self._config_manager.get_raw_config()
+        providers = read_provider_entries(config)
+        self._find_provider_indexes(providers, normalized_names)
+
+        provider_by_name = {str(provider.get("name", "")).strip(): provider for provider in providers}
+        exported_providers = [
+            ProviderConfigSchema.from_mapping(provider_by_name[name]).to_mapping() for name in normalized_names
+        ]
+        return {
+            "version": 1,
+            "kind": "llm_proxy.providers",
+            "providers": exported_providers,
+        }
+
+    def import_providers(self, payload: Any) -> dict[str, Any]:
+        """导入 Provider 配置；同名 Provider 自动追加数字后缀。"""
+        if not isinstance(payload, dict):
+            raise ValueError("Provider import payload must be a JSON object")
+        raw_providers = payload.get("providers")
+        if not isinstance(raw_providers, list) or not raw_providers:
+            raise ValueError("Provider import payload must include a non-empty providers list")
+
+        config = self._config_manager.get_raw_config()
+        providers = read_provider_entries(config)
+        existing_names = set(self._list_provider_names(providers))
+        imported_names: list[str] = []
+        renamed_providers: list[dict[str, str]] = []
+
+        for raw_provider in raw_providers:
+            if not isinstance(raw_provider, dict):
+                raise ValueError("Each imported provider must be an object")
+
+            original_config = ProviderConfigSchema.from_payload(raw_provider)
+            next_provider = original_config.to_storage_mapping()
+            unique_name = self._build_unique_provider_name(original_config.name, existing_names)
+            if unique_name != original_config.name:
+                renamed_providers.append({"from": original_config.name, "to": unique_name})
+                next_provider["name"] = unique_name
+
+            provider_config = ProviderConfigSchema.from_payload(next_provider)
+            providers.append(provider_config.to_storage_mapping())
+            existing_names.add(provider_config.name)
+            imported_names.append(provider_config.name)
+
+        providers = self._regroup_providers_by_enabled(providers)
+        self._save_providers(config, providers)
+        return {
+            "count": len(imported_names),
+            "names": imported_names,
+            "renamed": renamed_providers,
+        }
 
     def set_provider_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
@@ -208,6 +286,30 @@ class ProviderService:
     @staticmethod
     def _is_provider_enabled(provider: dict[str, Any]) -> bool:
         return parse_optional_bool(provider.get("enabled"), default=True) is not False
+
+    @staticmethod
+    def _sanitize_provider_name_seed(value: Any) -> str:
+        seed = re.sub(r"[^A-Za-z0-9_]", "_", str(value or "").strip())
+        seed = re.sub(r"_+", "_", seed).strip("_")
+        if not seed:
+            seed = "provider"
+        if not seed[0].isalpha():
+            seed = f"provider_{seed}"
+        return seed[:PROVIDER_NAME_MAX_LENGTH]
+
+    @classmethod
+    def _build_unique_provider_name(cls, base_name: Any, existing_names: set[str]) -> str:
+        seed = cls._sanitize_provider_name_seed(base_name)
+        if seed not in existing_names:
+            return seed
+
+        for index in range(1, 10_000):
+            suffix = f"_{index}"
+            prefix = seed[: PROVIDER_NAME_MAX_LENGTH - len(suffix)]
+            candidate = f"{prefix}{suffix}"
+            if candidate not in existing_names:
+                return candidate
+        raise ValueError("Unable to generate a unique provider name")
 
     @classmethod
     def _regroup_providers_by_enabled(

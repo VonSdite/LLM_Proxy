@@ -15,9 +15,9 @@ from ..utils.net import (
     DEFAULT_REAL_CLIENT_IP_HEADER,
     PROXY_MODE_CUSTOM,
     PROXY_MODE_DIRECT,
-    normalize_real_client_ip_header,
     normalize_proxy_mode,
     normalize_proxy_url,
+    normalize_real_client_ip_header,
 )
 
 LOGGER = logging.getLogger("app")

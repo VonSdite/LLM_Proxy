@@ -11,12 +11,12 @@ from typing import Any
 from ..application.app_context import AppContext
 from ..config.provider_config import parse_optional_bool
 from ..utils.net import (
-    DEFAULT_REAL_CLIENT_IP_HEADER,
     DEFAULT_PROXY_MODE,
+    DEFAULT_REAL_CLIENT_IP_HEADER,
     PROXY_MODE_CUSTOM,
-    normalize_real_client_ip_header,
     normalize_proxy_mode,
     normalize_proxy_url,
+    normalize_real_client_ip_header,
 )
 
 _HTTP_HEADER_NAME_CHARS = frozenset(

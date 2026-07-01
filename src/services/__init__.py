@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """服务层导出。"""
 
-from .auth_group_service import AuthGroupService
 from .api_key_service import ApiKeyService
+from .auth_group_service import AuthGroupService
 from .authentication_service import AuthenticationService
 from .claude_oauth_service import ClaudeOAuthService
 from .claude_proxy_service import ClaudeProxyService

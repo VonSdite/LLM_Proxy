@@ -53,6 +53,9 @@
                                             aria-label="查看 Chat 白名单说明"
                                         >?</button>
                                 </div>
+                                <button type="button" class="btn btn-toolbar-secondary" id="exportUsersBtn" onclick="exportUsers()">导出用户</button>
+                                <button type="button" class="btn btn-toolbar-secondary" id="importUsersBtn" onclick="openUserImportPicker()">导入用户</button>
+                                <input type="file" id="userImportFileInput" accept="application/json,.json" onchange="importUsersFromFile(this)" hidden>
                             </div>
                         </div>
                     </div>
@@ -63,6 +66,7 @@
                             </div>
                             <div class="users-batch-actions">
                                 <button type="button" class="btn btn-toolbar-secondary" id="batchSetModelPermissionsBtn" onclick="openPermissionModalForBatch()" disabled>设置模型权限</button>
+                                <button type="button" class="btn btn-toolbar-secondary" id="batchDeleteUsersBtn" onclick="deleteSelectedUsers()" disabled>批量删除</button>
                             </div>
                         </div>
                         <div class="section-search users-table-search" role="search" aria-label="搜索用户">
@@ -223,6 +227,8 @@
         let permissionDetailModalInstance = null;
         let pendingDeleteUserId = null;
         let deletingUserId = null;
+        let userBatchActionInFlight = false;
+        let userImportActionInFlight = false;
         let permissionTargetUserIds = [];
         let permissionModalMode = 'single';
         let permissionDraftMode = 'all';
@@ -332,12 +338,144 @@
             const controls = document.getElementById('usersBatchControls');
             const summary = document.getElementById('selectedUsersSummary');
             const batchButton = document.getElementById('batchSetModelPermissionsBtn');
-            if (!controls || !summary || !batchButton) return;
+            const deleteButton = document.getElementById('batchDeleteUsersBtn');
+            const importButton = document.getElementById('importUsersBtn');
+            if (!controls || !summary || !batchButton || !deleteButton) return;
 
             const selectedCount = selectedUserIds.size;
-            controls.hidden = !whitelistControlEnabled;
+            controls.hidden = selectedCount === 0;
             summary.textContent = String(selectedCount);
-            batchButton.disabled = selectedCount === 0;
+            batchButton.hidden = !whitelistControlEnabled;
+            batchButton.disabled = selectedCount === 0 || userBatchActionInFlight;
+            deleteButton.disabled = selectedCount === 0 || userBatchActionInFlight;
+            deleteButton.textContent = userBatchActionInFlight ? '删除中...' : '批量删除';
+            if (importButton) {
+                importButton.disabled = userImportActionInFlight;
+                importButton.textContent = userImportActionInFlight ? '导入中...' : '导入用户';
+            }
+        }
+
+        function buildJsonFilename(prefix) {
+            const now = new Date();
+            const pad = value => String(value).padStart(2, '0');
+            const timestamp = [
+                now.getFullYear(),
+                pad(now.getMonth() + 1),
+                pad(now.getDate()),
+                pad(now.getHours()),
+                pad(now.getMinutes()),
+                pad(now.getSeconds()),
+            ].join('');
+            return `${prefix}-${timestamp}.json`;
+        }
+
+        function downloadJsonFile(payload, filename) {
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        async function exportUsers() {
+            const selectedIds = Array.from(selectedUserIds);
+            const payload = selectedIds.length ? { user_ids: selectedIds } : {};
+            try {
+                const response = await fetch('/api/users/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '导出用户失败');
+                }
+                downloadJsonFile(result, buildJsonFilename('users'));
+                showMessage(`已导出 ${result.users?.length || 0} 个用户`, 'success');
+            } catch (error) {
+                console.error('导出用户失败:', error);
+                showActionError('导出用户', error, { fallback: '导出用户失败' });
+            }
+        }
+
+        function openUserImportPicker() {
+            if (userImportActionInFlight) return;
+            const input = document.getElementById('userImportFileInput');
+            if (!input) return;
+            input.value = '';
+            input.click();
+        }
+
+        async function importUsersFromFile(input) {
+            const file = input?.files?.[0];
+            if (!file || userImportActionInFlight) return;
+
+            userImportActionInFlight = true;
+            updateBatchToolbar();
+            try {
+                const payload = JSON.parse(await file.text());
+                const response = await fetch('/api/users/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '导入用户失败');
+                }
+                selectedUserIds = new Set(result.user_ids || []);
+                showMessage(
+                    `已导入 ${result.count || 0} 个用户${result.skipped_count ? `，跳过 ${result.skipped_count} 个重复 IP` : ''}`,
+                    'success'
+                );
+                await loadUsers();
+            } catch (error) {
+                console.error('导入用户失败:', error);
+                showActionError('导入用户', error, { fallback: '导入用户失败' });
+            } finally {
+                userImportActionInFlight = false;
+                if (input) input.value = '';
+                updateBatchToolbar();
+            }
+        }
+
+        async function deleteSelectedUsers() {
+            const selectedIds = Array.from(selectedUserIds);
+            if (!selectedIds.length || userBatchActionInFlight) {
+                showMessage('请先选择需要删除的用户', 'error');
+                return;
+            }
+
+            userBatchActionInFlight = true;
+            closeDeleteUserConfirm(false);
+            renderUsers();
+            try {
+                const response = await fetch('/api/users/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'delete',
+                        user_ids: selectedIds,
+                    }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '批量删除用户失败');
+                }
+                clearUserSelections(false);
+                showMessage(`已删除 ${result.count || selectedIds.length} 个用户`, 'success');
+                await loadUsers();
+            } catch (error) {
+                console.error('批量删除用户失败:', error);
+                showActionError('批量删除用户', error, { fallback: '批量删除用户失败' });
+            } finally {
+                userBatchActionInFlight = false;
+                renderUsers();
+            }
         }
 
         function clearUserSelections(shouldRender = true) {
@@ -362,7 +500,6 @@
         }
 
         function toggleSelectAllUsers(checked) {
-            if (!whitelistControlEnabled) return;
             if (checked) {
                 selectedUserIds = new Set(users.map(user => Number(user.id)));
             } else {
@@ -547,7 +684,6 @@
             chatWhitelistSaving = true;
             updateChatWhitelistUi();
             if (!whitelistControlEnabled) {
-                clearUserSelections(false);
                 closePermissionModal();
             }
             renderUsers();
@@ -564,7 +700,6 @@
                 }
                 whitelistControlEnabled = !!result.enabled;
                 if (!whitelistControlEnabled) {
-                    clearUserSelections(false);
                     closePermissionModal();
                 }
                 showMessage(`Chat 白名单已${whitelistControlEnabled ? '启用' : '禁用'}`, 'success');
@@ -1078,6 +1213,7 @@
         function renderUsers() {
             const container = document.getElementById('usersTableContainer');
             const showPermissionControls = whitelistControlEnabled;
+            const showSelectionControls = true;
 
             if (users.length === 0) {
                 container.innerHTML = `<div class="empty-state">${currentSearchKeyword ? '未找到匹配的用户' : '暂无用户数据'}</div>`;
@@ -1090,7 +1226,7 @@
                 <table class="users-table">
                     <thead>
                         <tr>
-                            ${showPermissionControls ? `
+                            ${showSelectionControls ? `
                             <th class="select-col">
                                 <input
                                     type="checkbox"
@@ -1098,6 +1234,7 @@
                                     id="selectAllUsersToggle"
                                     ${areAllCurrentUsersSelected() ? 'checked' : ''}
                                     onchange="toggleSelectAllUsers(this.checked)"
+                                    ${userBatchActionInFlight ? 'disabled' : ''}
                                     aria-label="选择当前页全部用户"
                                 >
                             </th>` : ''}
@@ -1161,13 +1298,14 @@
 
                 html += `
                     <tr>
-                        ${showPermissionControls ? `
+                        ${showSelectionControls ? `
                         <td class="select-col">
                             <input
                                 type="checkbox"
                                 class="user-table-checkbox"
                                 ${isSelected ? 'checked' : ''}
                                 onchange="toggleUserSelection(${Number(user.id)}, this.checked)"
+                                ${userBatchActionInFlight ? 'disabled' : ''}
                                 aria-label="选择用户 ${escapeHtml(user.username)}"
                             >
                         </td>` : ''}

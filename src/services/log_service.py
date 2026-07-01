@@ -222,6 +222,51 @@ class LogService:
             self._logger.error(f"Failed to get all request logs: {exc}")
             return []
 
+    def export_daily_stats(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """导出日聚合统计数据。"""
+        rows = self._repository.export_daily_stats(
+            start_date=start_date,
+            end_date=end_date,
+            username=username,
+            request_model=request_model,
+        )
+        self._logger.debug(
+            "Daily stats exported: start_date=%s end_date=%s username=%s request_model=%s rows=%s",
+            start_date,
+            end_date,
+            username,
+            request_model,
+            len(rows),
+        )
+        return {
+            "version": 1,
+            "kind": "llm_proxy.daily_request_stats",
+            "daily_request_stats": rows,
+        }
+
+    def import_daily_stats(self, payload: Any) -> dict[str, Any]:
+        """导入日聚合统计数据。"""
+        if not isinstance(payload, dict):
+            raise ValueError("Daily stats import payload must be a JSON object")
+        rows = payload.get("daily_request_stats")
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("Daily stats import payload must include a non-empty daily_request_stats list")
+
+        result = self._repository.import_daily_stats(rows)
+        self._logger.info(
+            "Daily stats imported: count=%s inserted=%s merged=%s",
+            result.get("count", 0),
+            result.get("inserted_count", 0),
+            result.get("merged_count", 0),
+        )
+        return result
+
     def get_unique_usernames(self) -> list[str]:
         """获取有日志记录的用户名列表。"""
         try:
