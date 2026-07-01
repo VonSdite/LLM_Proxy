@@ -158,7 +158,7 @@ downstream request
   - 管理立即生效项与重启生效项的边界
 - `ProviderRuntimeFactory`
   - 负责临时 / 正式 Provider 运行时对象构建
-  - 统一 hook 加载与缓存
+  - 统一 hook 加载与缓存，Hook 路径固定相对项目根目录 `hooks/`
 - `ExecutorRegistry`
   - 负责 HTTP 上游连接
   - 统一处理 Provider 出站请求中的代理风险确认页自动确认与一次重试

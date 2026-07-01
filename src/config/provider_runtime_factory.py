@@ -60,12 +60,23 @@ class ProviderRuntimeFactory:
         if not hook_path:
             return None
 
-        if Path(hook_path).is_absolute():
-            hook_file = Path(hook_path).resolve()
-        else:
-            hook_file = (self._base_dir / "hooks" / hook_path).resolve()
+        raw_hook_path = Path(hook_path)
+        cache_key = str(raw_hook_path)
+        if raw_hook_path.is_absolute():
+            self._logger.warning("Absolute hook path is not allowed: %s", hook_path)
+            self._hook_cache[cache_key] = None
+            return None
 
+        hooks_dir = (self._base_dir / "hooks").resolve()
+        hook_file = (hooks_dir / raw_hook_path).resolve()
         cache_key = str(hook_file)
+        try:
+            hook_file.relative_to(hooks_dir)
+        except ValueError:
+            self._logger.warning("Hook path must stay under hooks directory: %s", hook_path)
+            self._hook_cache[cache_key] = None
+            return None
+
         if cache_key in self._hook_cache:
             return self._hook_cache[cache_key]
 
