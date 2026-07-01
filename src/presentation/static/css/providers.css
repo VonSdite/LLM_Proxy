@@ -240,7 +240,7 @@
 }
 
 .providers-page .provider-list-table col.provider-actions-col {
-    width: 180px;
+    width: 232px;
 }
 
 .providers-page .providers-table th,
@@ -498,7 +498,18 @@
     flex-wrap: wrap;
 }
 
+.providers-page .provider-group-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
 .providers-page .provider-group-batch-btn {
+    white-space: nowrap;
+}
+
+.providers-page .provider-group-data-btn {
     white-space: nowrap;
 }
 
@@ -1060,7 +1071,7 @@
 
 .providers-page .provider-list-table td.provider-actions-cell,
 .providers-page .provider-list-table th:last-child {
-    width: 180px;
+    width: 232px;
 }
 
 .providers-page .btn-edit {
