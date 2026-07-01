@@ -523,7 +523,7 @@ from src.hooks import BaseHook, HookContext
 
 内置上游思考参数 Hook：
 
-- `openai_reasoning_compat.py`：汇总 Hook，按 Provider 名、路由模型名、上游模型名和请求体 `model` 自动匹配 MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope
+- `openai_reasoning_compat.py`：汇总 Hook，按真实上游模型名和请求体 `model` 自动匹配 MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope
 - `minimax_openai_compat.py`：MiniMax 专用 Hook
 - `deepseek_openai_compat.py`：DeepSeek 专用 Hook
 - `glm_openai_compat.py`：GLM / Z.AI 专用 Hook

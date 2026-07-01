@@ -267,10 +267,10 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual(20, rewritten["top_k"])
         self.assertNotIn("reasoning_effort", rewritten)
 
-    def test_aggregate_reasoning_hook_dispatches_by_vendor(self) -> None:
+    def test_aggregate_reasoning_hook_dispatches_by_model(self) -> None:
         module = self._load_hook_module("openai_reasoning_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="dashscope", upstream_model="qwen-plus")
+        ctx = self._ctx(provider_name="generic", upstream_model="qwen-plus")
 
         rewritten = hook.request_guard(
             ctx,
@@ -284,6 +284,14 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual(True, rewritten["enable_thinking"])
         self.assertEqual(2048, rewritten["thinking_budget"])
         self.assertNotIn("reasoning", rewritten)
+
+    def test_aggregate_reasoning_hook_does_not_match_provider_name(self) -> None:
+        module = self._load_hook_module("openai_reasoning_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(provider_name="dashscope", upstream_model="plain-model")
+        body = {"model": "plain-model", "messages": [], "reasoning_effort": "high"}
+
+        self.assertEqual(body, hook.request_guard(ctx, body))
 
     def test_reasoning_hooks_ignore_non_openai_chat_upstream(self) -> None:
         module = self._load_hook_module("openai_reasoning_compat.py")
