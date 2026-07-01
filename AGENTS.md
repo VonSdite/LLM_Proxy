@@ -12,6 +12,11 @@
 - 只有在减少转义、提升可读性时，普通字符串才使用单引号 `'...'`。
 - 涉及代码、配置、架构的修改时，优先保持控制平面与数据平面职责清晰。
 - 项目使用 `uv` 管理 Python 环境和依赖，运行测试、脚本和临时工具时优先使用 `uv run ...`。
+- 运行 Python 测试和项目脚本时使用 `uv run python ...`，避免直接调用裸 `python`。
+- 临时使用未固定到项目依赖中的 Python 工具时使用 `uv run --with <package> <command> ...`。
+- Python 代码统一使用 `ruff` 按 `pyproject.toml` 配置整理 import 和格式化；仓库环境没有 `ruff` 命令时使用 `uv run --with ruff ruff ...`。
+- 新增或修改 Python 文件后，需要对相关 Python 文件运行 `uv run --with ruff ruff check --select I --fix <paths>` 和 `uv run --with ruff ruff format <paths>`。
+- 文档编写使用正面事实陈述，直接描述当前行为、能力和约束，避免用“由于/为了/修复/改为”等变更缘由式表述。
 
 ## 项目定位
 - 这是一个基于 Flask + gevent 的 OpenAI 兼容代理服务。

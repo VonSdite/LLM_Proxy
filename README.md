@@ -521,6 +521,21 @@ from src.hooks import BaseHook, HookContext
 - 对成功响应做字段清洗、补全或内容改写
 - 通过 `HookAbortError` 主动中止当前请求
 
+内置上游思考参数 Hook：
+
+- `openai_reasoning_compat.py`：汇总 Hook，按 Provider 名、路由模型名、上游模型名和请求体 `model` 自动匹配 MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope
+- `minimax_openai_compat.py`：MiniMax 专用 Hook
+- `deepseek_openai_compat.py`：DeepSeek 专用 Hook
+- `glm_openai_compat.py`：GLM / Z.AI 专用 Hook
+- `qwen_openai_compat.py`：Qwen / DashScope 专用 Hook
+
+这些 Hook 只处理 OpenAI Chat 风格上游请求，会把 `reasoning_effort`、Responses 风格 `reasoning.effort`、Claude 风格 `thinking` 和 `enable_thinking` 规整成对应厂商参数：
+
+- MiniMax：`reasoning_split=true`；MiniMax-M3 使用 `thinking.type`
+- DeepSeek V4：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`
+- GLM / Z.AI：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`，历史 assistant 消息含 `reasoning_content` 时设置 `clear_thinking=false`
+- Qwen / DashScope：`enable_thinking`、`thinking_budget`，历史 assistant 消息含 `reasoning_content` 时设置 `preserve_thinking=true`
+
 `HookContext` 会提供这些上下文信息：
 
 - `retry`：当前是第几次尝试，从 `0` 开始
