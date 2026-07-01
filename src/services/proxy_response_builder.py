@@ -16,6 +16,7 @@ from ..external import LLMProvider
 from ..hooks import HookAbortError, HookContext, HookErrorType
 from ..proxy_core import (
     DownstreamChunk,
+    StreamEvent,
     decode_stream_events,
     encode_downstream_chunk,
     encode_downstream_response_body,
@@ -110,6 +111,38 @@ class ProxyResponseBuilder:
             completion_trace_error_type: str | None = None
             completion_error_message: str | None = None
             completion_hook_abort: HookAbortError | None = None
+
+            def emit_downstream_chunks(downstream_chunks: list[DownstreamChunk]) -> Iterator[bytes]:
+                nonlocal terminal_sent
+                for downstream_chunk in downstream_chunks:
+                    guarded_chunk = self._guard_stream_chunk(provider, request_ctx, downstream_chunk)
+                    if guarded_chunk is None:
+                        continue
+                    terminal_already_sent = terminal_sent
+                    if is_terminal_chunk(guarded_chunk, downstream_target_format):
+                        terminal_sent = True
+                    if guarded_chunk.kind == "done":
+                        if terminal_already_sent:
+                            continue
+                        encoded_terminal = encode_downstream_chunk(guarded_chunk, downstream_target_format)
+                        if encoded_terminal:
+                            self._extend_trace_buffer(downstream_payload_buffer, encoded_terminal)
+                            yield encoded_terminal
+                        continue
+                    if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
+                        self._update_meta_from_payload(meta, guarded_chunk.payload)
+                    if (
+                        downstream_target_format == "openai_chat"
+                        and guarded_chunk.kind == "json"
+                        and not forward_stream_usage
+                        and self._is_usage_only_stream_chunk(guarded_chunk.payload)
+                    ):
+                        continue
+                    encoded_chunk = encode_downstream_chunk(guarded_chunk, downstream_target_format)
+                    if encoded_chunk:
+                        self._extend_trace_buffer(downstream_payload_buffer, encoded_chunk)
+                        yield encoded_chunk
+
             try:
                 upstream_chunks = self._iter_stream_chunks_with_trace(
                     response.iter_content(chunk_size=None),
@@ -124,43 +157,21 @@ class ProxyResponseBuilder:
                         state,
                     )
                     self._update_meta_from_stream_state(meta, state)
-                    for downstream_chunk in downstream_chunks:
-                        guarded_chunk = self._guard_stream_chunk(provider, request_ctx, downstream_chunk)
-                        if guarded_chunk is None:
-                            continue
-                        terminal_already_sent = terminal_sent
-                        if is_terminal_chunk(guarded_chunk, downstream_target_format):
-                            terminal_sent = True
-                        if guarded_chunk.kind == "done":
-                            if terminal_already_sent:
-                                continue
-                            encoded_terminal = encode_downstream_chunk(guarded_chunk, downstream_target_format)
-                            if encoded_terminal:
-                                self._extend_trace_buffer(downstream_payload_buffer, encoded_terminal)
-                                yield encoded_terminal
-                            continue
-                        if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
-                            self._update_meta_from_payload(meta, guarded_chunk.payload)
-                        if (
-                            downstream_target_format == "openai_chat"
-                            and guarded_chunk.kind == "json"
-                            and not forward_stream_usage
-                            and self._is_usage_only_stream_chunk(guarded_chunk.payload)
-                        ):
-                            continue
-                        encoded_chunk = encode_downstream_chunk(guarded_chunk, downstream_target_format)
-                        if encoded_chunk:
-                            self._extend_trace_buffer(downstream_payload_buffer, encoded_chunk)
-                            yield encoded_chunk
+                    yield from emit_downstream_chunks(downstream_chunks)
+
+                if not terminal_sent:
+                    downstream_chunks = translator.translate_stream_event(
+                        request_ctx.upstream_model,
+                        original_request,
+                        translated_request,
+                        StreamEvent(kind="done", payload="[DONE]"),
+                        state,
+                    )
+                    self._update_meta_from_stream_state(meta, state)
+                    yield from emit_downstream_chunks(downstream_chunks)
 
                 if should_emit_terminal_chunk(downstream_target_format) and not terminal_sent:
-                    encoded_terminal = encode_downstream_chunk(
-                        DownstreamChunk(kind="done"),
-                        downstream_target_format,
-                    )
-                    if encoded_terminal:
-                        self._extend_trace_buffer(downstream_payload_buffer, encoded_terminal)
-                        yield encoded_terminal
+                    yield from emit_downstream_chunks([DownstreamChunk(kind="done")])
             except HookAbortError as exc:
                 completion_hook_abort = exc
                 completion_error_message = exc.message

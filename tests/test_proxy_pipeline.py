@@ -135,6 +135,17 @@ class StreamDecoderTests(unittest.TestCase):
         self.assertEqual(["json", "done"], [event.kind for event in events])
         self.assertEqual("你好", events[0].payload["choices"][0]["delta"]["content"])
 
+    def test_sse_json_decoder_rejects_invalid_utf8_bytes(self) -> None:
+        chunks = [
+            b'data: {"choices":[{"delta":{"content":"',
+            b"\x85",
+            b'ok"}}]}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+
+        with self.assertRaises(UnicodeDecodeError):
+            list(decode_stream_events(chunks, "sse_json"))
+
     def test_ndjson_decoder_handles_split_lines(self) -> None:
         chunks = [
             b'{"id":1}\n{"id"',
@@ -1550,8 +1561,76 @@ class ProxyServicePipelineTests(unittest.TestCase):
         )
 
         def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
-            del provider_arg, headers, args, kwargs
+            del provider_arg, args, kwargs
+            captured["headers"] = headers
             captured["body"] = body
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/messages"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "max_tokens": 256,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "Hello"}],
+                        },
+                    ],
+                    "stream": True,
+                },
+                {"Accept-Encoding": "gzip, br, zstd"},
+                forward_stream_usage=True,
+            )
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        captured_accept_encoding = next(
+            value for name, value in captured["headers"].items() if name.lower() == "accept-encoding"
+        )
+        self.assertEqual("identity", captured_accept_encoding)
+        self.assertEqual("user", captured["body"]["messages"][0]["role"])
+        self.assertEqual("Hello", captured["body"]["messages"][0]["content"])
+        self.assertTrue(captured["body"]["stream_options"]["include_usage"])
+        self.assertIn(b"event: message_start", stream_body)
+        self.assertIn(b"event: content_block_start", stream_body)
+        self.assertIn(b"event: content_block_delta", stream_body)
+        self.assertIn(b"event: message_delta", stream_body)
+        self.assertIn(b"event: message_stop", stream_body)
+        self.assertNotIn(b"[DONE]", stream_body)
+        self.assertTrue(fake_response.closed)
+
+    def test_proxy_service_finalizes_openai_chat_to_claude_stream_without_upstream_done(
+        self,
+    ) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("claude_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":123,"model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}\n\n',
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, body, args, kwargs
             return OpenedUpstreamResponse(
                 response=fake_response,
                 status_code=200,
@@ -1583,12 +1662,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
 
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
-        self.assertEqual("user", captured["body"]["messages"][0]["role"])
-        self.assertEqual("Hello", captured["body"]["messages"][0]["content"])
-        self.assertTrue(captured["body"]["stream_options"]["include_usage"])
-        self.assertIn(b"event: message_start", stream_body)
-        self.assertIn(b"event: content_block_start", stream_body)
-        self.assertIn(b"event: content_block_delta", stream_body)
+        self.assertIn(b"event: content_block_stop", stream_body)
         self.assertIn(b"event: message_delta", stream_body)
         self.assertIn(b"event: message_stop", stream_body)
         self.assertNotIn(b"[DONE]", stream_body)
