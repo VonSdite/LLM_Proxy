@@ -488,6 +488,7 @@ class LogRepository:
         end_date: str | None = None,
         username: str | Sequence[str] | None = None,
         request_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """按条件导出日聚合统计原始行。"""
         with self._get_connection() as conn:
@@ -503,6 +504,7 @@ class LogRepository:
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "d.request_model", request_model)
+            self._append_text_filter(conditions, params, "d.ip_address", ip_address)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             cursor.execute(
@@ -527,17 +529,17 @@ class LogRepository:
             return [dict(row) for row in cursor.fetchall()]
 
     def import_daily_stats(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
-        """导入日聚合统计，遇到相同唯一维度时累加。"""
+        """导入日聚合统计，遇到相同唯一维度时以导入值覆盖。"""
         now_text = now_local_datetime_text()
         normalized_rows = [self._normalize_daily_stat_row(row) for row in rows]
         inserted_count = 0
-        merged_count = 0
+        updated_count = 0
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             for row in normalized_rows:
                 if self._daily_stat_exists(cursor, row):
-                    merged_count += 1
+                    updated_count += 1
                     self._update_daily_stat(cursor, row, now_text)
                     continue
                 else:
@@ -554,10 +556,10 @@ class LogRepository:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(stat_date, ip_address, request_model, response_model)
                     DO UPDATE SET
-                        request_count = request_count + excluded.request_count,
-                        total_tokens = total_tokens + excluded.total_tokens,
-                        prompt_tokens = prompt_tokens + excluded.prompt_tokens,
-                        completion_tokens = completion_tokens + excluded.completion_tokens,
+                        request_count = excluded.request_count,
+                        total_tokens = excluded.total_tokens,
+                        prompt_tokens = excluded.prompt_tokens,
+                        completion_tokens = excluded.completion_tokens,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -577,7 +579,8 @@ class LogRepository:
         return {
             "count": len(normalized_rows),
             "inserted_count": inserted_count,
-            "merged_count": merged_count,
+            "updated_count": updated_count,
+            "merged_count": updated_count,
         }
 
     def get_unique_request_models(self) -> list[str]:
@@ -713,10 +716,10 @@ class LogRepository:
             f"""
             UPDATE daily_request_stats
             SET
-                request_count = request_count + ?,
-                total_tokens = total_tokens + ?,
-                prompt_tokens = prompt_tokens + ?,
-                completion_tokens = completion_tokens + ?,
+                request_count = ?,
+                total_tokens = ?,
+                prompt_tokens = ?,
+                completion_tokens = ?,
                 updated_at = ?
             WHERE {where_clause}
             """,

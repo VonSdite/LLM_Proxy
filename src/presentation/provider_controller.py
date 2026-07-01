@@ -214,7 +214,11 @@ class ProviderController:
         try:
             payload = get_json_object()
             result = self._provider_service.import_providers(payload)
-            self._logger.info("Providers imported: count=%s", result.get("count", 0))
+            self._logger.info(
+                "Providers imported: count=%s auth_groups=%s",
+                result.get("count", 0),
+                result.get("auth_groups_count", 0),
+            )
             return jsonify(result), 201
         except ValueError as exc:
             return build_value_error_response(exc)

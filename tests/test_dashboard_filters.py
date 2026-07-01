@@ -292,47 +292,49 @@ class DashboardFilterApiTests(unittest.TestCase):
     def test_daily_stats_export_returns_json_rows(self) -> None:
         response = self.client.get(
             "/api/statistics/daily-stats/export",
-            query_string={
-                **self.DATE_FILTER,
-                "username": "alice",
-            },
         )
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
         self.assertEqual("llm_proxy.daily_request_stats", payload["kind"])
         self.assertEqual(
-            {("2026-04-08", "10.0.0.1", "model-a"), ("2026-04-08", "10.0.0.1", "model-c")},
+            {
+                ("2026-04-08", "10.0.0.1", "model-a"),
+                ("2026-04-08", "10.0.0.1", "model-c"),
+                ("2026-04-08", "10.0.0.2", "model-b"),
+                ("2026-04-08", "10.0.0.3", "model-a"),
+            },
             {(item["stat_date"], item["ip_address"], item["request_model"]) for item in payload["daily_request_stats"]},
         )
 
-    def test_daily_stats_import_merges_duplicate_keys(self) -> None:
+    def test_daily_stats_import_updates_duplicate_keys_idempotently(self) -> None:
+        payload = {
+            "daily_request_stats": [
+                {
+                    "stat_date": "2026-04-08",
+                    "ip_address": "10.0.0.1",
+                    "request_model": "model-a",
+                    "response_model": "resp-a",
+                    "request_count": 2,
+                    "total_tokens": 12,
+                    "prompt_tokens": 5,
+                    "completion_tokens": 7,
+                },
+                {
+                    "stat_date": "2026-04-10",
+                    "ip_address": "10.0.0.2",
+                    "request_model": "model-imported",
+                    "response_model": "resp-imported",
+                    "request_count": 1,
+                    "total_tokens": 9,
+                    "prompt_tokens": 4,
+                    "completion_tokens": 5,
+                },
+            ]
+        }
         response = self.client.post(
             "/api/statistics/daily-stats/import",
-            json={
-                "daily_request_stats": [
-                    {
-                        "stat_date": "2026-04-08",
-                        "ip_address": "10.0.0.1",
-                        "request_model": "model-a",
-                        "response_model": "resp-a",
-                        "request_count": 2,
-                        "total_tokens": 12,
-                        "prompt_tokens": 5,
-                        "completion_tokens": 7,
-                    },
-                    {
-                        "stat_date": "2026-04-10",
-                        "ip_address": "10.0.0.2",
-                        "request_model": "model-imported",
-                        "response_model": "resp-imported",
-                        "request_count": 1,
-                        "total_tokens": 9,
-                        "prompt_tokens": 4,
-                        "completion_tokens": 5,
-                    },
-                ]
-            },
+            json=payload,
         )
 
         self.assertEqual(201, response.status_code)
@@ -340,10 +342,17 @@ class DashboardFilterApiTests(unittest.TestCase):
             {
                 "count": 2,
                 "inserted_count": 1,
+                "updated_count": 1,
                 "merged_count": 1,
             },
             response.get_json(),
         )
+        second_response = self.client.post(
+            "/api/statistics/daily-stats/import",
+            json=payload,
+        )
+        self.assertEqual(201, second_response.status_code)
+        self.assertEqual(2, second_response.get_json()["updated_count"])
 
         stats_response = self.client.get(
             "/api/statistics",
@@ -356,10 +365,10 @@ class DashboardFilterApiTests(unittest.TestCase):
         )
         self.assertEqual(200, stats_response.status_code)
         merged_row = stats_response.get_json()[0]
-        self.assertEqual(3, merged_row["request_count"])
-        self.assertEqual(22, merged_row["total_tokens"])
-        self.assertEqual(10, merged_row["prompt_tokens"])
-        self.assertEqual(12, merged_row["completion_tokens"])
+        self.assertEqual(2, merged_row["request_count"])
+        self.assertEqual(12, merged_row["total_tokens"])
+        self.assertEqual(5, merged_row["prompt_tokens"])
+        self.assertEqual(7, merged_row["completion_tokens"])
 
     def test_statistics_api_sorts_on_server(self) -> None:
         response = self.client.get(

@@ -382,20 +382,21 @@
         }
 
         async function exportUsers() {
-            const selectedIds = Array.from(selectedUserIds);
-            const payload = selectedIds.length ? { user_ids: selectedIds } : {};
             try {
                 const response = await fetch('/api/users/export', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
+                    body: JSON.stringify({}),
                 });
                 const result = await response.json();
                 if (!response.ok) {
                     throw new Error(result.error || '导出用户失败');
                 }
                 downloadJsonFile(result, buildJsonFilename('users'));
-                showMessage(`已导出 ${result.users?.length || 0} 个用户`, 'success');
+                showMessage(
+                    `已导出 ${result.users?.length || 0} 个用户，${result.daily_request_stats?.length || 0} 条统计数据`,
+                    'success'
+                );
             } catch (error) {
                 console.error('导出用户失败:', error);
                 showActionError('导出用户', error, { fallback: '导出用户失败' });
@@ -429,7 +430,7 @@
                 }
                 selectedUserIds = new Set(result.user_ids || []);
                 showMessage(
-                    `导入完成：成功 ${result.count || 0} 个，失败 ${result.failed_count || 0} 个，重复 ${result.skipped_count || 0} 个`,
+                    `导入完成：新增 ${result.created_count || 0} 个，更新 ${result.updated_count || 0} 个，失败 ${result.failed_count || 0} 个，统计 ${result.stats_count || 0} 条`,
                     'success'
                 );
                 await loadUsers();

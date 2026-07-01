@@ -228,6 +228,7 @@ class LogService:
         end_date: str | None = None,
         username: str | Sequence[str] | None = None,
         request_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """导出日聚合统计数据。"""
         rows = self._repository.export_daily_stats(
@@ -235,13 +236,15 @@ class LogService:
             end_date=end_date,
             username=username,
             request_model=request_model,
+            ip_address=ip_address,
         )
         self._logger.debug(
-            "Daily stats exported: start_date=%s end_date=%s username=%s request_model=%s rows=%s",
+            "Daily stats exported: start_date=%s end_date=%s username=%s request_model=%s ip_address=%s rows=%s",
             start_date,
             end_date,
             username,
             request_model,
+            ip_address,
             len(rows),
         )
         return {
@@ -260,10 +263,10 @@ class LogService:
 
         result = self._repository.import_daily_stats(rows)
         self._logger.info(
-            "Daily stats imported: count=%s inserted=%s merged=%s",
+            "Daily stats imported: count=%s inserted=%s updated=%s",
             result.get("count", 0),
             result.get("inserted_count", 0),
-            result.get("merged_count", 0),
+            result.get("updated_count", 0),
         )
         return result
 

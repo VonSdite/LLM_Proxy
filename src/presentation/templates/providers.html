@@ -1564,7 +1564,10 @@
                     throw new Error(result.error || '导出 Provider 失败');
                 }
                 downloadJsonFile(result, buildJsonFilename('providers'));
-                showMessage(`已导出 ${result.providers?.length || selectedNames.length} 个 Provider`, 'success');
+                showMessage(
+                    `已导出 ${result.providers?.length || selectedNames.length} 个 Provider，${result.auth_groups?.length || 0} 个 Auth Group`,
+                    'success'
+                );
             } catch (error) {
                 console.error('导出 provider 失败:', error);
                 showActionError('导出 Provider', error, { fallback: '导出 Provider 失败' });
@@ -1598,8 +1601,9 @@
                 }
                 selectedProviderNames = new Set(result.names || []);
                 const renamedCount = Array.isArray(result.renamed) ? result.renamed.length : 0;
+                const renamedAuthGroupCount = Array.isArray(result.auth_groups_renamed) ? result.auth_groups_renamed.length : 0;
                 showMessage(
-                    `已导入 ${result.count || 0} 个 Provider${renamedCount ? `，${renamedCount} 个已重命名` : ''}`,
+                    `已导入 ${result.count || 0} 个 Provider，${result.auth_groups_count || 0} 个 Auth Group${renamedCount || renamedAuthGroupCount ? `，${renamedCount + renamedAuthGroupCount} 个已重命名` : ''}`,
                     'success'
                 );
                 await loadProviders();
