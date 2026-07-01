@@ -69,6 +69,11 @@ class ProviderServiceTests(unittest.TestCase):
         self.config_manager.reload()
         self.reload_count = 0
 
+    def _write_hook_file(self, relative_path: str) -> None:
+        hook_file = self.root_path / "hooks" / relative_path
+        hook_file.parent.mkdir(parents=True, exist_ok=True)
+        hook_file.write_text("class Hook:\n    pass\n", encoding="utf-8")
+
     def _current_provider_names(self) -> list[str]:
         current_config = self.config_manager.get_raw_config()
         return [item["name"] for item in current_config["providers"]]
@@ -235,6 +240,7 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual("direct", persisted["oauth"]["proxy_mode"])
 
     def test_update_provider_preserves_enabled_when_payload_omits_enabled(self) -> None:
+        self._write_hook_file("example_hook.py")
         self._seed_providers(
             [
                 {
@@ -785,6 +791,52 @@ class ProviderServiceTests(unittest.TestCase):
             result["renamed"],
         )
         self.assertEqual(["demo", "demo_1", "demo_2"], self._current_provider_names())
+
+    def test_import_providers_drops_missing_hook(self) -> None:
+        result = self.service.import_providers(
+            {
+                "providers": [
+                    {
+                        "name": "imported",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "sk-imported",
+                        "model_list": ["gpt-4.1"],
+                        "hook": "missing_hook.py",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(1, result["count"])
+        provider = self.service.get_provider("imported")
+        self.assertIsNotNone(provider)
+        self.assertNotIn("hook", provider)
+        current_config = self.config_manager.get_raw_config()
+        self.assertNotIn("hook", current_config["providers"][0])
+
+    def test_import_providers_preserves_existing_hook(self) -> None:
+        self._write_hook_file("custom/demo_hook.py")
+
+        result = self.service.import_providers(
+            {
+                "providers": [
+                    {
+                        "name": "imported",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "sk-imported",
+                        "model_list": ["gpt-4.1"],
+                        "hook": "custom/demo_hook.py",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(1, result["count"])
+        provider = self.service.get_provider("imported")
+        self.assertIsNotNone(provider)
+        self.assertEqual("custom/demo_hook.py", provider["hook"])
+        current_config = self.config_manager.get_raw_config()
+        self.assertEqual("custom/demo_hook.py", current_config["providers"][0]["hook"])
 
     def test_export_providers_preserves_requested_order(self) -> None:
         self._seed_providers(
