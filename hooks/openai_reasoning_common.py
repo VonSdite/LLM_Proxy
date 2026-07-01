@@ -14,18 +14,16 @@ from src.translators.reasoning_utils import (
 class VendorReasoningAdapter:
     """把统一思考意图改写成单个厂商的 OpenAI 兼容参数。"""
 
-    # 子类填写厂商或模型关键词，汇总 Hook 用这些关键词选择对应处理器。
+    # 子类填写上游模型关键词，汇总 Hook 用这些关键词选择对应处理器。
     match_terms: tuple[str, ...] = ()
     # 子类填写支持 thinking 控制参数的模型关键词；匹配前统一转小写。
     thinking_control_terms: tuple[str, ...] = ()
 
     def matches(self, ctx: HookContext, body: dict[str, Any]) -> bool:
-        # 自动识别只看上游侧信号，避免下游路由别名把匹配范围放大；匹配前统一转小写。
-        # provider_name：配置中的 Provider 名称。
+        # 自动识别只看模型信号，避免 Provider 命名或下游路由别名把匹配范围放大；匹配前统一转小写。
         # upstream_model：进入 hook 前由路由 key 解析出的真实上游模型名。
         # body["model"]：当前请求体里的上游模型字段，可能已被 translator 或前置 hook 改写。
         candidate_values = (
-            ctx.provider_name,
             ctx.upstream_model,
             body.get("model"),
         )
