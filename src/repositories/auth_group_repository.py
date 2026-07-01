@@ -337,19 +337,19 @@ class AuthGroupRepository:
         )
 
     def import_runtime_states(self, rows: Iterable[dict[str, Any]]) -> dict[str, int]:
-        """导入运行态表项，主键相同的表项使用导入值覆盖。"""
+        """导入运行态表项，主键相同的表项保持现有数据。"""
         now_text = now_local_datetime_text()
         normalized_rows = [self._normalize_runtime_state_row(row, default_updated_at=now_text) for row in rows]
         inserted_count = 0
-        updated_count = 0
+        skipped_count = 0
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             for row in normalized_rows:
                 if self._runtime_state_exists(cursor, row):
-                    updated_count += 1
-                else:
-                    inserted_count += 1
+                    skipped_count += 1
+                    continue
+                inserted_count += 1
                 cursor.execute(
                     """
                     INSERT INTO auth_entry_runtime_state (
@@ -357,15 +357,6 @@ class AuthGroupRepository:
                         last_status_code, last_error_type, last_error_message, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(auth_group_name, entry_id)
-                    DO UPDATE SET
-                        disabled = excluded.disabled,
-                        disabled_reason = excluded.disabled_reason,
-                        cooldown_until = excluded.cooldown_until,
-                        last_status_code = excluded.last_status_code,
-                        last_error_type = excluded.last_error_type,
-                        last_error_message = excluded.last_error_message,
-                        updated_at = excluded.updated_at
                     """,
                     (
                         row["auth_group_name"],
@@ -383,23 +374,24 @@ class AuthGroupRepository:
         return {
             "count": len(normalized_rows),
             "inserted_count": inserted_count,
-            "updated_count": updated_count,
+            "updated_count": 0,
+            "skipped_count": skipped_count,
         }
 
     def import_usage_buckets(self, rows: Iterable[dict[str, Any]]) -> dict[str, int]:
-        """导入用量桶表项，主键相同的表项使用导入值覆盖。"""
+        """导入用量桶表项，主键相同的表项保持现有数据。"""
         now_text = now_local_datetime_text()
         normalized_rows = [self._normalize_usage_bucket_row(row, default_updated_at=now_text) for row in rows]
         inserted_count = 0
-        updated_count = 0
+        skipped_count = 0
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             for row in normalized_rows:
                 if self._usage_bucket_exists(cursor, row):
-                    updated_count += 1
-                else:
-                    inserted_count += 1
+                    skipped_count += 1
+                    continue
+                inserted_count += 1
                 cursor.execute(
                     """
                     INSERT INTO auth_entry_usage_buckets (
@@ -407,13 +399,6 @@ class AuthGroupRepository:
                         request_count, prompt_tokens, completion_tokens, total_tokens, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(auth_group_name, entry_id, bucket_type, bucket_start)
-                    DO UPDATE SET
-                        request_count = excluded.request_count,
-                        prompt_tokens = excluded.prompt_tokens,
-                        completion_tokens = excluded.completion_tokens,
-                        total_tokens = excluded.total_tokens,
-                        updated_at = excluded.updated_at
                     """,
                     (
                         row["auth_group_name"],
@@ -431,7 +416,8 @@ class AuthGroupRepository:
         return {
             "count": len(normalized_rows),
             "inserted_count": inserted_count,
-            "updated_count": updated_count,
+            "updated_count": 0,
+            "skipped_count": skipped_count,
         }
 
     def reset_current_minute_usage(self, auth_group_name: str, entry_id: str, when: datetime) -> None:

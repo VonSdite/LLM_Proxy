@@ -869,7 +869,81 @@ class ProviderServiceTests(unittest.TestCase):
             {row["bucket_type"] for row in exported["auth_entry_usage_buckets"]},
         )
 
-    def test_import_providers_renames_auth_groups_and_rewrites_provider_reference(self) -> None:
+    def test_auth_group_repository_import_skips_existing_table_rows(self) -> None:
+        self.auth_group_repository.save_entry_runtime_state(
+            "shared-auth",
+            "existing",
+            disabled=False,
+            disabled_reason=None,
+            cooldown_until=None,
+            last_status_code=200,
+            last_error_type=None,
+            last_error_message=None,
+        )
+        runtime_result = self.auth_group_repository.import_runtime_states(
+            [
+                {
+                    "auth_group_name": "shared-auth",
+                    "entry_id": "existing",
+                    "disabled": True,
+                    "disabled_reason": "manual",
+                    "cooldown_until": "2026-04-08 10:00:00.000000",
+                    "last_status_code": 429,
+                    "last_error_type": "rate_limit",
+                    "last_error_message": "quota exceeded",
+                    "updated_at": "2026-04-08 09:00:00.000000",
+                }
+            ]
+        )
+
+        self.assertEqual(
+            {"count": 1, "inserted_count": 0, "updated_count": 0, "skipped_count": 1},
+            runtime_result,
+        )
+        runtime_state = self.auth_group_repository.get_entry_runtime_state("shared-auth", "existing")
+        self.assertFalse(runtime_state["disabled"])
+        self.assertEqual(200, runtime_state["last_status_code"])
+
+        self.auth_group_repository.import_usage_buckets(
+            [
+                {
+                    "auth_group_name": "shared-auth",
+                    "entry_id": "existing",
+                    "bucket_type": "day",
+                    "bucket_start": "2026-04-08",
+                    "request_count": 7,
+                    "prompt_tokens": 17,
+                    "completion_tokens": 19,
+                    "total_tokens": 36,
+                    "updated_at": "2026-04-08 08:00:00.000000",
+                }
+            ]
+        )
+        usage_result = self.auth_group_repository.import_usage_buckets(
+            [
+                {
+                    "auth_group_name": "shared-auth",
+                    "entry_id": "existing",
+                    "bucket_type": "day",
+                    "bucket_start": "2026-04-08",
+                    "request_count": 3,
+                    "prompt_tokens": 11,
+                    "completion_tokens": 13,
+                    "total_tokens": 24,
+                    "updated_at": "2026-04-08 09:00:00.000000",
+                }
+            ]
+        )
+
+        self.assertEqual(
+            {"count": 1, "inserted_count": 0, "updated_count": 0, "skipped_count": 1},
+            usage_result,
+        )
+        usage_rows = self.auth_group_repository.export_usage_buckets(["shared-auth"])
+        self.assertEqual(7, usage_rows[0]["request_count"])
+        self.assertEqual(36, usage_rows[0]["total_tokens"])
+
+    def test_import_providers_merges_duplicate_auth_group_entries(self) -> None:
         self._write_config(
             {
                 "auth_groups": [
@@ -887,6 +961,31 @@ class ProviderServiceTests(unittest.TestCase):
             }
         )
         self.config_manager.reload()
+        self.auth_group_repository.save_entry_runtime_state(
+            "shared-auth",
+            "existing",
+            disabled=False,
+            disabled_reason=None,
+            cooldown_until=None,
+            last_status_code=200,
+            last_error_type=None,
+            last_error_message=None,
+        )
+        self.auth_group_repository.import_usage_buckets(
+            [
+                {
+                    "auth_group_name": "shared-auth",
+                    "entry_id": "existing",
+                    "bucket_type": "day",
+                    "bucket_start": "2026-04-08",
+                    "request_count": 7,
+                    "prompt_tokens": 17,
+                    "completion_tokens": 19,
+                    "total_tokens": 36,
+                    "updated_at": "2026-04-08 08:00:00.000000",
+                }
+            ]
+        )
 
         result = self.service.import_providers(
             {
@@ -895,13 +994,28 @@ class ProviderServiceTests(unittest.TestCase):
                         "name": "shared-auth",
                         "entries": [
                             {
+                                "id": "existing",
+                                "headers": {"Authorization": "Bearer sk-overwrite"},
+                            },
+                            {
                                 "id": "imported",
                                 "headers": {"Authorization": "Bearer sk-imported"},
-                            }
+                            },
                         ],
                     }
                 ],
                 "auth_entry_runtime_state": [
+                    {
+                        "auth_group_name": "shared-auth",
+                        "entry_id": "existing",
+                        "disabled": True,
+                        "disabled_reason": "manual",
+                        "cooldown_until": "2026-04-08 10:00:00.000000",
+                        "last_status_code": 429,
+                        "last_error_type": "rate_limit",
+                        "last_error_message": "quota exceeded",
+                        "updated_at": "2026-04-08 09:00:00.000000",
+                    },
                     {
                         "auth_group_name": "shared-auth",
                         "entry_id": "imported",
@@ -912,9 +1026,20 @@ class ProviderServiceTests(unittest.TestCase):
                         "last_error_type": "rate_limit",
                         "last_error_message": "quota exceeded",
                         "updated_at": "2026-04-08 09:00:00.000000",
-                    }
+                    },
                 ],
                 "auth_entry_usage_buckets": [
+                    {
+                        "auth_group_name": "shared-auth",
+                        "entry_id": "existing",
+                        "bucket_type": "day",
+                        "bucket_start": "2026-04-08",
+                        "request_count": 3,
+                        "prompt_tokens": 11,
+                        "completion_tokens": 13,
+                        "total_tokens": 24,
+                        "updated_at": "2026-04-08 09:00:00.000000",
+                    },
                     {
                         "auth_group_name": "shared-auth",
                         "entry_id": "imported",
@@ -925,7 +1050,7 @@ class ProviderServiceTests(unittest.TestCase):
                         "completion_tokens": 13,
                         "total_tokens": 24,
                         "updated_at": "2026-04-08 09:00:00.000000",
-                    }
+                    },
                 ],
                 "providers": [
                     {
@@ -939,20 +1064,35 @@ class ProviderServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(1, result["auth_groups_count"])
-        self.assertEqual([{"from": "shared-auth", "to": "shared-auth_1"}], result["auth_groups_renamed"])
-        self.assertEqual(1, result["auth_entry_runtime_state_count"])
-        self.assertEqual(1, result["auth_entry_usage_buckets_count"])
+        self.assertEqual([], result["auth_groups_renamed"])
+        self.assertEqual(2, result["auth_entry_runtime_state_count"])
+        self.assertEqual(1, result["auth_entry_runtime_state_inserted_count"])
+        self.assertEqual(1, result["auth_entry_runtime_state_skipped_count"])
+        self.assertEqual(0, result["auth_entry_runtime_state_updated_count"])
+        self.assertEqual(2, result["auth_entry_usage_buckets_count"])
+        self.assertEqual(1, result["auth_entry_usage_buckets_inserted_count"])
+        self.assertEqual(1, result["auth_entry_usage_buckets_skipped_count"])
+        self.assertEqual(0, result["auth_entry_usage_buckets_updated_count"])
         current_config = self.config_manager.get_raw_config()
-        self.assertEqual(["shared-auth", "shared-auth_1"], self._current_auth_group_names())
-        self.assertEqual("shared-auth_1", current_config["providers"][0]["auth_group"])
-        runtime_state = self.auth_group_repository.get_entry_runtime_state("shared-auth_1", "imported")
-        self.assertTrue(runtime_state["disabled"])
-        self.assertEqual("manual", runtime_state["disabled_reason"])
-        usage_rows = self.auth_group_repository.export_usage_buckets(["shared-auth_1"])
-        self.assertEqual(1, len(usage_rows))
-        self.assertEqual("shared-auth_1", usage_rows[0]["auth_group_name"])
-        self.assertEqual(3, usage_rows[0]["request_count"])
-        self.assertEqual(24, usage_rows[0]["total_tokens"])
+        self.assertEqual(["shared-auth"], self._current_auth_group_names())
+        self.assertEqual("shared-auth", current_config["providers"][0]["auth_group"])
+        entries = {entry["id"]: entry for entry in current_config["auth_groups"][0]["entries"]}
+        self.assertEqual({"Authorization": "Bearer sk-existing"}, entries["existing"]["headers"])
+        self.assertEqual({"Authorization": "Bearer sk-imported"}, entries["imported"]["headers"])
+
+        existing_runtime_state = self.auth_group_repository.get_entry_runtime_state("shared-auth", "existing")
+        self.assertFalse(existing_runtime_state["disabled"])
+        self.assertEqual(200, existing_runtime_state["last_status_code"])
+        imported_runtime_state = self.auth_group_repository.get_entry_runtime_state("shared-auth", "imported")
+        self.assertTrue(imported_runtime_state["disabled"])
+        self.assertEqual("manual", imported_runtime_state["disabled_reason"])
+        usage_by_entry = {
+            row["entry_id"]: row for row in self.auth_group_repository.export_usage_buckets(["shared-auth"])
+        }
+        self.assertEqual(7, usage_by_entry["existing"]["request_count"])
+        self.assertEqual(36, usage_by_entry["existing"]["total_tokens"])
+        self.assertEqual(3, usage_by_entry["imported"]["request_count"])
+        self.assertEqual(24, usage_by_entry["imported"]["total_tokens"])
 
 
 if __name__ == "__main__":

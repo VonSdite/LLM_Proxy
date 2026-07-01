@@ -16,7 +16,127 @@ providers:
   enabled: true
   api: https://api.deepseek.com/chat/completions
   source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_6
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_3
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
   api_key: sk-1234
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_1_1
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  api_key: sk-1234
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_2_1
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  api_key: sk-1234
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_7
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_6_1
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_8
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_6_2
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_4
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_6_3
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_5
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
+  verify_ssl: false
+  model_list:
+  - deepseek-v4-flash
+  - deepseek-v4-pro
+  proxy_mode: direct
+- name: deepseek_6_4
+  enabled: true
+  api: https://api.deepseek.com/chat/completions
+  source_format: openai_chat
+  auth_group: group1
   verify_ssl: false
   model_list:
   - deepseek-v4-flash
@@ -24,6 +144,14 @@ providers:
   proxy_mode: direct
 auth_groups:
 - name: group1
+  strategy: least_inflight
+  cooldown_seconds_on_429: 60
+  entries:
+  - id: key1
+    enabled: true
+    headers:
+      Authorization: Bearer 1
+- name: group1_1
   strategy: least_inflight
   cooldown_seconds_on_429: 60
   entries:

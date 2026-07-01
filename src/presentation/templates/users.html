@@ -31,7 +31,7 @@
         <section class="users-section">
                 <div class="users-data-shell">
                     <div class="section-toolbar">
-                        <div class="section-heading-inline">
+                        <div class="section-heading-inline users-list-heading">
                             <div class="section-title-group">
                                 <h2>用户列表</h2>
                             </div>
@@ -53,42 +53,37 @@
                                             aria-label="查看 Chat 白名单说明"
                                         >?</button>
                                 </div>
+                                <div class="users-batch-controls" id="usersBatchControls">
+                                    <div class="users-batch-actions">
+                                        <button type="button" class="btn btn-toolbar-secondary" id="batchSetModelPermissionsBtn" onclick="openPermissionModalForBatch()" disabled>模型权限</button>
+                                        <button type="button" class="btn btn-toolbar-secondary" id="batchDeleteUsersBtn" onclick="toggleUserBatchDeleteConfirm(event)" disabled>删除</button>
+                                    </div>
+                                </div>
                                 <button type="button" class="btn btn-toolbar-secondary" id="exportUsersBtn" onclick="exportUsers()" disabled>导出</button>
                                 <button type="button" class="btn btn-toolbar-secondary" id="importUsersBtn" onclick="openUserImportPicker()">导入</button>
                                 <input type="file" id="userImportFileInput" accept="application/json,.json" onchange="importUsersFromFile(this)" hidden>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="users-batch-toolbar">
-                        <div class="users-batch-controls" id="usersBatchControls" hidden>
-                            <div class="users-batch-summary">
-                                已选 <strong id="selectedUsersSummary">0</strong> 个
-                            </div>
-                            <div class="users-batch-actions">
-                                <button type="button" class="btn btn-toolbar-secondary" id="batchSetModelPermissionsBtn" onclick="openPermissionModalForBatch()" disabled>设置模型权限</button>
-                                <button type="button" class="btn btn-toolbar-secondary" id="batchDeleteUsersBtn" onclick="deleteSelectedUsers()" disabled>批量删除</button>
-                            </div>
-                        </div>
-                        <div class="section-search users-table-search" role="search" aria-label="搜索用户">
-                            <div class="section-search-field">
-                                <input
-                                    type="text"
-                                    id="userSearchInput"
-                                    class="form-control"
-                                    placeholder="搜索用户名 / IP"
-                                    autocomplete="off"
-                                    spellcheck="false"
-                                >
-                                <button
-                                    type="button"
-                                    class="search-clear-button"
-                                    id="clearUserSearchBtn"
-                                    onmousedown="event.preventDefault()"
-                                    onclick="clearUserSearch()"
-                                    aria-label="清空搜索"
-                                    title="清空搜索"
-                                    hidden
-                                >&times;</button>
+                                <div class="section-search users-table-search" role="search" aria-label="搜索用户">
+                                    <div class="section-search-field">
+                                        <input
+                                            type="text"
+                                            id="userSearchInput"
+                                            class="form-control"
+                                            placeholder="搜索用户名 / IP"
+                                            autocomplete="off"
+                                            spellcheck="false"
+                                        >
+                                        <button
+                                            type="button"
+                                            class="search-clear-button"
+                                            id="clearUserSearchBtn"
+                                            onmousedown="event.preventDefault()"
+                                            onclick="clearUserSearch()"
+                                            aria-label="清空搜索"
+                                            title="清空搜索"
+                                            hidden
+                                        >&times;</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -203,6 +198,13 @@
             <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteUserBtn" onclick="confirmDeleteUser(event)">确认</button>
         </div>
     </div>
+    <div class="inline-confirm-popover floating-delete-popover" id="userBatchDeletePopover" data-placement="bottom" hidden>
+        <div class="inline-confirm-text" id="userBatchDeleteConfirmText">确认删除已选用户？</div>
+        <div class="inline-confirm-actions">
+            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelUserBatchDeleteConfirm(event)">取消</button>
+            <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmUserBatchDeleteBtn" onclick="confirmUserBatchDelete(event)">确认</button>
+        </div>
+    </div>
 {% endblock %}
 
 {% block page_scripts %}
@@ -227,6 +229,7 @@
         let permissionDetailModalInstance = null;
         let pendingDeleteUserId = null;
         let deletingUserId = null;
+        let pendingBatchDeleteUserIds = [];
         let userBatchActionInFlight = false;
         let userImportActionInFlight = false;
         let permissionTargetUserIds = [];
@@ -336,20 +339,27 @@
 
         function updateBatchToolbar() {
             const controls = document.getElementById('usersBatchControls');
-            const summary = document.getElementById('selectedUsersSummary');
             const batchButton = document.getElementById('batchSetModelPermissionsBtn');
             const deleteButton = document.getElementById('batchDeleteUsersBtn');
             const exportButton = document.getElementById('exportUsersBtn');
             const importButton = document.getElementById('importUsersBtn');
-            if (!controls || !summary || !batchButton || !deleteButton) return;
+            if (!controls || !batchButton || !deleteButton) return;
 
             const selectedCount = selectedUserIds.size;
-            controls.hidden = selectedCount === 0;
-            summary.textContent = String(selectedCount);
-            batchButton.hidden = !whitelistControlEnabled;
-            batchButton.disabled = selectedCount === 0 || userBatchActionInFlight;
+            batchButton.disabled = !whitelistControlEnabled || selectedCount === 0 || userBatchActionInFlight;
             deleteButton.disabled = selectedCount === 0 || userBatchActionInFlight;
-            deleteButton.textContent = userBatchActionInFlight ? '删除中...' : '批量删除';
+            deleteButton.textContent = userBatchActionInFlight ? '删除中...' : '删除';
+            deleteButton.classList.toggle('is-active', pendingBatchDeleteUserIds.length > 0);
+            if (selectedCount === 0) {
+                closeUserBatchDeleteConfirm(false);
+            } else {
+                pendingBatchDeleteUserIds = pendingBatchDeleteUserIds.filter(userId => selectedUserIds.has(Number(userId)));
+                if (!pendingBatchDeleteUserIds.length && !userBatchActionInFlight) {
+                    hideUserBatchDeletePopover();
+                } else {
+                    syncUserBatchDeletePopover();
+                }
+            }
             if (exportButton) {
                 exportButton.disabled = selectedCount === 0 || userBatchActionInFlight || userImportActionInFlight;
             }
@@ -450,8 +460,8 @@
             }
         }
 
-        async function deleteSelectedUsers() {
-            const selectedIds = Array.from(selectedUserIds);
+        async function deleteSelectedUsers(userIds = null) {
+            const selectedIds = Array.isArray(userIds) ? userIds : Array.from(selectedUserIds);
             if (!selectedIds.length || userBatchActionInFlight) {
                 showMessage('请先选择需要删除的用户', 'error');
                 return;
@@ -459,6 +469,7 @@
 
             userBatchActionInFlight = true;
             closeDeleteUserConfirm(false);
+            hideUserBatchDeletePopover();
             renderUsers();
             try {
                 const response = await fetch('/api/users/batch', {
@@ -474,6 +485,7 @@
                     throw new Error(result.error || '批量删除用户失败');
                 }
                 clearUserSelections(false);
+                pendingBatchDeleteUserIds = [];
                 showMessage(`已删除 ${result.count || selectedIds.length} 个用户`, 'success');
                 await loadUsers();
             } catch (error) {
@@ -957,6 +969,9 @@
             if (!event.target.closest('.inline-confirm-wrap') && !event.target.closest('#userDeletePopover')) {
                 closeDeleteUserConfirm();
             }
+            if (!event.target.closest('#batchDeleteUsersBtn') && !event.target.closest('#userBatchDeletePopover')) {
+                closeUserBatchDeleteConfirm();
+            }
             if (!event.target.closest('[data-users-help-topic]') && !event.target.closest('#usersHelpPopover')) {
                 hideUsersHelpPopover();
             }
@@ -966,17 +981,20 @@
             if (event.key === 'Escape') {
                 closeAllCustomSelects();
                 closeDeleteUserConfirm();
+                closeUserBatchDeleteConfirm();
                 hideUsersHelpPopover();
             }
         });
 
         window.addEventListener('resize', function() {
             closeDeleteUserConfirm(false);
+            closeUserBatchDeleteConfirm(false);
             hideUsersHelpPopover();
         });
 
         window.addEventListener('scroll', function() {
             closeDeleteUserConfirm(false);
+            closeUserBatchDeleteConfirm(false);
             hideUsersHelpPopover();
         }, true);
 
@@ -996,6 +1014,75 @@
             popover.style.removeProperty('left');
             popover.style.removeProperty('--popover-arrow-left');
             popover.dataset.placement = 'bottom';
+        }
+
+        function getUserBatchDeletePopoverElement() {
+            return document.getElementById('userBatchDeletePopover');
+        }
+
+        function getUserBatchDeleteTrigger() {
+            return document.getElementById('batchDeleteUsersBtn');
+        }
+
+        function hideUserBatchDeletePopover() {
+            const popover = getUserBatchDeletePopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty('top');
+            popover.style.removeProperty('left');
+            popover.style.removeProperty('--popover-arrow-left');
+            popover.dataset.placement = 'bottom';
+        }
+
+        function syncUserBatchDeletePopover() {
+            const popover = getUserBatchDeletePopoverElement();
+            if (!popover) return;
+
+            if (!pendingBatchDeleteUserIds.length) {
+                hideUserBatchDeletePopover();
+                return;
+            }
+
+            const trigger = getUserBatchDeleteTrigger();
+            if (!trigger) {
+                pendingBatchDeleteUserIds = [];
+                hideUserBatchDeletePopover();
+                return;
+            }
+
+            popover.hidden = false;
+            const textElement = document.getElementById('userBatchDeleteConfirmText');
+            if (textElement) {
+                textElement.textContent = `确认删除 ${pendingBatchDeleteUserIds.length} 个用户？`;
+            }
+            const confirmButton = document.getElementById('confirmUserBatchDeleteBtn');
+            if (confirmButton) {
+                confirmButton.disabled = userBatchActionInFlight;
+                confirmButton.textContent = userBatchActionInFlight ? '删除中...' : '确认';
+            }
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 10;
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const left = Math.min(
+                window.innerWidth - popoverRect.width - viewportPadding,
+                Math.max(viewportPadding, triggerRect.left + ((triggerRect.width - popoverRect.width) / 2))
+            );
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? 'bottom' : 'top';
+            popover.style.top = `${top}px`;
+            popover.style.left = `${left}px`;
+            popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
         }
 
         function syncDeleteUserPopover() {
@@ -1050,7 +1137,9 @@
             try {
                 pendingDeleteUserId = null;
                 deletingUserId = null;
+                pendingBatchDeleteUserIds = [];
                 hideUserDeletePopover();
+                hideUserBatchDeletePopover();
 
                 const params = new URLSearchParams({
                     page: currentPage,
@@ -1834,6 +1923,7 @@
             if (deletingUserId !== null) return;
 
             pendingDeleteUserId = pendingDeleteUserId === userId ? null : userId;
+            closeUserBatchDeleteConfirm(false);
             if (pendingDeleteUserId !== userId) {
                 deletingUserId = null;
             }
@@ -1859,6 +1949,48 @@
                     element.classList.remove('is-active');
                 });
             }
+        }
+
+        function toggleUserBatchDeleteConfirm(event) {
+            event?.stopPropagation();
+            if (userBatchActionInFlight) return;
+
+            const selectedIds = Array.from(selectedUserIds);
+            if (!selectedIds.length) {
+                showMessage('请先选择需要删除的用户', 'error');
+                return;
+            }
+
+            pendingBatchDeleteUserIds = pendingBatchDeleteUserIds.length ? [] : selectedIds;
+            closeDeleteUserConfirm(false);
+            renderUsers();
+        }
+
+        function cancelUserBatchDeleteConfirm(event) {
+            event?.stopPropagation();
+            closeUserBatchDeleteConfirm(true);
+        }
+
+        function closeUserBatchDeleteConfirm(shouldRender = true) {
+            if (!pendingBatchDeleteUserIds.length) return;
+            if (userBatchActionInFlight) {
+                return;
+            }
+            pendingBatchDeleteUserIds = [];
+            hideUserBatchDeletePopover();
+            if (shouldRender) {
+                renderUsers();
+            } else {
+                document.getElementById('batchDeleteUsersBtn')?.classList.remove('is-active');
+            }
+        }
+
+        async function confirmUserBatchDelete(event) {
+            event?.stopPropagation();
+            const selectedIds = pendingBatchDeleteUserIds.slice();
+            if (!selectedIds.length || userBatchActionInFlight) return;
+
+            await deleteSelectedUsers(selectedIds);
         }
 
         async function confirmDeleteUser(event) {

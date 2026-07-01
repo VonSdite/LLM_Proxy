@@ -45,6 +45,7 @@
                     </div>
                     <div class="section-header-actions">
                         <input type="file" id="providerImportFileInput" accept="application/json,.json" onchange="importProvidersFromFile(this)" hidden>
+                        <button type="button" class="btn btn-primary" id="importProvidersBtn" onclick="openProviderImportPicker()">导入</button>
                         <button type="button" class="btn btn-primary" onclick="openCreateModal()">新增 Provider</button>
                     </div>
                 </div>
@@ -543,6 +544,13 @@
             <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteProviderBtn" onclick="confirmDeleteProvider(event)">确认</button>
         </div>
     </div>
+    <div class="inline-confirm-popover floating-delete-popover" id="providerBatchDeletePopover" data-placement="bottom" hidden>
+        <div class="inline-confirm-text" id="providerBatchDeleteConfirmText">确认删除已选 Provider？</div>
+        <div class="inline-confirm-actions">
+            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelProviderBatchDeleteConfirm(event)">取消</button>
+            <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmProviderBatchDeleteBtn" onclick="confirmProviderBatchDelete(event)">确认</button>
+        </div>
+    </div>
     <div class="inline-confirm-popover floating-delete-popover" id="authEntryDeletePopover" data-placement="bottom" hidden>
         <div class="inline-confirm-text">确认删除这个 Entry？</div>
         <div class="inline-confirm-actions">
@@ -589,6 +597,8 @@
         let activeAuthGroupRuntime = null;
         let pendingDeleteProviderName = null;
         let deletingProviderName = null;
+        let pendingBatchDeleteProviderNames = [];
+        let pendingBatchDeleteProviderGroupKey = null;
         let selectedProviderNames = new Set();
         let togglingProviderNames = new Set();
         let providerBatchActionInFlight = false;
@@ -1105,6 +1115,9 @@
             if (!event.target.closest('.inline-confirm-wrap') && !event.target.closest('#providerDeletePopover')) {
                 closeDeleteProviderConfirm();
             }
+            if (!event.target.closest('[data-provider-batch-delete-button]') && !event.target.closest('#providerBatchDeletePopover')) {
+                closeProviderBatchDeleteConfirm();
+            }
             if (!event.target.closest('[data-auth-group-delete-trigger]') && !event.target.closest('#authGroupDeletePopover')) {
                 closeDeleteAuthGroupConfirm();
             }
@@ -1120,6 +1133,7 @@
             if (event.key === 'Escape') {
                 closeAllCustomSelects();
                 closeDeleteProviderConfirm();
+                closeProviderBatchDeleteConfirm();
                 closeDeleteAuthGroupConfirm();
                 closeDeleteAuthEntryConfirm();
                 hideProviderHelpPopover();
@@ -1129,6 +1143,7 @@
         window.addEventListener('resize', function() {
             closeAllCustomSelects();
             closeDeleteProviderConfirm(false);
+            closeProviderBatchDeleteConfirm(false);
             closeDeleteAuthGroupConfirm(false);
             closeDeleteAuthEntryConfirm(false);
             syncProviderHelpPopover();
@@ -1140,6 +1155,7 @@
             }
             closeAllCustomSelects();
             closeDeleteProviderConfirm(false);
+            closeProviderBatchDeleteConfirm(false);
             closeDeleteAuthGroupConfirm(false);
             closeDeleteAuthEntryConfirm(false);
             syncProviderHelpPopover();
@@ -1163,6 +1179,79 @@
             popover.style.removeProperty('left');
             popover.style.removeProperty('--popover-arrow-left');
             popover.dataset.placement = 'bottom';
+        }
+
+        function getProviderBatchDeletePopoverElement() {
+            return document.getElementById('providerBatchDeletePopover');
+        }
+
+        function getProviderBatchDeleteTrigger() {
+            const groupKey = String(pendingBatchDeleteProviderGroupKey || '').trim();
+            if (!groupKey) return null;
+            return Array.from(document.querySelectorAll('[data-provider-batch-delete-button]'))
+                .find(element => element.dataset.providerBatchDeleteButton === groupKey) || null;
+        }
+
+        function hideProviderBatchDeletePopover() {
+            const popover = getProviderBatchDeletePopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty('top');
+            popover.style.removeProperty('left');
+            popover.style.removeProperty('--popover-arrow-left');
+            popover.dataset.placement = 'bottom';
+        }
+
+        function syncProviderBatchDeletePopover() {
+            const popover = getProviderBatchDeletePopoverElement();
+            if (!popover) return;
+
+            if (!pendingBatchDeleteProviderNames.length || pendingBatchDeleteProviderGroupKey === null) {
+                hideProviderBatchDeletePopover();
+                return;
+            }
+
+            const trigger = getProviderBatchDeleteTrigger();
+            if (!trigger) {
+                pendingBatchDeleteProviderNames = [];
+                pendingBatchDeleteProviderGroupKey = null;
+                hideProviderBatchDeletePopover();
+                return;
+            }
+
+            popover.hidden = false;
+            const textElement = document.getElementById('providerBatchDeleteConfirmText');
+            if (textElement) {
+                textElement.textContent = `确认删除 ${pendingBatchDeleteProviderNames.length} 个 Provider？`;
+            }
+            const confirmButton = document.getElementById('confirmProviderBatchDeleteBtn');
+            if (confirmButton) {
+                confirmButton.disabled = providerBatchActionInFlight;
+                confirmButton.textContent = providerBatchActionInFlight ? '删除中...' : '确认';
+            }
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 10;
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const left = Math.min(
+                window.innerWidth - popoverRect.width - viewportPadding,
+                Math.max(viewportPadding, triggerRect.left + ((triggerRect.width - popoverRect.width) / 2))
+            );
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? 'bottom' : 'top';
+            popover.style.top = `${top}px`;
+            popover.style.left = `${left}px`;
+            popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
         }
 
         function syncDeleteProviderPopover() {
@@ -1368,11 +1457,31 @@
                 element.disabled = providerInteractionLocked || selectedNames.length === 0;
             });
 
-            document.querySelectorAll('[data-provider-import-button]').forEach(element => {
+            document.querySelectorAll('[data-provider-batch-delete-button]').forEach(element => {
                 if (!(element instanceof HTMLButtonElement)) return;
-                element.disabled = providerInteractionLocked;
-                element.textContent = providerImportActionInFlight ? '导入中...' : '导入';
+                element.disabled = providerInteractionLocked || selectedNames.length === 0;
+                element.textContent = providerBatchActionInFlight ? '删除中...' : '删除';
+                const groupKey = String(element.dataset.providerBatchDeleteButton || '').trim();
+                element.classList.toggle(
+                    'is-active',
+                    pendingBatchDeleteProviderNames.length > 0 && pendingBatchDeleteProviderGroupKey === groupKey
+                );
             });
+            if (selectedNames.length === 0) {
+                closeProviderBatchDeleteConfirm(false);
+            } else {
+                pendingBatchDeleteProviderNames = pendingBatchDeleteProviderNames.filter(name => selectedNames.includes(name));
+                if (!pendingBatchDeleteProviderNames.length && !providerBatchActionInFlight) {
+                    pendingBatchDeleteProviderGroupKey = null;
+                }
+                syncProviderBatchDeletePopover();
+            }
+
+            const importButton = document.getElementById('importProvidersBtn');
+            if (importButton instanceof HTMLButtonElement) {
+                importButton.disabled = providerInteractionLocked;
+                importButton.textContent = providerImportActionInFlight ? '导入中...' : '导入';
+            }
 
             document.querySelectorAll('[data-provider-group-select-checkbox]').forEach(element => {
                 if (!(element instanceof HTMLInputElement)) return;
@@ -1481,6 +1590,7 @@
             return {
                 enable: { label: '启用', past: '启用', fallback: '批量启用 Provider 失败' },
                 disable: { label: '禁用', past: '禁用', fallback: '批量禁用 Provider 失败' },
+                delete: { label: '删除', past: '删除', fallback: '批量删除 Provider 失败' },
             }[action] || null;
         }
 
@@ -1526,9 +1636,8 @@
                 if (!response.ok) {
                     throw new Error(result.error || '复制 Provider 失败');
                 }
-                selectedProviderNames = new Set([result.name]);
                 showMessage(`Provider 已复制为 ${result.name}，配置已重载`, 'success');
-                await loadProviders();
+                await loadPageData();
             } catch (error) {
                 console.error('复制 provider 失败:', error);
                 showActionError('复制 Provider', error, { fallback: '复制 Provider 失败' });
@@ -1600,7 +1709,7 @@
                     `已导入 ${result.count || 0} 个 Provider，${result.auth_groups_count || 0} 个 Auth Group，${authTableRowCount} 条 Auth 表项${renamedCount || renamedAuthGroupCount ? `，${renamedCount + renamedAuthGroupCount} 个已重命名` : ''}`,
                     'success'
                 );
-                await loadProviders();
+                await loadPageData();
             } catch (error) {
                 console.error('导入 provider 失败:', error);
                 showActionError('导入 Provider', error, { fallback: '导入 Provider 失败' });
@@ -1613,6 +1722,7 @@
 
         async function executeProviderBatchAction(action, selectedNames, meta) {
             closeDeleteProviderConfirm(false);
+            closeProviderBatchDeleteConfirm(false);
             providerBatchActionInFlight = true;
             renderProviders();
 
@@ -1632,7 +1742,12 @@
 
                 selectedProviderNames = new Set(selectedNames);
                 showMessage(`已批量${meta.past} ${result.count || selectedNames.length} 个 Provider，配置已重载`, 'success');
-                await loadProviders();
+                if (action === 'delete') {
+                    selectedProviderNames = new Set();
+                    await loadPageData();
+                } else {
+                    await loadProviders();
+                }
             } catch (error) {
                 console.error(`批量${meta.label} provider 失败:`, error);
                 showActionError(`批量${meta.label} Provider`, error, { fallback: meta.fallback });
@@ -3530,17 +3645,18 @@
                                 >${batchActionMeta.buttonLabel}</button>
                                 <button
                                     type="button"
+                                    class="btn btn-toolbar-secondary provider-group-batch-btn"
+                                    data-provider-batch-delete-button="${normalizedGroupKey}"
+                                    onclick="toggleProviderBatchDeleteConfirm(event, '${normalizedGroupKey}')"
+                                    disabled
+                                >删除</button>
+                                <button
+                                    type="button"
                                     class="btn btn-toolbar-secondary provider-group-data-btn"
                                     data-provider-export-button
                                     onclick="exportSelectedProviders()"
                                     disabled
                                 >导出</button>
-                                <button
-                                    type="button"
-                                    class="btn btn-toolbar-secondary provider-group-data-btn"
-                                    data-provider-import-button
-                                    onclick="openProviderImportPicker()"
-                                >导入</button>
                             </div>
                         </div>
                         <span class="toolbar-pill">${providerList.length} 个</span>
@@ -4939,6 +5055,63 @@
             }
         }
 
+        function toggleProviderBatchDeleteConfirm(event, groupKey = '') {
+            event?.stopPropagation();
+            if (hasProviderMutationInFlight()) return;
+
+            const selectedNames = getNormalizedSelectedProviderNames();
+            if (!selectedNames.length) {
+                showMessage('请先选择至少一个 Provider', 'error');
+                return;
+            }
+
+            const normalizedGroupKey = String(groupKey || '').trim();
+            const isSameTrigger = pendingBatchDeleteProviderGroupKey === normalizedGroupKey
+                && pendingBatchDeleteProviderNames.length > 0;
+            pendingBatchDeleteProviderNames = isSameTrigger ? [] : selectedNames;
+            pendingBatchDeleteProviderGroupKey = isSameTrigger ? null : normalizedGroupKey;
+            closeDeleteProviderConfirm(false);
+            closeDeleteAuthGroupConfirm(false);
+            closeDeleteAuthEntryConfirm(false);
+            renderProviders();
+        }
+
+        function cancelProviderBatchDeleteConfirm(event) {
+            event?.stopPropagation();
+            closeProviderBatchDeleteConfirm(true);
+        }
+
+        function closeProviderBatchDeleteConfirm(shouldRender = true) {
+            if (!pendingBatchDeleteProviderNames.length && pendingBatchDeleteProviderGroupKey === null) return;
+            if (providerBatchActionInFlight) {
+                return;
+            }
+            pendingBatchDeleteProviderNames = [];
+            pendingBatchDeleteProviderGroupKey = null;
+            hideProviderBatchDeletePopover();
+            if (shouldRender) {
+                renderProviders();
+            } else {
+                document.querySelectorAll('[data-provider-batch-delete-button].is-active').forEach(element => {
+                    element.classList.remove('is-active');
+                });
+            }
+        }
+
+        async function confirmProviderBatchDelete(event) {
+            event?.stopPropagation();
+            const selectedNames = pendingBatchDeleteProviderNames.slice();
+            if (!selectedNames.length || providerBatchActionInFlight) return;
+
+            const meta = getProviderBatchActionMeta('delete');
+            if (!meta) {
+                showMessage('不支持的批量操作: delete', 'error');
+                return;
+            }
+
+            await executeProviderBatchAction('delete', selectedNames, meta);
+        }
+
         async function runProviderBatchAction(action, groupKey = '') {
             const selectedNames = groupKey
                 ? getSelectedProviderNamesForGroup(groupKey)
@@ -4969,6 +5142,7 @@
             if (hasProviderMutationInFlight()) return;
 
             pendingDeleteProviderName = pendingDeleteProviderName === name ? null : name;
+            closeProviderBatchDeleteConfirm(false);
             closeDeleteAuthGroupConfirm(false);
             closeDeleteAuthEntryConfirm(false);
             if (pendingDeleteProviderName !== name) {
