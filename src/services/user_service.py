@@ -408,6 +408,7 @@ class UserService:
         created_user_ids: list[int] = []
         created_ip_addresses: list[str] = []
         skipped_ip_addresses: list[str] = []
+        skipped_users: list[dict[str, Any]] = []
         seen_ip_addresses: set[str] = set()
 
         for raw_user in raw_users:
@@ -421,9 +422,25 @@ class UserService:
             if not is_valid_ip(ip_address):
                 raise ValueError(f"Invalid imported user IP address: {raw_user.get('ip_address')}")
 
-            if ip_address in seen_ip_addresses or self._repository.get_by_ip(ip_address):
+            existing_user = self._repository.get_by_ip(ip_address)
+            if ip_address in seen_ip_addresses or existing_user:
                 if ip_address not in skipped_ip_addresses:
                     skipped_ip_addresses.append(ip_address)
+                skipped_user = {
+                    "username": username,
+                    "ip_address": ip_address,
+                    "existing_user_id": int(existing_user["id"]) if existing_user else None,
+                    "existing_username": existing_user.get("username") if existing_user else None,
+                }
+                skipped_users.append(skipped_user)
+                self._logger.warning(
+                    "User import skipped duplicate IP: imported_username=%r ip=%s existing_user_id=%s "
+                    "existing_username=%r",
+                    skipped_user["username"],
+                    skipped_user["ip_address"],
+                    skipped_user["existing_user_id"],
+                    skipped_user["existing_username"],
+                )
                 seen_ip_addresses.add(ip_address)
                 continue
 
@@ -449,14 +466,16 @@ class UserService:
         self._logger.info(
             "Users imported: created=%s skipped=%s",
             len(created_user_ids),
-            len(skipped_ip_addresses),
+            len(skipped_users),
         )
         return {
             "count": len(created_user_ids),
             "user_ids": created_user_ids,
             "ip_addresses": created_ip_addresses,
-            "skipped_count": len(skipped_ip_addresses),
+            "failed_count": 0,
+            "skipped_count": len(skipped_users),
             "skipped_ip_addresses": skipped_ip_addresses,
+            "skipped_users": skipped_users,
         }
 
     def delete_user(self, user_id: int) -> bool:
