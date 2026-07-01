@@ -124,10 +124,11 @@ class FakeLogService:
         total_tokens: int,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
-        start_time=None,
-        end_time=None,
+        start_time: Any = None,
+        end_time: Any = None,
         ip_address: str | None = None,
-    ) -> None:
+        api_key_id: int | None = None,
+    ) -> int | None:
         del (
             request_model,
             response_model,
@@ -137,7 +138,9 @@ class FakeLogService:
             start_time,
             end_time,
             ip_address,
+            api_key_id,
         )
+        return None
 
 
 class FakeProviderManager:
@@ -496,6 +499,8 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertEqual(["203.0.113.20"], user_service.ip_lookups)
+        self.assertIsNotNone(proxy_service.last_kwargs)
+        assert proxy_service.last_kwargs is not None
         self.assertEqual("203.0.113.20", proxy_service.last_kwargs["client_ip"])
 
     def test_chat_completions_ignores_real_ip_header_when_disabled(self) -> None:
@@ -540,6 +545,8 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertEqual(["127.0.0.1"], user_service.ip_lookups)
+        self.assertIsNotNone(proxy_service.last_kwargs)
+        assert proxy_service.last_kwargs is not None
         self.assertEqual("127.0.0.1", proxy_service.last_kwargs["client_ip"])
 
     def test_chat_completions_returns_openai_style_error_payload_for_upstream_failures(self) -> None:

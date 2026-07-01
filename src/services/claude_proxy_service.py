@@ -379,7 +379,9 @@ class ClaudeProxyService:
     def _get_oauth_proxy_mode(self) -> str | None:
         getter = getattr(self._config_manager, "get_oauth_proxy_mode", None)
         if callable(getter):
-            return getter()
+            value = getter()
+            if isinstance(value, str):
+                return value
         return None
 
     def _build_stream_response(

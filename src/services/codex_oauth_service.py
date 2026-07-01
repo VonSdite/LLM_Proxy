@@ -737,11 +737,12 @@ class CodexOAuthService:
     @classmethod
     def _is_auth_failure_state(cls, file_state: dict[str, Any]) -> bool:
         status_code = file_state.get("usage_status_code")
-        try:
-            if int(status_code) == 401:
-                return True
-        except (TypeError, ValueError):
-            pass
+        if status_code is not None:
+            try:
+                if int(status_code) == 401:
+                    return True
+            except (TypeError, ValueError):
+                pass
 
         error_type = str(file_state.get("usage_error_type") or "").strip().lower()
         if error_type in AUTH_FAILURE_ERROR_TYPES:
@@ -989,7 +990,7 @@ class CodexOAuthService:
         return auth_file
 
     @staticmethod
-    def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    def _write_json_file(path: Path, payload: Any) -> None:
         with path.open("w", encoding="utf-8", newline="\n") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
@@ -1058,7 +1059,9 @@ class CodexOAuthService:
     def _get_oauth_proxy_mode(self) -> str | None:
         getter = getattr(self._config_manager, "get_oauth_proxy_mode", None)
         if callable(getter):
-            return getter()
+            value = getter()
+            if isinstance(value, str):
+                return value
         return None
 
     def _build_auth_file_entry(
