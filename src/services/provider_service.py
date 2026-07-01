@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from ..application.app_context import AppContext
@@ -32,12 +33,13 @@ class ProviderService:
     ):
         self._config_manager = ctx.config_manager
         self._logger = ctx.logger
+        self._root_path = ctx.root_path
         self._reload_callback = reload_callback
         self._auth_group_repository = auth_group_repository
 
     def list_providers(self) -> list[dict[str, Any]]:
         config = self._config_manager.get_raw_config()
-        return [ProviderConfigSchema.from_mapping(provider).to_mapping() for provider in read_provider_entries(config)]
+        return [self._normalize_provider_mapping(provider) for provider in read_provider_entries(config)]
 
     def get_provider(self, name: str) -> dict[str, Any] | None:
         config = self._config_manager.get_raw_config()
@@ -45,12 +47,12 @@ class ProviderService:
         provider = self._find_provider(providers, name)
         if provider is None:
             return None
-        return ProviderConfigSchema.from_mapping(provider).to_mapping()
+        return self._normalize_provider_mapping(provider)
 
     def create_provider(self, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
-        provider_config = ProviderConfigSchema.from_payload(payload)
+        provider_config = self._build_provider_config(payload)
         normalized = provider_config.to_mapping()
         stored = provider_config.to_storage_mapping()
 
@@ -73,7 +75,7 @@ class ProviderService:
         if "enabled" not in normalized_payload:
             normalized_payload["enabled"] = ProviderConfigSchema.from_mapping(target).enabled
 
-        provider_config = ProviderConfigSchema.from_payload(normalized_payload)
+        provider_config = self._build_provider_config(normalized_payload)
         normalized = provider_config.to_mapping()
         stored = provider_config.to_storage_mapping()
 
@@ -111,7 +113,7 @@ class ProviderService:
             copied_provider.get("name"),
             existing_names,
         )
-        provider_config = ProviderConfigSchema.from_payload(copied_provider)
+        provider_config = self._build_provider_config(copied_provider)
         stored = provider_config.to_storage_mapping()
         providers.insert(providers.index(target) + 1, stored)
         self._save_providers(config, providers)
@@ -126,9 +128,7 @@ class ProviderService:
         self._find_provider_indexes(providers, normalized_names)
 
         provider_by_name = {str(provider.get("name", "")).strip(): provider for provider in providers}
-        exported_providers = [
-            ProviderConfigSchema.from_mapping(provider_by_name[name]).to_mapping() for name in normalized_names
-        ]
+        exported_providers = [self._normalize_provider_mapping(provider_by_name[name]) for name in normalized_names]
         auth_group_by_name = {str(auth_group.get("name", "")).strip(): auth_group for auth_group in auth_groups}
         referenced_auth_group_names: list[str] = []
         seen_auth_group_names: set[str] = set()
@@ -227,14 +227,14 @@ class ProviderService:
             if auth_group_name in auth_group_name_map:
                 provider_payload["auth_group"] = auth_group_name_map[auth_group_name]
 
-            original_config = ProviderConfigSchema.from_payload(provider_payload)
+            original_config = self._build_provider_config(provider_payload)
             next_provider = original_config.to_storage_mapping()
             unique_name = self._build_unique_provider_name(original_config.name, existing_names)
             if unique_name != original_config.name:
                 renamed_providers.append({"from": original_config.name, "to": unique_name})
                 next_provider["name"] = unique_name
 
-            provider_config = ProviderConfigSchema.from_payload(next_provider)
+            provider_config = self._build_provider_config(next_provider)
             providers.append(provider_config.to_storage_mapping())
             existing_names.add(provider_config.name)
             imported_names.append(provider_config.name)
@@ -293,7 +293,7 @@ class ProviderService:
         target_index = providers.index(target)
         normalized = ProviderConfigSchema.from_mapping(target).to_storage_mapping()
         normalized["enabled"] = bool(enabled)
-        provider_config = ProviderConfigSchema.from_mapping(normalized)
+        provider_config = self._build_provider_config(normalized, validate_name_format=False)
         providers[target_index] = provider_config.to_storage_mapping()
         providers = self._regroup_providers_by_enabled(providers)
         self._save_providers(config, providers)
@@ -308,7 +308,10 @@ class ProviderService:
         for target_index in target_indexes:
             normalized = ProviderConfigSchema.from_mapping(providers[target_index]).to_storage_mapping()
             normalized["enabled"] = bool(enabled)
-            providers[target_index] = ProviderConfigSchema.from_mapping(normalized).to_storage_mapping()
+            providers[target_index] = self._build_provider_config(
+                normalized,
+                validate_name_format=False,
+            ).to_storage_mapping()
 
         providers = self._regroup_providers_by_enabled(providers)
         self._save_providers(config, providers)
@@ -363,11 +366,67 @@ class ProviderService:
         auth_groups: list[dict[str, Any]],
         providers: list[dict[str, Any]],
     ) -> None:
+        providers = [self._without_unavailable_hook(provider, warn=True) for provider in providers]
         self._validate_provider_config(auth_groups, providers)
         config["auth_groups"] = auth_groups
         config["providers"] = providers
         self._config_manager.write_raw_config(config)
         self._reload_callback()
+
+    def _build_provider_config(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        validate_name_format: bool = True,
+    ) -> ProviderConfigSchema:
+        provider_config = (
+            ProviderConfigSchema.from_payload(payload)
+            if validate_name_format
+            else ProviderConfigSchema.from_mapping(payload)
+        )
+        normalized = self._without_unavailable_hook(provider_config.to_storage_mapping(), warn=True)
+        if normalized.get("hook") == provider_config.hook:
+            return provider_config
+        if validate_name_format:
+            return ProviderConfigSchema.from_payload(normalized)
+        return ProviderConfigSchema.from_mapping(normalized)
+
+    def _normalize_provider_mapping(self, provider: Mapping[str, Any]) -> dict[str, Any]:
+        provider_config = ProviderConfigSchema.from_mapping(provider)
+        normalized = self._without_unavailable_hook(provider_config.to_mapping(), warn=False)
+        return ProviderConfigSchema.from_mapping(normalized).to_mapping()
+
+    def _without_unavailable_hook(self, provider: Mapping[str, Any], *, warn: bool) -> dict[str, Any]:
+        normalized = dict(provider)
+        hook_path = str(normalized.get("hook") or "").strip()
+        if not hook_path:
+            normalized.pop("hook", None)
+            return normalized
+
+        if self._is_available_hook_path(hook_path):
+            return normalized
+
+        normalized.pop("hook", None)
+        if warn:
+            self._logger.warning(
+                "Provider hook ignored because hook file is unavailable: provider=%s hook=%s",
+                normalized.get("name") or "<unknown>",
+                hook_path,
+            )
+        return normalized
+
+    def _is_available_hook_path(self, hook_path: str) -> bool:
+        raw_hook_path = Path(hook_path)
+        if raw_hook_path.is_absolute():
+            return False
+
+        hooks_dir = (self._root_path / "hooks").resolve()
+        hook_file = (hooks_dir / raw_hook_path).resolve()
+        try:
+            hook_file.relative_to(hooks_dir)
+        except ValueError:
+            return False
+        return hook_file.is_file()
 
     @staticmethod
     def _find_provider(providers: list[dict[str, Any]], name: str) -> dict[str, Any] | None:

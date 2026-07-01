@@ -79,6 +79,7 @@ downstream request
   - 暴露系统设置读取与保存接口
 - `ProviderService`
   - 维护 Provider 配置的创建、复制、编辑、删除、启停、排序和批量删除
+  - 在配置写入和管理 API 输出时校验本机 hook 文件；不存在、绝对路径或跳出 `hooks/` 的 hook 字段为空
   - 按选中 Provider 导出 JSON，导出包包含被选 Provider、它们引用到的 Auth Group、Auth Entry 运行态和用量桶表项
   - 导入 Provider JSON 时为同名 Provider 和 Auth Group 生成数字后缀名称，并同步重写导入 Provider 的 `auth_group` 引用
   - 导入 Provider JSON 时按 Auth Group 重命名结果同步写入 Auth Entry 运行态和用量桶表项
@@ -385,6 +386,9 @@ Provider 公共配置字段只有：
 - `proxy`
   - 仅在 `proxy_mode=custom` 且非空时生效，`custom` 空值按直连执行
   - 自定义代理 URL 中 userinfo 的账号密码会在保存时规范化转义
+- `hook`
+  - 路径固定相对项目根目录 `hooks/`
+  - 管理 API 输出和配置写入只保留本机存在且位于 `hooks/` 下的 hook 文件路径
 
 历史配置载入时会自动删除 `target_format`、`target_formats` 和 `transport` 并回写配置文件，用于兼容迁移窗口内的旧配置。
 历史 Provider / OAuth 配置缺少 `proxy_mode` 时也会在载入阶段自动回写：有 `proxy` 的配置补为 `custom`，没有 `proxy` 的配置补为 `direct`。
