@@ -10,7 +10,7 @@ from flask import Flask
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
-from src.repositories import LogRepository, UserRepository
+from src.repositories import UserRepository
 from src.services import ModelCatalogService, UserService
 from src.utils.database import create_connection_factory
 
@@ -67,8 +67,7 @@ class UserModelPermissionTests(unittest.TestCase):
             flask_app=Flask(__name__),
         )
         self._repository = UserRepository(self._get_connection)
-        self._log_repository = LogRepository(self._get_connection)
-        self._service = UserService(self._ctx, self._repository, log_repository=self._log_repository)
+        self._service = UserService(self._ctx, self._repository)
 
     def tearDown(self) -> None:
         self._tempdir.cleanup()
@@ -182,20 +181,6 @@ class UserModelPermissionTests(unittest.TestCase):
             model_permissions_provided=True,
             model_permissions=["demo/gpt-4.1-mini"],
         )
-        self._log_repository.import_daily_stats(
-            [
-                {
-                    "stat_date": "2026-04-08",
-                    "ip_address": "127.0.0.1",
-                    "request_model": "demo/gpt-4.1-mini",
-                    "response_model": "gpt-4.1-mini",
-                    "request_count": 2,
-                    "total_tokens": 20,
-                    "prompt_tokens": 8,
-                    "completion_tokens": 12,
-                }
-            ]
-        )
 
         exported = self._service.export_users([alice_id])
 
@@ -211,23 +196,9 @@ class UserModelPermissionTests(unittest.TestCase):
             ],
             exported["users"],
         )
-        self.assertEqual(
-            [
-                {
-                    "stat_date": "2026-04-08",
-                    "ip_address": "127.0.0.1",
-                    "request_model": "demo/gpt-4.1-mini",
-                    "response_model": "gpt-4.1-mini",
-                    "request_count": 2,
-                    "total_tokens": 20,
-                    "prompt_tokens": 8,
-                    "completion_tokens": 12,
-                }
-            ],
-            exported["daily_request_stats"],
-        )
+        self.assertNotIn("daily_request_stats", exported)
 
-    def test_import_users_updates_duplicate_ip_and_imports_stats(self) -> None:
+    def test_import_users_updates_duplicate_ip(self) -> None:
         existing_id = self._repository.create("alice", "127.0.0.1")
         self.assertIsNotNone(existing_id)
 
@@ -246,18 +217,6 @@ class UserModelPermissionTests(unittest.TestCase):
                         "model_permissions": ["demo/gpt-4.1"],
                     },
                 ],
-                "daily_request_stats": [
-                    {
-                        "stat_date": "2026-04-08",
-                        "ip_address": "127.0.0.1",
-                        "request_model": "demo/gpt-4.1-mini",
-                        "response_model": "gpt-4.1-mini",
-                        "request_count": 2,
-                        "total_tokens": 20,
-                        "prompt_tokens": 8,
-                        "completion_tokens": 12,
-                    }
-                ],
             }
         )
 
@@ -266,7 +225,7 @@ class UserModelPermissionTests(unittest.TestCase):
         self.assertEqual(1, result["updated_count"])
         self.assertEqual(0, result["failed_count"])
         self.assertEqual(0, result["skipped_count"])
-        self.assertEqual(1, result["stats_inserted_count"])
+        self.assertNotIn("stats_inserted_count", result)
         users = self._repository.list_all()
         self.assertEqual(["alice-copy", "bob"], [user["username"] for user in users])
         alice = self._service.get_user_by_ip("127.0.0.1")
@@ -278,9 +237,6 @@ class UserModelPermissionTests(unittest.TestCase):
         self.assertEqual("*", alice["model_permissions"])
         self.assertFalse(bool(bob["whitelist_access_enabled"]))
         self.assertEqual(["demo/gpt-4.1"], bob["model_permissions"])
-        exported = self._service.export_users([existing_id])
-        self.assertEqual(1, len(exported["daily_request_stats"]))
-        self.assertEqual(20, exported["daily_request_stats"][0]["total_tokens"])
 
     def test_batch_delete_users_removes_selected_users(self) -> None:
         alice_id = self._repository.create("alice", "127.0.0.1")
