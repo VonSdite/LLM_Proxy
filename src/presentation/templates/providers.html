@@ -44,9 +44,6 @@
                         <h3 class="section-title">Providers</h3>
                     </div>
                     <div class="section-header-actions">
-                        <button type="button" class="btn btn-toolbar-secondary" id="copySelectedProviderBtn" onclick="copySelectedProvider()" disabled>复制</button>
-                        <button type="button" class="btn btn-toolbar-secondary" id="exportSelectedProvidersBtn" onclick="exportSelectedProviders()" disabled>导出</button>
-                        <button type="button" class="btn btn-toolbar-secondary" id="importProvidersBtn" onclick="openProviderImportPicker()">导入</button>
                         <input type="file" id="providerImportFileInput" accept="application/json,.json" onchange="importProvidersFromFile(this)" hidden>
                         <button type="button" class="btn btn-primary" onclick="openCreateModal()">新增 Provider</button>
                     </div>
@@ -1365,21 +1362,17 @@
         function updateProviderSelectionUi() {
             const providerInteractionLocked = hasProviderMutationInFlight();
             const selectedNames = getNormalizedSelectedProviderNames();
-            const copyButton = document.getElementById('copySelectedProviderBtn');
-            const exportButton = document.getElementById('exportSelectedProvidersBtn');
-            const importButton = document.getElementById('importProvidersBtn');
 
-            if (copyButton) {
-                copyButton.disabled = providerInteractionLocked || selectedNames.length !== 1;
-                copyButton.textContent = providerCopyActionInFlight ? '复制中...' : '复制';
-            }
-            if (exportButton) {
-                exportButton.disabled = providerInteractionLocked || selectedNames.length === 0;
-            }
-            if (importButton) {
-                importButton.disabled = providerInteractionLocked;
-                importButton.textContent = providerImportActionInFlight ? '导入中...' : '导入';
-            }
+            document.querySelectorAll('[data-provider-export-button]').forEach(element => {
+                if (!(element instanceof HTMLButtonElement)) return;
+                element.disabled = providerInteractionLocked || selectedNames.length === 0;
+            });
+
+            document.querySelectorAll('[data-provider-import-button]').forEach(element => {
+                if (!(element instanceof HTMLButtonElement)) return;
+                element.disabled = providerInteractionLocked;
+                element.textContent = providerImportActionInFlight ? '导入中...' : '导入';
+            });
 
             document.querySelectorAll('[data-provider-group-select-checkbox]').forEach(element => {
                 if (!(element instanceof HTMLInputElement)) return;
@@ -1517,17 +1510,16 @@
             URL.revokeObjectURL(url);
         }
 
-        async function copySelectedProvider() {
-            const selectedNames = getNormalizedSelectedProviderNames();
-            if (selectedNames.length !== 1 || hasProviderMutationInFlight()) {
-                showMessage('请选择一个 Provider 进行复制', 'error');
+        async function copyProvider(name) {
+            const normalizedName = String(name || '').trim();
+            if (!normalizedName || hasProviderMutationInFlight()) {
                 return;
             }
 
             providerCopyActionInFlight = true;
             renderProviders();
             try {
-                const response = await fetch(`/api/providers/${encodeURIComponent(selectedNames[0])}/copy`, {
+                const response = await fetch(`/api/providers/${encodeURIComponent(normalizedName)}/copy`, {
                     method: 'POST',
                 });
                 const result = await response.json();
@@ -3528,13 +3520,28 @@
                     <div class="provider-group-header">
                         <div class="provider-group-heading">
                             <h4 class="provider-group-title">${escapeHtml(title)}</h4>
-                            <button
-                                type="button"
-                                class="btn btn-toolbar-secondary provider-group-batch-btn"
-                                id="${batchActionMeta.buttonId}"
-                                onclick="runProviderBatchAction('${batchActionMeta.action}', '${normalizedGroupKey}')"
-                                disabled
-                            >${batchActionMeta.buttonLabel}</button>
+                            <div class="provider-group-actions">
+                                <button
+                                    type="button"
+                                    class="btn btn-toolbar-secondary provider-group-batch-btn"
+                                    id="${batchActionMeta.buttonId}"
+                                    onclick="runProviderBatchAction('${batchActionMeta.action}', '${normalizedGroupKey}')"
+                                    disabled
+                                >${batchActionMeta.buttonLabel}</button>
+                                <button
+                                    type="button"
+                                    class="btn btn-toolbar-secondary provider-group-data-btn"
+                                    data-provider-export-button
+                                    onclick="exportSelectedProviders()"
+                                    disabled
+                                >导出</button>
+                                <button
+                                    type="button"
+                                    class="btn btn-toolbar-secondary provider-group-data-btn"
+                                    data-provider-import-button
+                                    onclick="openProviderImportPicker()"
+                                >导入</button>
+                            </div>
                         </div>
                         <span class="toolbar-pill">${providerList.length} 个</span>
                     </div>
@@ -3656,6 +3663,11 @@
                             <div class="action-buttons">
                                 <button class="btn-action btn-edit" onclick="openEditModal(decodeProviderName('${encodedProviderName}'))">编辑</button>
                                 <button
+                                    class="btn-action btn-edit"
+                                    onclick="copyProvider(decodeProviderName('${encodedProviderName}'))"
+                                    ${providerActionLocked ? 'disabled' : ''}
+                                >复制</button>
+                                <button
                                     class="btn-action ${isEnabled ? 'btn-delete' : 'btn-edit'}"
                                     onclick="setProviderEnabled(decodeProviderName('${encodedProviderName}'), ${isEnabled ? 'false' : 'true'})"
                                     ${providerActionLocked ? 'disabled' : ''}
@@ -3685,16 +3697,16 @@
             if (providerCountElement) {
                 providerCountElement.textContent = providers.length;
             }
-            if (!providers.length) {
-                container.innerHTML = '<div class="empty-state">当前没有 provider 配置</div>';
-                updateProviderSelectionUi();
-                return;
-            }
 
             const enabledProviders = providers.filter(provider => isProviderEnabled(provider));
             const disabledProviders = providers.filter(provider => !isProviderEnabled(provider));
             const providerGroupSections = [
-                buildProviderTable('enabled', '已启用', enabledProviders, '当前没有已启用 Provider'),
+                buildProviderTable(
+                    'enabled',
+                    '已启用',
+                    enabledProviders,
+                    providers.length ? '当前没有已启用 Provider' : '当前没有 Provider 配置'
+                ),
             ];
             if (disabledProviders.length > 0) {
                 providerGroupSections.push(

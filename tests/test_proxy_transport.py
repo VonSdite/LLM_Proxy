@@ -1248,7 +1248,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("/api/providers/order", html)
         self.assertIn("/api/providers/export", html)
         self.assertIn("/api/providers/import", html)
-        self.assertIn("function copySelectedProvider()", html)
+        self.assertIn("function copyProvider(name)", html)
         self.assertIn("function exportSelectedProviders()", html)
         self.assertIn("function importProvidersFromFile(input)", html)
         self.assertIn(
@@ -1260,6 +1260,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('class="drag-handle-placeholder" aria-hidden="true"', html)
         self.assertIn('id="${batchActionMeta.buttonId}"', html)
         self.assertIn('class="btn btn-toolbar-secondary provider-group-batch-btn"', html)
+        self.assertIn("data-provider-export-button", html)
+        self.assertIn("data-provider-import-button", html)
+        self.assertIn("onclick=\"copyProvider(decodeProviderName('${encodedProviderName}'))\"", html)
         self.assertIn("onclick=\"runProviderBatchAction('${batchActionMeta.action}', '${normalizedGroupKey}')\"", html)
         self.assertIn("buttonId: 'disableEnabledProvidersBtn'", html)
         self.assertIn("buttonId: 'enableDisabledProvidersBtn'", html)
