@@ -225,6 +225,8 @@ class ProxyService:
 
                 headers, original_body, translated_body, request_ctx = build_request(attempt, selected_auth)
                 requested_stream = request_ctx.stream
+                if requested_stream:
+                    headers = merge_http_headers(headers, {"Accept-Encoding": "identity"})
                 effective_upstream_model = request_ctx.upstream_model
                 translated_upstream_model = translated_body["model"]
                 self._logger.info(
