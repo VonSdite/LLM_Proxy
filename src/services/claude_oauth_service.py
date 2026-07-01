@@ -149,8 +149,12 @@ class ClaudeOAuthService:
 
         expires_in = int(token_data.get("expires_in") or 0)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=max(expires_in, 0))
-        organization = token_data.get("organization") if isinstance(token_data.get("organization"), dict) else {}
-        account = token_data.get("account") if isinstance(token_data.get("account"), dict) else {}
+        organization = token_data.get("organization")
+        if not isinstance(organization, dict):
+            organization = {}
+        account = token_data.get("account")
+        if not isinstance(account, dict):
+            account = {}
         auth_payload = {
             "type": "claude",
             "id_token": token_data.get("id_token") or "",
@@ -431,7 +435,9 @@ class ClaudeOAuthService:
     def _get_oauth_proxy_mode(self) -> str | None:
         getter = getattr(self._config_manager, "get_oauth_proxy_mode", None)
         if callable(getter):
-            return getter()
+            value = getter()
+            if isinstance(value, str):
+                return value
         return None
 
     def _refresh_auth_file(self, auth_file: Path, payload: dict[str, Any]) -> dict[str, Any]:
@@ -457,8 +463,12 @@ class ClaudeOAuthService:
             raise ValueError("Claude refresh response must be a JSON object")
 
         expires_in = int(token_data.get("expires_in") or 0)
-        account = token_data.get("account") if isinstance(token_data.get("account"), dict) else {}
-        organization = token_data.get("organization") if isinstance(token_data.get("organization"), dict) else {}
+        account = token_data.get("account")
+        if not isinstance(account, dict):
+            account = {}
+        organization = token_data.get("organization")
+        if not isinstance(organization, dict):
+            organization = {}
         next_payload = dict(payload)
         next_payload["access_token"] = token_data.get("access_token") or payload.get("access_token") or ""
         next_payload["refresh_token"] = token_data.get("refresh_token") or refresh_token
@@ -522,7 +532,7 @@ class ClaudeOAuthService:
         return auth_file
 
     @staticmethod
-    def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    def _write_json_file(path: Path, payload: Any) -> None:
         with path.open("w", encoding="utf-8", newline="\n") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
@@ -750,11 +760,12 @@ class ClaudeOAuthService:
     @classmethod
     def _is_auth_failure_state(cls, file_state: dict[str, Any]) -> bool:
         status_code = file_state.get("usage_status_code")
-        try:
-            if int(status_code) in {401, 403}:
-                return True
-        except (TypeError, ValueError):
-            pass
+        if status_code is not None:
+            try:
+                if int(status_code) in {401, 403}:
+                    return True
+            except (TypeError, ValueError):
+                pass
 
         error_type = str(file_state.get("usage_error_type") or "").strip().lower()
         if error_type in AUTH_FAILURE_ERROR_TYPES:
@@ -894,7 +905,9 @@ class ClaudeOAuthService:
 
     @staticmethod
     def _extract_email(token_data: dict[str, Any]) -> str:
-        account = token_data.get("account") if isinstance(token_data.get("account"), dict) else {}
+        account = token_data.get("account")
+        if not isinstance(account, dict):
+            account = {}
         return str(token_data.get("email") or account.get("email_address") or "").strip()
 
     @classmethod
