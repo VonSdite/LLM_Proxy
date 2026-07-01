@@ -10,7 +10,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from ..application.app_context import AppContext
-from ..repositories import UserRepository
+from ..repositories import LogRepository, UserRepository
 from ..utils import is_valid_ip, normalize_ip
 from ..utils.local_time import normalize_local_datetime_text
 from .model_catalog_service import ModelCatalogService
@@ -26,10 +26,12 @@ class UserService:
         ctx: AppContext,
         repository: UserRepository,
         model_catalog_service: ModelCatalogService | None = None,
+        log_repository: LogRepository | None = None,
     ):
         self._logger = ctx.logger
         self._model_catalog_service = model_catalog_service or ModelCatalogService(ctx)
         self._repository = repository
+        self._log_repository = log_repository
         self._cache_lock = threading.RLock()
         self._user_by_ip_cache: dict[str, dict[str, Any] | None] = {}
 
@@ -378,12 +380,16 @@ class UserService:
             users = [users_by_id[user_id] for user_id in normalized_user_ids]
 
         exported_users = []
+        exported_ip_addresses: list[str] = []
         for user in users:
             parsed_permissions = self._deserialize_model_permissions(user.get("model_permissions"))
+            ip_address = str(user.get("ip_address") or "").strip()
+            if ip_address:
+                exported_ip_addresses.append(ip_address)
             exported_users.append(
                 {
                     "username": user.get("username"),
-                    "ip_address": user.get("ip_address"),
+                    "ip_address": ip_address,
                     "whitelist_access_enabled": bool(user.get("whitelist_access_enabled")),
                     "model_permissions": self.MODEL_PERMISSIONS_ALL
                     if parsed_permissions is None
@@ -391,24 +397,34 @@ class UserService:
                 }
             )
 
+        daily_request_stats: list[dict[str, Any]] = []
+        if self._log_repository is not None and exported_ip_addresses:
+            daily_request_stats = self._log_repository.export_daily_stats(ip_address=exported_ip_addresses)
+
         return {
             "version": 1,
             "kind": "llm_proxy.users",
             "users": exported_users,
+            "daily_request_stats": daily_request_stats,
         }
 
     def import_users(self, payload: Any) -> dict[str, Any]:
-        """导入用户数据；重复 IP 视为已存在并跳过。"""
+        """导入用户迁移数据；IP 已存在时更新用户记录。"""
         if not isinstance(payload, dict):
             raise ValueError("User import payload must be a JSON object")
         raw_users = payload.get("users")
         if not isinstance(raw_users, list) or not raw_users:
             raise ValueError("User import payload must include a non-empty users list")
+        raw_daily_request_stats = payload.get("daily_request_stats", [])
+        if raw_daily_request_stats is None:
+            raw_daily_request_stats = []
+        if not isinstance(raw_daily_request_stats, list):
+            raise ValueError("User import payload daily_request_stats must be a list")
 
         created_user_ids: list[int] = []
         created_ip_addresses: list[str] = []
-        skipped_ip_addresses: list[str] = []
-        skipped_users: list[dict[str, Any]] = []
+        updated_user_ids: list[int] = []
+        updated_ip_addresses: list[str] = []
         seen_ip_addresses: set[str] = set()
 
         for raw_user in raw_users:
@@ -422,60 +438,75 @@ class UserService:
             if not is_valid_ip(ip_address):
                 raise ValueError(f"Invalid imported user IP address: {raw_user.get('ip_address')}")
 
-            existing_user = self._repository.get_by_ip(ip_address)
-            if ip_address in seen_ip_addresses or existing_user:
-                if ip_address not in skipped_ip_addresses:
-                    skipped_ip_addresses.append(ip_address)
-                skipped_user = {
-                    "username": username,
-                    "ip_address": ip_address,
-                    "existing_user_id": int(existing_user["id"]) if existing_user else None,
-                    "existing_username": existing_user.get("username") if existing_user else None,
-                }
-                skipped_users.append(skipped_user)
-                self._logger.warning(
-                    "User import skipped duplicate IP: imported_username=%r ip=%s existing_user_id=%s "
-                    "existing_username=%r",
-                    skipped_user["username"],
-                    skipped_user["ip_address"],
-                    skipped_user["existing_user_id"],
-                    skipped_user["existing_username"],
-                )
-                seen_ip_addresses.add(ip_address)
-                continue
-
             model_permissions = self._serialize_model_permissions(
                 raw_user.get("model_permissions", self.MODEL_PERMISSIONS_ALL),
                 validate_models=False,
             )
+            whitelist_access_enabled = self._coerce_import_bool(
+                raw_user.get("whitelist_access_enabled"),
+                default=True,
+            )
+            existing_user = self._repository.get_by_ip(ip_address)
+            if existing_user:
+                user_id = int(existing_user["id"])
+                self._repository.update(
+                    user_id,
+                    username=username,
+                    whitelist_access_enabled=whitelist_access_enabled,
+                    model_permissions=model_permissions,
+                )
+                if ip_address not in seen_ip_addresses:
+                    updated_user_ids.append(user_id)
+                    updated_ip_addresses.append(ip_address)
+                self._logger.info(
+                    "User import updated existing IP: user_id=%s username=%r ip=%s",
+                    user_id,
+                    username,
+                    ip_address,
+                )
+                seen_ip_addresses.add(ip_address)
+                continue
+
             user_id = self._repository.create(
                 username,
                 ip_address,
                 model_permissions=model_permissions,
-                whitelist_access_enabled=self._coerce_import_bool(
-                    raw_user.get("whitelist_access_enabled"),
-                    default=True,
-                ),
+                whitelist_access_enabled=whitelist_access_enabled,
             )
             if user_id is not None:
                 created_user_ids.append(int(user_id))
                 created_ip_addresses.append(ip_address)
                 seen_ip_addresses.add(ip_address)
 
-        self._invalidate_ip_cache(*created_ip_addresses)
+        stats_result = {
+            "count": 0,
+            "inserted_count": 0,
+            "updated_count": 0,
+            "merged_count": 0,
+        }
+        if raw_daily_request_stats:
+            if self._log_repository is None:
+                raise ValueError("User import payload includes daily stats but log repository is unavailable")
+            stats_result = self._log_repository.import_daily_stats(raw_daily_request_stats)
+
+        self._invalidate_ip_cache(*created_ip_addresses, *updated_ip_addresses)
         self._logger.info(
-            "Users imported: created=%s skipped=%s",
+            "Users imported: created=%s updated=%s stats=%s",
             len(created_user_ids),
-            len(skipped_users),
+            len(updated_user_ids),
+            stats_result.get("count", 0),
         )
         return {
-            "count": len(created_user_ids),
-            "user_ids": created_user_ids,
-            "ip_addresses": created_ip_addresses,
+            "count": len(created_user_ids) + len(updated_user_ids),
+            "created_count": len(created_user_ids),
+            "updated_count": len(updated_user_ids),
+            "user_ids": [*created_user_ids, *updated_user_ids],
+            "ip_addresses": [*created_ip_addresses, *updated_ip_addresses],
             "failed_count": 0,
-            "skipped_count": len(skipped_users),
-            "skipped_ip_addresses": skipped_ip_addresses,
-            "skipped_users": skipped_users,
+            "skipped_count": 0,
+            "stats_count": stats_result.get("count", 0),
+            "stats_inserted_count": stats_result.get("inserted_count", 0),
+            "stats_updated_count": stats_result.get("updated_count", 0),
         }
 
     def delete_user(self, user_id: int) -> bool:

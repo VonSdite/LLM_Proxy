@@ -12,6 +12,7 @@ from typing import Any
 from ..application.app_context import AppContext
 from ..config.provider_config import (
     PROVIDER_NAME_MAX_LENGTH,
+    AuthGroupSchema,
     ProviderConfigSchema,
     parse_optional_bool,
     validate_auth_group_provider_definitions,
@@ -114,37 +115,86 @@ class ProviderService:
         normalized_names = self._normalize_provider_names(names, reject_duplicates=False)
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
+        auth_groups = read_auth_group_entries(config)
         self._find_provider_indexes(providers, normalized_names)
 
         provider_by_name = {str(provider.get("name", "")).strip(): provider for provider in providers}
         exported_providers = [
             ProviderConfigSchema.from_mapping(provider_by_name[name]).to_mapping() for name in normalized_names
         ]
+        auth_group_by_name = {str(auth_group.get("name", "")).strip(): auth_group for auth_group in auth_groups}
+        referenced_auth_group_names: list[str] = []
+        seen_auth_group_names: set[str] = set()
+        for provider in exported_providers:
+            auth_group_name = str(provider.get("auth_group") or "").strip()
+            if (
+                auth_group_name
+                and auth_group_name in auth_group_by_name
+                and auth_group_name not in seen_auth_group_names
+            ):
+                referenced_auth_group_names.append(auth_group_name)
+                seen_auth_group_names.add(auth_group_name)
+        exported_auth_groups = [
+            AuthGroupSchema.from_mapping(auth_group_by_name[name]).to_mapping() for name in referenced_auth_group_names
+        ]
         return {
             "version": 1,
             "kind": "llm_proxy.providers",
             "providers": exported_providers,
+            "auth_groups": exported_auth_groups,
         }
 
     def import_providers(self, payload: Any) -> dict[str, Any]:
-        """导入 Provider 配置；同名 Provider 自动追加数字后缀。"""
+        """导入 Provider 配置；同名 Provider 和 Auth Group 自动追加数字后缀。"""
         if not isinstance(payload, dict):
             raise ValueError("Provider import payload must be a JSON object")
         raw_providers = payload.get("providers")
         if not isinstance(raw_providers, list) or not raw_providers:
             raise ValueError("Provider import payload must include a non-empty providers list")
+        raw_auth_groups = payload.get("auth_groups", [])
+        if raw_auth_groups is None:
+            raw_auth_groups = []
+        if not isinstance(raw_auth_groups, list):
+            raise ValueError("Provider import payload auth_groups must be a list")
 
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
+        auth_groups = read_auth_group_entries(config)
+        existing_auth_group_names = set(self._list_auth_group_names(auth_groups))
         existing_names = set(self._list_provider_names(providers))
+        imported_auth_group_names: list[str] = []
+        renamed_auth_groups: list[dict[str, str]] = []
+        auth_group_name_map: dict[str, str] = {}
         imported_names: list[str] = []
         renamed_providers: list[dict[str, str]] = []
+
+        for raw_auth_group in raw_auth_groups:
+            if not isinstance(raw_auth_group, dict):
+                raise ValueError("Each imported auth group must be an object")
+
+            original_auth_group = AuthGroupSchema.from_mapping(raw_auth_group)
+            next_auth_group = original_auth_group.to_mapping()
+            unique_name = self._build_unique_auth_group_name(original_auth_group.name, existing_auth_group_names)
+            auth_group_name_map.setdefault(original_auth_group.name, unique_name)
+            if unique_name != original_auth_group.name:
+                renamed_auth_groups.append({"from": original_auth_group.name, "to": unique_name})
+                next_auth_group["name"] = unique_name
+
+            auth_group = AuthGroupSchema.from_mapping(next_auth_group)
+            auth_groups.append(auth_group.to_mapping())
+            existing_auth_group_names.add(auth_group.name)
+            imported_auth_group_names.append(auth_group.name)
 
         for raw_provider in raw_providers:
             if not isinstance(raw_provider, dict):
                 raise ValueError("Each imported provider must be an object")
 
-            original_config = ProviderConfigSchema.from_payload(raw_provider)
+            provider_payload = dict(raw_provider)
+            auth_group_name = str(provider_payload.get("auth_group") or "").strip()
+            if auth_group_name in auth_group_name_map:
+                provider_payload["auth_group"] = auth_group_name_map[auth_group_name]
+
+            original_config = ProviderConfigSchema.from_payload(provider_payload)
             next_provider = original_config.to_storage_mapping()
             unique_name = self._build_unique_provider_name(original_config.name, existing_names)
             if unique_name != original_config.name:
@@ -157,11 +207,14 @@ class ProviderService:
             imported_names.append(provider_config.name)
 
         providers = self._regroup_providers_by_enabled(providers)
-        self._save_providers(config, providers)
+        self._save_config(config, auth_groups, providers)
         return {
             "count": len(imported_names),
             "names": imported_names,
             "renamed": renamed_providers,
+            "auth_groups_count": len(imported_auth_group_names),
+            "auth_group_names": imported_auth_group_names,
+            "auth_groups_renamed": renamed_auth_groups,
         }
 
     def set_provider_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
@@ -236,7 +289,16 @@ class ProviderService:
         }
 
     def _save_providers(self, config: dict[str, Any], providers: list[dict[str, Any]]) -> None:
-        self._validate_providers(config, providers)
+        self._save_config(config, read_auth_group_entries(config), providers)
+
+    def _save_config(
+        self,
+        config: dict[str, Any],
+        auth_groups: list[dict[str, Any]],
+        providers: list[dict[str, Any]],
+    ) -> None:
+        self._validate_provider_config(auth_groups, providers)
+        config["auth_groups"] = auth_groups
         config["providers"] = providers
         self._config_manager.write_raw_config(config)
         self._reload_callback()
@@ -251,11 +313,8 @@ class ProviderService:
         return providers[provider_index]
 
     @staticmethod
-    def _validate_providers(config: dict[str, Any], providers: list[dict[str, Any]]) -> None:
-        validate_auth_group_provider_definitions(
-            read_auth_group_entries(config),
-            providers,
-        )
+    def _validate_provider_config(auth_groups: list[dict[str, Any]], providers: list[dict[str, Any]]) -> None:
+        validate_auth_group_provider_definitions(auth_groups, providers)
 
     @staticmethod
     def _normalize_provider_names(
@@ -311,6 +370,18 @@ class ProviderService:
                 return candidate
         raise ValueError("Unable to generate a unique provider name")
 
+    @staticmethod
+    def _build_unique_auth_group_name(base_name: Any, existing_names: set[str]) -> str:
+        seed = str(base_name or "").strip() or "auth_group"
+        if seed not in existing_names:
+            return seed
+
+        for index in range(1, 10_000):
+            candidate = f"{seed}_{index}"
+            if candidate not in existing_names:
+                return candidate
+        raise ValueError("Unable to generate a unique auth group name")
+
     @classmethod
     def _regroup_providers_by_enabled(
         cls,
@@ -355,6 +426,10 @@ class ProviderService:
     @staticmethod
     def _list_provider_names(providers: list[dict[str, Any]]) -> list[str]:
         return list(ProviderService._build_provider_indexes_by_name(providers).keys())
+
+    @staticmethod
+    def _list_auth_group_names(auth_groups: list[dict[str, Any]]) -> list[str]:
+        return [str(auth_group.get("name", "")).strip() for auth_group in auth_groups]
 
     @staticmethod
     def _build_provider_indexes_by_name(providers: list[dict[str, Any]]) -> dict[str, int]:

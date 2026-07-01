@@ -68,6 +68,10 @@ class ProviderServiceTests(unittest.TestCase):
         current_config = self.config_manager.get_raw_config()
         return [item["name"] for item in current_config["providers"]]
 
+    def _current_auth_group_names(self) -> list[str]:
+        current_config = self.config_manager.get_raw_config()
+        return [item["name"] for item in current_config["auth_groups"]]
+
     def test_config_manager_removes_legacy_target_format_on_load(self) -> None:
         self._write_config(
             {
@@ -802,6 +806,90 @@ class ProviderServiceTests(unittest.TestCase):
             ["provider_b", "provider_a"],
             [provider["name"] for provider in exported["providers"]],
         )
+
+    def test_export_providers_includes_referenced_auth_groups(self) -> None:
+        self._write_config(
+            {
+                "auth_groups": [
+                    {
+                        "name": "shared-auth",
+                        "entries": [
+                            {
+                                "id": "primary",
+                                "headers": {"Authorization": "Bearer sk-auth"},
+                            }
+                        ],
+                    }
+                ],
+                "providers": [
+                    {
+                        "name": "provider_a",
+                        "api": "https://example.com/v1/chat/completions",
+                        "auth_group": "shared-auth",
+                        "model_list": ["gpt-4.1"],
+                    }
+                ],
+            }
+        )
+        self.config_manager.reload()
+
+        exported = self.service.export_providers(["provider_a"])
+
+        self.assertEqual(["provider_a"], [provider["name"] for provider in exported["providers"]])
+        self.assertEqual(["shared-auth"], [auth_group["name"] for auth_group in exported["auth_groups"]])
+        self.assertEqual(
+            {"Authorization": "Bearer sk-auth"},
+            exported["auth_groups"][0]["entries"][0]["headers"],
+        )
+
+    def test_import_providers_renames_auth_groups_and_rewrites_provider_reference(self) -> None:
+        self._write_config(
+            {
+                "auth_groups": [
+                    {
+                        "name": "shared-auth",
+                        "entries": [
+                            {
+                                "id": "existing",
+                                "headers": {"Authorization": "Bearer sk-existing"},
+                            }
+                        ],
+                    }
+                ],
+                "providers": [],
+            }
+        )
+        self.config_manager.reload()
+
+        result = self.service.import_providers(
+            {
+                "auth_groups": [
+                    {
+                        "name": "shared-auth",
+                        "entries": [
+                            {
+                                "id": "imported",
+                                "headers": {"Authorization": "Bearer sk-imported"},
+                            }
+                        ],
+                    }
+                ],
+                "providers": [
+                    {
+                        "name": "provider_a",
+                        "api": "https://example.com/v1/chat/completions",
+                        "auth_group": "shared-auth",
+                        "model_list": ["gpt-4.1"],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(1, result["auth_groups_count"])
+        self.assertEqual([{"from": "shared-auth", "to": "shared-auth_1"}], result["auth_groups_renamed"])
+        current_config = self.config_manager.get_raw_config()
+        self.assertEqual(["shared-auth", "shared-auth_1"], self._current_auth_group_names())
+        self.assertEqual("shared-auth_1", current_config["providers"][0]["auth_group"])
 
 
 if __name__ == "__main__":

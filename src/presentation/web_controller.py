@@ -476,15 +476,15 @@ class WebController:
 
     def export_daily_stats(self) -> ResponseReturnValue:
         try:
-            self._validate_dashboard_date_range(
-                request.args.get("start_date"),
-                request.args.get("end_date"),
-            )
+            start_date = request.args.get("start_date")
+            end_date = request.args.get("end_date")
+            if start_date or end_date:
+                self._validate_dashboard_date_range(start_date, end_date)
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
             result = self._log_service.export_daily_stats(
-                request.args.get("start_date"),
-                request.args.get("end_date"),
+                start_date,
+                end_date,
                 usernames or None,
                 request_models or None,
             )
@@ -504,10 +504,10 @@ class WebController:
             payload = require_json_object()
             result = self._log_service.import_daily_stats(payload)
             self._logger.info(
-                "Daily stats JSON imported: count=%s inserted=%s merged=%s",
+                "Daily stats JSON imported: count=%s inserted=%s updated=%s",
                 result.get("count", 0),
                 result.get("inserted_count", 0),
-                result.get("merged_count", 0),
+                result.get("updated_count", 0),
             )
             return jsonify(result), 201
         except ValueError as exc:

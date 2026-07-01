@@ -1468,15 +1468,8 @@
         }
 
         async function exportStatisticsData() {
-            const startDate = currentFilters.start_date || '';
-            const endDate = currentFilters.end_date || '';
-            if (!validateDateRangeForQuery(startDate, endDate)) {
-                return;
-            }
-
             try {
-                const params = buildDashboardSearchParams({});
-                const response = await fetch(`/api/statistics/daily-stats/export?${params}`, { cache: 'no-store' });
+                const response = await fetch('/api/statistics/daily-stats/export', { cache: 'no-store' });
                 const result = await response.json();
                 if (!response.ok) {
                     throw new Error(result.error || '导出统计数据失败');
@@ -1519,7 +1512,7 @@
                     throw new Error(result.error || '导入统计数据失败');
                 }
                 showMessage(
-                    `已导入 ${result.count || 0} 条统计数据，合并 ${result.merged_count || 0} 条`,
+                    `已导入 ${result.count || 0} 条统计数据，更新 ${result.updated_count || 0} 条`,
                     'success'
                 );
                 loadActiveDashboardTabData();

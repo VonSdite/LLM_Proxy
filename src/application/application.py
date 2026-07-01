@@ -265,7 +265,12 @@ class Application:
             codex_oauth_service=codex_oauth_service,
             claude_oauth_service=claude_oauth_service,
         )
-        user_service = UserService(self._ctx, self._user_repository, model_catalog_service)
+        user_service = UserService(
+            self._ctx,
+            self._user_repository,
+            model_catalog_service,
+            self._log_repository,
+        )
         api_key_service = ApiKeyService(self._ctx, self._api_key_repository, model_catalog_service)
         self._user_service = user_service
         self._api_key_service = api_key_service
