@@ -219,11 +219,10 @@ class UserController:
             payload = get_json_object()
             result = self._user_service.import_users(payload)
             self._logger.info(
-                "Users imported: count=%s created=%s updated=%s stats=%s",
+                "Users imported: count=%s created=%s updated=%s",
                 result.get("count", 0),
                 result.get("created_count", 0),
                 result.get("updated_count", 0),
-                result.get("stats_count", 0),
             )
             return jsonify(result), 201
         except ValueError as exc:

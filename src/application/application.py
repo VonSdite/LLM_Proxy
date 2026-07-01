@@ -269,7 +269,6 @@ class Application:
             self._ctx,
             self._user_repository,
             model_catalog_service,
-            self._log_repository,
         )
         api_key_service = ApiKeyService(self._ctx, self._api_key_repository, model_catalog_service)
         self._user_service = user_service

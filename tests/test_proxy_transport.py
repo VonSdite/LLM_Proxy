@@ -1439,7 +1439,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("/api/users/export", users_html)
         self.assertIn("/api/users/import", users_html)
         self.assertIn(
-            "新增 ${result.created_count || 0} 个，更新 ${result.updated_count || 0} 个，失败 ${result.failed_count || 0} 个，统计 ${result.stats_count || 0} 条",
+            "新增 ${result.created_count || 0} 个，更新 ${result.updated_count || 0} 个，失败 ${result.failed_count || 0} 个",
             users_html,
         )
         self.assertIn("function deleteSelectedUsers()", users_html)
