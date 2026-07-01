@@ -144,6 +144,78 @@ class AuthGroupRepository:
             }
         return result
 
+    def export_runtime_states(self, auth_group_names: Iterable[str]) -> list[dict[str, Any]]:
+        """按 Auth Group 名称导出运行态表项。"""
+        normalized_names = self._normalize_auth_group_names(auth_group_names)
+        if not normalized_names:
+            return []
+
+        placeholders = ", ".join("?" for _ in normalized_names)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT auth_group_name, entry_id, disabled, disabled_reason, cooldown_until,
+                       last_status_code, last_error_type, last_error_message, updated_at
+                FROM auth_entry_runtime_state
+                WHERE auth_group_name IN ({placeholders})
+                ORDER BY auth_group_name ASC, entry_id ASC
+                """,
+                normalized_names,
+            )
+            rows = cursor.fetchall()
+
+        return [
+            {
+                "auth_group_name": row["auth_group_name"],
+                "entry_id": row["entry_id"],
+                "disabled": bool(row["disabled"]),
+                "disabled_reason": row["disabled_reason"],
+                "cooldown_until": row["cooldown_until"],
+                "last_status_code": row["last_status_code"],
+                "last_error_type": row["last_error_type"],
+                "last_error_message": row["last_error_message"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def export_usage_buckets(self, auth_group_names: Iterable[str]) -> list[dict[str, Any]]:
+        """按 Auth Group 名称导出用量桶表项。"""
+        normalized_names = self._normalize_auth_group_names(auth_group_names)
+        if not normalized_names:
+            return []
+
+        placeholders = ", ".join("?" for _ in normalized_names)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT auth_group_name, entry_id, bucket_type, bucket_start,
+                       request_count, prompt_tokens, completion_tokens, total_tokens, updated_at
+                FROM auth_entry_usage_buckets
+                WHERE auth_group_name IN ({placeholders})
+                ORDER BY auth_group_name ASC, entry_id ASC, bucket_type ASC, bucket_start ASC
+                """,
+                normalized_names,
+            )
+            rows = cursor.fetchall()
+
+        return [
+            {
+                "auth_group_name": row["auth_group_name"],
+                "entry_id": row["entry_id"],
+                "bucket_type": row["bucket_type"],
+                "bucket_start": row["bucket_start"],
+                "request_count": int(row["request_count"] or 0),
+                "prompt_tokens": int(row["prompt_tokens"] or 0),
+                "completion_tokens": int(row["completion_tokens"] or 0),
+                "total_tokens": int(row["total_tokens"] or 0),
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     def purge_legacy_provider_runtime_state(
         self,
         active_auth_group_names: Iterable[str] = (),
@@ -263,6 +335,104 @@ class AuthGroupRepository:
             last_error_type=None,
             last_error_message=None,
         )
+
+    def import_runtime_states(self, rows: Iterable[dict[str, Any]]) -> dict[str, int]:
+        """导入运行态表项，主键相同的表项使用导入值覆盖。"""
+        now_text = now_local_datetime_text()
+        normalized_rows = [self._normalize_runtime_state_row(row, default_updated_at=now_text) for row in rows]
+        inserted_count = 0
+        updated_count = 0
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for row in normalized_rows:
+                if self._runtime_state_exists(cursor, row):
+                    updated_count += 1
+                else:
+                    inserted_count += 1
+                cursor.execute(
+                    """
+                    INSERT INTO auth_entry_runtime_state (
+                        auth_group_name, entry_id, disabled, disabled_reason, cooldown_until,
+                        last_status_code, last_error_type, last_error_message, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(auth_group_name, entry_id)
+                    DO UPDATE SET
+                        disabled = excluded.disabled,
+                        disabled_reason = excluded.disabled_reason,
+                        cooldown_until = excluded.cooldown_until,
+                        last_status_code = excluded.last_status_code,
+                        last_error_type = excluded.last_error_type,
+                        last_error_message = excluded.last_error_message,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        row["auth_group_name"],
+                        row["entry_id"],
+                        1 if row["disabled"] else 0,
+                        row["disabled_reason"],
+                        row["cooldown_until"],
+                        row["last_status_code"],
+                        row["last_error_type"],
+                        row["last_error_message"],
+                        row["updated_at"],
+                    ),
+                )
+
+        return {
+            "count": len(normalized_rows),
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+        }
+
+    def import_usage_buckets(self, rows: Iterable[dict[str, Any]]) -> dict[str, int]:
+        """导入用量桶表项，主键相同的表项使用导入值覆盖。"""
+        now_text = now_local_datetime_text()
+        normalized_rows = [self._normalize_usage_bucket_row(row, default_updated_at=now_text) for row in rows]
+        inserted_count = 0
+        updated_count = 0
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for row in normalized_rows:
+                if self._usage_bucket_exists(cursor, row):
+                    updated_count += 1
+                else:
+                    inserted_count += 1
+                cursor.execute(
+                    """
+                    INSERT INTO auth_entry_usage_buckets (
+                        auth_group_name, entry_id, bucket_type, bucket_start,
+                        request_count, prompt_tokens, completion_tokens, total_tokens, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(auth_group_name, entry_id, bucket_type, bucket_start)
+                    DO UPDATE SET
+                        request_count = excluded.request_count,
+                        prompt_tokens = excluded.prompt_tokens,
+                        completion_tokens = excluded.completion_tokens,
+                        total_tokens = excluded.total_tokens,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        row["auth_group_name"],
+                        row["entry_id"],
+                        row["bucket_type"],
+                        row["bucket_start"],
+                        row["request_count"],
+                        row["prompt_tokens"],
+                        row["completion_tokens"],
+                        row["total_tokens"],
+                        row["updated_at"],
+                    ),
+                )
+
+        return {
+            "count": len(normalized_rows),
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+        }
 
     def reset_current_minute_usage(self, auth_group_name: str, entry_id: str, when: datetime) -> None:
         minute_bucket = self._minute_bucket_start(when)
@@ -453,3 +623,122 @@ class AuthGroupRepository:
             entry_usage[f"{prefix}_completion_tokens"] = int(row["completion_tokens"] or 0)
             entry_usage[f"{prefix}_total_tokens"] = int(row["total_tokens"] or 0)
         return usage_by_entry
+
+    @staticmethod
+    def _normalize_auth_group_names(auth_group_names: Iterable[str]) -> list[str]:
+        seen_names: set[str] = set()
+        normalized_names: list[str] = []
+        for raw_name in auth_group_names:
+            name = str(raw_name or "").strip()
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
+            normalized_names.append(name)
+        return normalized_names
+
+    @staticmethod
+    def _normalize_required_text(value: Any, *, field_name: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError(f"Auth group runtime field {field_name} is required")
+        return text
+
+    @staticmethod
+    def _normalize_optional_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @classmethod
+    def _normalize_optional_int(cls, value: Any, *, field_name: str) -> int | None:
+        if value is None or str(value).strip() == "":
+            return None
+        return cls._normalize_non_negative_int(value, field_name=field_name)
+
+    @staticmethod
+    def _normalize_non_negative_int(value: Any, *, field_name: str) -> int:
+        try:
+            parsed = int(value or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Auth group runtime field {field_name} must be an integer") from exc
+        if parsed < 0:
+            raise ValueError(f"Auth group runtime field {field_name} must be greater than or equal to 0")
+        return parsed
+
+    @staticmethod
+    def _normalize_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        normalized = str(value or "").strip().lower()
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"", "0", "false", "no", "off", "disabled"}:
+            return False
+        return bool(value)
+
+    @classmethod
+    def _normalize_runtime_state_row(cls, row: dict[str, Any], *, default_updated_at: str) -> dict[str, Any]:
+        if not isinstance(row, dict):
+            raise ValueError("Each auth_entry_runtime_state row must be an object")
+        return {
+            "auth_group_name": cls._normalize_required_text(row.get("auth_group_name"), field_name="auth_group_name"),
+            "entry_id": cls._normalize_required_text(row.get("entry_id"), field_name="entry_id"),
+            "disabled": cls._normalize_bool(row.get("disabled")),
+            "disabled_reason": cls._normalize_optional_text(row.get("disabled_reason")),
+            "cooldown_until": cls._normalize_optional_text(row.get("cooldown_until")),
+            "last_status_code": cls._normalize_optional_int(row.get("last_status_code"), field_name="last_status_code"),
+            "last_error_type": cls._normalize_optional_text(row.get("last_error_type")),
+            "last_error_message": cls._normalize_optional_text(row.get("last_error_message")),
+            "updated_at": cls._normalize_optional_text(row.get("updated_at")) or default_updated_at,
+        }
+
+    @classmethod
+    def _normalize_usage_bucket_row(cls, row: dict[str, Any], *, default_updated_at: str) -> dict[str, Any]:
+        if not isinstance(row, dict):
+            raise ValueError("Each auth_entry_usage_buckets row must be an object")
+        return {
+            "auth_group_name": cls._normalize_required_text(row.get("auth_group_name"), field_name="auth_group_name"),
+            "entry_id": cls._normalize_required_text(row.get("entry_id"), field_name="entry_id"),
+            "bucket_type": cls._normalize_required_text(row.get("bucket_type"), field_name="bucket_type"),
+            "bucket_start": cls._normalize_required_text(row.get("bucket_start"), field_name="bucket_start"),
+            "request_count": cls._normalize_non_negative_int(row.get("request_count"), field_name="request_count"),
+            "prompt_tokens": cls._normalize_non_negative_int(row.get("prompt_tokens"), field_name="prompt_tokens"),
+            "completion_tokens": cls._normalize_non_negative_int(
+                row.get("completion_tokens"),
+                field_name="completion_tokens",
+            ),
+            "total_tokens": cls._normalize_non_negative_int(row.get("total_tokens"), field_name="total_tokens"),
+            "updated_at": cls._normalize_optional_text(row.get("updated_at")) or default_updated_at,
+        }
+
+    @staticmethod
+    def _runtime_state_exists(cursor: Any, row: dict[str, Any]) -> bool:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM auth_entry_runtime_state
+            WHERE auth_group_name = ? AND entry_id = ?
+            LIMIT 1
+            """,
+            (row["auth_group_name"], row["entry_id"]),
+        )
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _usage_bucket_exists(cursor: Any, row: dict[str, Any]) -> bool:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM auth_entry_usage_buckets
+            WHERE auth_group_name = ? AND entry_id = ? AND bucket_type = ? AND bucket_start = ?
+            LIMIT 1
+            """,
+            (
+                row["auth_group_name"],
+                row["entry_id"],
+                row["bucket_type"],
+                row["bucket_start"],
+            ),
+        )
+        return cursor.fetchone() is not None

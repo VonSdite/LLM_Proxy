@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -12,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
 from src.config.config_manager import ConfigManager
+from src.repositories.auth_group_repository import AuthGroupRepository
 from src.services.provider_service import ProviderService
+from src.utils.database import create_connection_factory
 
 
 class FakeLogger:
@@ -36,8 +39,10 @@ class ProviderServiceTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory(dir=runtime_root)
         self.root_path = Path(self.temp_dir.name)
         self.config_path = self.root_path / "config.yaml"
+        self.db_path = self.root_path / "requests.db"
         self._write_config({"auth_groups": [], "providers": []})
         self.config_manager = ConfigManager(self.config_path, self.root_path)
+        self.auth_group_repository = AuthGroupRepository(create_connection_factory(self.db_path))
         self.reload_count = 0
 
         def reload_callback() -> None:
@@ -50,7 +55,7 @@ class ProviderServiceTests(unittest.TestCase):
             root_path=self.root_path,
             flask_app=Flask(__name__),
         )
-        self.service = ProviderService(ctx, reload_callback)
+        self.service = ProviderService(ctx, reload_callback, self.auth_group_repository)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -832,6 +837,21 @@ class ProviderServiceTests(unittest.TestCase):
             }
         )
         self.config_manager.reload()
+        self.auth_group_repository.save_entry_runtime_state(
+            "shared-auth",
+            "primary",
+            disabled=True,
+            disabled_reason="manual",
+            cooldown_until="2026-04-08 10:00:00.000000",
+            last_status_code=429,
+            last_error_type="rate_limit",
+            last_error_message="quota exceeded",
+        )
+        self.auth_group_repository.increment_request_usage(
+            "shared-auth",
+            "primary",
+            datetime(2026, 4, 8, 9, 15, 0),
+        )
 
         exported = self.service.export_providers(["provider_a"])
 
@@ -840,6 +860,13 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(
             {"Authorization": "Bearer sk-auth"},
             exported["auth_groups"][0]["entries"][0]["headers"],
+        )
+        self.assertEqual(["shared-auth"], [row["auth_group_name"] for row in exported["auth_entry_runtime_state"]])
+        self.assertEqual("primary", exported["auth_entry_runtime_state"][0]["entry_id"])
+        self.assertTrue(exported["auth_entry_runtime_state"][0]["disabled"])
+        self.assertEqual(
+            {"minute", "day"},
+            {row["bucket_type"] for row in exported["auth_entry_usage_buckets"]},
         )
 
     def test_import_providers_renames_auth_groups_and_rewrites_provider_reference(self) -> None:
@@ -874,6 +901,32 @@ class ProviderServiceTests(unittest.TestCase):
                         ],
                     }
                 ],
+                "auth_entry_runtime_state": [
+                    {
+                        "auth_group_name": "shared-auth",
+                        "entry_id": "imported",
+                        "disabled": True,
+                        "disabled_reason": "manual",
+                        "cooldown_until": "2026-04-08 10:00:00.000000",
+                        "last_status_code": 429,
+                        "last_error_type": "rate_limit",
+                        "last_error_message": "quota exceeded",
+                        "updated_at": "2026-04-08 09:00:00.000000",
+                    }
+                ],
+                "auth_entry_usage_buckets": [
+                    {
+                        "auth_group_name": "shared-auth",
+                        "entry_id": "imported",
+                        "bucket_type": "day",
+                        "bucket_start": "2026-04-08",
+                        "request_count": 3,
+                        "prompt_tokens": 11,
+                        "completion_tokens": 13,
+                        "total_tokens": 24,
+                        "updated_at": "2026-04-08 09:00:00.000000",
+                    }
+                ],
                 "providers": [
                     {
                         "name": "provider_a",
@@ -887,9 +940,19 @@ class ProviderServiceTests(unittest.TestCase):
 
         self.assertEqual(1, result["auth_groups_count"])
         self.assertEqual([{"from": "shared-auth", "to": "shared-auth_1"}], result["auth_groups_renamed"])
+        self.assertEqual(1, result["auth_entry_runtime_state_count"])
+        self.assertEqual(1, result["auth_entry_usage_buckets_count"])
         current_config = self.config_manager.get_raw_config()
         self.assertEqual(["shared-auth", "shared-auth_1"], self._current_auth_group_names())
         self.assertEqual("shared-auth_1", current_config["providers"][0]["auth_group"])
+        runtime_state = self.auth_group_repository.get_entry_runtime_state("shared-auth_1", "imported")
+        self.assertTrue(runtime_state["disabled"])
+        self.assertEqual("manual", runtime_state["disabled_reason"])
+        usage_rows = self.auth_group_repository.export_usage_buckets(["shared-auth_1"])
+        self.assertEqual(1, len(usage_rows))
+        self.assertEqual("shared-auth_1", usage_rows[0]["auth_group_name"])
+        self.assertEqual(3, usage_rows[0]["request_count"])
+        self.assertEqual(24, usage_rows[0]["total_tokens"])
 
 
 if __name__ == "__main__":

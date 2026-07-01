@@ -278,7 +278,11 @@ class Application:
         self._api_key_service.sync_model_permissions()
         proxy_service = ProxyService(self._ctx, self._auth_group_manager)
         log_service = LogService(self._ctx, self._log_repository)
-        provider_service = ProviderService(self._ctx, self.reload_providers)
+        provider_service = ProviderService(
+            self._ctx,
+            self.reload_providers,
+            self._auth_group_repository,
+        )
         provider_model_test_service = ProviderModelTestService(
             self._ctx,
             self._provider_runtime_factory,

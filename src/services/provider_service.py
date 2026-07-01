@@ -17,16 +17,23 @@ from ..config.provider_config import (
     parse_optional_bool,
     validate_auth_group_provider_definitions,
 )
+from ..repositories.auth_group_repository import AuthGroupRepository
 from .config_sections import read_auth_group_entries, read_provider_entries
 
 
 class ProviderService:
     """负责 provider 配置的增删改查与模型拉取。"""
 
-    def __init__(self, ctx: AppContext, reload_callback: Callable[[], None]):
+    def __init__(
+        self,
+        ctx: AppContext,
+        reload_callback: Callable[[], None],
+        auth_group_repository: AuthGroupRepository | None = None,
+    ):
         self._config_manager = ctx.config_manager
         self._logger = ctx.logger
         self._reload_callback = reload_callback
+        self._auth_group_repository = auth_group_repository
 
     def list_providers(self) -> list[dict[str, Any]]:
         config = self._config_manager.get_raw_config()
@@ -137,11 +144,18 @@ class ProviderService:
         exported_auth_groups = [
             AuthGroupSchema.from_mapping(auth_group_by_name[name]).to_mapping() for name in referenced_auth_group_names
         ]
+        auth_entry_runtime_state: list[dict[str, Any]] = []
+        auth_entry_usage_buckets: list[dict[str, Any]] = []
+        if self._auth_group_repository is not None and referenced_auth_group_names:
+            auth_entry_runtime_state = self._auth_group_repository.export_runtime_states(referenced_auth_group_names)
+            auth_entry_usage_buckets = self._auth_group_repository.export_usage_buckets(referenced_auth_group_names)
         return {
             "version": 1,
             "kind": "llm_proxy.providers",
             "providers": exported_providers,
             "auth_groups": exported_auth_groups,
+            "auth_entry_runtime_state": auth_entry_runtime_state,
+            "auth_entry_usage_buckets": auth_entry_usage_buckets,
         }
 
     def import_providers(self, payload: Any) -> dict[str, Any]:
@@ -156,6 +170,16 @@ class ProviderService:
             raw_auth_groups = []
         if not isinstance(raw_auth_groups, list):
             raise ValueError("Provider import payload auth_groups must be a list")
+        raw_auth_entry_runtime_state = payload.get("auth_entry_runtime_state", [])
+        if raw_auth_entry_runtime_state is None:
+            raw_auth_entry_runtime_state = []
+        if not isinstance(raw_auth_entry_runtime_state, list):
+            raise ValueError("Provider import payload auth_entry_runtime_state must be a list")
+        raw_auth_entry_usage_buckets = payload.get("auth_entry_usage_buckets", [])
+        if raw_auth_entry_usage_buckets is None:
+            raw_auth_entry_usage_buckets = []
+        if not isinstance(raw_auth_entry_usage_buckets, list):
+            raise ValueError("Provider import payload auth_entry_usage_buckets must be a list")
 
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -208,6 +232,29 @@ class ProviderService:
 
         providers = self._regroup_providers_by_enabled(providers)
         self._save_config(config, auth_groups, providers)
+        runtime_state_result = {
+            "count": 0,
+            "inserted_count": 0,
+            "updated_count": 0,
+        }
+        usage_bucket_result = {
+            "count": 0,
+            "inserted_count": 0,
+            "updated_count": 0,
+        }
+        if raw_auth_entry_runtime_state or raw_auth_entry_usage_buckets:
+            if self._auth_group_repository is None:
+                raise ValueError("Provider import payload includes auth group table rows but repository is unavailable")
+            runtime_state_rows = self._rewrite_auth_group_table_rows(
+                raw_auth_entry_runtime_state,
+                auth_group_name_map,
+            )
+            usage_bucket_rows = self._rewrite_auth_group_table_rows(
+                raw_auth_entry_usage_buckets,
+                auth_group_name_map,
+            )
+            runtime_state_result = self._auth_group_repository.import_runtime_states(runtime_state_rows)
+            usage_bucket_result = self._auth_group_repository.import_usage_buckets(usage_bucket_rows)
         return {
             "count": len(imported_names),
             "names": imported_names,
@@ -215,6 +262,12 @@ class ProviderService:
             "auth_groups_count": len(imported_auth_group_names),
             "auth_group_names": imported_auth_group_names,
             "auth_groups_renamed": renamed_auth_groups,
+            "auth_entry_runtime_state_count": runtime_state_result["count"],
+            "auth_entry_usage_buckets_count": usage_bucket_result["count"],
+            "auth_entry_runtime_state_inserted_count": runtime_state_result["inserted_count"],
+            "auth_entry_runtime_state_updated_count": runtime_state_result["updated_count"],
+            "auth_entry_usage_buckets_inserted_count": usage_bucket_result["inserted_count"],
+            "auth_entry_usage_buckets_updated_count": usage_bucket_result["updated_count"],
         }
 
     def set_provider_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
@@ -430,6 +483,24 @@ class ProviderService:
     @staticmethod
     def _list_auth_group_names(auth_groups: list[dict[str, Any]]) -> list[str]:
         return [str(auth_group.get("name", "")).strip() for auth_group in auth_groups]
+
+    @staticmethod
+    def _rewrite_auth_group_table_rows(
+        rows: list[Any],
+        auth_group_name_map: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        rewritten_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("Each imported auth group table row must be an object")
+            auth_group_name = str(row.get("auth_group_name") or "").strip()
+            mapped_auth_group_name = auth_group_name_map.get(auth_group_name)
+            if mapped_auth_group_name is None:
+                continue
+            rewritten_row = dict(row)
+            rewritten_row["auth_group_name"] = mapped_auth_group_name
+            rewritten_rows.append(rewritten_row)
+        return rewritten_rows
 
     @staticmethod
     def _build_provider_indexes_by_name(providers: list[dict[str, Any]]) -> dict[str, int]:

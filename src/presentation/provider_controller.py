@@ -215,9 +215,10 @@ class ProviderController:
             payload = get_json_object()
             result = self._provider_service.import_providers(payload)
             self._logger.info(
-                "Providers imported: count=%s auth_groups=%s",
+                "Providers imported: count=%s auth_groups=%s auth_table_rows=%s",
                 result.get("count", 0),
                 result.get("auth_groups_count", 0),
+                result.get("auth_entry_runtime_state_count", 0) + result.get("auth_entry_usage_buckets_count", 0),
             )
             return jsonify(result), 201
         except ValueError as exc:
