@@ -1564,8 +1564,9 @@
                     throw new Error(result.error || '导出 Provider 失败');
                 }
                 downloadJsonFile(result, buildJsonFilename('providers'));
+                const authTableRowCount = (result.auth_entry_runtime_state?.length || 0) + (result.auth_entry_usage_buckets?.length || 0);
                 showMessage(
-                    `已导出 ${result.providers?.length || selectedNames.length} 个 Provider，${result.auth_groups?.length || 0} 个 Auth Group`,
+                    `已导出 ${result.providers?.length || selectedNames.length} 个 Provider，${result.auth_groups?.length || 0} 个 Auth Group，${authTableRowCount} 条 Auth 表项`,
                     'success'
                 );
             } catch (error) {
@@ -1602,8 +1603,9 @@
                 selectedProviderNames = new Set(result.names || []);
                 const renamedCount = Array.isArray(result.renamed) ? result.renamed.length : 0;
                 const renamedAuthGroupCount = Array.isArray(result.auth_groups_renamed) ? result.auth_groups_renamed.length : 0;
+                const authTableRowCount = (result.auth_entry_runtime_state_count || 0) + (result.auth_entry_usage_buckets_count || 0);
                 showMessage(
-                    `已导入 ${result.count || 0} 个 Provider，${result.auth_groups_count || 0} 个 Auth Group${renamedCount || renamedAuthGroupCount ? `，${renamedCount + renamedAuthGroupCount} 个已重命名` : ''}`,
+                    `已导入 ${result.count || 0} 个 Provider，${result.auth_groups_count || 0} 个 Auth Group，${authTableRowCount} 条 Auth 表项${renamedCount || renamedAuthGroupCount ? `，${renamedCount + renamedAuthGroupCount} 个已重命名` : ''}`,
                     'success'
                 );
                 await loadProviders();

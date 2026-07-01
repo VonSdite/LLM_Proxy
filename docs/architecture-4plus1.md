@@ -79,8 +79,9 @@ downstream request
   - 暴露系统设置读取与保存接口
 - `ProviderService`
   - 维护 Provider 配置的创建、复制、编辑、删除、启停、排序和批量删除
-  - 按选中 Provider 导出 JSON，导出包包含被选 Provider 和它们引用到的 Auth Group
+  - 按选中 Provider 导出 JSON，导出包包含被选 Provider、它们引用到的 Auth Group、Auth Entry 运行态和用量桶表项
   - 导入 Provider JSON 时为同名 Provider 和 Auth Group 生成数字后缀名称，并同步重写导入 Provider 的 `auth_group` 引用
+  - 导入 Provider JSON 时按 Auth Group 重命名结果同步写入 Auth Entry 运行态和用量桶表项
 - `UserService`
   - 维护用户、IP 白名单状态和模型权限
   - 支持用户迁移 JSON 导入导出与批量删除；导出包包含用户配置和关联日聚合统计
@@ -705,6 +706,8 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 系统设置保存与生效边界
 - [src/services/provider_service.py](../src/services/provider_service.py)
   - Provider 配置管理、复制、排序、迁移 JSON 导入导出和重载触发
+- [src/repositories/auth_group_repository.py](../src/repositories/auth_group_repository.py)
+  - Auth Entry 运行态、用量桶、迁移表项导入导出和 Auth Group 运行态查询
 - [src/services/user_service.py](../src/services/user_service.py)
   - 用户管理、模型权限、IP 缓存、迁移 JSON 导入导出和批量删除
 - [src/services/log_service.py](../src/services/log_service.py)
