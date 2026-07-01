@@ -1442,6 +1442,15 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("/api/users/export", users_html)
         self.assertIn("/api/users/import", users_html)
         self.assertIn(
+            '<button type="button" class="btn btn-toolbar-secondary" id="exportUsersBtn" onclick="exportUsers()" disabled>导出</button>',
+            users_html,
+        )
+        self.assertIn(
+            '<button type="button" class="btn btn-toolbar-secondary" id="importUsersBtn" onclick="openUserImportPicker()">导入</button>',
+            users_html,
+        )
+        self.assertIn("body: JSON.stringify({ user_ids: selectedIds })", users_html)
+        self.assertIn(
             "新增 ${result.created_count || 0} 个，更新 ${result.updated_count || 0} 个，失败 ${result.failed_count || 0} 个",
             users_html,
         )

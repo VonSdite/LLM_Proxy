@@ -53,8 +53,8 @@
                                             aria-label="查看 Chat 白名单说明"
                                         >?</button>
                                 </div>
-                                <button type="button" class="btn btn-toolbar-secondary" id="exportUsersBtn" onclick="exportUsers()">导出用户</button>
-                                <button type="button" class="btn btn-toolbar-secondary" id="importUsersBtn" onclick="openUserImportPicker()">导入用户</button>
+                                <button type="button" class="btn btn-toolbar-secondary" id="exportUsersBtn" onclick="exportUsers()" disabled>导出</button>
+                                <button type="button" class="btn btn-toolbar-secondary" id="importUsersBtn" onclick="openUserImportPicker()">导入</button>
                                 <input type="file" id="userImportFileInput" accept="application/json,.json" onchange="importUsersFromFile(this)" hidden>
                             </div>
                         </div>
@@ -339,6 +339,7 @@
             const summary = document.getElementById('selectedUsersSummary');
             const batchButton = document.getElementById('batchSetModelPermissionsBtn');
             const deleteButton = document.getElementById('batchDeleteUsersBtn');
+            const exportButton = document.getElementById('exportUsersBtn');
             const importButton = document.getElementById('importUsersBtn');
             if (!controls || !summary || !batchButton || !deleteButton) return;
 
@@ -349,9 +350,12 @@
             batchButton.disabled = selectedCount === 0 || userBatchActionInFlight;
             deleteButton.disabled = selectedCount === 0 || userBatchActionInFlight;
             deleteButton.textContent = userBatchActionInFlight ? '删除中...' : '批量删除';
+            if (exportButton) {
+                exportButton.disabled = selectedCount === 0 || userBatchActionInFlight || userImportActionInFlight;
+            }
             if (importButton) {
                 importButton.disabled = userImportActionInFlight;
-                importButton.textContent = userImportActionInFlight ? '导入中...' : '导入用户';
+                importButton.textContent = userImportActionInFlight ? '导入中...' : '导入';
             }
         }
 
@@ -382,11 +386,16 @@
         }
 
         async function exportUsers() {
+            const selectedIds = Array.from(selectedUserIds);
+            if (!selectedIds.length) {
+                showMessage('请先选择需要导出的用户', 'error');
+                return;
+            }
             try {
                 const response = await fetch('/api/users/export', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({}),
+                    body: JSON.stringify({ user_ids: selectedIds }),
                 });
                 const result = await response.json();
                 if (!response.ok) {
@@ -508,7 +517,7 @@
 
         function toggleUserSelection(userId, checked) {
             const normalizedUserId = Number(userId);
-            if (!whitelistControlEnabled || !Number.isFinite(normalizedUserId)) return;
+            if (!Number.isFinite(normalizedUserId)) return;
 
             const nextSelection = new Set(selectedUserIds);
             if (checked) {
