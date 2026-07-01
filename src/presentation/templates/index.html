@@ -1469,13 +1469,23 @@
 
         async function exportStatisticsData() {
             try {
-                const response = await fetch('/api/statistics/daily-stats/export', { cache: 'no-store' });
+                const startDate = currentFilters.start_date || '';
+                const endDate = currentFilters.end_date || '';
+                if (!validateDateRangeForQuery(startDate, endDate)) {
+                    return;
+                }
+
+                const params = buildDashboardSearchParams({});
+                const response = await fetch(`/api/statistics/daily-stats/export?${params}`, { cache: 'no-store' });
                 const result = await response.json();
                 if (!response.ok) {
                     throw new Error(result.error || '导出统计数据失败');
                 }
-                downloadJsonFile(result, buildJsonFilename('daily-request-stats'));
-                showMessage(`已导出 ${result.daily_request_stats?.length || 0} 条统计数据`, 'success');
+                downloadJsonFile(result, buildJsonFilename('statistics-data'));
+                showMessage(
+                    `已导出请求明细 ${result.request_logs?.length || 0} 条、日聚合 ${result.daily_request_stats?.length || 0} 条`,
+                    'success'
+                );
             } catch (error) {
                 console.error('导出统计数据失败:', error);
                 showActionError('导出统计数据', error, { fallback: '导出统计数据失败' });
@@ -1512,7 +1522,7 @@
                     throw new Error(result.error || '导入统计数据失败');
                 }
                 showMessage(
-                    `已导入 ${result.count || 0} 条统计数据，更新 ${result.updated_count || 0} 条`,
+                    `请求明细新增 ${result.request_logs_inserted_count || 0} 条、重复 ${result.request_logs_skipped_count || 0} 条；日聚合新增 ${result.daily_request_stats_inserted_count || 0} 条、合并 ${result.daily_request_stats_merged_count || 0} 条`,
                     'success'
                 );
                 loadActiveDashboardTabData();

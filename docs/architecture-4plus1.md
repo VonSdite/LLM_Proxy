@@ -73,7 +73,7 @@ downstream request
   - 直接处理 `OPTIONS /v1/*` 预检请求
 - `WebController`
   - 提供 Provider、用户、API Key、统计与系统设置页面
-  - 暴露统计汇总、用户用量汇总、请求明细、当前页签 Excel 导出与全量日聚合统计 JSON 导入导出接口
+  - 暴露统计汇总、用户用量汇总、请求明细、当前页签 Excel 导出与统计迁移 JSON 导入导出接口
   - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
   - 在 `api_keys.enabled=true` 时显示 API Key 管理顶层导航入口
   - 暴露系统设置读取与保存接口
@@ -88,7 +88,8 @@ downstream request
   - 导入用户迁移 JSON 时按 IP 创建或更新用户
 - `LogService`
   - 读取请求日志、统计汇总、用户用量汇总和筛选项
-  - 支持全量日聚合统计 JSON 导入导出；导入时按日期、IP、请求模型和响应模型幂等更新
+  - 支持按筛选条件导出统计迁移 JSON，迁移包包含请求明细和日聚合统计
+  - 导入请求明细时按明细业务字段识别重复行；导入日聚合统计时按日期、IP、请求模型和响应模型累加数值
 - `ApiKeyController`
   - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限和 token 上限更新接口
 - `ApiKeyService`
@@ -711,9 +712,9 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - [src/services/user_service.py](../src/services/user_service.py)
   - 用户管理、模型权限、IP 缓存、迁移 JSON 导入导出和批量删除
 - [src/services/log_service.py](../src/services/log_service.py)
-  - 请求日志查询、统计聚合、Excel 数据读取和日聚合统计 JSON 导入导出
+  - 请求日志查询、统计聚合、Excel 数据读取和统计迁移 JSON 导入导出
 - [src/repositories/log_repository.py](../src/repositories/log_repository.py)
-  - 请求日志、日聚合统计、筛选查询和日聚合统计幂等导入
+  - 请求日志、日聚合统计、筛选查询、请求明细去重导入和日聚合统计合并导入
 - [src/services/api_key_service.py](../src/services/api_key_service.py)
   - API Key 生成、hash 鉴权、模型权限、token 上限和 key 级用量管理
 - [src/services/model_catalog_service.py](../src/services/model_catalog_service.py)

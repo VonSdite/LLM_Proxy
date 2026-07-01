@@ -478,8 +478,7 @@ class WebController:
         try:
             start_date = request.args.get("start_date")
             end_date = request.args.get("end_date")
-            if start_date or end_date:
-                self._validate_dashboard_date_range(start_date, end_date)
+            self._validate_dashboard_date_range(start_date, end_date)
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
             result = self._log_service.export_daily_stats(
@@ -489,7 +488,8 @@ class WebController:
                 request_models or None,
             )
             self._logger.debug(
-                "Daily stats JSON exported: rows=%s",
+                "Statistics JSON exported: request_logs=%s daily_request_stats=%s",
+                len(result.get("request_logs", [])),
                 len(result.get("daily_request_stats", [])),
             )
             return jsonify(result)
@@ -504,10 +504,13 @@ class WebController:
             payload = require_json_object()
             result = self._log_service.import_daily_stats(payload)
             self._logger.info(
-                "Daily stats JSON imported: count=%s inserted=%s updated=%s",
+                "Statistics JSON imported: count=%s request_logs_inserted=%s request_logs_skipped=%s "
+                "daily_request_stats_inserted=%s daily_request_stats_merged=%s",
                 result.get("count", 0),
-                result.get("inserted_count", 0),
-                result.get("updated_count", 0),
+                result.get("request_logs_inserted_count", 0),
+                result.get("request_logs_skipped_count", 0),
+                result.get("daily_request_stats_inserted_count", 0),
+                result.get("daily_request_stats_merged_count", 0),
             )
             return jsonify(result), 201
         except ValueError as exc:

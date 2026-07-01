@@ -230,8 +230,14 @@ class LogService:
         request_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
-        """导出日聚合统计数据。"""
-        rows = self._repository.export_daily_stats(
+        """导出统计迁移包。"""
+        request_logs = self._repository.export_request_logs(
+            start_date=start_date,
+            end_date=end_date,
+            username=username,
+            request_model=request_model,
+        )
+        daily_stats = self._repository.export_daily_stats(
             start_date=start_date,
             end_date=end_date,
             username=username,
@@ -239,34 +245,72 @@ class LogService:
             ip_address=ip_address,
         )
         self._logger.debug(
-            "Daily stats exported: start_date=%s end_date=%s username=%s request_model=%s ip_address=%s rows=%s",
+            "Statistics package exported: start_date=%s end_date=%s username=%s request_model=%s "
+            "ip_address=%s request_logs=%s daily_request_stats=%s",
             start_date,
             end_date,
             username,
             request_model,
             ip_address,
-            len(rows),
+            len(request_logs),
+            len(daily_stats),
         )
         return {
             "version": 1,
-            "kind": "llm_proxy.daily_request_stats",
-            "daily_request_stats": rows,
+            "kind": "llm_proxy.statistics",
+            "request_logs": request_logs,
+            "daily_request_stats": daily_stats,
         }
 
     def import_daily_stats(self, payload: Any) -> dict[str, Any]:
-        """导入日聚合统计数据。"""
+        """导入统计迁移包。"""
         if not isinstance(payload, dict):
-            raise ValueError("Daily stats import payload must be a JSON object")
-        rows = payload.get("daily_request_stats")
-        if not isinstance(rows, list) or not rows:
-            raise ValueError("Daily stats import payload must include a non-empty daily_request_stats list")
+            raise ValueError("Statistics import payload must be a JSON object")
 
-        result = self._repository.import_daily_stats(rows)
+        request_logs = payload.get("request_logs", [])
+        daily_stats = payload.get("daily_request_stats", [])
+        if not isinstance(request_logs, list):
+            raise ValueError("Statistics import payload request_logs must be a list")
+        if not isinstance(daily_stats, list):
+            raise ValueError("Statistics import payload daily_request_stats must be a list")
+        if not request_logs and not daily_stats:
+            raise ValueError("Statistics import payload must include request_logs or daily_request_stats")
+
+        request_logs_result = (
+            self._repository.import_request_logs(request_logs)
+            if request_logs
+            else {"count": 0, "inserted_count": 0, "skipped_count": 0, "duplicate_count": 0}
+        )
+        daily_stats_result = (
+            self._repository.import_daily_stats(daily_stats)
+            if daily_stats
+            else {"count": 0, "inserted_count": 0, "updated_count": 0, "merged_count": 0}
+        )
+        result = {
+            "count": request_logs_result.get("count", 0) + daily_stats_result.get("count", 0),
+            "inserted_count": request_logs_result.get("inserted_count", 0)
+            + daily_stats_result.get("inserted_count", 0),
+            "updated_count": daily_stats_result.get("updated_count", 0),
+            "merged_count": daily_stats_result.get("merged_count", 0),
+            "skipped_count": request_logs_result.get("skipped_count", 0),
+            "duplicate_count": request_logs_result.get("duplicate_count", 0),
+            "request_logs_count": request_logs_result.get("count", 0),
+            "request_logs_inserted_count": request_logs_result.get("inserted_count", 0),
+            "request_logs_skipped_count": request_logs_result.get("skipped_count", 0),
+            "request_logs_duplicate_count": request_logs_result.get("duplicate_count", 0),
+            "daily_request_stats_count": daily_stats_result.get("count", 0),
+            "daily_request_stats_inserted_count": daily_stats_result.get("inserted_count", 0),
+            "daily_request_stats_updated_count": daily_stats_result.get("updated_count", 0),
+            "daily_request_stats_merged_count": daily_stats_result.get("merged_count", 0),
+        }
         self._logger.info(
-            "Daily stats imported: count=%s inserted=%s updated=%s",
+            "Statistics package imported: count=%s request_logs_inserted=%s request_logs_skipped=%s "
+            "daily_request_stats_inserted=%s daily_request_stats_merged=%s",
             result.get("count", 0),
-            result.get("inserted_count", 0),
-            result.get("updated_count", 0),
+            result.get("request_logs_inserted_count", 0),
+            result.get("request_logs_skipped_count", 0),
+            result.get("daily_request_stats_inserted_count", 0),
+            result.get("daily_request_stats_merged_count", 0),
         )
         return result
 
