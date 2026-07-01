@@ -129,8 +129,8 @@
 ## Hook 机制
 - 配置字段：`providers[].hook`
 - 路径规则：
-  - 绝对路径直接加载
-  - 相对路径默认相对项目根目录 `hooks/`
+  - 只支持相对项目根目录 `hooks/` 的路径
+  - 路径不能跳出 `hooks/` 目录
 - Hook 模块必须导出 `Hook` 类
 - 可选方法：
   - `header_hook(ctx, headers) -> headers`

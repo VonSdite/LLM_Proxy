@@ -183,7 +183,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `max_retries`：失败重试次数，默认 `3`
 - `verify_ssl`：是否校验证书；代码默认值为 `false`，公网 HTTPS 建议显式设为 `true`
 - `model_list`：当前 Provider 暴露的模型列表
-- `hook`：Hook 文件路径；支持绝对路径。相对路径会从项目根目录下的 `hooks/` 目录加载，文件中需要导出名为 `Hook` 的类
+- `hook`：相对 `hooks/` 目录的 Hook 文件路径，文件中需要导出名为 `Hook` 的类
 
 旧配置中如果残留 `transport` 字段，启动加载配置时会自动删除并写回配置文件；上游传输固定由内部 HTTP executor 处理。
 
