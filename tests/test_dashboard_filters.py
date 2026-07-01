@@ -292,22 +292,30 @@ class DashboardFilterApiTests(unittest.TestCase):
     def test_daily_stats_export_returns_json_rows(self) -> None:
         response = self.client.get(
             "/api/statistics/daily-stats/export",
+            query_string=[
+                ("start_date", self.DATE_FILTER["start_date"]),
+                ("end_date", self.DATE_FILTER["end_date"]),
+                ("username", "alice"),
+                ("request_model", "model-a"),
+            ],
         )
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
-        self.assertEqual("llm_proxy.daily_request_stats", payload["kind"])
+        self.assertEqual("llm_proxy.statistics", payload["kind"])
         self.assertEqual(
+            {("10.0.0.1", "model-a", "resp-a", 10)},
             {
-                ("2026-04-08", "10.0.0.1", "model-a"),
-                ("2026-04-08", "10.0.0.1", "model-c"),
-                ("2026-04-08", "10.0.0.2", "model-b"),
-                ("2026-04-08", "10.0.0.3", "model-a"),
+                (item["ip_address"], item["request_model"], item["response_model"], item["total_tokens"])
+                for item in payload["request_logs"]
             },
+        )
+        self.assertEqual(
+            {("2026-04-08", "10.0.0.1", "model-a")},
             {(item["stat_date"], item["ip_address"], item["request_model"]) for item in payload["daily_request_stats"]},
         )
 
-    def test_daily_stats_import_updates_duplicate_keys_idempotently(self) -> None:
+    def test_daily_stats_import_merges_duplicate_keys(self) -> None:
         payload = {
             "daily_request_stats": [
                 {
@@ -338,21 +346,11 @@ class DashboardFilterApiTests(unittest.TestCase):
         )
 
         self.assertEqual(201, response.status_code)
-        self.assertEqual(
-            {
-                "count": 2,
-                "inserted_count": 1,
-                "updated_count": 1,
-                "merged_count": 1,
-            },
-            response.get_json(),
-        )
-        second_response = self.client.post(
-            "/api/statistics/daily-stats/import",
-            json=payload,
-        )
-        self.assertEqual(201, second_response.status_code)
-        self.assertEqual(2, second_response.get_json()["updated_count"])
+        result = response.get_json()
+        self.assertEqual(2, result["count"])
+        self.assertEqual(1, result["daily_request_stats_inserted_count"])
+        self.assertEqual(1, result["daily_request_stats_updated_count"])
+        self.assertEqual(1, result["daily_request_stats_merged_count"])
 
         stats_response = self.client.get(
             "/api/statistics",
@@ -365,10 +363,66 @@ class DashboardFilterApiTests(unittest.TestCase):
         )
         self.assertEqual(200, stats_response.status_code)
         merged_row = stats_response.get_json()[0]
-        self.assertEqual(2, merged_row["request_count"])
-        self.assertEqual(12, merged_row["total_tokens"])
-        self.assertEqual(5, merged_row["prompt_tokens"])
-        self.assertEqual(7, merged_row["completion_tokens"])
+        self.assertEqual(3, merged_row["request_count"])
+        self.assertEqual(22, merged_row["total_tokens"])
+        self.assertEqual(10, merged_row["prompt_tokens"])
+        self.assertEqual(12, merged_row["completion_tokens"])
+
+    def test_request_logs_import_skips_duplicate_detail_rows(self) -> None:
+        export_response = self.client.get(
+            "/api/statistics/daily-stats/export",
+            query_string=[
+                ("start_date", self.DATE_FILTER["start_date"]),
+                ("end_date", self.DATE_FILTER["end_date"]),
+                ("username", "alice"),
+                ("request_model", "model-a"),
+            ],
+        )
+        self.assertEqual(200, export_response.status_code)
+        duplicate_log = dict(export_response.get_json()["request_logs"][0])
+        duplicate_log["id"] = 999999
+        new_log = {
+            "id": 1000000,
+            "api_key_id": None,
+            "ip_address": "10.0.0.2",
+            "request_model": "model-imported-log",
+            "response_model": "resp-imported-log",
+            "total_tokens": 18,
+            "prompt_tokens": 8,
+            "completion_tokens": 10,
+            "start_time": "2026-04-11 09:00:00.000000",
+            "end_time": "2026-04-11 09:00:01.000000",
+            "created_at": "2026-04-11 09:00:01.000000",
+        }
+
+        response = self.client.post(
+            "/api/statistics/daily-stats/import",
+            json={"request_logs": [duplicate_log, new_log]},
+        )
+
+        self.assertEqual(201, response.status_code)
+        result = response.get_json()
+        self.assertEqual(2, result["request_logs_count"])
+        self.assertEqual(1, result["request_logs_inserted_count"])
+        self.assertEqual(1, result["request_logs_skipped_count"])
+        self.assertEqual(1, result["request_logs_duplicate_count"])
+
+        logs_response = self.client.get(
+            "/api/request-logs",
+            query_string={
+                "page": "1",
+                "page_size": "50",
+                "start_date": "2026-04-01",
+                "end_date": "2026-04-30",
+            },
+        )
+        self.assertEqual(200, logs_response.status_code)
+        logs_payload = logs_response.get_json()
+        self.assertEqual(5, logs_payload["total"])
+        self.assertEqual(
+            1,
+            sum(1 for item in logs_payload["logs"] if item["request_model"] == "model-imported-log"),
+        )
 
     def test_statistics_api_sorts_on_server(self) -> None:
         response = self.client.get(

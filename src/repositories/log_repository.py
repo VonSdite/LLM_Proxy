@@ -482,6 +482,52 @@ class LogRepository:
             cursor.execute(query, params)
             return cursor.fetchall()
 
+    def export_request_logs(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """按条件导出请求明细原始行。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            conditions = []
+            params: list[Any] = []
+
+            if start_date:
+                conditions.append("l.start_time >= ?")
+                params.append(f"{start_date} 00:00:00.000000")
+            if end_date:
+                conditions.append('l.start_time < DATE(?, "+1 day")')
+                params.append(end_date)
+            self._append_text_filter(conditions, params, "u.username", username)
+            self._append_text_filter(conditions, params, "l.request_model", request_model)
+
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+            cursor.execute(
+                f"""
+                SELECT
+                    l.id,
+                    l.api_key_id,
+                    l.ip_address,
+                    l.request_model,
+                    l.response_model,
+                    l.total_tokens,
+                    l.prompt_tokens,
+                    l.completion_tokens,
+                    l.start_time,
+                    l.end_time,
+                    l.created_at
+                FROM request_logs l
+                LEFT JOIN users u ON l.ip_address = u.ip_address
+                WHERE {where_clause}
+                ORDER BY l.start_time ASC, l.id ASC
+                """,
+                params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
     def export_daily_stats(
         self,
         start_date: str | None = None,
@@ -529,7 +575,7 @@ class LogRepository:
             return [dict(row) for row in cursor.fetchall()]
 
     def import_daily_stats(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
-        """导入日聚合统计，遇到相同唯一维度时以导入值覆盖。"""
+        """导入日聚合统计，遇到相同唯一维度时累加数值。"""
         now_text = now_local_datetime_text()
         normalized_rows = [self._normalize_daily_stat_row(row) for row in rows]
         inserted_count = 0
@@ -556,10 +602,10 @@ class LogRepository:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(stat_date, ip_address, request_model, response_model)
                     DO UPDATE SET
-                        request_count = excluded.request_count,
-                        total_tokens = excluded.total_tokens,
-                        prompt_tokens = excluded.prompt_tokens,
-                        completion_tokens = excluded.completion_tokens,
+                        request_count = request_count + excluded.request_count,
+                        total_tokens = total_tokens + excluded.total_tokens,
+                        prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+                        completion_tokens = completion_tokens + excluded.completion_tokens,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -581,6 +627,51 @@ class LogRepository:
             "inserted_count": inserted_count,
             "updated_count": updated_count,
             "merged_count": updated_count,
+        }
+
+    def import_request_logs(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """导入请求明细，遇到相同明细数据时跳过。"""
+        now_text = now_local_datetime_text()
+        normalized_rows = [self._normalize_request_log_row(row, default_created_at=now_text) for row in rows]
+        inserted_count = 0
+        skipped_count = 0
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for row in normalized_rows:
+                if self._request_log_exists(cursor, row):
+                    skipped_count += 1
+                    continue
+
+                cursor.execute(
+                    """
+                    INSERT INTO request_logs
+                    (
+                        api_key_id, ip_address, request_model, response_model, total_tokens,
+                        prompt_tokens, completion_tokens, start_time, end_time, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["api_key_id"],
+                        row["ip_address"],
+                        row["request_model"],
+                        row["response_model"],
+                        row["total_tokens"],
+                        row["prompt_tokens"],
+                        row["completion_tokens"],
+                        row["start_time"],
+                        row["end_time"],
+                        row["created_at"],
+                    ),
+                )
+                inserted_count += 1
+
+        return {
+            "count": len(normalized_rows),
+            "inserted_count": inserted_count,
+            "skipped_count": skipped_count,
+            "duplicate_count": skipped_count,
         }
 
     def get_unique_request_models(self) -> list[str]:
@@ -661,6 +752,52 @@ class LogRepository:
             "completion_tokens": cls._normalize_stat_int(row.get("completion_tokens"), field_name="completion_tokens"),
         }
 
+    @classmethod
+    def _normalize_request_log_row(cls, row: dict[str, Any], *, default_created_at: str) -> dict[str, Any]:
+        if not isinstance(row, dict):
+            raise ValueError("Each request log row must be an object")
+        return {
+            "api_key_id": cls._normalize_optional_positive_int(row.get("api_key_id"), field_name="api_key_id"),
+            "ip_address": cls._normalize_stat_text(row.get("ip_address"), field_name="ip_address", required=False),
+            "request_model": cls._normalize_stat_text(
+                row.get("request_model"), field_name="request_model", required=True
+            ),
+            "response_model": cls._normalize_stat_text(
+                row.get("response_model"), field_name="response_model", required=False
+            ),
+            "total_tokens": cls._normalize_optional_stat_int(row.get("total_tokens"), field_name="total_tokens"),
+            "prompt_tokens": cls._normalize_optional_stat_int(row.get("prompt_tokens"), field_name="prompt_tokens"),
+            "completion_tokens": cls._normalize_optional_stat_int(
+                row.get("completion_tokens"), field_name="completion_tokens"
+            ),
+            "start_time": cls._normalize_stat_text(row.get("start_time"), field_name="start_time", required=True),
+            "end_time": cls._normalize_stat_text(row.get("end_time"), field_name="end_time", required=False),
+            "created_at": cls._normalize_stat_text(row.get("created_at"), field_name="created_at", required=False)
+            or default_created_at,
+        }
+
+    @classmethod
+    def _normalize_optional_stat_int(cls, value: Any, *, field_name: str) -> int | None:
+        if value is None or str(value).strip() == "":
+            return None
+        return cls._normalize_stat_int(value, field_name=field_name)
+
+    @classmethod
+    def _normalize_optional_positive_int(cls, value: Any, *, field_name: str) -> int | None:
+        if value is None or str(value).strip() == "":
+            return None
+        return cls._normalize_positive_int(value, field_name=field_name)
+
+    @staticmethod
+    def _normalize_positive_int(value: Any, *, field_name: str) -> int:
+        try:
+            parsed = int(value or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"request log {field_name} must be an integer") from exc
+        if parsed <= 0:
+            raise ValueError(f"request log {field_name} must be greater than 0")
+        return parsed
+
     @staticmethod
     def _daily_stat_exists(cursor: sqlite3.Cursor, row: dict[str, Any]) -> bool:
         if row["ip_address"] is None:
@@ -681,6 +818,34 @@ class LogRepository:
                 """,
                 (row["stat_date"], row["ip_address"], row["request_model"], row["response_model"]),
             )
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _request_log_exists(cursor: sqlite3.Cursor, row: dict[str, Any]) -> bool:
+        cursor.execute(
+            """
+            SELECT 1 FROM request_logs
+            WHERE ip_address IS ?
+              AND request_model IS ?
+              AND response_model IS ?
+              AND total_tokens IS ?
+              AND prompt_tokens IS ?
+              AND completion_tokens IS ?
+              AND start_time IS ?
+              AND end_time IS ?
+            LIMIT 1
+            """,
+            (
+                row["ip_address"],
+                row["request_model"],
+                row["response_model"],
+                row["total_tokens"],
+                row["prompt_tokens"],
+                row["completion_tokens"],
+                row["start_time"],
+                row["end_time"],
+            ),
+        )
         return cursor.fetchone() is not None
 
     @staticmethod
@@ -716,10 +881,10 @@ class LogRepository:
             f"""
             UPDATE daily_request_stats
             SET
-                request_count = ?,
-                total_tokens = ?,
-                prompt_tokens = ?,
-                completion_tokens = ?,
+                request_count = request_count + ?,
+                total_tokens = total_tokens + ?,
+                prompt_tokens = prompt_tokens + ?,
+                completion_tokens = completion_tokens + ?,
                 updated_at = ?
             WHERE {where_clause}
             """,
