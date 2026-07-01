@@ -20,6 +20,8 @@ class VendorReasoningAdapter:
     thinking_control_terms: tuple[str, ...] = ()
 
     def matches(self, ctx: HookContext, body: dict[str, Any]) -> bool:
+        if not should_apply_openai_chat_vendor_adapter(ctx):
+            return False
         # 自动识别只看模型信号，避免 Provider 命名或下游路由别名把匹配范围放大；匹配前统一转小写。
         # upstream_model：进入 hook 前由路由 key 解析出的真实上游模型名。
         # body["model"]：当前请求体里的上游模型字段，可能已被 translator 或前置 hook 改写。
@@ -40,7 +42,7 @@ class VendorReasoningAdapter:
         return _matches_any(candidate_values, self.thinking_control_terms)
 
     def request_guard(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any]:
-        if not is_openai_chat_target(ctx):
+        if not should_apply_openai_chat_vendor_adapter(ctx):
             return body
         updated = dict(body)
         effort = extract_reasoning_effort(updated)
@@ -66,8 +68,11 @@ class SingleVendorReasoningHook(BaseHook):
         return self._adapter.request_guard(ctx, body)
 
 
-def is_openai_chat_target(ctx: HookContext) -> bool:
-    return str(ctx.provider_target_format or "").strip().lower() == "openai_chat"
+def should_apply_openai_chat_vendor_adapter(ctx: HookContext) -> bool:
+    # 厂商兼容参数用于跨协议进入 OpenAI Chat 上游；OpenAI Chat 原生下游保持原样透传。
+    source_format = str(ctx.provider_source_format or "").strip().lower()
+    target_format = str(ctx.provider_target_format or "").strip().lower()
+    return source_format == "openai_chat" and target_format != "openai_chat"
 
 
 def _matches_any(values: tuple[Any, ...], terms: tuple[str, ...]) -> bool:

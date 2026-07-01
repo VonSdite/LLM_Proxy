@@ -67,6 +67,7 @@ class HookContractsTests(unittest.TestCase):
         provider_name: str = "demo",
         request_model: str = "demo/model",
         upstream_model: str = "model",
+        provider_source_format: str = "openai_chat",
         provider_target_format: str = "openai_chat",
         stream: bool = False,
     ) -> HookContext:
@@ -77,6 +78,7 @@ class HookContractsTests(unittest.TestCase):
             provider_name=provider_name,
             request_model=request_model,
             upstream_model=upstream_model,
+            provider_source_format=provider_source_format,
             provider_target_format=provider_target_format,
             stream=stream,
         )
@@ -160,7 +162,12 @@ class HookContractsTests(unittest.TestCase):
     def test_minimax_hook_adds_reasoning_split_and_thinking(self) -> None:
         module = self._load_hook_module("minimax_openai_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="minimax", upstream_model="minimax-m3", stream=True)
+        ctx = self._ctx(
+            provider_name="minimax",
+            upstream_model="minimax-m3",
+            provider_target_format="claude_chat",
+            stream=True,
+        )
 
         rewritten = hook.request_guard(
             ctx,
@@ -180,7 +187,11 @@ class HookContractsTests(unittest.TestCase):
     def test_minimax_hook_keeps_non_m3_thinking_control_off(self) -> None:
         module = self._load_hook_module("minimax_openai_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="minimax", upstream_model="abab6.5s-chat")
+        ctx = self._ctx(
+            provider_name="minimax",
+            upstream_model="abab6.5s-chat",
+            provider_target_format="claude_chat",
+        )
 
         rewritten = hook.request_guard(
             ctx,
@@ -198,7 +209,11 @@ class HookContractsTests(unittest.TestCase):
     def test_deepseek_hook_maps_xhigh_to_max(self) -> None:
         module = self._load_hook_module("deepseek_openai_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="deepseek", upstream_model="deepseek-v4-pro")
+        ctx = self._ctx(
+            provider_name="deepseek",
+            upstream_model="deepseek-v4-pro",
+            provider_target_format="claude_chat",
+        )
 
         rewritten = hook.request_guard(
             ctx,
@@ -215,7 +230,11 @@ class HookContractsTests(unittest.TestCase):
     def test_deepseek_hook_keeps_compat_model_thinking_control_off(self) -> None:
         module = self._load_hook_module("deepseek_openai_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="deepseek", upstream_model="deepseek-reasoner")
+        ctx = self._ctx(
+            provider_name="deepseek",
+            upstream_model="deepseek-reasoner",
+            provider_target_format="claude_chat",
+        )
 
         rewritten = hook.request_guard(
             ctx,
@@ -232,7 +251,7 @@ class HookContractsTests(unittest.TestCase):
     def test_glm_hook_sets_preserved_thinking_when_reasoning_history_exists(self) -> None:
         module = self._load_hook_module("glm_openai_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="zai", upstream_model="glm-4.5")
+        ctx = self._ctx(provider_name="zai", upstream_model="glm-4.5", provider_target_format="claude_chat")
 
         rewritten = hook.request_guard(
             ctx,
@@ -249,7 +268,11 @@ class HookContractsTests(unittest.TestCase):
     def test_qwen_hook_maps_budget_and_keeps_vendor_parameters(self) -> None:
         module = self._load_hook_module("qwen_openai_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="dashscope", upstream_model="qwen3-coder-plus")
+        ctx = self._ctx(
+            provider_name="dashscope",
+            upstream_model="qwen3-coder-plus",
+            provider_target_format="claude_chat",
+        )
 
         rewritten = hook.request_guard(
             ctx,
@@ -270,7 +293,7 @@ class HookContractsTests(unittest.TestCase):
     def test_aggregate_reasoning_hook_dispatches_by_model(self) -> None:
         module = self._load_hook_module("openai_reasoning_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="generic", upstream_model="qwen-plus")
+        ctx = self._ctx(provider_name="generic", upstream_model="qwen-plus", provider_target_format="claude_chat")
 
         rewritten = hook.request_guard(
             ctx,
@@ -293,13 +316,43 @@ class HookContractsTests(unittest.TestCase):
 
         self.assertEqual(body, hook.request_guard(ctx, body))
 
+    def test_reasoning_hooks_follow_upstream_format_when_downstream_is_claude(self) -> None:
+        module = self._load_hook_module("openai_reasoning_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_name="dashscope",
+            upstream_model="qwen-plus",
+            provider_source_format="openai_chat",
+            provider_target_format="claude_chat",
+        )
+        body = {"model": "qwen-plus", "reasoning_effort": "high"}
+
+        rewritten = hook.request_guard(ctx, body)
+
+        self.assertEqual(True, rewritten["enable_thinking"])
+        self.assertEqual(8192, rewritten["thinking_budget"])
+
+    def test_reasoning_hooks_ignore_openai_chat_to_openai_chat(self) -> None:
+        module = self._load_hook_module("openai_reasoning_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_name="dashscope",
+            upstream_model="qwen-plus",
+            provider_source_format="openai_chat",
+            provider_target_format="openai_chat",
+        )
+        body = {"model": "qwen-plus", "reasoning_effort": "high"}
+
+        self.assertEqual(body, hook.request_guard(ctx, body))
+
     def test_reasoning_hooks_ignore_non_openai_chat_upstream(self) -> None:
         module = self._load_hook_module("openai_reasoning_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="dashscope",
             upstream_model="qwen-plus",
-            provider_target_format="openai_responses",
+            provider_source_format="claude_chat",
+            provider_target_format="openai_chat",
         )
         body = {"model": "qwen-plus", "reasoning_effort": "high"}
 
