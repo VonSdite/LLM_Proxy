@@ -80,6 +80,8 @@ class ProviderController:
         self._app.route("/api/providers", methods=["GET"])(auth(self.get_providers))
         self._app.route("/api/providers", methods=["POST"])(auth(self.create_provider))
         self._app.route("/api/providers/batch", methods=["POST"])(auth(self.batch_providers))
+        self._app.route("/api/providers/export", methods=["POST"])(auth(self.export_providers))
+        self._app.route("/api/providers/import", methods=["POST"])(auth(self.import_providers))
         self._app.route("/api/providers/order", methods=["PUT"])(auth(self.reorder_providers))
         self._app.route("/api/providers/fetch-models", methods=["GET"])(auth(self.fetch_models))
         self._app.route("/api/providers/test-models", methods=["POST"])(auth(self.test_models))
@@ -87,6 +89,7 @@ class ProviderController:
         self._app.route("/api/providers/<path:name>", methods=["GET"])(auth(self.get_provider))
         self._app.route("/api/providers/<path:name>", methods=["PUT"])(auth(self.update_provider))
         self._app.route("/api/providers/<path:name>", methods=["DELETE"])(auth(self.delete_provider))
+        self._app.route("/api/providers/<path:name>/copy", methods=["POST"])(auth(self.copy_provider))
         self._app.route("/api/providers/<path:name>/disable", methods=["POST"])(auth(self.disable_provider))
         self._app.route("/api/providers/<path:name>/enable", methods=["POST"])(auth(self.enable_provider))
         self._app.route("/api/auth-groups", methods=["GET"])(auth(self.get_auth_groups))
@@ -182,6 +185,41 @@ class ProviderController:
             return build_value_error_response(exc)
         except Exception as exc:
             self._logger.error("Error deleting provider: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def copy_provider(self, name: str) -> ResponseReturnValue:
+        try:
+            provider = self._provider_service.copy_provider(name)
+            self._logger.info("Provider copied: %s -> %s", name, provider.get("name"))
+            return jsonify(provider), 201
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error copying provider: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def export_providers(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            result = self._provider_service.export_providers(payload.get("names"))
+            self._logger.info("Providers exported: count=%s", len(result.get("providers", [])))
+            return jsonify(result)
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error exporting providers: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def import_providers(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            result = self._provider_service.import_providers(payload)
+            self._logger.info("Providers imported: count=%s", result.get("count", 0))
+            return jsonify(result), 201
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error importing providers: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def disable_provider(self, name: str) -> ResponseReturnValue:

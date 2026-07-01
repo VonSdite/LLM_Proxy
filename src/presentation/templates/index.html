@@ -51,6 +51,9 @@
                 </div>
                 <button class="btn btn-primary" onclick="applyFilters()">查询</button>
                 <button class="btn btn-primary" onclick="exportActiveDashboardTab()">导出 Excel</button>
+                <button class="btn btn-primary" onclick="exportStatisticsData()">导出数据</button>
+                <button class="btn btn-primary" id="importStatisticsDataBtn" onclick="openStatisticsImportPicker()">导入数据</button>
+                <input type="file" id="statisticsImportFileInput" accept="application/json,.json" onchange="importStatisticsDataFromFile(this)" hidden>
             </div>
         </div>
 
@@ -197,6 +200,7 @@
         let statsRequestToken = 0;
         let userUsageRequestToken = 0;
         let logsRequestToken = 0;
+        let statisticsImportInFlight = false;
         const statsSortState = {
             key: 'total_tokens',
             direction: 'desc',
@@ -428,6 +432,32 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
+        }
+
+        function buildJsonFilename(prefix) {
+            const now = new Date();
+            const pad = value => String(value).padStart(2, '0');
+            const timestamp = [
+                now.getFullYear(),
+                pad(now.getMonth() + 1),
+                pad(now.getDate()),
+                pad(now.getHours()),
+                pad(now.getMinutes()),
+                pad(now.getSeconds()),
+            ].join('');
+            return `${prefix}-${timestamp}.json`;
+        }
+
+        function downloadJsonFile(payload, filename) {
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
         }
 
         function renderModelBadge(value) {
@@ -1435,6 +1465,75 @@
                 sort_direction: sortState.direction,
             });
             window.location.href = `/api/statistics/export?${params}`;
+        }
+
+        async function exportStatisticsData() {
+            const startDate = currentFilters.start_date || '';
+            const endDate = currentFilters.end_date || '';
+            if (!validateDateRangeForQuery(startDate, endDate)) {
+                return;
+            }
+
+            try {
+                const params = buildDashboardSearchParams({});
+                const response = await fetch(`/api/statistics/daily-stats/export?${params}`, { cache: 'no-store' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '导出统计数据失败');
+                }
+                downloadJsonFile(result, buildJsonFilename('daily-request-stats'));
+                showMessage(`已导出 ${result.daily_request_stats?.length || 0} 条统计数据`, 'success');
+            } catch (error) {
+                console.error('导出统计数据失败:', error);
+                showActionError('导出统计数据', error, { fallback: '导出统计数据失败' });
+            }
+        }
+
+        function openStatisticsImportPicker() {
+            if (statisticsImportInFlight) return;
+            const input = document.getElementById('statisticsImportFileInput');
+            if (!input) return;
+            input.value = '';
+            input.click();
+        }
+
+        async function importStatisticsDataFromFile(input) {
+            const file = input?.files?.[0];
+            if (!file || statisticsImportInFlight) return;
+
+            statisticsImportInFlight = true;
+            const importButton = document.getElementById('importStatisticsDataBtn');
+            if (importButton) {
+                importButton.disabled = true;
+                importButton.textContent = '导入中...';
+            }
+            try {
+                const payload = JSON.parse(await file.text());
+                const response = await fetch('/api/statistics/daily-stats/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '导入统计数据失败');
+                }
+                showMessage(
+                    `已导入 ${result.count || 0} 条统计数据，合并 ${result.merged_count || 0} 条`,
+                    'success'
+                );
+                loadActiveDashboardTabData();
+            } catch (error) {
+                console.error('导入统计数据失败:', error);
+                showActionError('导入统计数据', error, { fallback: '导入统计数据失败' });
+            } finally {
+                statisticsImportInFlight = false;
+                if (input) input.value = '';
+                if (importButton) {
+                    importButton.disabled = false;
+                    importButton.textContent = '导入数据';
+                }
+            }
         }
     </script>
 {% endblock %}

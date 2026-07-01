@@ -31,6 +31,8 @@ class UserController:
         self._app.route("/api/users", methods=["GET"])(auth(self.get_users))
         self._app.route("/api/users", methods=["POST"])(auth(self.create_user))
         self._app.route("/api/users/batch", methods=["POST"])(auth(self.batch_users))
+        self._app.route("/api/users/export", methods=["POST"])(auth(self.export_users))
+        self._app.route("/api/users/import", methods=["POST"])(auth(self.import_users))
         self._app.route("/api/users/<int:user_id>", methods=["GET"])(auth(self.get_user))
         self._app.route("/api/users/<int:user_id>", methods=["PUT"])(auth(self.update_user))
         self._app.route("/api/users/<int:user_id>", methods=["DELETE"])(auth(self.delete_user))
@@ -178,13 +180,16 @@ class UserController:
         try:
             payload = get_json_object()
             action = str(payload.get("action") or "").strip().lower()
-            if action != "set_model_permissions":
+            if action == "set_model_permissions":
+                result = self._user_service.batch_update_model_permissions(
+                    payload.get("user_ids"),
+                    payload.get("model_permissions"),
+                )
+            elif action == "delete":
+                result = self._user_service.batch_delete_users(payload.get("user_ids"))
+            else:
                 raise ValueError(f"Unsupported user batch action: {action or '<empty>'}")
 
-            result = self._user_service.batch_update_model_permissions(
-                payload.get("user_ids"),
-                payload.get("model_permissions"),
-            )
             self._logger.info(
                 "User batch action completed: action=%s count=%s",
                 action,
@@ -195,6 +200,32 @@ class UserController:
             return build_value_error_response(exc)
         except Exception as exc:
             self._logger.error("Error applying user batch action: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def export_users(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            result = self._user_service.export_users(payload.get("user_ids") if "user_ids" in payload else None)
+            self._logger.info("Users exported: count=%s", len(result.get("users", [])))
+            return jsonify(result)
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error exporting users: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def import_users(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            result = self._user_service.import_users(payload)
+            self._logger.info(
+                "Users imported: count=%s skipped=%s", result.get("count", 0), result.get("skipped_count", 0)
+            )
+            return jsonify(result), 201
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error importing users: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def delete_user(self, user_id: int) -> ResponseReturnValue:

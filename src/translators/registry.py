@@ -20,6 +20,10 @@ from .claude_bridge import (
     translate_openai_chat_downstream_chunk_to_claude as _translate_openai_chat_downstream_chunk_to_claude,
 )
 from .event_chunk_utils import build_json_event_chunk
+from .reasoning_utils import (
+    openai_reasoning_effort_to_claude_thinking,
+    openai_reasoning_effort_to_responses_reasoning,
+)
 from .responses_bridge import (
     convert_openai_chat_response_to_responses as _convert_openai_chat_response_to_responses,
 )
@@ -28,10 +32,6 @@ from .responses_bridge import (
 )
 from .responses_bridge import (
     translate_openai_chat_downstream_chunk_to_responses as _translate_openai_chat_downstream_chunk_to_responses,
-)
-from .reasoning_utils import (
-    openai_reasoning_effort_to_claude_thinking,
-    openai_reasoning_effort_to_responses_reasoning,
 )
 from .tool_result_utils import normalize_tool_result_content
 

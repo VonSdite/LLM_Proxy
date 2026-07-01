@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
 from ..utils.database import ConnectionFactory
@@ -481,6 +482,104 @@ class LogRepository:
             cursor.execute(query, params)
             return cursor.fetchall()
 
+    def export_daily_stats(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """按条件导出日聚合统计原始行。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            conditions = []
+            params: list[Any] = []
+
+            if start_date:
+                conditions.append("d.stat_date >= ?")
+                params.append(start_date)
+            if end_date:
+                conditions.append("d.stat_date <= ?")
+                params.append(end_date)
+            self._append_text_filter(conditions, params, "u.username", username)
+            self._append_text_filter(conditions, params, "d.request_model", request_model)
+
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+            cursor.execute(
+                f"""
+                SELECT
+                    d.stat_date,
+                    d.ip_address,
+                    d.request_model,
+                    d.response_model,
+                    d.request_count,
+                    d.total_tokens,
+                    d.prompt_tokens,
+                    d.completion_tokens
+                FROM daily_request_stats d
+                LEFT JOIN users u ON d.ip_address = u.ip_address
+                WHERE {where_clause}
+                ORDER BY d.stat_date ASC, COALESCE(d.ip_address, '') ASC,
+                    d.request_model ASC, d.response_model ASC
+                """,
+                params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def import_daily_stats(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """导入日聚合统计，遇到相同唯一维度时累加。"""
+        now_text = now_local_datetime_text()
+        normalized_rows = [self._normalize_daily_stat_row(row) for row in rows]
+        inserted_count = 0
+        merged_count = 0
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for row in normalized_rows:
+                if self._daily_stat_exists(cursor, row):
+                    merged_count += 1
+                    self._update_daily_stat(cursor, row, now_text)
+                    continue
+                else:
+                    inserted_count += 1
+
+                cursor.execute(
+                    """
+                    INSERT INTO daily_request_stats
+                    (
+                        stat_date, ip_address, request_model, response_model,
+                        request_count, total_tokens, prompt_tokens, completion_tokens,
+                        created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(stat_date, ip_address, request_model, response_model)
+                    DO UPDATE SET
+                        request_count = request_count + excluded.request_count,
+                        total_tokens = total_tokens + excluded.total_tokens,
+                        prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+                        completion_tokens = completion_tokens + excluded.completion_tokens,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        row["stat_date"],
+                        row["ip_address"],
+                        row["request_model"],
+                        row["response_model"],
+                        row["request_count"],
+                        row["total_tokens"],
+                        row["prompt_tokens"],
+                        row["completion_tokens"],
+                        now_text,
+                        now_text,
+                    ),
+                )
+
+        return {
+            "count": len(normalized_rows),
+            "inserted_count": inserted_count,
+            "merged_count": merged_count,
+        }
+
     def get_unique_request_models(self) -> list[str]:
         """查询有日志记录的请求模型列表。"""
         with self._get_connection() as conn:
@@ -508,3 +607,118 @@ class LogRepository:
                 """
             )
             return [row["username"] for row in cursor.fetchall()]
+
+    @staticmethod
+    def _normalize_stat_date(value: Any) -> str:
+        text = str(value or "").strip()
+        try:
+            datetime.strptime(text, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("daily stat stat_date must use YYYY-MM-DD") from exc
+        return text
+
+    @staticmethod
+    def _normalize_stat_text(value: Any, *, field_name: str, required: bool) -> str | None:
+        if value is None:
+            if required:
+                raise ValueError(f"daily stat {field_name} is required")
+            return None
+        text = str(value).strip()
+        if not text and required:
+            raise ValueError(f"daily stat {field_name} is required")
+        return text or None
+
+    @staticmethod
+    def _normalize_stat_int(value: Any, *, field_name: str) -> int:
+        try:
+            parsed = int(value or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"daily stat {field_name} must be an integer") from exc
+        if parsed < 0:
+            raise ValueError(f"daily stat {field_name} must be greater than or equal to 0")
+        return parsed
+
+    @classmethod
+    def _normalize_daily_stat_row(cls, row: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(row, dict):
+            raise ValueError("Each daily stat row must be an object")
+        response_model = cls._normalize_stat_text(
+            row.get("response_model"), field_name="response_model", required=False
+        )
+        return {
+            "stat_date": cls._normalize_stat_date(row.get("stat_date")),
+            "ip_address": cls._normalize_stat_text(row.get("ip_address"), field_name="ip_address", required=False),
+            "request_model": cls._normalize_stat_text(
+                row.get("request_model"), field_name="request_model", required=True
+            ),
+            "response_model": response_model or "",
+            "request_count": cls._normalize_stat_int(row.get("request_count"), field_name="request_count"),
+            "total_tokens": cls._normalize_stat_int(row.get("total_tokens"), field_name="total_tokens"),
+            "prompt_tokens": cls._normalize_stat_int(row.get("prompt_tokens"), field_name="prompt_tokens"),
+            "completion_tokens": cls._normalize_stat_int(row.get("completion_tokens"), field_name="completion_tokens"),
+        }
+
+    @staticmethod
+    def _daily_stat_exists(cursor: sqlite3.Cursor, row: dict[str, Any]) -> bool:
+        if row["ip_address"] is None:
+            cursor.execute(
+                """
+                SELECT 1 FROM daily_request_stats
+                WHERE stat_date = ? AND ip_address IS NULL AND request_model = ? AND response_model = ?
+                LIMIT 1
+                """,
+                (row["stat_date"], row["request_model"], row["response_model"]),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT 1 FROM daily_request_stats
+                WHERE stat_date = ? AND ip_address = ? AND request_model = ? AND response_model = ?
+                LIMIT 1
+                """,
+                (row["stat_date"], row["ip_address"], row["request_model"], row["response_model"]),
+            )
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _update_daily_stat(cursor: sqlite3.Cursor, row: dict[str, Any], now_text: str) -> None:
+        params: tuple[Any, ...]
+        if row["ip_address"] is None:
+            where_clause = "stat_date = ? AND ip_address IS NULL AND request_model = ? AND response_model = ?"
+            params = (
+                row["request_count"],
+                row["total_tokens"],
+                row["prompt_tokens"],
+                row["completion_tokens"],
+                now_text,
+                row["stat_date"],
+                row["request_model"],
+                row["response_model"],
+            )
+        else:
+            where_clause = "stat_date = ? AND ip_address = ? AND request_model = ? AND response_model = ?"
+            params = (
+                row["request_count"],
+                row["total_tokens"],
+                row["prompt_tokens"],
+                row["completion_tokens"],
+                now_text,
+                row["stat_date"],
+                row["ip_address"],
+                row["request_model"],
+                row["response_model"],
+            )
+
+        cursor.execute(
+            f"""
+            UPDATE daily_request_stats
+            SET
+                request_count = request_count + ?,
+                total_tokens = total_tokens + ?,
+                prompt_tokens = prompt_tokens + ?,
+                completion_tokens = completion_tokens + ?,
+                updated_at = ?
+            WHERE {where_clause}
+            """,
+            params,
+        )

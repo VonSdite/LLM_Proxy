@@ -39,6 +39,9 @@ class FakeProviderService:
     def __init__(self) -> None:
         self.reorder_calls: list[list[str]] = []
         self.enabled_calls: list[tuple[str, bool]] = []
+        self.copy_calls: list[str] = []
+        self.export_calls: list[list[str]] = []
+        self.import_calls: list[dict] = []
         self.raise_error: Exception | None = None
 
     def reorder_providers(self, names: list[str]) -> dict:
@@ -57,6 +60,36 @@ class FakeProviderService:
         return {
             "name": name,
             "enabled": enabled,
+        }
+
+    def copy_provider(self, name: str) -> dict:
+        self.copy_calls.append(name)
+        if self.raise_error is not None:
+            raise self.raise_error
+        return {
+            "name": f"{name}_1",
+            "enabled": True,
+        }
+
+    def export_providers(self, names: list[str]) -> dict:
+        self.export_calls.append(list(names))
+        if self.raise_error is not None:
+            raise self.raise_error
+        return {
+            "kind": "llm_proxy.providers",
+            "providers": [{"name": name} for name in names],
+        }
+
+    def import_providers(self, payload: dict) -> dict:
+        self.import_calls.append(dict(payload))
+        if self.raise_error is not None:
+            raise self.raise_error
+        providers = payload.get("providers", [])
+        names = [provider.get("name") for provider in providers]
+        return {
+            "count": len(names),
+            "names": names,
+            "renamed": [],
         }
 
 
@@ -218,6 +251,62 @@ class ProviderControllerOrderRouteTests(unittest.TestCase):
             response.get_json(),
         )
         self.assertEqual([("legacy/provider", False)], self.provider_service.enabled_calls)
+
+    def test_copy_provider_route_returns_created_provider(self) -> None:
+        response = self.client.post("/api/providers/provider-a/copy")
+
+        self.assertEqual(201, response.status_code)
+        self.assertEqual(
+            {
+                "name": "provider-a_1",
+                "enabled": True,
+            },
+            response.get_json(),
+        )
+        self.assertEqual(["provider-a"], self.provider_service.copy_calls)
+
+    def test_export_providers_route_returns_selected_payload(self) -> None:
+        response = self.client.post(
+            "/api/providers/export",
+            json={"names": ["provider-b", "provider-a"]},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {
+                "kind": "llm_proxy.providers",
+                "providers": [
+                    {"name": "provider-b"},
+                    {"name": "provider-a"},
+                ],
+            },
+            response.get_json(),
+        )
+        self.assertEqual([["provider-b", "provider-a"]], self.provider_service.export_calls)
+
+    def test_import_providers_route_returns_import_result(self) -> None:
+        payload = {
+            "providers": [
+                {
+                    "name": "provider-a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "model_list": ["gpt-4.1"],
+                }
+            ]
+        }
+
+        response = self.client.post("/api/providers/import", json=payload)
+
+        self.assertEqual(201, response.status_code)
+        self.assertEqual(
+            {
+                "count": 1,
+                "names": ["provider-a"],
+                "renamed": [],
+            },
+            response.get_json(),
+        )
+        self.assertEqual([payload], self.provider_service.import_calls)
 
 
 class ProviderControllerFetchModelsRouteTests(unittest.TestCase):

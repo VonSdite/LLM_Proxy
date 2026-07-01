@@ -53,6 +53,8 @@ class WebController:
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
         self._app.route("/api/statistics/user-usage-summary", methods=["GET"])(auth(self.get_user_usage_summary))
         self._app.route("/api/statistics/export", methods=["GET"])(auth(self.export_statistics))
+        self._app.route("/api/statistics/daily-stats/export", methods=["GET"])(auth(self.export_daily_stats))
+        self._app.route("/api/statistics/daily-stats/import", methods=["POST"])(auth(self.import_daily_stats))
         self._app.route("/api/request-logs", methods=["GET"])(auth(self.get_request_logs))
         self._app.route("/api/usernames", methods=["GET"])(auth(self.get_usernames))
         self._app.route("/api/request-models", methods=["GET"])(auth(self.get_request_models))
@@ -201,11 +203,7 @@ class WebController:
     def _clean_excel_text(value: Any) -> str:
         """清理 XML 1.0 不支持的控制字符。"""
         text = str(value if value is not None else "")
-        return "".join(
-            char
-            for char in text
-            if char in {"\t", "\n", "\r"} or ord(char) >= 32
-        )
+        return "".join(char for char in text if char in {"\t", "\n", "\r"} or ord(char) >= 32)
 
     @classmethod
     def _build_sheet_xml(cls, headers: list[str], rows: list[list[Any]]) -> str:
@@ -283,9 +281,7 @@ class WebController:
     def _dashboard_export_response(filename: str, content: bytes) -> ResponseReturnValue:
         response = make_response(content)
         response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        response.headers["Content-Disposition"] = (
-            f"attachment; filename={filename}; filename*=UTF-8''{quote(filename)}"
-        )
+        response.headers["Content-Disposition"] = f"attachment; filename={filename}; filename*=UTF-8''{quote(filename)}"
         return response
 
     @staticmethod
@@ -476,6 +472,48 @@ class WebController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error exporting statistics: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def export_daily_stats(self) -> ResponseReturnValue:
+        try:
+            self._validate_dashboard_date_range(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+            )
+            usernames = self._get_multi_filter_values("username")
+            request_models = self._get_multi_filter_values("request_model")
+            result = self._log_service.export_daily_stats(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+                usernames or None,
+                request_models or None,
+            )
+            self._logger.debug(
+                "Daily stats JSON exported: rows=%s",
+                len(result.get("daily_request_stats", [])),
+            )
+            return jsonify(result)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error exporting daily stats: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def import_daily_stats(self) -> ResponseReturnValue:
+        try:
+            payload = require_json_object()
+            result = self._log_service.import_daily_stats(payload)
+            self._logger.info(
+                "Daily stats JSON imported: count=%s inserted=%s merged=%s",
+                result.get("count", 0),
+                result.get("inserted_count", 0),
+                result.get("merged_count", 0),
+            )
+            return jsonify(result), 201
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error importing daily stats: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def get_request_logs(self) -> ResponseReturnValue:

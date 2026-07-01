@@ -73,10 +73,19 @@ downstream request
   - 直接处理 `OPTIONS /v1/*` 预检请求
 - `WebController`
   - 提供 Provider、用户、API Key、统计与系统设置页面
-  - 暴露统计汇总、用户用量汇总、请求明细与当前页签 Excel 导出接口
+  - 暴露统计汇总、用户用量汇总、请求明细、当前页签 Excel 导出与日聚合统计 JSON 导入导出接口
   - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
   - 在 `api_keys.enabled=true` 时显示 API Key 管理顶层导航入口
   - 暴露系统设置读取与保存接口
+- `ProviderService`
+  - 维护 Provider 配置的创建、复制、编辑、删除、启停、排序和批量删除
+  - 按选中 Provider 导出 JSON，导入 Provider JSON 时为同名配置生成数字后缀名称
+- `UserService`
+  - 维护用户、IP 白名单状态和模型权限
+  - 支持用户 JSON 导入导出与批量删除；导入时重复 IP 作为已有用户跳过
+- `LogService`
+  - 读取请求日志、统计汇总、用户用量汇总和筛选项
+  - 支持日聚合统计 JSON 导入导出；导入时按日期、IP、请求模型和响应模型累加合并
 - `ApiKeyController`
   - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限和 token 上限更新接口
 - `ApiKeyService`
@@ -692,6 +701,14 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 主代理 orchestration
 - [src/services/settings_service.py](../src/services/settings_service.py)
   - 系统设置保存与生效边界
+- [src/services/provider_service.py](../src/services/provider_service.py)
+  - Provider 配置管理、复制、排序、JSON 导入导出和重载触发
+- [src/services/user_service.py](../src/services/user_service.py)
+  - 用户管理、模型权限、IP 缓存、JSON 导入导出和批量删除
+- [src/services/log_service.py](../src/services/log_service.py)
+  - 请求日志查询、统计聚合、Excel 数据读取和日聚合统计 JSON 导入导出
+- [src/repositories/log_repository.py](../src/repositories/log_repository.py)
+  - 请求日志、日聚合统计、筛选查询和日聚合统计累加导入
 - [src/services/api_key_service.py](../src/services/api_key_service.py)
   - API Key 生成、hash 鉴权、模型权限、token 上限和 key 级用量管理
 - [src/services/model_catalog_service.py](../src/services/model_catalog_service.py)

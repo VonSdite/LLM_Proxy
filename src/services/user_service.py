@@ -11,7 +11,7 @@ from typing import Any
 
 from ..application.app_context import AppContext
 from ..repositories import UserRepository
-from ..utils import is_valid_ip
+from ..utils import is_valid_ip, normalize_ip
 from ..utils.local_time import normalize_local_datetime_text
 from .model_catalog_service import ModelCatalogService
 
@@ -101,13 +101,20 @@ class UserService:
             return None
         return tuple(normalized_models)
 
-    def _serialize_model_permissions(self, value: Any) -> str:
+    def _serialize_model_permissions(self, value: Any, *, validate_models: bool = True) -> str:
         """标准化模型权限存储格式。"""
         if isinstance(value, str):
             normalized_text = value.strip()
             if normalized_text == self.MODEL_PERMISSIONS_ALL:
                 return self.MODEL_PERMISSIONS_ALL
-            raw_items: Sequence[Any] = normalized_text.replace(",", "\n").splitlines()
+            try:
+                parsed_value = json.loads(normalized_text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed_value = None
+            if isinstance(parsed_value, list):
+                raw_items: Sequence[Any] = parsed_value
+            else:
+                raw_items = normalized_text.replace(",", "\n").splitlines()
         elif isinstance(value, (list, tuple, set)):
             raw_items = list(value)
         else:
@@ -117,10 +124,11 @@ class UserService:
         if self.MODEL_PERMISSIONS_ALL in normalized_models:
             return self.MODEL_PERMISSIONS_ALL
 
-        available_models = set(self._get_available_model_names())
-        unknown_models = [model for model in normalized_models if model not in available_models]
-        if unknown_models:
-            raise ValueError(f"Unknown model permission(s): {', '.join(unknown_models)}")
+        if validate_models:
+            available_models = set(self._get_available_model_names())
+            unknown_models = [model for model in normalized_models if model not in available_models]
+            if unknown_models:
+                raise ValueError(f"Unknown model permission(s): {', '.join(unknown_models)}")
 
         return json.dumps(normalized_models, ensure_ascii=True)
 
@@ -326,6 +334,131 @@ class UserService:
             "model_permissions": payload,
         }
 
+    def batch_delete_users(self, user_ids: Any) -> dict[str, Any]:
+        """批量删除用户。"""
+        normalized_user_ids = self._normalize_user_ids(user_ids)
+        existing_users = self._repository.get_by_ids(normalized_user_ids)
+        existing_users_by_id = {int(user["id"]): user for user in existing_users}
+        missing_user_ids = [user_id for user_id in normalized_user_ids if user_id not in existing_users_by_id]
+        if missing_user_ids:
+            if len(missing_user_ids) == 1:
+                raise ValueError(f"User not found: {missing_user_ids[0]}")
+            raise ValueError(f"Users not found: {', '.join(str(user_id) for user_id in missing_user_ids)}")
+
+        deleted_user_ids: list[int] = []
+        deleted_ip_addresses: list[str] = []
+        for user_id in normalized_user_ids:
+            user = existing_users_by_id[user_id]
+            if self._repository.delete(user_id):
+                deleted_user_ids.append(user_id)
+                ip_address = str(user.get("ip_address") or "").strip()
+                if ip_address:
+                    deleted_ip_addresses.append(ip_address)
+
+        self._invalidate_ip_cache(*deleted_ip_addresses)
+        self._logger.info("Users batch deleted: count=%s", len(deleted_user_ids))
+        return {
+            "count": len(deleted_user_ids),
+            "user_ids": deleted_user_ids,
+        }
+
+    def export_users(self, user_ids: Any = None) -> dict[str, Any]:
+        """导出用户数据。"""
+        if user_ids is None:
+            users = self._repository.list_all()
+        else:
+            normalized_user_ids = self._normalize_user_ids(user_ids)
+            users = self._repository.get_by_ids(normalized_user_ids)
+            users_by_id = {int(user["id"]): user for user in users}
+            missing_user_ids = [user_id for user_id in normalized_user_ids if user_id not in users_by_id]
+            if missing_user_ids:
+                if len(missing_user_ids) == 1:
+                    raise ValueError(f"User not found: {missing_user_ids[0]}")
+                raise ValueError(f"Users not found: {', '.join(str(user_id) for user_id in missing_user_ids)}")
+            users = [users_by_id[user_id] for user_id in normalized_user_ids]
+
+        exported_users = []
+        for user in users:
+            parsed_permissions = self._deserialize_model_permissions(user.get("model_permissions"))
+            exported_users.append(
+                {
+                    "username": user.get("username"),
+                    "ip_address": user.get("ip_address"),
+                    "whitelist_access_enabled": bool(user.get("whitelist_access_enabled")),
+                    "model_permissions": self.MODEL_PERMISSIONS_ALL
+                    if parsed_permissions is None
+                    else list(parsed_permissions),
+                }
+            )
+
+        return {
+            "version": 1,
+            "kind": "llm_proxy.users",
+            "users": exported_users,
+        }
+
+    def import_users(self, payload: Any) -> dict[str, Any]:
+        """导入用户数据；重复 IP 视为已存在并跳过。"""
+        if not isinstance(payload, dict):
+            raise ValueError("User import payload must be a JSON object")
+        raw_users = payload.get("users")
+        if not isinstance(raw_users, list) or not raw_users:
+            raise ValueError("User import payload must include a non-empty users list")
+
+        created_user_ids: list[int] = []
+        created_ip_addresses: list[str] = []
+        skipped_ip_addresses: list[str] = []
+        seen_ip_addresses: set[str] = set()
+
+        for raw_user in raw_users:
+            if not isinstance(raw_user, dict):
+                raise ValueError("Each imported user must be an object")
+
+            username = str(raw_user.get("username") or "").strip()
+            ip_address = normalize_ip(raw_user.get("ip_address"))
+            if not username:
+                raise ValueError("Imported user username is required")
+            if not is_valid_ip(ip_address):
+                raise ValueError(f"Invalid imported user IP address: {raw_user.get('ip_address')}")
+
+            if ip_address in seen_ip_addresses or self._repository.get_by_ip(ip_address):
+                if ip_address not in skipped_ip_addresses:
+                    skipped_ip_addresses.append(ip_address)
+                seen_ip_addresses.add(ip_address)
+                continue
+
+            model_permissions = self._serialize_model_permissions(
+                raw_user.get("model_permissions", self.MODEL_PERMISSIONS_ALL),
+                validate_models=False,
+            )
+            user_id = self._repository.create(
+                username,
+                ip_address,
+                model_permissions=model_permissions,
+                whitelist_access_enabled=self._coerce_import_bool(
+                    raw_user.get("whitelist_access_enabled"),
+                    default=True,
+                ),
+            )
+            if user_id is not None:
+                created_user_ids.append(int(user_id))
+                created_ip_addresses.append(ip_address)
+                seen_ip_addresses.add(ip_address)
+
+        self._invalidate_ip_cache(*created_ip_addresses)
+        self._logger.info(
+            "Users imported: created=%s skipped=%s",
+            len(created_user_ids),
+            len(skipped_ip_addresses),
+        )
+        return {
+            "count": len(created_user_ids),
+            "user_ids": created_user_ids,
+            "ip_addresses": created_ip_addresses,
+            "skipped_count": len(skipped_ip_addresses),
+            "skipped_ip_addresses": skipped_ip_addresses,
+        }
+
     def delete_user(self, user_id: int) -> bool:
         """删除用户。"""
         try:
@@ -485,3 +618,20 @@ class UserService:
         if not normalized_user_ids:
             raise ValueError("User ids must be a non-empty list")
         return normalized_user_ids
+
+    @staticmethod
+    def _coerce_import_bool(value: Any, *, default: bool) -> bool:
+        """解析导入数据中的布尔值。"""
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if not lowered:
+                return default
+            if lowered in {"true", "1", "yes", "on"}:
+                return True
+            if lowered in {"false", "0", "no", "off"}:
+                return False
+        return bool(value)

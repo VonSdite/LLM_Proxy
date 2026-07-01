@@ -708,6 +708,101 @@ class ProviderServiceTests(unittest.TestCase):
         current_config = self.config_manager.get_raw_config()
         self.assertEqual(["demo-a"], [item["name"] for item in current_config["providers"]])
 
+    def test_copy_provider_inserts_copy_below_source(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "enabled_a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "enabled_b",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+            ]
+        )
+
+        copied = self.service.copy_provider("enabled_a")
+
+        self.assertEqual("enabled_a_1", copied["name"])
+        self.assertEqual(1, self.reload_count)
+        self.assertEqual(
+            ["enabled_a", "enabled_a_1", "enabled_b"],
+            self._current_provider_names(),
+        )
+
+    def test_import_providers_renames_duplicate_names(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "demo",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-demo",
+                    "model_list": ["gpt-4.1"],
+                }
+            ]
+        )
+
+        result = self.service.import_providers(
+            {
+                "providers": [
+                    {
+                        "name": "demo",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "sk-imported",
+                        "model_list": ["gpt-4.1-mini"],
+                    },
+                    {
+                        "name": "demo",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "sk-imported-2",
+                        "model_list": ["gpt-4.1-nano"],
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(2, result["count"])
+        self.assertEqual(["demo_1", "demo_2"], result["names"])
+        self.assertEqual(
+            [
+                {"from": "demo", "to": "demo_1"},
+                {"from": "demo", "to": "demo_2"},
+            ],
+            result["renamed"],
+        )
+        self.assertEqual(["demo", "demo_1", "demo_2"], self._current_provider_names())
+
+    def test_export_providers_preserves_requested_order(self) -> None:
+        self._seed_providers(
+            [
+                {
+                    "name": "provider_a",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-a",
+                    "model_list": ["gpt-4.1"],
+                },
+                {
+                    "name": "provider_b",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "sk-b",
+                    "model_list": ["gpt-4.1-mini"],
+                },
+            ]
+        )
+
+        exported = self.service.export_providers(["provider_b", "provider_a"])
+
+        self.assertEqual("llm_proxy.providers", exported["kind"])
+        self.assertEqual(
+            ["provider_b", "provider_a"],
+            [provider["name"] for provider in exported["providers"]],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

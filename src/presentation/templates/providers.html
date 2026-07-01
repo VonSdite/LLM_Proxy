@@ -44,6 +44,10 @@
                         <h3 class="section-title">Providers</h3>
                     </div>
                     <div class="section-header-actions">
+                        <button type="button" class="btn btn-toolbar-secondary" id="copySelectedProviderBtn" onclick="copySelectedProvider()" disabled>复制</button>
+                        <button type="button" class="btn btn-toolbar-secondary" id="exportSelectedProvidersBtn" onclick="exportSelectedProviders()" disabled>导出</button>
+                        <button type="button" class="btn btn-toolbar-secondary" id="importProvidersBtn" onclick="openProviderImportPicker()">导入</button>
+                        <input type="file" id="providerImportFileInput" accept="application/json,.json" onchange="importProvidersFromFile(this)" hidden>
                         <button type="button" class="btn btn-primary" onclick="openCreateModal()">新增 Provider</button>
                     </div>
                 </div>
@@ -592,6 +596,8 @@
         let togglingProviderNames = new Set();
         let providerBatchActionInFlight = false;
         let providerOrderActionInFlight = false;
+        let providerCopyActionInFlight = false;
+        let providerImportActionInFlight = false;
         let fetchedModelCandidates = [];
         let fetchedModelSelection = new Set();
         let fetchedModelExistingSelection = new Set();
@@ -913,6 +919,8 @@
         function hasProviderMutationInFlight() {
             return providerBatchActionInFlight
                 || providerOrderActionInFlight
+                || providerCopyActionInFlight
+                || providerImportActionInFlight
                 || togglingProviderNames.size > 0
                 || deletingProviderName !== null;
         }
@@ -1356,6 +1364,22 @@
 
         function updateProviderSelectionUi() {
             const providerInteractionLocked = hasProviderMutationInFlight();
+            const selectedNames = getNormalizedSelectedProviderNames();
+            const copyButton = document.getElementById('copySelectedProviderBtn');
+            const exportButton = document.getElementById('exportSelectedProvidersBtn');
+            const importButton = document.getElementById('importProvidersBtn');
+
+            if (copyButton) {
+                copyButton.disabled = providerInteractionLocked || selectedNames.length !== 1;
+                copyButton.textContent = providerCopyActionInFlight ? '复制中...' : '复制';
+            }
+            if (exportButton) {
+                exportButton.disabled = providerInteractionLocked || selectedNames.length === 0;
+            }
+            if (importButton) {
+                importButton.disabled = providerInteractionLocked;
+                importButton.textContent = providerImportActionInFlight ? '导入中...' : '导入';
+            }
 
             document.querySelectorAll('[data-provider-group-select-checkbox]').forEach(element => {
                 if (!(element instanceof HTMLInputElement)) return;
@@ -1465,6 +1489,128 @@
                 enable: { label: '启用', past: '启用', fallback: '批量启用 Provider 失败' },
                 disable: { label: '禁用', past: '禁用', fallback: '批量禁用 Provider 失败' },
             }[action] || null;
+        }
+
+        function buildJsonFilename(prefix) {
+            const now = new Date();
+            const pad = value => String(value).padStart(2, '0');
+            const timestamp = [
+                now.getFullYear(),
+                pad(now.getMonth() + 1),
+                pad(now.getDate()),
+                pad(now.getHours()),
+                pad(now.getMinutes()),
+                pad(now.getSeconds()),
+            ].join('');
+            return `${prefix}-${timestamp}.json`;
+        }
+
+        function downloadJsonFile(payload, filename) {
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        async function copySelectedProvider() {
+            const selectedNames = getNormalizedSelectedProviderNames();
+            if (selectedNames.length !== 1 || hasProviderMutationInFlight()) {
+                showMessage('请选择一个 Provider 进行复制', 'error');
+                return;
+            }
+
+            providerCopyActionInFlight = true;
+            renderProviders();
+            try {
+                const response = await fetch(`/api/providers/${encodeURIComponent(selectedNames[0])}/copy`, {
+                    method: 'POST',
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '复制 Provider 失败');
+                }
+                selectedProviderNames = new Set([result.name]);
+                showMessage(`Provider 已复制为 ${result.name}，配置已重载`, 'success');
+                await loadProviders();
+            } catch (error) {
+                console.error('复制 provider 失败:', error);
+                showActionError('复制 Provider', error, { fallback: '复制 Provider 失败' });
+            } finally {
+                providerCopyActionInFlight = false;
+                renderProviders();
+            }
+        }
+
+        async function exportSelectedProviders() {
+            const selectedNames = getNormalizedSelectedProviderNames();
+            if (!selectedNames.length) {
+                showMessage('请先选择需要导出的 Provider', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/providers/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ names: selectedNames }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '导出 Provider 失败');
+                }
+                downloadJsonFile(result, buildJsonFilename('providers'));
+                showMessage(`已导出 ${result.providers?.length || selectedNames.length} 个 Provider`, 'success');
+            } catch (error) {
+                console.error('导出 provider 失败:', error);
+                showActionError('导出 Provider', error, { fallback: '导出 Provider 失败' });
+            }
+        }
+
+        function openProviderImportPicker() {
+            if (hasProviderMutationInFlight()) return;
+            const input = document.getElementById('providerImportFileInput');
+            if (!input) return;
+            input.value = '';
+            input.click();
+        }
+
+        async function importProvidersFromFile(input) {
+            const file = input?.files?.[0];
+            if (!file || hasProviderMutationInFlight()) return;
+
+            providerImportActionInFlight = true;
+            updateProviderSelectionUi();
+            try {
+                const payload = JSON.parse(await file.text());
+                const response = await fetch('/api/providers/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '导入 Provider 失败');
+                }
+                selectedProviderNames = new Set(result.names || []);
+                const renamedCount = Array.isArray(result.renamed) ? result.renamed.length : 0;
+                showMessage(
+                    `已导入 ${result.count || 0} 个 Provider${renamedCount ? `，${renamedCount} 个已重命名` : ''}`,
+                    'success'
+                );
+                await loadProviders();
+            } catch (error) {
+                console.error('导入 provider 失败:', error);
+                showActionError('导入 Provider', error, { fallback: '导入 Provider 失败' });
+            } finally {
+                providerImportActionInFlight = false;
+                if (input) input.value = '';
+                renderProviders();
+            }
         }
 
         async function executeProviderBatchAction(action, selectedNames, meta) {

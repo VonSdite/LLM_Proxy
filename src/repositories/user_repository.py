@@ -58,6 +58,7 @@ class UserRepository:
         username: str,
         ip_address: str,
         model_permissions: str = MODEL_PERMISSIONS_ALL,
+        whitelist_access_enabled: bool = True,
     ) -> int | None:
         """创建用户记录。"""
         now_text = now_local_datetime_text()
@@ -70,7 +71,14 @@ class UserRepository:
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (username, ip_address, 1, model_permissions, now_text, now_text),
+                (
+                    username,
+                    ip_address,
+                    1 if whitelist_access_enabled else 0,
+                    model_permissions,
+                    now_text,
+                    now_text,
+                ),
             )
             return cursor.lastrowid
 

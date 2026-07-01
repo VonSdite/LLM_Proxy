@@ -170,6 +170,9 @@
 - 用户管理：
   - `GET /api/users`
   - `POST /api/users`
+  - `POST /api/users/batch`
+  - `POST /api/users/export`
+  - `POST /api/users/import`
   - `GET /api/users/<id>`
   - `PUT /api/users/<id>`
   - `DELETE /api/users/<id>`
@@ -177,11 +180,26 @@
 - Provider 管理：
   - `GET /api/providers`
   - `POST /api/providers`
+  - `POST /api/providers/batch`
+  - `POST /api/providers/export`
+  - `POST /api/providers/import`
+  - `PUT /api/providers/order`
   - `GET /api/providers/<name>`
   - `PUT /api/providers/<name>`
   - `DELETE /api/providers/<name>`
+  - `POST /api/providers/<name>/copy`
+  - `POST /api/providers/<name>/disable`
+  - `POST /api/providers/<name>/enable`
   - `GET /api/providers/fetch-models`
+  - `POST /api/providers/test-models`
   - `PUT /api/providers/chat-whitelist`
+- 统计管理：
+  - `GET /api/statistics`
+  - `GET /api/statistics/user-usage-summary`
+  - `GET /api/statistics/export`
+  - `GET /api/statistics/daily-stats/export`
+  - `POST /api/statistics/daily-stats/import`
+  - `GET /api/request-logs`
 - 页面：
   - `GET /`
   - `GET /users`

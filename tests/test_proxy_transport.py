@@ -26,8 +26,8 @@ from src.config.provider_config import (
 from src.config.provider_manager import ProviderManager
 from src.executors import HttpExecutor
 from src.external.stream_probe import probe_stream_response
-from src.proxy_core import resolve_stream_format
 from src.presentation.app_factory import create_flask_app
+from src.proxy_core import resolve_stream_format
 from src.repositories import AuthGroupRepository
 from src.services.model_discovery_service import ModelDiscoveryService
 from src.utils.app_version import get_app_version
@@ -1246,6 +1246,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function runProviderBatchAction(action, groupKey = '')", html)
         self.assertIn("/api/providers/batch", html)
         self.assertIn("/api/providers/order", html)
+        self.assertIn("/api/providers/export", html)
+        self.assertIn("/api/providers/import", html)
+        self.assertIn("function copySelectedProvider()", html)
+        self.assertIn("function exportSelectedProviders()", html)
+        self.assertIn("function importProvidersFromFile(input)", html)
         self.assertIn(
             "/api/providers/${encodeURIComponent(normalizedName)}/${enabled ? 'enable' : 'disable'}",
             html,
@@ -1431,6 +1436,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function parseLocalDateTime(value)", users_html)
         self.assertNotIn("new Date(user.created_at)", users_html)
         self.assertIn("formatDateTime(user.created_at)", users_html)
+        self.assertIn("/api/users/export", users_html)
+        self.assertIn("/api/users/import", users_html)
+        self.assertIn("function deleteSelectedUsers()", users_html)
 
     def test_oauth_template_contains_oauth_workflows(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "oauth.html"
@@ -2027,6 +2035,8 @@ const sandbox = {{
   ],
   providerBatchActionInFlight: false,
   providerOrderActionInFlight: false,
+  providerCopyActionInFlight: false,
+  providerImportActionInFlight: false,
   togglingProviderNames: new Set(),
   deletingProviderName: null,
 }};
@@ -2066,8 +2076,9 @@ process.stdout.write(JSON.stringify({{
                 "const providerNameMaxLength = 64;",
                 "const providerNamePattern = /^[A-Za-z][A-Za-z0-9_]*$/;",
                 html[
-                    html.index("function getProviderNameValidationError")
-                    : html.index("function updateProviderNameValidity")
+                    html.index("function getProviderNameValidationError") : html.index(
+                        "function updateProviderNameValidity"
+                    )
                 ],
             ]
         )
@@ -2267,6 +2278,9 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn("fetch(`/api/statistics?${params}`, { cache: 'no-store' })", index_html)
         self.assertIn("fetch(`/api/statistics/user-usage-summary?${params}`, { cache: 'no-store' })", index_html)
         self.assertIn("window.location.href = `/api/statistics/export?${params}`;", index_html)
+        self.assertIn("/api/statistics/daily-stats/export", index_html)
+        self.assertIn("/api/statistics/daily-stats/import", index_html)
+        self.assertIn("function exportStatisticsData()", index_html)
         self.assertIn("fetch(`/api/request-logs?${params}`, { cache: 'no-store' })", index_html)
         self.assertIn("function parseLocalDateTime(value)", index_html)
         self.assertNotIn("new Date(log.start_time)", index_html)
