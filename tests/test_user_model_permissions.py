@@ -220,7 +220,20 @@ class UserModelPermissionTests(unittest.TestCase):
         )
 
         self.assertEqual(1, result["count"])
+        self.assertEqual(0, result["failed_count"])
+        self.assertEqual(1, result["skipped_count"])
         self.assertEqual(["127.0.0.1"], result["skipped_ip_addresses"])
+        self.assertEqual(
+            [
+                {
+                    "username": "alice-copy",
+                    "ip_address": "127.0.0.1",
+                    "existing_user_id": existing_id,
+                    "existing_username": "alice",
+                }
+            ],
+            result["skipped_users"],
+        )
         users = self._repository.list_all()
         self.assertEqual(["alice", "bob"], [user["username"] for user in users])
         bob = self._service.get_user_by_ip("127.0.0.2")

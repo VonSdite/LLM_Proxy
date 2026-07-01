@@ -429,7 +429,7 @@
                 }
                 selectedUserIds = new Set(result.user_ids || []);
                 showMessage(
-                    `已导入 ${result.count || 0} 个用户${result.skipped_count ? `，跳过 ${result.skipped_count} 个重复 IP` : ''}`,
+                    `导入完成：成功 ${result.count || 0} 个，失败 ${result.failed_count || 0} 个，重复 ${result.skipped_count || 0} 个`,
                     'success'
                 );
                 await loadUsers();

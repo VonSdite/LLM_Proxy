@@ -1438,6 +1438,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("formatDateTime(user.created_at)", users_html)
         self.assertIn("/api/users/export", users_html)
         self.assertIn("/api/users/import", users_html)
+        self.assertIn("失败 ${result.failed_count || 0} 个，重复 ${result.skipped_count || 0} 个", users_html)
         self.assertIn("function deleteSelectedUsers()", users_html)
 
     def test_oauth_template_contains_oauth_workflows(self) -> None:
