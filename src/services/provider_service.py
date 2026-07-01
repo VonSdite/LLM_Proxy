@@ -159,7 +159,7 @@ class ProviderService:
         }
 
     def import_providers(self, payload: Any) -> dict[str, Any]:
-        """导入 Provider 配置；同名 Provider 和 Auth Group 自动追加数字后缀。"""
+        """导入 Provider 配置；同名 Provider 追加数字后缀，同名 Auth Group 合并缺失 Entry。"""
         if not isinstance(payload, dict):
             raise ValueError("Provider import payload must be a JSON object")
         raw_providers = payload.get("providers")
@@ -184,10 +184,10 @@ class ProviderService:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
         auth_groups = read_auth_group_entries(config)
-        existing_auth_group_names = set(self._list_auth_group_names(auth_groups))
+        auth_group_indexes = self._build_auth_group_indexes_by_name(auth_groups)
         existing_names = set(self._list_provider_names(providers))
         imported_auth_group_names: list[str] = []
-        renamed_auth_groups: list[dict[str, str]] = []
+        imported_auth_group_name_set: set[str] = set()
         auth_group_name_map: dict[str, str] = {}
         imported_names: list[str] = []
         renamed_providers: list[dict[str, str]] = []
@@ -197,17 +197,26 @@ class ProviderService:
                 raise ValueError("Each imported auth group must be an object")
 
             original_auth_group = AuthGroupSchema.from_mapping(raw_auth_group)
-            next_auth_group = original_auth_group.to_mapping()
-            unique_name = self._build_unique_auth_group_name(original_auth_group.name, existing_auth_group_names)
-            auth_group_name_map.setdefault(original_auth_group.name, unique_name)
-            if unique_name != original_auth_group.name:
-                renamed_auth_groups.append({"from": original_auth_group.name, "to": unique_name})
-                next_auth_group["name"] = unique_name
+            auth_group_name_map.setdefault(original_auth_group.name, original_auth_group.name)
+            existing_index = auth_group_indexes.get(original_auth_group.name)
+            if existing_index is None:
+                auth_group = AuthGroupSchema.from_mapping(original_auth_group.to_mapping())
+                auth_groups.append(auth_group.to_mapping())
+                auth_group_indexes[auth_group.name] = len(auth_groups) - 1
+            else:
+                current_auth_group = AuthGroupSchema.from_mapping(auth_groups[existing_index])
+                existing_entry_ids = {entry.id for entry in current_auth_group.entries}
+                missing_entries = [
+                    entry.to_mapping() for entry in original_auth_group.entries if entry.id not in existing_entry_ids
+                ]
+                if missing_entries:
+                    merged_auth_group = current_auth_group.to_mapping()
+                    merged_auth_group["entries"].extend(missing_entries)
+                    auth_groups[existing_index] = AuthGroupSchema.from_mapping(merged_auth_group).to_mapping()
 
-            auth_group = AuthGroupSchema.from_mapping(next_auth_group)
-            auth_groups.append(auth_group.to_mapping())
-            existing_auth_group_names.add(auth_group.name)
-            imported_auth_group_names.append(auth_group.name)
+            if original_auth_group.name not in imported_auth_group_name_set:
+                imported_auth_group_names.append(original_auth_group.name)
+                imported_auth_group_name_set.add(original_auth_group.name)
 
         for raw_provider in raw_providers:
             if not isinstance(raw_provider, dict):
@@ -236,11 +245,13 @@ class ProviderService:
             "count": 0,
             "inserted_count": 0,
             "updated_count": 0,
+            "skipped_count": 0,
         }
         usage_bucket_result = {
             "count": 0,
             "inserted_count": 0,
             "updated_count": 0,
+            "skipped_count": 0,
         }
         if raw_auth_entry_runtime_state or raw_auth_entry_usage_buckets:
             if self._auth_group_repository is None:
@@ -261,13 +272,15 @@ class ProviderService:
             "renamed": renamed_providers,
             "auth_groups_count": len(imported_auth_group_names),
             "auth_group_names": imported_auth_group_names,
-            "auth_groups_renamed": renamed_auth_groups,
+            "auth_groups_renamed": [],
             "auth_entry_runtime_state_count": runtime_state_result["count"],
             "auth_entry_usage_buckets_count": usage_bucket_result["count"],
             "auth_entry_runtime_state_inserted_count": runtime_state_result["inserted_count"],
             "auth_entry_runtime_state_updated_count": runtime_state_result["updated_count"],
+            "auth_entry_runtime_state_skipped_count": runtime_state_result.get("skipped_count", 0),
             "auth_entry_usage_buckets_inserted_count": usage_bucket_result["inserted_count"],
             "auth_entry_usage_buckets_updated_count": usage_bucket_result["updated_count"],
+            "auth_entry_usage_buckets_skipped_count": usage_bucket_result.get("skipped_count", 0),
         }
 
     def set_provider_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
@@ -423,18 +436,6 @@ class ProviderService:
                 return candidate
         raise ValueError("Unable to generate a unique provider name")
 
-    @staticmethod
-    def _build_unique_auth_group_name(base_name: Any, existing_names: set[str]) -> str:
-        seed = str(base_name or "").strip() or "auth_group"
-        if seed not in existing_names:
-            return seed
-
-        for index in range(1, 10_000):
-            candidate = f"{seed}_{index}"
-            if candidate not in existing_names:
-                return candidate
-        raise ValueError("Unable to generate a unique auth group name")
-
     @classmethod
     def _regroup_providers_by_enabled(
         cls,
@@ -481,8 +482,8 @@ class ProviderService:
         return list(ProviderService._build_provider_indexes_by_name(providers).keys())
 
     @staticmethod
-    def _list_auth_group_names(auth_groups: list[dict[str, Any]]) -> list[str]:
-        return [str(auth_group.get("name", "")).strip() for auth_group in auth_groups]
+    def _build_auth_group_indexes_by_name(auth_groups: list[dict[str, Any]]) -> dict[str, int]:
+        return {str(auth_group.get("name", "")).strip(): index for index, auth_group in enumerate(auth_groups)}
 
     @staticmethod
     def _rewrite_auth_group_table_rows(

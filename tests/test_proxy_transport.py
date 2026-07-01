@@ -1251,6 +1251,28 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function copyProvider(name)", html)
         self.assertIn("function exportSelectedProviders()", html)
         self.assertIn("function importProvidersFromFile(input)", html)
+        self.assertIn('id="providerBatchDeletePopover"', html)
+        self.assertIn("function toggleProviderBatchDeleteConfirm(event, groupKey = '')", html)
+        self.assertIn("function confirmProviderBatchDelete(event)", html)
+        copy_provider_script = html.split("async function copyProvider(name)", 1)[1].split(
+            "async function exportSelectedProviders()",
+            1,
+        )[0]
+        import_providers_script = html.split("async function importProvidersFromFile(input)", 1)[1].split(
+            "async function executeProviderBatchAction",
+            1,
+        )[0]
+        batch_action_script = html.split("async function executeProviderBatchAction", 1)[1].split(
+            "function getAuthEntryDeletePopoverElement()",
+            1,
+        )[0]
+        self.assertIn("await loadPageData();", copy_provider_script)
+        self.assertNotIn("await loadProviders();", copy_provider_script)
+        self.assertIn("await loadPageData();", import_providers_script)
+        self.assertNotIn("await loadProviders();", import_providers_script)
+        self.assertIn("delete: { label: '删除', past: '删除', fallback: '批量删除 Provider 失败' }", html)
+        self.assertIn("if (action === 'delete')", batch_action_script)
+        self.assertIn("await loadPageData();", batch_action_script)
         self.assertIn(
             "/api/providers/${encodeURIComponent(normalizedName)}/${enabled ? 'enable' : 'disable'}",
             html,
@@ -1260,8 +1282,24 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('class="drag-handle-placeholder" aria-hidden="true"', html)
         self.assertIn('id="${batchActionMeta.buttonId}"', html)
         self.assertIn('class="btn btn-toolbar-secondary provider-group-batch-btn"', html)
+        self.assertIn("data-provider-batch-delete-button", html)
+        self.assertIn('data-provider-batch-delete-button="${normalizedGroupKey}"', html)
+        self.assertIn("onclick=\"toggleProviderBatchDeleteConfirm(event, '${normalizedGroupKey}')\"", html)
+        self.assertNotIn("onclick=\"runProviderBatchAction('delete')\"", html)
+        provider_table_script = html.split(
+            "function buildProviderTable(groupKey, title, providerList, emptyText)",
+            1,
+        )[1].split("function renderProviders()", 1)[0]
+        self.assertLess(
+            provider_table_script.index("data-provider-batch-delete-button"),
+            provider_table_script.index("data-provider-export-button"),
+        )
         self.assertIn("data-provider-export-button", html)
-        self.assertIn("data-provider-import-button", html)
+        self.assertIn(
+            '<button type="button" class="btn btn-primary" id="importProvidersBtn" onclick="openProviderImportPicker()">导入</button>',
+            html,
+        )
+        self.assertNotIn("data-provider-import-button", html)
         self.assertIn("onclick=\"copyProvider(decodeProviderName('${encodedProviderName}'))\"", html)
         self.assertIn("onclick=\"runProviderBatchAction('${batchActionMeta.action}', '${normalizedGroupKey}')\"", html)
         self.assertIn("buttonId: 'disableEnabledProvidersBtn'", html)
@@ -1271,6 +1309,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("已启用", html)
         self.assertIn("已禁用", html)
         self.assertIn("if (!normalizedName || hasProviderMutationInFlight())", html)
+        self.assertNotIn("selectedProviderNames = new Set([result.name]);", html)
         self.assertIn("groupLabel = groupKey === 'enabled'", html)
         self.assertIn('data-provider-row-checkbox="${encodedProviderName}"', html)
         self.assertIn('data-auth-group-delete-trigger="${encodedGroupName}"', html)
@@ -1449,12 +1488,43 @@ class ProviderTemplateTransportTests(unittest.TestCase):
             '<button type="button" class="btn btn-toolbar-secondary" id="importUsersBtn" onclick="openUserImportPicker()">导入</button>',
             users_html,
         )
+        export_user_button = (
+            '<button type="button" class="btn btn-toolbar-secondary" id="exportUsersBtn" '
+            'onclick="exportUsers()" disabled>导出</button>'
+        )
+        batch_permission_button = (
+            '<button type="button" class="btn btn-toolbar-secondary" id="batchSetModelPermissionsBtn" '
+            'onclick="openPermissionModalForBatch()" disabled>模型权限</button>'
+        )
+        batch_delete_button = (
+            '<button type="button" class="btn btn-toolbar-secondary" id="batchDeleteUsersBtn" '
+            'onclick="toggleUserBatchDeleteConfirm(event)" disabled>删除</button>'
+        )
+        import_user_button = (
+            '<button type="button" class="btn btn-toolbar-secondary" id="importUsersBtn" '
+            'onclick="openUserImportPicker()">导入</button>'
+        )
+        self.assertIn('<div class="section-heading-inline users-list-heading">', users_html)
+        self.assertLess(users_html.index(batch_permission_button), users_html.index(batch_delete_button))
+        self.assertLess(users_html.index(batch_delete_button), users_html.index(export_user_button))
+        self.assertLess(users_html.index(export_user_button), users_html.index(import_user_button))
+        self.assertIn('<div class="users-batch-controls" id="usersBatchControls">', users_html)
+        self.assertNotIn('id="selectedUsersSummary"', users_html)
+        self.assertNotIn("users-batch-summary", users_html)
+        self.assertNotIn('id="usersBatchControls" hidden', users_html)
+        self.assertNotIn("controls.hidden = selectedCount === 0;", users_html)
+        self.assertNotIn("batchButton.hidden = !whitelistControlEnabled;", users_html)
+        self.assertIn('id="userBatchDeletePopover"', users_html)
+        self.assertIn("function toggleUserBatchDeleteConfirm(event)", users_html)
+        self.assertIn("function confirmUserBatchDelete(event)", users_html)
+        self.assertIn("await deleteSelectedUsers(selectedIds);", users_html)
+        self.assertIn("deleteButton.textContent = userBatchActionInFlight ? '删除中...' : '删除';", users_html)
         self.assertIn("body: JSON.stringify({ user_ids: selectedIds })", users_html)
         self.assertIn(
             "新增 ${result.created_count || 0} 个，更新 ${result.updated_count || 0} 个，失败 ${result.failed_count || 0} 个",
             users_html,
         )
-        self.assertIn("function deleteSelectedUsers()", users_html)
+        self.assertIn("async function deleteSelectedUsers(userIds = null)", users_html)
 
     def test_oauth_template_contains_oauth_workflows(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "oauth.html"
