@@ -12,7 +12,7 @@ from qwen_openai_compat import QwenReasoningAdapter
 
 
 class Hook(BaseHook):
-    """按 provider / model 识别厂商并应用对应 OpenAI 兼容参数。"""
+    """按上游模型识别厂商并应用对应 OpenAI 兼容参数。"""
 
     def __init__(self) -> None:
         self._adapters: tuple[VendorReasoningAdapter, ...] = (
