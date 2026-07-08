@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260419-8">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260419-10">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置{% endblock %}
@@ -726,6 +726,20 @@
                         <li><strong>测试模型</strong>：会使用当前选中的 Auth Entry 发起上游模型测试</li>
                         <li><strong>影响范围</strong>：它只影响当前表单里的拉取模型和模型测试，不会修改 Auth Group 配置本身。</li>
                     </ul>
+                `,
+            },
+            model_test_first_token_latency: {
+                title: '首字延迟',
+                html: `
+                    <p>首字延迟记录从测试请求发出到首个正文或推理增量到达的时间。</p>
+                    <p>流式思考内容以 <code>reasoning_content</code> 形式到达时，会作为首个模型输出参与记录。</p>
+                `,
+            },
+            model_test_tps: {
+                title: 'TPS',
+                html: `
+                    <p>TPS 使用上游 <code>completion usage</code> 中的 <code>completion_tokens</code> 除以本次流式请求端到端耗时计算。</p>
+                    <p>端到端耗时从测试请求发出开始，到流式响应结束为止。</p>
                 `,
             },
         };
@@ -2452,8 +2466,30 @@
                             </th>
                             <th class="model-test-model-column">模型</th>
                             <th class="model-test-status-column">是否可用</th>
-                            <th class="model-test-metric-column">首字延迟</th>
-                            <th class="model-test-metric-column">TPS</th>
+                            <th class="model-test-metric-column">
+                                <span class="model-test-header-label">
+                                    首字延迟
+                                    <button
+                                        type="button"
+                                        class="model-test-header-help"
+                                        data-provider-help-topic="model_test_first_token_latency"
+                                        onclick="toggleProviderHelp('model_test_first_token_latency', event)"
+                                        aria-label="查看首字延迟说明"
+                                    >?</button>
+                                </span>
+                            </th>
+                            <th class="model-test-metric-column">
+                                <span class="model-test-header-label">
+                                    TPS
+                                    <button
+                                        type="button"
+                                        class="model-test-header-help"
+                                        data-provider-help-topic="model_test_tps"
+                                        onclick="toggleProviderHelp('model_test_tps', event)"
+                                        aria-label="查看 TPS 说明"
+                                    >?</button>
+                                </span>
+                            </th>
                             <th class="model-test-actions-column">操作</th>
                         </tr>
                     </thead>

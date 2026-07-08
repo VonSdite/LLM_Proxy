@@ -233,23 +233,25 @@ class ProviderModelTestService:
 
     @staticmethod
     def _build_benchmark_request(model_name: str) -> dict[str, Any]:
+        benchmark_block = "\n".join(
+            f"{index:02d}: the quick brown fox jumps over the lazy dog" for index in range(1, 13)
+        )
         return {
             "model": model_name,
             "stream": True,
             "temperature": 0,
             "top_p": 1,
-            "max_tokens": 160,
+            "max_tokens": 192,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are running a deterministic latency benchmark. Follow formatting instructions exactly.",
+                    "content": "You are running a latency check. Output only the requested text.",
                 },
                 {
                     "role": "user",
                     "content": (
-                        "Return exactly 10 lines. Each line must start with NN: where NN is 01-10. "
-                        "After the prefix, write exactly 8 short English words. Use plain ASCII only. "
-                        "Do not use markdown, bullets, explanations, or code fences."
+                        "Copy the following block exactly once. Keep every line unchanged and output nothing else.\n\n"
+                        f"{benchmark_block}"
                     ),
                 },
             ],
@@ -406,13 +408,10 @@ class ProviderModelTestService:
 
         if first_token_at is not None and request_started_at is not None:
             first_token_latency_ms = round(max((first_token_at - request_started_at) * 1000, 0), 2)
-        if (
-            first_token_at is not None
-            and completed_at is not None
-            and completion_tokens > 0
-            and completed_at > first_token_at
-        ):
-            tps = round(completion_tokens / (completed_at - first_token_at), 2)
+        if request_started_at is not None and completed_at is not None and completion_tokens > 0:
+            elapsed_seconds = completed_at - request_started_at
+            if elapsed_seconds > 0:
+                tps = round(completion_tokens / elapsed_seconds, 2)
 
         return {
             "requested_model": model_name,
