@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from flask import Flask
 
@@ -200,6 +201,46 @@ class ProviderModelTestServiceTests(unittest.TestCase):
 
         self.assertTrue(result["results"][0]["available"])
         self.assertIsNone(result["results"][0]["tps"])
+
+    def test_stream_tps_uses_request_duration_to_avoid_buffered_chunk_spikes(self) -> None:
+        fake_response = FakeStreamResponse(
+            [
+                (
+                    b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"demo-model",'
+                    b'"choices":[{"delta":{"content":"Hello"},"index":0}]}\n\n'
+                    b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"demo-model",'
+                    b'"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":100,"total_tokens":112}}\n\n'
+                    b"data: [DONE]\n\n"
+                )
+            ]
+        )
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            del provider, headers, body, kwargs
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with patch(
+            "src.services.provider_model_test_service.time.perf_counter",
+            side_effect=[100.0, 110.0, 110.001],
+        ):
+            result = self.service.test_models(
+                {
+                    "api": "https://example.com/v1/chat/completions",
+                    "source_format": "openai_chat",
+                    "models": ["demo-model"],
+                }
+            )
+
+        self.assertEqual(10000.0, result["results"][0]["first_token_latency_ms"])
+        self.assertEqual(10.0, result["results"][0]["tps"])
 
     def test_stream_success_without_model_output_marks_unavailable(self) -> None:
         fake_response = FakeStreamResponse(

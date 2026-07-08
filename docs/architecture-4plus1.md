@@ -488,7 +488,7 @@ provider editor form snapshot
   - 两者都不经过 `AuthGroupManager.acquire()`
   - 两者都不写运行态冷却、并发、配额
 - 首字延迟仅在真实流式首个正文或推理增量到达时记录
-- TPS 仅在拿到 completion usage 后计算
+- TPS 仅在拿到 completion usage 后计算，计算口径为 `completion_tokens / 本次流式请求端到端耗时`
 - 如果上游成功但未返回 usage：
   - `available = true`
   - `tps = null`
