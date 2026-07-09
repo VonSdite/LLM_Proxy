@@ -128,6 +128,11 @@ class FakeModelDiscoveryService:
         api: str,
         api_key: str | None = None,
         request_headers: dict[str, str] | None = None,
+        hook: str | None = None,
+        provider_name: str | None = None,
+        source_format: str | None = None,
+        auth_group: str | None = None,
+        auth_entry_id: str | None = None,
         proxy_mode: str | None = None,
         proxy: str | None = None,
         timeout_seconds: str | None = None,
@@ -138,6 +143,11 @@ class FakeModelDiscoveryService:
                 "api": api,
                 "api_key": api_key,
                 "request_headers": dict(request_headers or {}),
+                "hook": hook,
+                "provider_name": provider_name,
+                "source_format": source_format,
+                "auth_group": auth_group,
+                "auth_entry_id": auth_entry_id,
                 "proxy_mode": proxy_mode,
                 "proxy": proxy,
                 "timeout_seconds": timeout_seconds,
@@ -373,6 +383,41 @@ class ProviderControllerFetchModelsRouteTests(unittest.TestCase):
                     "Authorization": "Bearer sk-entry-a",
                     "x-org": "team-a",
                 },
+                "hook": None,
+                "provider_name": None,
+                "source_format": None,
+                "auth_group": "pool-a",
+                "auth_entry_id": "entry-a",
+                "proxy_mode": None,
+                "proxy": None,
+                "timeout_seconds": None,
+                "verify_ssl": None,
+            },
+            self.model_discovery_service.calls[-1],
+        )
+
+    def test_fetch_models_route_passes_hook_form_snapshot(self) -> None:
+        response = self.client.get(
+            "/api/providers/fetch-models",
+            query_string={
+                "name": "provider-a",
+                "api": "https://example.com/v1/chat/completions",
+                "source_format": "claude_chat",
+                "hook": "custom/model_fetch_hook.py",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": None,
+                "request_headers": {},
+                "hook": "custom/model_fetch_hook.py",
+                "provider_name": "provider-a",
+                "source_format": "claude_chat",
+                "auth_group": None,
+                "auth_entry_id": None,
                 "proxy_mode": None,
                 "proxy": None,
                 "timeout_seconds": None,

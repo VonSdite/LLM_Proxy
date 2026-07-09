@@ -156,12 +156,17 @@ downstream request
   - 按当前 Provider 表单快照直连上游测试模型可用性、首字延迟与 TPS
   - 在协议支持时显式请求 usage 返回
   - 批量测试按前端当前选择的模型行逐条执行并逐条回填结果
+- `ModelDiscoveryService`
+  - 按当前 Provider 表单快照拉取上游模型列表
+  - Hook 实现 `fetch_models` 时使用 Hook 返回的模型列表或模型 payload
+  - Hook 返回 `None` 时使用 `/v1/models` 与 `/models` 候选端点探测
 - `SettingsService`
   - 维护 `server`、`admin`、`oauth`、`api_keys` 与 `logging`
   - 管理立即生效项与重启生效项的边界
 - `ProviderRuntimeFactory`
   - 负责临时 / 正式 Provider 运行时对象构建
-  - 统一 hook 加载与缓存，Hook 路径固定相对项目根目录 `hooks/`
+  - 统一 hook 路径校验、懒加载、文件签名检查与弱引用缓存
+  - Hook 路径固定相对项目根目录 `hooks/`
 - `ExecutorRegistry`
   - 负责 HTTP 上游连接
   - 统一处理 Provider 出站请求中的代理风险确认页自动确认与一次重试
@@ -174,12 +179,17 @@ downstream request
 - `Encoder`
   - 将统一 chunk 编码成下游协议
 - `Hook`
-  - 只负责 header 和 guard
+  - 负责 header、guard、成功响应清洗和模型拉取扩展
+  - 按配置路径懒加载，不扫描 `hooks/` 目录
+  - 每次调用扩展点前检查 Hook 文件签名；文件新增或内容变化后按当前文件重新加载
+  - Hook 文件删除后，已加载实例继续可用；从未成功加载过的路径保持 no-op
+  - 实际 Hook 实例使用弱引用缓存，没有 Provider 或控制平面临时对象引用时可被回收
   - `request_guard` 运行在协议转换之后，用于上游前的厂商私有参数适配
+  - `fetch_models` 运行在控制平面的 Provider 模型拉取链路中
   - 内置上游思考参数 Hook 位于 `hooks/openai_reasoning_compat.py`
   - MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope 各有独立处理类和单厂商入口文件
 
-Hook 组件除了 header / guard，还会收到最小重试上下文：
+Hook 组件除了 header / guard / 模型拉取 payload，还会收到最小重试上下文：
 
 - `retry`
 - `auth_group_name`
@@ -468,8 +478,9 @@ provider editor form snapshot
 provider editor form snapshot
   -> controller
   -> auth header resolve (api_key or auth_group + auth_entry)
-  -> model endpoint inference
-  -> upstream fetch (/v1/models or /models)
+  -> fetch_models hook
+  -> hook model result or model endpoint inference
+  -> optional upstream fetch (/v1/models or /models)
   -> fetched model picker
   -> provider form model table
 ```
@@ -480,10 +491,11 @@ provider editor form snapshot
 - 测试模型列表中的模型值按真实上游模型 ID 处理，不执行 `{provider_name}/` 路由前缀裁剪
 - 两条链路都会使用 Provider 表单快照中的 `proxy_mode`、`proxy` 和 `verify_ssl`
 - Provider 编辑页的 `model_list` 采用表格编辑，并以当前前端行状态作为唯一数据源
-- 只应用 request-side hook：
+- 拉取模型只应用 `fetch_models`；Hook 返回 `None` 时使用内置端点探测
+- 测试模型只应用 request-side hook：
   - `header_hook`
   - `request_guard`
-- 不应用 `response_guard`
+- 两条链路都不应用 `response_guard`
 - `auth_group` 模式下：
   - 拉取模型必须显式选择 `auth_entry`
   - 测试模型也必须显式选择 `auth_entry`

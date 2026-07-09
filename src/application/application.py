@@ -291,7 +291,7 @@ class Application:
             self.reload_providers,
             self._auth_group_manager,
         )
-        model_discovery_service = ModelDiscoveryService(self._ctx)
+        model_discovery_service = ModelDiscoveryService(self._ctx, self._provider_runtime_factory)
         codex_proxy_service = CodexProxyService(self._ctx, codex_oauth_service)
         claude_proxy_service = ClaudeProxyService(self._ctx, claude_oauth_service)
         settings_service = SettingsService(

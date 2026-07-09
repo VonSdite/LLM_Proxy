@@ -5257,9 +5257,12 @@
                 return;
             }
             const params = new URLSearchParams({ api: payload.api });
+            if (payload.name) params.set('name', payload.name);
+            if (payload.source_format) params.set('source_format', payload.source_format);
             if (payload.api_key) params.set('api_key', payload.api_key);
             if (payload.auth_group) params.set('auth_group', payload.auth_group);
             if (payload.auth_group && authEntryId) params.set('auth_entry_id', authEntryId);
+            if (payload.hook) params.set('hook', payload.hook);
             if (payload.proxy_mode) params.set('proxy_mode', payload.proxy_mode);
             if (payload.proxy_mode === 'custom' && payload.proxy) params.set('proxy', payload.proxy);
             if (payload.timeout_seconds) params.set('timeout_seconds', payload.timeout_seconds);

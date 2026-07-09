@@ -11,7 +11,14 @@ from urllib.parse import urlparse
 import requests
 
 from ..application.app_context import AppContext
-from ..config.provider_config import clean_optional_string, parse_optional_bool, parse_optional_positive_int
+from ..config.provider_config import (
+    ProviderConfigSchema,
+    clean_optional_string,
+    parse_optional_bool,
+    parse_optional_positive_int,
+)
+from ..config.provider_runtime_factory import ProviderRuntimeFactory
+from ..hooks import HookContext
 from ..utils.http_headers import merge_http_headers
 from ..utils.net import apply_requests_proxy_settings, build_requests_proxy_settings, build_requests_request_proxies
 from ..utils.proxy_warning import (
@@ -24,14 +31,24 @@ from ..utils.proxy_warning import (
 class ModelDiscoveryService:
     """负责探测上游 provider 的模型列表。"""
 
-    def __init__(self, ctx: AppContext):
+    _HOOK_PROVIDER_NAME = "ModelDiscovery"
+    _HOOK_PROVIDER_MODEL = "__model_discovery__"
+
+    def __init__(self, ctx: AppContext, runtime_factory: ProviderRuntimeFactory | None = None):
         self._logger = ctx.logger
+        self._root_path = ctx.root_path
+        self._runtime_factory = runtime_factory or ProviderRuntimeFactory(ctx)
 
     def fetch_models_preview(
         self,
         api: str,
         api_key: str | None = None,
         request_headers: Mapping[str, str] | None = None,
+        hook: str | None = None,
+        provider_name: str | None = None,
+        source_format: str | None = None,
+        auth_group: str | None = None,
+        auth_entry_id: str | None = None,
         proxy_mode: str | None = None,
         proxy: str | None = None,
         timeout_seconds: Any | None = None,
@@ -40,14 +57,42 @@ class ModelDiscoveryService:
         if not api or not str(api).strip():
             raise ValueError("Provider api is required")
 
+        normalized_api = str(api).strip()
+        normalized_api_key = clean_optional_string(api_key)
+        headers = self._build_model_fetch_headers(normalized_api_key, request_headers)
+        normalized_timeout_seconds = parse_optional_positive_int(timeout_seconds, default=10) or 10
+        normalized_verify_ssl = parse_optional_bool(verify_ssl, default=False) or False
+        normalized_hook = clean_optional_string(hook)
+
+        if normalized_hook:
+            hook_models = self._fetch_models_from_hook(
+                api=normalized_api,
+                hook=normalized_hook,
+                headers=headers,
+                api_key=normalized_api_key,
+                request_headers=request_headers,
+                provider_name=provider_name,
+                source_format=source_format,
+                auth_group=auth_group,
+                auth_entry_id=auth_entry_id,
+                proxy_mode=proxy_mode,
+                proxy=proxy,
+                timeout_seconds=normalized_timeout_seconds,
+                verify_ssl=normalized_verify_ssl,
+            )
+            if hook_models is not None:
+                return {
+                    "fetched_models": hook_models,
+                    "fetched_count": len(hook_models),
+                }
+
         fetched_models = self._fetch_models_from_upstream(
-            api=str(api).strip(),
-            api_key=clean_optional_string(api_key),
-            request_headers=request_headers,
+            api=normalized_api,
+            headers=headers,
             proxy_mode=proxy_mode,
             proxy=proxy,
-            timeout_seconds=parse_optional_positive_int(timeout_seconds, default=10) or 10,
-            verify_ssl=parse_optional_bool(verify_ssl, default=False) or False,
+            timeout_seconds=normalized_timeout_seconds,
+            verify_ssl=normalized_verify_ssl,
         )
 
         return {
@@ -55,20 +100,113 @@ class ModelDiscoveryService:
             "fetched_count": len(fetched_models),
         }
 
+    def _fetch_models_from_hook(
+        self,
+        *,
+        api: str,
+        hook: str,
+        headers: dict[str, str],
+        api_key: str | None,
+        request_headers: Mapping[str, str] | None,
+        provider_name: str | None,
+        source_format: str | None,
+        auth_group: str | None,
+        auth_entry_id: str | None,
+        proxy_mode: str | None,
+        proxy: str | None,
+        timeout_seconds: int,
+        verify_ssl: bool,
+    ) -> list[str] | None:
+        provider = self._build_hook_provider(
+            api=api,
+            hook=hook,
+            proxy_mode=proxy_mode,
+            proxy=proxy,
+            timeout_seconds=timeout_seconds,
+            verify_ssl=verify_ssl,
+        )
+        if provider.hook is None:
+            return None
+
+        hook_provider_name = clean_optional_string(provider_name) or self._HOOK_PROVIDER_NAME
+        hook_source_format = clean_optional_string(source_format) or provider.source_format
+        candidate_urls = self._build_model_endpoint_candidates(api)
+        payload = {
+            "api": api,
+            "api_key": api_key,
+            "headers": dict(headers),
+            "request_headers": dict(request_headers or {}),
+            "candidate_urls": list(candidate_urls),
+            "provider_name": hook_provider_name,
+            "source_format": hook_source_format,
+            "auth_group": clean_optional_string(auth_group),
+            "auth_entry_id": clean_optional_string(auth_entry_id),
+            "proxy_mode": provider.proxy_mode,
+            "proxy": provider.proxy,
+            "timeout_seconds": timeout_seconds,
+            "verify_ssl": verify_ssl,
+        }
+        ctx = HookContext(
+            retry=0,
+            root_path=self._root_path,
+            logger=self._logger,
+            provider_name=hook_provider_name,
+            provider_source_format=hook_source_format,
+            provider_target_format=provider.primary_target_format,
+            transport=provider.transport,
+            stream=False,
+            auth_group_name=clean_optional_string(auth_group),
+            auth_entry_id=clean_optional_string(auth_entry_id),
+        )
+        hook_payload = provider.apply_fetch_models_hook(ctx, payload)
+        if hook_payload is None:
+            return None
+
+        models = self._extract_models_from_payload(hook_payload)
+        if not models:
+            raise ValueError("Hook fetch_models returned no models")
+
+        self._logger.info(
+            "Fetched %s models from provider hook: provider_api=%s hook=%s",
+            len(models),
+            api,
+            hook,
+        )
+        return models
+
+    def _build_hook_provider(
+        self,
+        *,
+        api: str,
+        hook: str,
+        proxy_mode: str | None,
+        proxy: str | None,
+        timeout_seconds: int,
+        verify_ssl: bool,
+    ):
+        provider_config = ProviderConfigSchema.from_mapping(
+            {
+                "name": self._HOOK_PROVIDER_NAME,
+                "api": api,
+                "model_list": [self._HOOK_PROVIDER_MODEL],
+                "hook": hook,
+                "proxy_mode": proxy_mode,
+                "proxy": proxy,
+                "timeout_seconds": timeout_seconds,
+                "verify_ssl": verify_ssl,
+            }
+        )
+        return self._runtime_factory.build_provider_from_schema(provider_config)
+
     def _fetch_models_from_upstream(
         self,
         api: str,
-        api_key: str | None,
-        request_headers: Mapping[str, str] | None,
+        headers: dict[str, str],
         proxy_mode: str | None,
         proxy: str | None,
         timeout_seconds: int,
         verify_ssl: bool,
     ) -> list[str]:
-        headers = {"accept": "application/json"}
-        if api_key:
-            headers["authorization"] = f"Bearer {api_key}"
-        headers = merge_http_headers(headers, request_headers)
         proxy_settings = build_requests_proxy_settings(
             proxy_mode,
             proxy,
@@ -126,6 +264,16 @@ class ModelDiscoveryService:
                     close_response(response)
 
         raise ValueError("; ".join(candidate_errors) or "Failed to fetch models")
+
+    @staticmethod
+    def _build_model_fetch_headers(
+        api_key: str | None,
+        request_headers: Mapping[str, str] | None,
+    ) -> dict[str, str]:
+        headers = {"accept": "application/json"}
+        if api_key:
+            headers["authorization"] = f"Bearer {api_key}"
+        return merge_http_headers(headers, request_headers)
 
     @staticmethod
     def _build_model_endpoint_candidates(api: str) -> list[str]:

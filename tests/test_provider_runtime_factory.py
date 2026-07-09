@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import sys
 import tempfile
 import unittest
@@ -96,8 +97,134 @@ class Hook:
             provider = factory.build_provider_from_schema(self._provider_config("custom/demo_hook.py"))
             hook_context = self._hook_context(root_path, logger)
 
-        self.assertIsNotNone(provider.hook)
-        self.assertEqual({"helper_value": "loaded"}, provider.apply_request_guard(hook_context, {}))
+            self.assertIsNotNone(provider.hook)
+            self.assertEqual({"helper_value": "loaded"}, provider.apply_request_guard(hook_context, {}))
+
+    def test_missing_hook_file_loads_after_file_is_created(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_path = Path(temp_dir)
+            hook_dir = root_path / "hooks" / "custom"
+            hook_dir.mkdir(parents=True)
+            logger = FakeLogger()
+            factory = self._build_factory(root_path, logger)
+            provider = factory.build_provider_from_schema(self._provider_config("custom/demo_hook.py"))
+            hook_context = self._hook_context(root_path, logger)
+
+            self.assertEqual({}, provider.apply_request_guard(hook_context, {}))
+
+            (hook_dir / "demo_hook.py").write_text(
+                """
+class Hook:
+    def request_guard(self, ctx, body):
+        del ctx
+        guarded = dict(body)
+        guarded["created_after_first_attempt"] = True
+        return guarded
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                {"created_after_first_attempt": True},
+                provider.apply_request_guard(hook_context, {}),
+            )
+
+    def test_loaded_hook_reloads_after_file_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_path = Path(temp_dir)
+            hook_dir = root_path / "hooks" / "custom"
+            hook_dir.mkdir(parents=True)
+            hook_file = hook_dir / "demo_hook.py"
+            hook_file.write_text(
+                """
+class Hook:
+    def request_guard(self, ctx, body):
+        del ctx
+        guarded = dict(body)
+        guarded["version"] = "one"
+        return guarded
+""".lstrip(),
+                encoding="utf-8",
+            )
+            logger = FakeLogger()
+            factory = self._build_factory(root_path, logger)
+            provider = factory.build_provider_from_schema(self._provider_config("custom/demo_hook.py"))
+            hook_context = self._hook_context(root_path, logger)
+
+            self.assertEqual({"version": "one"}, provider.apply_request_guard(hook_context, {}))
+
+            hook_file.write_text(
+                """
+class Hook:
+    def request_guard(self, ctx, body):
+        del ctx
+        guarded = dict(body)
+        guarded["version"] = "two-hot-reload"
+        return guarded
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            self.assertEqual({"version": "two-hot-reload"}, provider.apply_request_guard(hook_context, {}))
+
+    def test_loaded_hook_stays_available_after_file_is_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_path = Path(temp_dir)
+            hook_dir = root_path / "hooks" / "custom"
+            hook_dir.mkdir(parents=True)
+            hook_file = hook_dir / "demo_hook.py"
+            hook_file.write_text(
+                """
+class Hook:
+    def request_guard(self, ctx, body):
+        del ctx
+        guarded = dict(body)
+        guarded["loaded_before_delete"] = True
+        return guarded
+""".lstrip(),
+                encoding="utf-8",
+            )
+            logger = FakeLogger()
+            factory = self._build_factory(root_path, logger)
+            provider = factory.build_provider_from_schema(self._provider_config("custom/demo_hook.py"))
+            hook_context = self._hook_context(root_path, logger)
+
+            self.assertEqual({"loaded_before_delete": True}, provider.apply_request_guard(hook_context, {}))
+
+            hook_file.unlink()
+
+            self.assertEqual({"loaded_before_delete": True}, provider.apply_request_guard(hook_context, {}))
+
+    def test_hook_cache_uses_weak_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_path = Path(temp_dir)
+            hook_dir = root_path / "hooks" / "custom"
+            hook_dir.mkdir(parents=True)
+            (hook_dir / "demo_hook.py").write_text(
+                """
+class Hook:
+    def request_guard(self, ctx, body):
+        del ctx
+        guarded = dict(body)
+        guarded["cached"] = True
+        return guarded
+""".lstrip(),
+                encoding="utf-8",
+            )
+            logger = FakeLogger()
+            factory = self._build_factory(root_path, logger)
+            provider = factory.build_provider_from_schema(self._provider_config("custom/demo_hook.py"))
+            hook_context = self._hook_context(root_path, logger)
+
+            self.assertEqual({"cached": True}, provider.apply_request_guard(hook_context, {}))
+            cache_entry = next(iter(factory._hook_cache.values()))  # noqa: SLF001
+            self.assertIsNotNone(cache_entry.hook_ref)
+            hook_ref = cache_entry.hook_ref
+
+            del provider
+            gc.collect()
+
+        self.assertIsNone(hook_ref())
 
     def test_absolute_hook_path_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

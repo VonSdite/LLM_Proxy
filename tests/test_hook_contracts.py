@@ -60,6 +60,11 @@ class NoneReturningGuard(BaseHook):
         return None
 
 
+class ModelFetchHook(BaseHook):
+    def fetch_models(self, ctx: HookContext, payload: dict[str, Any]) -> list[str]:
+        return [ctx.provider_name, str(payload["api"])]
+
+
 class HookContractsTests(unittest.TestCase):
     def _ctx(
         self,
@@ -114,6 +119,7 @@ class HookContractsTests(unittest.TestCase):
 
         self.assertEqual(request_body, hook.request_guard(ctx, request_body))
         self.assertEqual(response_body, hook.response_guard(ctx, response_body))
+        self.assertIsNone(hook.fetch_models(ctx, {"api": "https://example.com"}))
 
     def test_provider_does_not_call_legacy_hook_methods(self) -> None:
         provider = LLMProvider(name="demo", api="https://example.com", hook=cast(Any, LegacyOnlyHook()))
@@ -123,6 +129,7 @@ class HookContractsTests(unittest.TestCase):
 
         self.assertEqual(request_body, provider.apply_request_guard(ctx, request_body))
         self.assertEqual(response_body, provider.apply_response_guard(ctx, response_body))
+        self.assertIsNone(provider.apply_fetch_models_hook(ctx, {"api": "https://example.com"}))
 
     def test_provider_uses_request_and_response_guards(self) -> None:
         provider = LLMProvider(name="demo", api="https://example.com", hook=GuardHook())
@@ -130,6 +137,15 @@ class HookContractsTests(unittest.TestCase):
 
         self.assertEqual(True, provider.apply_request_guard(ctx, {"messages": []})["guarded"])
         self.assertEqual(True, provider.apply_response_guard(ctx, {"message": "ok"})["checked"])
+
+    def test_provider_uses_fetch_models_hook(self) -> None:
+        provider = LLMProvider(name="demo", api="https://example.com", hook=ModelFetchHook())
+        ctx = self._ctx(provider_name="demo")
+
+        self.assertEqual(
+            ["demo", "https://example.com"],
+            provider.apply_fetch_models_hook(ctx, {"api": "https://example.com"}),
+        )
 
     def test_none_from_guard_keeps_original_body(self) -> None:
         provider = LLMProvider(name="demo", api="https://example.com", hook=NoneReturningGuard())
@@ -154,6 +170,15 @@ class HookContractsTests(unittest.TestCase):
         rewritten_body = hook.request_guard(ctx, request_body)
 
         self.assertEqual("[PREFIX] hello", rewritten_body["messages"][0]["content"])
+        self.assertIsNone(
+            hook.fetch_models(
+                ctx,
+                {
+                    "api": "https://example.com/v1/chat/completions",
+                    "candidate_urls": ["https://example.com/v1/models"],
+                },
+            )
+        )
         with self.assertRaises(HookAbortError) as caught:
             hook.request_guard(ctx, {"messages": [{"role": "user", "content": "[HOOK_ABORT_EXAMPLE]"}]})
         self.assertEqual(400, caught.exception.status_code)
