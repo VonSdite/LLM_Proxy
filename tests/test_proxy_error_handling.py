@@ -549,6 +549,57 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         assert proxy_service.last_kwargs is not None
         self.assertEqual("127.0.0.1", proxy_service.last_kwargs["client_ip"])
 
+    def test_chat_completions_drops_downstream_authorization_before_proxy_service(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        proxy_service = RecordingProxyService(
+            (
+                app.response_class(
+                    '{"id":"chatcmpl_1","object":"chat.completion"}',
+                    status=200,
+                    mimetype="application/json",
+                ),
+                200,
+                None,
+            )
+        )
+        ProxyController(
+            ctx,
+            proxy_service,
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            headers={
+                "Authorization": "Bearer downstream-token",
+                "X-API-Key": "downstream-token",
+            },
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertIsNotNone(proxy_service.last_args)
+        assert proxy_service.last_args is not None
+        forwarded_headers = proxy_service.last_args[2]
+        self.assertIsInstance(forwarded_headers, dict)
+        self.assertNotIn("Authorization", forwarded_headers)
+        forwarded_api_key = next(value for key, value in forwarded_headers.items() if key.lower() == "x-api-key")
+        self.assertEqual("downstream-token", forwarded_api_key)
+
     def test_chat_completions_returns_openai_style_error_payload_for_upstream_failures(self) -> None:
         provider = LLMProvider(
             name="demo",

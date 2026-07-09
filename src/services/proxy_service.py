@@ -160,7 +160,7 @@ class ProxyService:
             attempt: int,
             selected_auth: SelectedAuthEntry | None,
         ) -> tuple[dict[str, str], dict[str, Any], dict[str, Any], HookContext]:
-            headers = dict(request_headers)
+            headers = self._filter_upstream_request_headers(request_headers)
             headers["content-type"] = "application/json"
             if selected_auth is not None:
                 headers = merge_http_headers(headers, selected_auth.headers_mapping())
@@ -541,6 +541,11 @@ class ProxyService:
         upstream_request_data = dict(request_data)
         upstream_request_data["model"] = upstream_model
         return upstream_request_data
+
+    @staticmethod
+    def _filter_upstream_request_headers(headers: dict[str, str]) -> dict[str, str]:
+        excluded = {"authorization"}
+        return {key: value for key, value in headers.items() if key.lower() not in excluded}
 
     @staticmethod
     def _resolve_downstream_target_format(

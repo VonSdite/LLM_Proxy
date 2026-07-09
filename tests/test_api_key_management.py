@@ -316,7 +316,7 @@ class ApiKeyManagementTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(["demo/m1"], [item["id"] for item in payload["data"]])
 
-    def test_chat_completion_records_usage_to_api_key_and_drops_downstream_key_header(self) -> None:
+    def test_chat_completion_records_usage_to_api_key_and_drops_downstream_authorization_header(self) -> None:
         created = self.api_key_service.create_api_key(
             name="client-a",
             model_permissions=["demo/m1"],
@@ -335,7 +335,10 @@ class ApiKeyManagementTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertNotIn("Authorization", proxy_service.forwarded_headers)
-        self.assertNotIn("X-API-Key", proxy_service.forwarded_headers)
+        forwarded_api_key = next(
+            value for key, value in proxy_service.forwarded_headers.items() if key.lower() == "x-api-key"
+        )
+        self.assertEqual(created["api_key"], forwarded_api_key)
 
         stored = self.api_key_repository.get_by_id(int(created["id"]))
         self.assertIsNotNone(stored)

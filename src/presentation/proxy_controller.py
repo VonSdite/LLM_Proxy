@@ -610,10 +610,7 @@ class ProxyController:
                 request_model=model_name,
                 target_format=resolved_target_format,
             )
-            headers = self._filter_request_headers(
-                request.headers,
-                drop_downstream_api_key=self._is_api_key_required(),
-            )
+            headers = self._filter_request_headers(request.headers)
             start_time = now_local_datetime()
             api_key_id = self._get_api_key_id(api_key)
 
@@ -847,12 +844,9 @@ class ProxyController:
             )
 
     @staticmethod
-    def _filter_request_headers(
-        headers: Any,
-        *,
-        drop_downstream_api_key: bool = False,
-    ) -> dict[str, str]:
+    def _filter_request_headers(headers: Any) -> dict[str, str]:
         excluded = {
+            "authorization",
             "host",
             "content-length",
             "connection",
@@ -864,8 +858,6 @@ class ProxyController:
             "transfer-encoding",
             "upgrade",
         }
-        if drop_downstream_api_key:
-            excluded.update({"authorization", "x-api-key"})
         return {k: v for k, v in headers.items() if k.lower() not in excluded}
 
     @staticmethod

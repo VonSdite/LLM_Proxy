@@ -694,7 +694,10 @@ class ProxyServicePipelineTests(unittest.TestCase):
                     "messages": [{"role": "user", "content": "Hello"}],
                     "stream": True,
                 },
-                {"Authorization": "Bearer user-token"},
+                {
+                    "Authorization": "Bearer user-token",
+                    "X-API-Key": "user-token",
+                },
             )
             stream_body = self._collect_response_body(response)
 
@@ -704,12 +707,14 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(200, status_code)
         self.assertEqual(["authorization"], authorization_headers)
         self.assertEqual("Bearer sk-provider", headers["authorization"])
+        self.assertEqual("user-token", headers["X-API-Key"])
         self.assertEqual("after-auth", headers["x-hook-stage"])
         self.assertEqual("Bearer sk-provider", hook.headers[0]["authorization"])
         self.assertNotIn("Authorization", hook.headers[0])
+        self.assertEqual("user-token", hook.headers[0]["X-API-Key"])
         self.assertIn(b"data: [DONE]", stream_body)
 
-    def test_provider_without_api_key_keeps_client_authorization(self) -> None:
+    def test_provider_without_api_key_drops_client_authorization_header(self) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
             name="demo",
@@ -748,16 +753,21 @@ class ProxyServicePipelineTests(unittest.TestCase):
                     "messages": [{"role": "user", "content": "Hello"}],
                     "stream": True,
                 },
-                {"Authorization": "Bearer user-token"},
+                {
+                    "Authorization": "Bearer user-token",
+                    "X-API-Key": "user-token",
+                },
             )
             self._collect_response_body(response)
 
         headers = captured["headers"]
         authorization_headers = [key for key in headers if key.lower() == "authorization"]
+        api_key_headers = [key for key in headers if key.lower() == "x-api-key"]
         self.assertIsNone(failure_info)
         self.assertEqual(200, status_code)
-        self.assertEqual(["Authorization"], authorization_headers)
-        self.assertEqual("Bearer user-token", headers["Authorization"])
+        self.assertEqual([], authorization_headers)
+        self.assertEqual(["X-API-Key"], api_key_headers)
+        self.assertEqual("user-token", headers["X-API-Key"])
 
     def test_nonstream_response_filters_upstream_content_type_before_setting_downstream_type(self) -> None:
         app, service = self._build_service()
