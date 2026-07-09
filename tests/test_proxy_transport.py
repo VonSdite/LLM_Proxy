@@ -1656,6 +1656,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="codexImportAuthFilesBtn"', html)
         self.assertIn('id="codexRefreshSelectedQuotaBtn"', html)
         self.assertIn('aria-label="刷新选中额度"', html)
+        self.assertIn('id="codexResetSelectedQuotaBtn"', html)
+        self.assertIn('aria-label="重置选中本地额度状态"', html)
+        self.assertIn('onclick="resetSelectedCodexQuotaStates()"', html)
         self.assertIn('id="codexExportSelectedAuthFilesBtn"', html)
         self.assertIn('aria-label="导出选中认证文件"', html)
         self.assertIn('id="codexDeleteSelectedAuthFilesBtn"', html)
@@ -1669,6 +1672,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("batchExporting: false", html)
         self.assertIn("batchImporting: false", html)
         self.assertIn("quotaResettingByFile: {}", html)
+        self.assertIn("batchQuotaResetting: false", html)
+        self.assertIn("batchQuotaResettingCount: 0", html)
         self.assertIn(
             "codexAuthState.quotaLoadingByFile[name] = false;\n                        renderCodexAuthFiles();",
             html,
@@ -1677,7 +1682,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn("已选择 ${selectedSize} 个 / 共", html)
         self.assertIn("function renderCodexQuotaProgress", html)
         self.assertIn("function renderTrashIcon", html)
-        self.assertIn("function renderResetQuotaIcon", html)
+        self.assertNotIn("function renderResetQuotaIcon", html)
         self.assertIn("function copyTextToClipboard(text)", html)
         self.assertIn("function copyTextWithTextarea(text)", html)
         self.assertIn(
@@ -1708,7 +1713,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function uploadAuthFiles", html)
         self.assertIn("function requestDeleteCodexAuthFile", html)
         self.assertIn("function deleteCodexAuthFile", html)
+        self.assertIn("function resetSelectedCodexQuotaStates", html)
         self.assertIn("function resetCodexQuotaState", html)
+        self.assertIn("function resetCodexQuotaStateByName", html)
         self.assertIn("function replaceCodexAuthFileInState", html)
         self.assertIn("method: 'DELETE'", html)
         self.assertIn("function normalizeCodexAvailabilityStatus", html)
@@ -1743,6 +1750,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("<span>上次刷新：</span>", html)
         self.assertIn("formatCodexQuotaRefreshedAt(file, quota)", html)
         self.assertIn("quota_refreshed_at", html)
+        self.assertIn('class="btn btn-secondary btn-sm oauth-quota-reset-button"', html)
+        self.assertIn(">重置</button>", html)
+        self.assertIn(">重置选中</button>", html)
         self.assertNotIn("formatCodexUsageStatusLabel", html)
         self.assertNotIn("oauth-auth-file-error", html)
         self.assertIn('class="oauth-icon-button"', html)
