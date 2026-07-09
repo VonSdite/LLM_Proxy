@@ -36,6 +36,8 @@ downstream request
   -> controller
   -> provider lookup
   -> resolve route model key to upstream model id
+  -> strip downstream Authorization from upstream headers
+  -> auth header resolve (api_key or auth_group + auth_entry)
   -> header_hook
   -> translator.translate_request()
   -> request_guard
@@ -340,7 +342,7 @@ OAuth 模型是数据平面的例外路由：
   - 每次数据面请求读取当前 `client_ip.*` 配置解析客户端 IP
   - 解析结果用于白名单、模型权限、请求统计、访问日志关联和 LLM trace
   - 每次数据面请求读取当前 `api_keys.enabled`，开启时要求有效 API Key
-  - 开启 API Key 管理时会从转发给上游的 header 中移除下游 `Authorization` 和 `X-API-Key`，避免泄露下游 key
+  - 数据面转发始终从发往上游的 header 中移除下游 `Authorization`
   - 请求完成回调写日志时会带上 `api_key_id`，用于同步累加 key 级用量
 - `ModelCatalogService`
   - 每次用户 / API Key 权限管理读取当前 Provider 配置模型和 Codex / Claude OAuth 可用模型
