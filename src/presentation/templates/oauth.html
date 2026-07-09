@@ -178,14 +178,6 @@
                             <path d="M20 20v-4h-4"></path>
                         </svg>
                     </button>
-                    <button
-                        type="button"
-                        class="btn btn-secondary btn-sm oauth-toolbar-text-button"
-                        id="codexResetSelectedQuotaBtn"
-                        title="重置选中本地额度状态"
-                        aria-label="重置选中本地额度状态"
-                        onclick="resetSelectedCodexQuotaStates()"
-                    >重置选中</button>
                     <input
                         type="file"
                         id="codexImportAuthFilesInput"
@@ -458,11 +450,8 @@
             authFiles: [],
             quotaByFile: {},
             quotaLoadingByFile: {},
-            quotaResettingByFile: {},
             batchQuotaRefreshing: false,
             batchQuotaRefreshingCount: 0,
-            batchQuotaResetting: false,
-            batchQuotaResettingCount: 0,
             authFileFilter: 'all',
             selectedAuthFiles: new Set(),
             authFilePage: 1,
@@ -555,15 +544,13 @@
                 const importLabel = codexAuthState.batchImporting ? '正在导入认证文件' : '导入认证文件';
                 importAuthFilesButton.disabled = codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting
-                    || codexAuthState.batchQuotaResetting;
+                    || codexAuthState.batchImporting;
                 importAuthFilesButton.title = importLabel;
                 importAuthFilesButton.setAttribute('aria-label', importLabel);
             }
             const refreshSelectedQuotaButton = document.getElementById('codexRefreshSelectedQuotaBtn');
             if (refreshSelectedQuotaButton) {
                 const selectedQuotaLoading = selectedNamesForCurrentFilter.some(name => codexAuthState.quotaLoadingByFile[name] === true);
-                const selectedQuotaResetting = selectedNamesForCurrentFilter.some(name => codexAuthState.quotaResettingByFile[name] === true);
                 const isBatchRefreshing = codexAuthState.batchQuotaRefreshing === true;
                 const refreshLabel = isBatchRefreshing
                     ? `正在刷新 ${codexAuthState.batchQuotaRefreshingCount || selectedNamesForCurrentFilter.length} 个认证文件额度`
@@ -573,31 +560,9 @@
                     || codexAuthState.batchExporting
                     || codexAuthState.batchImporting
                     || isBatchRefreshing
-                    || codexAuthState.batchQuotaResetting
-                    || selectedQuotaLoading
-                    || selectedQuotaResetting;
+                    || selectedQuotaLoading;
                 refreshSelectedQuotaButton.title = refreshLabel;
                 refreshSelectedQuotaButton.setAttribute('aria-label', refreshLabel);
-            }
-            const resetSelectedQuotaButton = document.getElementById('codexResetSelectedQuotaBtn');
-            if (resetSelectedQuotaButton) {
-                const selectedQuotaLoading = selectedNamesForCurrentFilter.some(name => codexAuthState.quotaLoadingByFile[name] === true);
-                const selectedQuotaResetting = selectedNamesForCurrentFilter.some(name => codexAuthState.quotaResettingByFile[name] === true);
-                const isBatchResetting = codexAuthState.batchQuotaResetting === true;
-                const resetLabel = isBatchResetting
-                    ? `正在重置 ${codexAuthState.batchQuotaResettingCount || selectedNamesForCurrentFilter.length} 个认证文件本地额度状态`
-                    : '重置选中本地额度状态';
-                resetSelectedQuotaButton.disabled = selectedNamesForCurrentFilter.length === 0
-                    || codexAuthState.batchDeleting
-                    || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting
-                    || codexAuthState.batchQuotaRefreshing
-                    || isBatchResetting
-                    || selectedQuotaLoading
-                    || selectedQuotaResetting;
-                resetSelectedQuotaButton.textContent = isBatchResetting ? '重置中...' : '重置选中';
-                resetSelectedQuotaButton.title = resetLabel;
-                resetSelectedQuotaButton.setAttribute('aria-label', resetLabel);
             }
             const exportSelectedAuthFilesButton = document.getElementById('codexExportSelectedAuthFilesBtn');
             if (exportSelectedAuthFilesButton) {
@@ -607,8 +572,7 @@
                 exportSelectedAuthFilesButton.disabled = selectedNamesForCurrentFilter.length === 0
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting
-                    || codexAuthState.batchQuotaResetting;
+                    || codexAuthState.batchImporting;
                 exportSelectedAuthFilesButton.title = exportLabel;
                 exportSelectedAuthFilesButton.setAttribute('aria-label', exportLabel);
             }
@@ -617,8 +581,7 @@
                 deleteSelectedAuthFilesButton.disabled = selectedNamesForCurrentFilter.length === 0
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting
-                    || codexAuthState.batchQuotaResetting;
+                    || codexAuthState.batchImporting;
             }
             const batchDeletePopover = document.getElementById('codexBatchDeletePopover');
             if (batchDeletePopover) {
@@ -1414,20 +1377,15 @@
                 const encodedName = encodeURIComponent(file.name || '');
                 const quota = getCodexAuthFileQuota(file);
                 const isLoadingQuota = codexAuthState.quotaLoadingByFile[file.name || ''] === true;
-                const isResettingQuota = codexAuthState.quotaResettingByFile[file.name || ''] === true;
                 const quotaRefreshedAt = formatCodexQuotaRefreshedAt(file, quota);
                 const isDeleting = codexAuthState.deletingAuthFileName === (file.name || '')
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting
-                    || codexAuthState.batchQuotaResetting;
+                    || codexAuthState.batchImporting;
                 const isQuotaActionDisabled = isLoadingQuota
-                    || isResettingQuota
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting
-                    || codexAuthState.batchQuotaRefreshing
-                    || codexAuthState.batchQuotaResetting;
+                    || codexAuthState.batchImporting;
                 const isConfirmingDelete = codexAuthState.deleteConfirmName === (file.name || '');
                 const isSelected = codexAuthState.selectedAuthFiles.has(file.name || '');
                 const availabilityStatus = normalizeCodexAvailabilityStatus(file);
@@ -1488,14 +1446,6 @@
                                             onclick="loadCodexQuota('${encodedName}')"
                                             ${isQuotaActionDisabled ? 'disabled' : ''}
                                         >${renderRefreshIcon()}</button>
-                                        <button
-                                            type="button"
-                                            class="btn btn-secondary btn-sm oauth-quota-reset-button"
-                                            title="重置本地额度状态"
-                                            aria-label="重置 ${escapeHtml(file.name || '')} 本地额度状态"
-                                            onclick="resetCodexQuotaState('${encodedName}')"
-                                            ${isQuotaActionDisabled ? 'disabled' : ''}
-                                        >重置</button>
                                     </div>
                                     <div class="oauth-quota-refreshed-at"><span>上次刷新：</span>${escapeHtml(quotaRefreshedAt)}</div>
                                     <div class="oauth-quota-text">${renderCodexQuotaSummary(quota, isLoadingQuota)}</div>
@@ -2179,10 +2129,6 @@
                 showMessage('选中的认证文件正在刷新，请稍后再试', 'warning');
                 return;
             }
-            if (names.some(name => codexAuthState.quotaResettingByFile[name] === true)) {
-                showMessage('选中的认证文件正在重置，请稍后再试', 'warning');
-                return;
-            }
             codexAuthState.batchQuotaRefreshing = true;
             codexAuthState.batchQuotaRefreshingCount = names.length;
             names.forEach(name => {
@@ -2221,72 +2167,12 @@
             }
         }
 
-        async function resetSelectedCodexQuotaStates() {
-            const names = getCodexSelectedAuthFileNamesForCurrentFilter();
-            if (!names.length) {
-                showMessage('请先选择认证文件', 'error');
-                return;
-            }
-            if (codexAuthState.batchQuotaResetting) {
-                return;
-            }
-            if (codexAuthState.batchQuotaRefreshing) {
-                showMessage('选中的认证文件正在刷新，请稍后再试', 'warning');
-                return;
-            }
-            if (names.some(name => codexAuthState.quotaLoadingByFile[name] === true)) {
-                showMessage('选中的认证文件正在刷新，请稍后再试', 'warning');
-                return;
-            }
-            if (names.some(name => codexAuthState.quotaResettingByFile[name] === true)) {
-                showMessage('选中的认证文件正在重置，请稍后再试', 'warning');
-                return;
-            }
-            codexAuthState.batchQuotaResetting = true;
-            codexAuthState.batchQuotaResettingCount = names.length;
-            codexAuthState.batchDeleteConfirm = false;
-            names.forEach(name => {
-                codexAuthState.quotaResettingByFile[name] = true;
-            });
-            renderCodexAuthFiles();
-            showMessage(`正在重置 ${names.length} 个认证文件本地额度状态`, 'success');
-            let successCount = 0;
-            let failedCount = 0;
-            try {
-                for (const name of names) {
-                    try {
-                        const ok = await resetCodexQuotaStateByName(name, { silent: true, markResetting: false });
-                        if (ok) {
-                            successCount += 1;
-                        } else {
-                            failedCount += 1;
-                        }
-                    } finally {
-                        delete codexAuthState.quotaResettingByFile[name];
-                        renderCodexAuthFiles();
-                    }
-                }
-            } finally {
-                names.forEach(name => {
-                    delete codexAuthState.quotaResettingByFile[name];
-                });
-                codexAuthState.batchQuotaResetting = false;
-                codexAuthState.batchQuotaResettingCount = 0;
-                renderCodexAuthFiles();
-            }
-            if (failedCount) {
-                showMessage(`已重置 ${successCount} 个，失败 ${failedCount} 个`, 'error');
-            } else {
-                showMessage(`已重置 ${successCount} 个认证文件本地额度状态`, 'success');
-            }
-        }
-
         function toggleCodexBatchDeleteConfirm() {
             if (!getCodexSelectedAuthFileNamesForCurrentFilter().length) {
                 showMessage('请先选择认证文件', 'error');
                 return;
             }
-            if (codexAuthState.batchExporting || codexAuthState.batchImporting || codexAuthState.batchQuotaResetting) return;
+            if (codexAuthState.batchExporting || codexAuthState.batchImporting) return;
             codexAuthState.deleteConfirmName = '';
             codexAuthState.batchDeleteConfirm = !codexAuthState.batchDeleteConfirm;
             syncCodexAuthControls();
@@ -2302,7 +2188,6 @@
                 codexAuthState.batchDeleting
                 || codexAuthState.batchExporting
                 || codexAuthState.batchImporting
-                || codexAuthState.batchQuotaResetting
             ) return;
             const input = document.getElementById('codexImportAuthFilesInput');
             if (input) {
@@ -2341,7 +2226,7 @@
                 showMessage('请先选择认证文件', 'error');
                 return;
             }
-            if (codexAuthState.batchExporting || codexAuthState.batchImporting || codexAuthState.batchQuotaResetting) return;
+            if (codexAuthState.batchExporting || codexAuthState.batchImporting) return;
             codexAuthState.batchExporting = true;
             codexAuthState.batchDeleteConfirm = false;
             renderCodexAuthFiles();
@@ -2364,7 +2249,6 @@
                 || codexAuthState.batchDeleting
                 || codexAuthState.batchExporting
                 || codexAuthState.batchImporting
-                || codexAuthState.batchQuotaResetting
             ) return;
             codexAuthState.batchDeleting = true;
             codexAuthState.batchDeleteConfirm = false;
@@ -2449,7 +2333,6 @@
             codexAuthState.selectedAuthFiles.delete(name);
             delete codexAuthState.quotaByFile[name];
             delete codexAuthState.quotaLoadingByFile[name];
-            delete codexAuthState.quotaResettingByFile[name];
         }
 
         async function loadCodexAuthFiles() {
@@ -2465,7 +2348,6 @@
                 }
                 codexAuthState.authFiles = Array.isArray(result.files) ? result.files : [];
                 codexAuthState.quotaByFile = {};
-                codexAuthState.quotaResettingByFile = {};
                 renderCodexAuthFiles();
             } catch (error) {
                 console.error('加载 Codex 认证文件失败:', error);
@@ -2480,65 +2362,6 @@
             if (!name || codexAuthState.quotaLoadingByFile[name] === true) return;
             showMessage(`正在刷新 ${name} 的配额`, 'success');
             await refreshCodexQuotaByName(name);
-        }
-
-        async function resetCodexQuotaState(encodedName) {
-            const name = decodeURIComponent(encodedName);
-            if (
-                !name
-                || codexAuthState.quotaLoadingByFile[name] === true
-                || codexAuthState.quotaResettingByFile[name] === true
-                || codexAuthState.batchDeleting
-                || codexAuthState.batchExporting
-                || codexAuthState.batchImporting
-                || codexAuthState.batchQuotaRefreshing
-                || codexAuthState.batchQuotaResetting
-            ) return;
-            await resetCodexQuotaStateByName(name);
-        }
-
-        async function resetCodexQuotaStateByName(name, options = {}) {
-            const silent = options.silent === true;
-            const markResetting = options.markResetting !== false;
-            if (!name) return false;
-            if (markResetting) {
-                if (codexAuthState.quotaResettingByFile[name] === true) return false;
-                codexAuthState.quotaResettingByFile[name] = true;
-                renderCodexAuthFiles();
-            }
-            codexAuthState.quotaResettingByFile[name] = true;
-            try {
-                const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-quota`, {
-                    method: 'POST',
-                    cache: 'no-store',
-                });
-                const result = await response.json();
-                if (!response.ok) {
-                    throw new Error(result.error || '重置本地额度状态失败');
-                }
-                delete codexAuthState.quotaByFile[name];
-                delete codexAuthState.quotaLoadingByFile[name];
-                if (result.auth_file) {
-                    replaceCodexAuthFileInState(name, result.auth_file);
-                } else {
-                    await loadCodexAuthFiles();
-                }
-                if (!silent) {
-                    showMessage(`${name} 的本地额度状态已重置`, 'success');
-                }
-                return true;
-            } catch (error) {
-                console.error('重置 Codex 本地额度状态失败:', error);
-                if (!silent) {
-                    showActionError('重置 Codex 本地额度状态', error, { fallback: '重置本地额度状态失败' });
-                }
-                return false;
-            } finally {
-                if (markResetting) {
-                    delete codexAuthState.quotaResettingByFile[name];
-                    renderCodexAuthFiles();
-                }
-            }
         }
 
         async function refreshCodexQuotaByName(name, options = {}) {
