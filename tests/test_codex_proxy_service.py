@@ -70,6 +70,9 @@ class FakeHTTPResponse:
         del chunk_size
         yield from self._chunks
 
+    def json(self) -> Any:
+        return json.loads(self.text)
+
     def close(self) -> None:
         self.closed = True
 
@@ -615,6 +618,90 @@ class CodexProxyServiceTests(unittest.TestCase):
             "invalid or expired token",
             auth_entries["codex-first.json"]["usage_status_message"],
         )
+
+    def test_authentication_error_refreshes_current_auth_file_and_retries_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True, exist_ok=True)
+            auth_file = auth_dir / "codex-first.json"
+            auth_file.write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "account_id": "account-old",
+                        "access_token": "old-access",
+                        "refresh_token": "refresh-old",
+                        "plan_type": "pro",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            captured_authorizations: list[str] = []
+            refresh_requests: list[dict[str, Any]] = []
+
+            def fake_codex_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del json, timeout, kwargs
+                self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
+                self.assertTrue(stream)
+                authorization = str((headers or {}).get("Authorization") or "")
+                captured_authorizations.append(authorization)
+                if authorization == "Bearer old-access":
+                    return FakeHTTPResponse(
+                        status_code=401,
+                        body=b'{"error":{"type":"authentication_error","message":"invalid or expired token"}}',
+                        headers={"Content-Type": "application/json"},
+                    )
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n'
+                    ],
+                )
+
+            class FakeOAuthSession:
+                def post(self, url, data=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                    del headers, timeout, proxies, verify, kwargs
+                    refresh_requests.append({"url": url, "data": dict(data or {})})
+                    return FakeHTTPResponse(
+                        status_code=200,
+                        body=b'{"access_token":"new-access","refresh_token":"refresh-new","expires_in":3600}',
+                    )
+
+                def close(self) -> None:
+                    pass
+
+            with patch.object(oauth_service, "get_auth_file_quota") as quota_mock:
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_codex_post):
+                    with patch("src.services.codex_oauth_service.requests.Session", side_effect=FakeOAuthSession):
+                        response, status_code, failure = proxy_service.proxy_request(
+                            {
+                                "model": "gpt-5.4",
+                                "messages": [{"role": "user", "content": "hi"}],
+                                "stream": False,
+                            },
+                            {"Authorization": "Bearer downstream-token"},
+                            resolved_target_format="openai_chat",
+                        )
+                quota_mock.assert_not_called()
+            next_payload = json.loads(auth_file.read_text(encoding="utf-8"))
+            auth_entries = {entry["name"]: entry for entry in oauth_service.list_auth_files()["files"]}
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual(["Bearer old-access", "Bearer new-access"], captured_authorizations)
+        self.assertEqual("refresh_token", refresh_requests[0]["data"]["grant_type"])
+        self.assertEqual("refresh-old", refresh_requests[0]["data"]["refresh_token"])
+        self.assertEqual("new-access", next_payload["access_token"])
+        self.assertEqual("refresh-new", next_payload["refresh_token"])
+        self.assertEqual("success", auth_entries["codex-first.json"]["usage_status"])
 
     def test_stream_top_level_error_is_forwarded_and_marks_auth_file_failed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -383,6 +383,26 @@ class CodexOAuthService:
             },
         )
 
+    def refresh_auth_candidate(self, name: str) -> CodexAuthCandidate:
+        """刷新指定认证文件并返回新的请求候选。"""
+        auth_file = self._resolve_auth_file(name)
+        payload = self._read_auth_file(auth_file)
+        if not str(payload.get("refresh_token") or "").strip():
+            raise ValueError("Auth file does not contain refresh_token")
+        refreshed_payload = self._refresh_auth_file(auth_file, payload)
+        access_token = str(refreshed_payload.get("access_token") or "").strip()
+        if not access_token:
+            raise ValueError("Token refresh response missing access_token")
+        return CodexAuthCandidate(
+            name=auth_file.name,
+            path=auth_file,
+            access_token=access_token,
+            account_id=str(refreshed_payload.get("account_id") or "").strip(),
+            email=str(refreshed_payload.get("email") or "").strip(),
+            plan_type=self._normalize_codex_plan_type(refreshed_payload.get("plan_type")),
+            payload=refreshed_payload,
+        )
+
     def get_auth_file_quota(self, name: str) -> dict[str, Any]:
         """查询指定认证文件的 Codex 使用配额。"""
         return self._get_auth_file_quota(name, record_auth_failure=True)
