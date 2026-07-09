@@ -1668,6 +1668,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("batchDeleting: false", html)
         self.assertIn("batchExporting: false", html)
         self.assertIn("batchImporting: false", html)
+        self.assertIn("quotaResettingByFile: {}", html)
         self.assertIn(
             "codexAuthState.quotaLoadingByFile[name] = false;\n                        renderCodexAuthFiles();",
             html,
@@ -1676,6 +1677,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn("已选择 ${selectedSize} 个 / 共", html)
         self.assertIn("function renderCodexQuotaProgress", html)
         self.assertIn("function renderTrashIcon", html)
+        self.assertIn("function renderResetQuotaIcon", html)
         self.assertIn("function copyTextToClipboard(text)", html)
         self.assertIn("function copyTextWithTextarea(text)", html)
         self.assertIn(
@@ -1706,6 +1708,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function uploadAuthFiles", html)
         self.assertIn("function requestDeleteCodexAuthFile", html)
         self.assertIn("function deleteCodexAuthFile", html)
+        self.assertIn("function resetCodexQuotaState", html)
+        self.assertIn("function replaceCodexAuthFileInState", html)
         self.assertIn("method: 'DELETE'", html)
         self.assertIn("function normalizeCodexAvailabilityStatus", html)
         self.assertIn("function getCodexAuthFileInfo", html)
@@ -1754,6 +1758,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("/api/oauth/codex/auth-files", html)
         self.assertIn("/api/oauth/codex/auth-files/export", html)
         self.assertIn("/api/oauth/codex/auth-files/import", html)
+        self.assertIn("/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-quota", html)
         self.assertIn("/api/oauth/codex/models", html)
         self.assertNotIn("/api/oauth/codex/models/refresh", html)
         self.assertIn("function refreshClaudeAuthLink", html)

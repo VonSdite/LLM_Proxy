@@ -450,6 +450,7 @@
             authFiles: [],
             quotaByFile: {},
             quotaLoadingByFile: {},
+            quotaResettingByFile: {},
             batchQuotaRefreshing: false,
             batchQuotaRefreshingCount: 0,
             authFileFilter: 'all',
@@ -1377,8 +1378,14 @@
                 const encodedName = encodeURIComponent(file.name || '');
                 const quota = getCodexAuthFileQuota(file);
                 const isLoadingQuota = codexAuthState.quotaLoadingByFile[file.name || ''] === true;
+                const isResettingQuota = codexAuthState.quotaResettingByFile[file.name || ''] === true;
                 const quotaRefreshedAt = formatCodexQuotaRefreshedAt(file, quota);
                 const isDeleting = codexAuthState.deletingAuthFileName === (file.name || '')
+                    || codexAuthState.batchDeleting
+                    || codexAuthState.batchExporting
+                    || codexAuthState.batchImporting;
+                const isQuotaActionDisabled = isLoadingQuota
+                    || isResettingQuota
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
                     || codexAuthState.batchImporting;
@@ -1440,8 +1447,16 @@
                                             title="刷新额度"
                                             aria-label="刷新 ${escapeHtml(file.name || '')} 额度"
                                             onclick="loadCodexQuota('${encodedName}')"
-                                            ${isLoadingQuota ? 'disabled' : ''}
+                                            ${isQuotaActionDisabled ? 'disabled' : ''}
                                         >${renderRefreshIcon()}</button>
+                                        <button
+                                            type="button"
+                                            class="oauth-icon-button"
+                                            title="重置本地额度状态"
+                                            aria-label="重置 ${escapeHtml(file.name || '')} 本地额度状态"
+                                            onclick="resetCodexQuotaState('${encodedName}')"
+                                            ${isQuotaActionDisabled ? 'disabled' : ''}
+                                        >${renderResetQuotaIcon()}</button>
                                     </div>
                                     <div class="oauth-quota-refreshed-at"><span>上次刷新：</span>${escapeHtml(quotaRefreshedAt)}</div>
                                     <div class="oauth-quota-text">${renderCodexQuotaSummary(quota, isLoadingQuota)}</div>
@@ -1632,6 +1647,17 @@
                     <path d="M4 4v4h4"></path>
                     <path d="M4 13a8 8 0 0 0 14.5 4.7L20 16"></path>
                     <path d="M20 20v-4h-4"></path>
+                </svg>
+            `;
+        }
+
+        function renderResetQuotaIcon() {
+            return `
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 7h10a6 6 0 1 1-5.3 8.8"></path>
+                    <path d="M4 3v4h4"></path>
+                    <path d="M8 12h8"></path>
+                    <path d="M12 8v8"></path>
                 </svg>
             `;
         }
@@ -2320,6 +2346,7 @@
             codexAuthState.selectedAuthFiles.delete(name);
             delete codexAuthState.quotaByFile[name];
             delete codexAuthState.quotaLoadingByFile[name];
+            delete codexAuthState.quotaResettingByFile[name];
         }
 
         async function loadCodexAuthFiles() {
@@ -2335,6 +2362,7 @@
                 }
                 codexAuthState.authFiles = Array.isArray(result.files) ? result.files : [];
                 codexAuthState.quotaByFile = {};
+                codexAuthState.quotaResettingByFile = {};
                 renderCodexAuthFiles();
             } catch (error) {
                 console.error('加载 Codex 认证文件失败:', error);
@@ -2349,6 +2377,44 @@
             if (!name || codexAuthState.quotaLoadingByFile[name] === true) return;
             showMessage(`正在刷新 ${name} 的配额`, 'success');
             await refreshCodexQuotaByName(name);
+        }
+
+        async function resetCodexQuotaState(encodedName) {
+            const name = decodeURIComponent(encodedName);
+            if (
+                !name
+                || codexAuthState.quotaLoadingByFile[name] === true
+                || codexAuthState.quotaResettingByFile[name] === true
+                || codexAuthState.batchDeleting
+                || codexAuthState.batchExporting
+                || codexAuthState.batchImporting
+            ) return;
+            codexAuthState.quotaResettingByFile[name] = true;
+            renderCodexAuthFiles();
+            try {
+                const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-quota`, {
+                    method: 'POST',
+                    cache: 'no-store',
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '重置本地额度状态失败');
+                }
+                delete codexAuthState.quotaByFile[name];
+                delete codexAuthState.quotaLoadingByFile[name];
+                if (result.auth_file) {
+                    replaceCodexAuthFileInState(name, result.auth_file);
+                } else {
+                    await loadCodexAuthFiles();
+                }
+                showMessage(`${name} 的本地额度状态已重置`, 'success');
+            } catch (error) {
+                console.error('重置 Codex 本地额度状态失败:', error);
+                showActionError('重置 Codex 本地额度状态', error, { fallback: '重置本地额度状态失败' });
+            } finally {
+                delete codexAuthState.quotaResettingByFile[name];
+                renderCodexAuthFiles();
+            }
         }
 
         async function refreshCodexQuotaByName(name, options = {}) {
@@ -2393,6 +2459,18 @@
                     codexAuthState.quotaLoadingByFile[name] = false;
                     renderCodexAuthFiles();
                 }
+            }
+        }
+
+        function replaceCodexAuthFileInState(name, nextFile) {
+            let replaced = false;
+            codexAuthState.authFiles = (codexAuthState.authFiles || []).map(file => {
+                if (file.name !== name) return file;
+                replaced = true;
+                return nextFile;
+            });
+            if (!replaced) {
+                codexAuthState.authFiles = [...(codexAuthState.authFiles || []), nextFile];
             }
         }
 

@@ -43,6 +43,9 @@ class OAuthController:
         self._app.route("/api/oauth/codex/auth-files/<name>/quota", methods=["GET"])(
             auth(self.get_codex_auth_file_quota)
         )
+        self._app.route("/api/oauth/codex/auth-files/<name>/reset-quota", methods=["POST"])(
+            auth(self.reset_codex_auth_file_quota)
+        )
         self._app.route("/api/oauth/codex/models", methods=["GET"])(auth(self.list_codex_models))
         self._app.route("/api/oauth/codex/models", methods=["POST"])(auth(self.add_codex_model))
         self._app.route("/api/oauth/codex/models/<path:model_id>", methods=["DELETE"])(auth(self.delete_codex_model))
@@ -118,6 +121,15 @@ class OAuthController:
         except Exception as exc:
             self._logger.error("Error fetching Codex OAuth quota: %s", exc)
             return jsonify(self._build_codex_quota_error_payload(name, exc)), 500
+
+    def reset_codex_auth_file_quota(self, name: str) -> ResponseReturnValue:
+        try:
+            return jsonify(self._codex_oauth_service.reset_auth_file_quota_state(name))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error resetting Codex OAuth quota state: %s", exc)
+            return jsonify({"error": str(exc)}), 500
 
     def _build_codex_quota_error_payload(self, name: str, exc: Exception) -> dict[str, str]:
         """构造配额刷新失败响应，并尽量带出本次刷新时间。"""
