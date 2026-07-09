@@ -70,6 +70,18 @@ class LLMProvider:
             default_value=body,
         )
 
+    def apply_fetch_models_hook(self, ctx: HookContext, payload: dict[str, Any]) -> Any | None:
+        if not self.hook:
+            return None
+
+        hook_method = cast(
+            Callable[[HookContext, dict[str, Any]], Any] | None,
+            getattr(self.hook, "fetch_models", None),
+        )
+        if not callable(hook_method):
+            return None
+        return hook_method(ctx, payload)
+
     def _call_optional_hook(
         self,
         method_name: str,

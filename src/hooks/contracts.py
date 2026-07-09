@@ -55,9 +55,11 @@ class HookModule(Protocol):
 
     def response_guard(self, ctx: HookContext, body: Any) -> Any: ...
 
+    def fetch_models(self, ctx: HookContext, payload: dict[str, Any]) -> Any | None: ...
+
 
 class BaseHook:
-    """Base hook implementation. Override only the methods you need."""
+    """Hook 基类。按需覆盖需要的扩展点。"""
 
     def header_hook(self, ctx: HookContext, headers: dict[str, str]) -> dict[str, str]:
         return headers
@@ -67,3 +69,6 @@ class BaseHook:
 
     def response_guard(self, ctx: HookContext, body: Any) -> Any:
         return body
+
+    def fetch_models(self, ctx: HookContext, payload: dict[str, Any]) -> Any | None:
+        return None

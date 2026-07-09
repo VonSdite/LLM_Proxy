@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import tomllib
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -909,6 +910,67 @@ class ModelDiscoveryCandidateTests(unittest.TestCase):
         self.assertEqual(12, captured["timeout"])
         self.assertTrue(captured["verify"])
         self.assertFalse(captured["allow_redirects"])
+
+    def test_fetch_models_preview_uses_hook_fetch_models_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_path = Path(temp_dir)
+            hook_dir = root_path / "hooks" / "custom"
+            hook_dir.mkdir(parents=True)
+            (hook_dir / "model_fetch_hook.py").write_text(
+                """
+class Hook:
+    def fetch_models(self, ctx, payload):
+        assert ctx.provider_name == "preview_provider"
+        assert ctx.auth_group_name == "pool-a"
+        assert ctx.auth_entry_id == "entry-a"
+        assert payload["headers"]["Authorization"] == "Bearer sk-entry-a"
+        assert payload["request_headers"]["Authorization"] == "Bearer sk-entry-a"
+        assert payload["candidate_urls"] == [
+            "https://example.com/v1/models",
+            "https://example.com/models",
+        ]
+        assert payload["auth_group"] == "pool-a"
+        assert payload["auth_entry_id"] == "entry-a"
+        assert payload["proxy_mode"] == "direct"
+        assert payload["proxy"] is None
+        assert payload["timeout_seconds"] == 7
+        assert payload["verify_ssl"] is True
+        return {
+            "data": [
+                {"id": "hook-model"},
+                {"id": "hook-model"},
+                {"name": "second-model"},
+            ]
+        }
+""".lstrip(),
+                encoding="utf-8",
+            )
+            logger = FakeLogger()
+            ctx = AppContext(
+                logger=logger,
+                config_manager=None,  # type: ignore[arg-type]
+                root_path=root_path,
+                flask_app=Flask(__name__),
+            )
+            service = ModelDiscoveryService(ctx)
+
+            with patch(
+                "src.services.model_discovery_service.requests.Session",
+                side_effect=AssertionError("default model endpoint fetch should not run"),
+            ):
+                result = service.fetch_models_preview(
+                    api="https://example.com/v1/chat/completions",
+                    request_headers={"Authorization": "Bearer sk-entry-a"},
+                    hook="custom/model_fetch_hook.py",
+                    provider_name="preview_provider",
+                    auth_group="pool-a",
+                    auth_entry_id="entry-a",
+                    timeout_seconds=7,
+                    verify_ssl=True,
+                )
+
+        self.assertEqual(["hook-model", "second-model"], result["fetched_models"])
+        self.assertEqual(2, result["fetched_count"])
 
     def test_fetch_models_preview_defaults_to_ten_second_timeout(self) -> None:
         logger = FakeLogger()
