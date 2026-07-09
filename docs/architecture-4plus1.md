@@ -594,7 +594,7 @@ OAuth Claude tab
 - 认证文件的最近配额、配额错误、数据面使用状态和最近成功认证文件保存在 `data/oauth/codex/.state/auth_files.json`
 - Claude 认证文件最近一次数据面使用状态和最近成功认证文件保存在 `data/oauth/claude/.state/auth_files.json`
 - 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
-- OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持多文件导入、全选后批量刷新额度、批量重置本地额度状态、ZIP 导出和批量归档删除
+- OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持多文件导入、全选后批量刷新额度、ZIP 导出和批量归档删除
 - OAuth 页面导入认证文件时支持选择多个 JSON 文件或多个 ZIP 包；ZIP 必须是导出 API 生成的根目录 JSON 文件结构；每个 JSON 都会校验 provider 类型、access token、email 和过期时间，合法才写入认证目录
 - OAuth 页面导入完成后按导入结果 toast 提示成功数量和失败数量
 - OAuth 页面导出选中认证文件时调用导出 API，单个文件也会以 ZIP 下载
