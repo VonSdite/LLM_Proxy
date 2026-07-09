@@ -160,6 +160,7 @@ class CodexProxyService:
         target_format: str,
         route_name: str | None,
         client_ip: str | None,
+        allow_auth_refresh_retry: bool = True,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         translator = self._translator_registry.get("openai_responses", target_format)
         upstream_body = translator.translate_request(
@@ -258,6 +259,30 @@ class CodexProxyService:
                 body,
                 fallback=f"Codex upstream returned {upstream_response.status_code}",
             )
+            if (
+                allow_auth_refresh_retry
+                and str(candidate.payload.get("refresh_token") or "").strip()
+                and self._is_authentication_error_response(upstream_response.status_code, error_type, error_message)
+            ):
+                refreshed_candidate, refresh_failure = self._refresh_candidate_after_auth_error(
+                    candidate,
+                    model_name=model_name,
+                )
+                if refreshed_candidate is not None:
+                    return self._proxy_with_candidate(
+                        candidate=refreshed_candidate,
+                        model_name=model_name,
+                        request_data=request_data,
+                        request_headers=request_headers,
+                        on_complete=on_complete,
+                        forward_stream_usage=forward_stream_usage,
+                        target_format=target_format,
+                        route_name=route_name,
+                        client_ip=client_ip,
+                        allow_auth_refresh_retry=False,
+                    )
+                if refresh_failure is not None:
+                    return None, refresh_failure.status_code, refresh_failure
             if self._is_quota_exhausted_response(upstream_response.status_code, body):
                 retry_after = self._extract_retry_after_seconds(upstream_response, body)
                 self._codex_oauth_service.mark_auth_file_quota_exhausted(
@@ -679,6 +704,44 @@ class CodexProxyService:
         message = str(payload.get("message") or fallback).strip()
         return message, ""
 
+    def _refresh_candidate_after_auth_error(
+        self,
+        candidate: CodexAuthCandidate,
+        *,
+        model_name: str,
+    ) -> tuple[CodexAuthCandidate | None, ProxyErrorInfo | None]:
+        try:
+            refreshed_candidate = self._codex_oauth_service.refresh_auth_candidate(candidate.name)
+        except Exception as exc:
+            message = f"Token refresh failed: {exc}"
+            self._logger.warning(
+                "Codex auth file refresh after unauthorized response failed: model=%s auth_file=%s error=%s",
+                model_name,
+                candidate.name,
+                exc,
+            )
+            self._codex_oauth_service.record_auth_file_failure(
+                candidate.name,
+                message,
+                status_code=401,
+                error_type="token_refresh_failed",
+            )
+            return (
+                None,
+                ProxyErrorInfo(
+                    message=message,
+                    status_code=401,
+                    error_type="upstream_error",
+                    error_code="token_refresh_failed",
+                ),
+            )
+        self._logger.info(
+            "Codex auth file refreshed after unauthorized response: model=%s auth_file=%s",
+            model_name,
+            candidate.name,
+        )
+        return refreshed_candidate, None
+
     @staticmethod
     def _is_quota_exhausted_response(status_code: int, body: bytes) -> bool:
         if status_code != 429:
@@ -691,6 +754,26 @@ class CodexProxyService:
         if not isinstance(error, dict):
             return True
         return str(error.get("type") or "").strip() in {"usage_limit_reached", "rate_limit_exceeded", ""}
+
+    @staticmethod
+    def _is_authentication_error_response(status_code: int, error_type: str, error_message: str) -> bool:
+        if status_code == 401:
+            return True
+        normalized_type = str(error_type or "").strip().lower()
+        if normalized_type in {
+            "authentication_error",
+            "invalid_api_key",
+            "invalid_grant",
+            "refresh_token_reused",
+        }:
+            return True
+        normalized_message = str(error_message or "").strip().lower()
+        return (
+            "invalid or expired token" in normalized_message
+            or "invalid_api_key" in normalized_message
+            or "invalid_grant" in normalized_message
+            or "refresh_token_reused" in normalized_message
+        )
 
     @staticmethod
     def _extract_retry_after_seconds(response: requests.Response, body: bytes) -> float | None:

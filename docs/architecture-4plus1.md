@@ -601,6 +601,7 @@ OAuth Claude tab
 - Claude 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
 - Codex 查询配额时如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
+- Codex 数据面请求遇到 401 或认证类错误时，如果认证文件存在 refresh token，会先刷新认证文件并使用当前认证文件重试一次
 - Claude OAuth 数据面请求前如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
 - Codex / Claude 候选列表仍会按请求重建；默认按认证文件修改时间倒序排列，但最近一次真实请求成功的认证文件如果未被过滤，会被提升为第一候选
 - 同一个认证文件的配额刷新使用进程内非阻塞锁；重复刷新请求会直接返回跳过结果，不重复访问 Codex 上游
@@ -615,7 +616,8 @@ OAuth Claude tab
 - 普通 Provider 如果 `source_format=claude_chat`，也会在上游 body 已有 Claude Code billing header 时重签 `cch`；不会主动生成 billing header
 - Claude 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
 - 出站 HTTP 请求遇到代理风险确认页时，会自动确认一次并重试原请求；自动确认失败或重试后仍被拦截时，返回 `proxy_warning_required` 和确认页 URL
-- Codex / Claude 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
+- Codex 数据面请求在刷新重试后仍遇到 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
+- Claude 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
 - OAuth 登录、文件、配额与模型目录管理属于控制平面
 - Codex / Claude 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
 
@@ -862,8 +864,14 @@ sequenceDiagram
         CodexProxy->>ChatGPT: 使用下一个认证文件重试
     else 账号认证失败
         ChatGPT-->>CodexProxy: 401 authentication_error
-        CodexProxy->>CodexOAuth: record_auth_file_failure()
-        CodexProxy->>ChatGPT: 使用下一个认证文件重试
+        opt 当前认证文件存在 refresh_token
+            CodexProxy->>CodexOAuth: refresh_auth_candidate()
+            CodexProxy->>ChatGPT: 使用当前认证文件重试一次
+        end
+        alt 刷新不可用或重试后仍认证失败
+            CodexProxy->>CodexOAuth: record_auth_file_failure()
+            CodexProxy->>ChatGPT: 使用下一个认证文件重试
+        end
     end
     ChatGPT-->>CodexProxy: Responses SSE
     CodexProxy->>CodexOAuth: record_auth_file_success()
