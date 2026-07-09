@@ -338,6 +338,46 @@ class CodexOAuthService:
         cooldown_seconds = retry_after_seconds if retry_after_seconds is not None else 60.0
         self._quota_cooldowns[normalized_name] = time.time() + max(float(cooldown_seconds), 1.0)
 
+    def reset_auth_file_quota_state(self, name: str) -> dict[str, Any]:
+        """清除认证文件的本地配额快照和额度冷却状态。"""
+        auth_file = self._resolve_auth_file(name)
+        self._quota_cooldowns.pop(auth_file.name, None)
+        state = self._load_auth_file_state()
+        files = state.setdefault("files", {})
+        if not isinstance(files, dict):
+            files = {}
+            state["files"] = files
+        file_state = files.get(auth_file.name)
+        if not isinstance(file_state, dict):
+            file_state = {}
+        for field in ("quota", "quota_error", "quota_refreshed_at"):
+            file_state.pop(field, None)
+        if self._is_quota_failure_state(file_state):
+            file_state.update(
+                {
+                    "usage_status": "unknown",
+                    "usage_status_message": "",
+                    "usage_status_code": None,
+                    "usage_error_type": "",
+                    "usage_retry_after_seconds": None,
+                    "usage_status_updated_at": self._now_iso(),
+                }
+            )
+        if file_state:
+            files[auth_file.name] = file_state
+        else:
+            files.pop(auth_file.name, None)
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Codex quota state reset write failed: file=%s error=%s", auth_file.name, exc)
+        return {
+            "status": "ok",
+            "name": auth_file.name,
+            "reset_at": self._now_iso(),
+            "auth_file": self._build_auth_file_entry(auth_file, state),
+        }
+
     def record_auth_file_success(self, name: str) -> None:
         """记录认证文件最近一次 Codex 模型代理成功，并按需更新过期配额快照。"""
         normalized_name = self._normalize_auth_file_name(name)
@@ -770,6 +810,18 @@ class CodexOAuthService:
 
         message = str(file_state.get("usage_status_message") or "").strip().lower()
         return cls._is_auth_error_text(message)
+
+    @staticmethod
+    def _is_quota_failure_state(file_state: dict[str, Any]) -> bool:
+        status_code = file_state.get("usage_status_code")
+        if status_code is not None:
+            try:
+                if int(status_code) == 429:
+                    return True
+            except (TypeError, ValueError):
+                pass
+        error_type = str(file_state.get("usage_error_type") or "").strip().lower()
+        return error_type in {"usage_limit_reached", "rate_limit_exceeded", "codex_quota_exhausted"}
 
     @classmethod
     def _is_auth_error_response(cls, response: requests.Response) -> bool:

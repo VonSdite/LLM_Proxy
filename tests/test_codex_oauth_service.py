@@ -1235,6 +1235,147 @@ class CodexOAuthServiceTests(unittest.TestCase):
 
         self.assertEqual(["codex-second.json"], [candidate.name for candidate in candidates])
 
+    def test_reset_auth_file_quota_state_restores_quota_cooling_account(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            first = auth_dir / "codex-first.json"
+            second = auth_dir / "codex-second.json"
+            first.write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "first@example.com",
+                        "access_token": "access-first",
+                        "plan_type": "pro",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            second.write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "second@example.com",
+                        "access_token": "access-second",
+                        "plan_type": "pro",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            os.utime(second, (1000, 1000))
+            os.utime(first, (2000, 2000))
+            state_file = auth_dir / ".state" / "auth_files.json"
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "files": {
+                            "codex-first.json": {
+                                "quota": {
+                                    "status": "ok",
+                                    "refreshed_at": "2026-07-09T00:00:00Z",
+                                    "windows": [
+                                        {
+                                            "label": "Codex 5 小时",
+                                            "used_percent": 100.0,
+                                            "remaining_percent": 0.0,
+                                            "reset_at": "2026-07-09T01:00:00Z",
+                                        }
+                                    ],
+                                },
+                                "quota_error": "usage_limit_reached",
+                                "quota_refreshed_at": "2026-07-09T00:00:00Z",
+                                "usage_status": "error",
+                                "usage_status_message": "usage_limit_reached",
+                                "usage_status_code": 429,
+                                "usage_error_type": "usage_limit_reached",
+                                "usage_retry_after_seconds": 60,
+                                "usage_status_updated_at": "2026-07-09T00:00:00Z",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            service.add_model("gpt-5.4")
+            service.mark_auth_file_quota_exhausted("codex-first.json", retry_after_seconds=60)
+
+            before_candidates = service.iter_auth_candidates_for_model("gpt-5.4")
+            before_entry = next(
+                item for item in service.list_auth_files()["files"] if item["name"] == "codex-first.json"
+            )
+            result = service.reset_auth_file_quota_state("codex-first.json")
+            after_candidates = service.iter_auth_candidates_for_model("gpt-5.4")
+            after_state = json.loads(state_file.read_text(encoding="utf-8"))
+            after_file_state = after_state["files"]["codex-first.json"]
+
+        self.assertEqual(["codex-second.json"], [candidate.name for candidate in before_candidates])
+        self.assertEqual("quota_cooldown", before_entry["availability_status"])
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("codex-first.json", result["name"])
+        self.assertNotIn("codex-first.json", service._quota_cooldowns)
+        self.assertEqual(
+            ["codex-first.json", "codex-second.json"],
+            [candidate.name for candidate in after_candidates],
+        )
+        self.assertIsNone(result["auth_file"]["quota"])
+        self.assertEqual("", result["auth_file"]["quota_error"])
+        self.assertEqual("", result["auth_file"]["quota_refreshed_at"])
+        self.assertEqual("unknown", result["auth_file"]["usage_status"])
+        self.assertEqual("", result["auth_file"]["usage_error_type"])
+        self.assertEqual("available", result["auth_file"]["availability_status"])
+        self.assertNotIn("quota", after_file_state)
+        self.assertNotIn("quota_error", after_file_state)
+        self.assertNotIn("quota_refreshed_at", after_file_state)
+        self.assertEqual("unknown", after_file_state["usage_status"])
+        self.assertIsNone(after_file_state["usage_status_code"])
+        self.assertEqual("", after_file_state["usage_error_type"])
+
+    def test_reset_auth_file_quota_state_keeps_auth_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                        "plan_type": "pro",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            service.add_model("gpt-5.4")
+            service.record_auth_file_failure(
+                "codex-demo.json",
+                "invalid or expired token",
+                status_code=401,
+                error_type="authentication_error",
+            )
+            service.mark_auth_file_quota_exhausted("codex-demo.json", retry_after_seconds=60)
+
+            result = service.reset_auth_file_quota_state("codex-demo.json")
+            candidates = service.iter_auth_candidates_for_model("gpt-5.4")
+            auth_file = service.list_auth_files()["files"][0]
+
+        self.assertEqual("ok", result["status"])
+        self.assertNotIn("codex-demo.json", service._quota_cooldowns)
+        self.assertEqual([], candidates)
+        self.assertEqual("auth_failed", auth_file["availability_status"])
+        self.assertEqual("error", auth_file["usage_status"])
+        self.assertEqual("invalid or expired token", auth_file["usage_status_message"])
+        self.assertEqual(401, auth_file["usage_status_code"])
+        self.assertEqual("authentication_error", auth_file["usage_error_type"])
+
 
 if __name__ == "__main__":
     unittest.main()
