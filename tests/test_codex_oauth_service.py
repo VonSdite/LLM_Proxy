@@ -478,6 +478,29 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertTrue(auth_files[0]["quota_refreshed_at"])
         self.assertEqual(auth_files[0]["quota_refreshed_at"], quota_refreshed_at)
 
+    def test_build_quota_windows_uses_reported_duration_for_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = self._build_service(Path(tmp_dir))
+
+            windows = service._build_quota_windows(
+                {
+                    "rate_limit": {
+                        "primary_window": {
+                            "used_percent": 3,
+                            "limit_window_seconds": 604800,
+                            "reset_after_seconds": 599454,
+                        },
+                        "secondary_window": {
+                            "used_percent": 25,
+                            "limit_window_seconds": 18000,
+                            "reset_after_seconds": 3600,
+                        },
+                    }
+                }
+            )
+
+        self.assertEqual(["Codex 7 天", "Codex 5 小时"], [window["label"] for window in windows])
+
     def test_get_auth_file_quota_retries_after_proxy_warning_in_same_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

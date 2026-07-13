@@ -1476,13 +1476,31 @@ class CodexOAuthService:
             remaining_percent = None if used_percent is None else max(0.0, min(100.0, 100.0 - used_percent))
             windows.append(
                 {
-                    "label": f"{label} {fallback_label}",
+                    "label": f"{label} {self._format_quota_window_duration(window, fallback_label)}",
                     "used_percent": used_percent,
                     "remaining_percent": remaining_percent,
                     "reset_label": self._format_reset_label(window),
                     "reset_at": self._resolve_reset_at(window),
                 }
             )
+
+    @classmethod
+    def _format_quota_window_duration(cls, window: dict[str, Any], fallback_label: str) -> str:
+        """根据上游声明的完整窗口时长生成额度标签。"""
+        window_seconds = cls._parse_float(window.get("limit_window_seconds"))
+        if window_seconds is None:
+            window_seconds = cls._parse_float(window.get("limitWindowSeconds"))
+        if window_seconds is None or window_seconds <= 0:
+            return fallback_label
+
+        total_seconds = int(round(window_seconds))
+        if total_seconds % 86400 == 0:
+            return f"{total_seconds // 86400} 天"
+        if total_seconds % 3600 == 0:
+            return f"{total_seconds // 3600} 小时"
+        if total_seconds % 60 == 0:
+            return f"{total_seconds // 60} 分钟"
+        return f"{total_seconds} 秒"
 
     @staticmethod
     def _camelize(value: str) -> str:
