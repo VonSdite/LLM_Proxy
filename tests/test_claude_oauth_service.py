@@ -472,6 +472,68 @@ class ClaudeOAuthServiceTests(unittest.TestCase):
         self.assertEqual("new-access", payload["access_token"])
         self.assertEqual("new-refresh", payload["refresh_token"])
 
+    def test_auth_file_enabled_state_persists_and_controls_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "claude"
+            auth_dir.mkdir(parents=True)
+            auth_file = auth_dir / "claude-demo.json"
+            auth_file.write_text(
+                json.dumps(
+                    {
+                        "type": "claude",
+                        "email": "claude@example.com",
+                        "access_token": "access-demo",
+                        "refresh_token": "refresh-demo",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            service.add_model("claude-sonnet-4-5")
+
+            initial_entry = service.list_auth_files()["files"][0]
+            disabled_result = service.set_auth_file_enabled("claude-demo.json", False)
+            import_result = service.import_auth_files(
+                [
+                    (
+                        "claude-demo.json",
+                        json.dumps(
+                            {
+                                "type": "claude",
+                                "email": "claude@example.com",
+                                "access_token": "access-updated",
+                                "refresh_token": "refresh-updated",
+                                "expired": "2999-01-01T00:00:00Z",
+                            }
+                        ).encode("utf-8"),
+                    )
+                ]
+            )
+            state_payload = json.loads((auth_dir / ".state" / "auth_files.json").read_text(encoding="utf-8"))
+            next_service = self._build_service(root)
+            disabled_entry = next_service.list_auth_files()["files"][0]
+            disabled_candidates = next_service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+            enabled_result = next_service.set_auth_file_enabled("claude-demo.json", True)
+            enabled_candidates = next_service.iter_auth_candidates_for_model("claude-sonnet-4-5")
+
+        self.assertTrue(initial_entry["enabled"])
+        self.assertFalse(initial_entry["disabled"])
+        self.assertFalse(disabled_result["enabled"])
+        self.assertTrue(disabled_result["disabled"])
+        self.assertEqual(1, import_result.imported)
+        self.assertTrue(state_payload["files"]["claude-demo.json"]["disabled"])
+        self.assertFalse(disabled_entry["enabled"])
+        self.assertTrue(disabled_entry["disabled"])
+        self.assertEqual("disabled", disabled_entry["availability_status"])
+        self.assertEqual("已禁用：不会参与请求调度", disabled_entry["availability_status_message"])
+        self.assertEqual([], disabled_candidates)
+        self.assertTrue(enabled_result["enabled"])
+        self.assertFalse(enabled_result["disabled"])
+        self.assertEqual(["claude-demo.json"], [candidate.name for candidate in enabled_candidates])
+        self.assertEqual(["access-updated"], [candidate.access_token for candidate in enabled_candidates])
+
 
 if __name__ == "__main__":
     unittest.main()

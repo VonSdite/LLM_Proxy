@@ -1399,6 +1399,68 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertEqual(401, auth_file["usage_status_code"])
         self.assertEqual("authentication_error", auth_file["usage_error_type"])
 
+    def test_auth_file_enabled_state_persists_and_controls_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            auth_file = auth_dir / "codex-demo.json"
+            auth_file.write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                        "plan_type": "pro",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            service.add_model("gpt-5.4")
+
+            initial_entry = service.list_auth_files()["files"][0]
+            disabled_result = service.set_auth_file_enabled("codex-demo.json", False)
+            import_result = service.import_auth_files(
+                [
+                    (
+                        "codex-demo.json",
+                        json.dumps(
+                            {
+                                "type": "codex",
+                                "email": "codex@example.com",
+                                "access_token": "access-updated",
+                                "plan_type": "pro",
+                                "expired": "2999-01-01T00:00:00Z",
+                            }
+                        ).encode("utf-8"),
+                    )
+                ]
+            )
+            state_payload = json.loads((auth_dir / ".state" / "auth_files.json").read_text(encoding="utf-8"))
+            next_service = self._build_service(root)
+            disabled_entry = next_service.list_auth_files()["files"][0]
+            disabled_candidates = next_service.iter_auth_candidates_for_model("gpt-5.4")
+            enabled_result = next_service.set_auth_file_enabled("codex-demo.json", True)
+            enabled_candidates = next_service.iter_auth_candidates_for_model("gpt-5.4")
+
+        self.assertTrue(initial_entry["enabled"])
+        self.assertFalse(initial_entry["disabled"])
+        self.assertFalse(disabled_result["enabled"])
+        self.assertTrue(disabled_result["disabled"])
+        self.assertEqual(1, import_result.imported)
+        self.assertTrue(state_payload["files"]["codex-demo.json"]["disabled"])
+        self.assertFalse(disabled_entry["enabled"])
+        self.assertTrue(disabled_entry["disabled"])
+        self.assertEqual("disabled", disabled_entry["availability_status"])
+        self.assertEqual("已禁用：不会参与请求调度", disabled_entry["availability_status_message"])
+        self.assertEqual([], disabled_candidates)
+        self.assertTrue(enabled_result["enabled"])
+        self.assertFalse(enabled_result["disabled"])
+        self.assertEqual(["codex-demo.json"], [candidate.name for candidate in enabled_candidates])
+        self.assertEqual(["access-updated"], [candidate.access_token for candidate in enabled_candidates])
+
 
 if __name__ == "__main__":
     unittest.main()

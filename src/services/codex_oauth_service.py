@@ -172,7 +172,7 @@ class CodexOAuthService:
             "last_refresh": self._format_datetime(datetime.now(timezone.utc)),
         }
         auth_file = self._write_auth_file(auth_payload, state)
-        self._delete_auth_file_state_entry(auth_file.name)
+        self._reset_auth_file_runtime_state(auth_file.name)
         self._sessions.pop(state, None)
         self._logger.info("Codex OAuth auth file generated: file=%s email=%s", auth_file.name, email or "<empty>")
         return {
@@ -193,6 +193,35 @@ class CodexOAuthService:
             "files": files,
             "total": len(files),
             "auth_dir": str(self._auth_dir),
+        }
+
+    def set_auth_file_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
+        """设置 Codex OAuth 认证文件是否参与请求调度。"""
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled must be a boolean")
+        auth_file = self._resolve_auth_file(name)
+        state = self._load_auth_file_state()
+        files = state.setdefault("files", {})
+        if not isinstance(files, dict):
+            files = {}
+            state["files"] = files
+        current = files.get(auth_file.name)
+        if not isinstance(current, dict):
+            current = {}
+        current["disabled"] = not enabled
+        files[auth_file.name] = current
+        self._write_auth_file_state(state)
+        self._logger.info(
+            "Codex OAuth auth file enabled state updated: file=%s enabled=%s",
+            auth_file.name,
+            enabled,
+        )
+        return {
+            "status": "ok",
+            "name": auth_file.name,
+            "enabled": enabled,
+            "disabled": not enabled,
+            "auth_file": self._build_auth_file_entry(auth_file, state),
         }
 
     def delete_auth_file(self, name: str) -> dict[str, Any]:
@@ -235,7 +264,7 @@ class CodexOAuthService:
                 auth_file = self._auth_dir / import_name
                 self._write_json_file(auth_file, payload)
                 self._quota_cooldowns.pop(import_name, None)
-                self._delete_auth_file_state_entry(import_name)
+                self._reset_auth_file_runtime_state(import_name)
                 self._clear_last_success_auth_file(import_name)
                 imported_names.append(import_name)
             except ValueError as exc:
@@ -315,6 +344,8 @@ class CodexOAuthService:
             file_state = {}
             if isinstance(state_files, dict) and isinstance(state_files.get(path.name), dict):
                 file_state = state_files[path.name]
+            if not self._is_auth_file_enabled(file_state):
+                continue
             if self._is_auth_failure_state(file_state):
                 continue
             candidate = self._build_auth_candidate(path)
@@ -758,6 +789,24 @@ class CodexOAuthService:
         except Exception as exc:
             self._logger.warning("Codex auth file state delete failed: file=%s error=%s", name, exc)
 
+    def _reset_auth_file_runtime_state(self, name: str) -> None:
+        """清理认证运行状态，同时保留人工禁用设置。"""
+        state = self._load_auth_file_state()
+        files = state.get("files")
+        if not isinstance(files, dict):
+            return
+        current = files.get(name)
+        if not isinstance(current, dict):
+            return
+        if self._is_auth_file_enabled(current):
+            files.pop(name, None)
+        else:
+            files[name] = {"disabled": True}
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Codex auth file runtime state reset failed: file=%s error=%s", name, exc)
+
     def _sync_quota_cooldown_from_quota(self, name: str, quota: dict[str, Any]) -> None:
         """根据最新配额刷新结果同步内存冷却状态。"""
         normalized_name = self._normalize_auth_file_name(name)
@@ -793,6 +842,11 @@ class CodexOAuthService:
             self._write_auth_file_state(state)
         except Exception as exc:
             self._logger.warning("Codex auth file state clear failed: file=%s error=%s", name, exc)
+
+    @staticmethod
+    def _is_auth_file_enabled(file_state: dict[str, Any]) -> bool:
+        """读取认证文件启用状态，缺省值保持启用。"""
+        return file_state.get("disabled") is not True
 
     @classmethod
     def _is_auth_failure_state(cls, file_state: dict[str, Any]) -> bool:
@@ -1144,11 +1198,13 @@ class CodexOAuthService:
         self._purge_quota_cooldowns()
         payload = self._read_auth_file(path)
         token_status = "expired" if self._is_auth_payload_expired(payload) else "active"
-        state_files = (state or {}).get("files")
+        auth_file_state = state if state is not None else self._load_auth_file_state()
+        state_files = auth_file_state.get("files")
         file_state = {}
         if isinstance(state_files, dict) and isinstance(state_files.get(path.name), dict):
             file_state = state_files[path.name]
         quota = file_state.get("quota") if isinstance(file_state.get("quota"), dict) else None
+        enabled = self._is_auth_file_enabled(file_state)
         availability = self._build_auth_file_availability(path.name, payload, file_state, quota)
         return {
             "name": path.name,
@@ -1161,6 +1217,8 @@ class CodexOAuthService:
             "status_message": "Token expired" if token_status == "expired" else "Ready",
             "token_status": token_status,
             "token_status_message": "Token expired" if token_status == "expired" else "Ready",
+            "enabled": enabled,
+            "disabled": not enabled,
             "availability_status": availability["status"],
             "availability_status_message": availability["message"],
             "availability_retry_at": availability["retry_at"],
@@ -1185,6 +1243,9 @@ class CodexOAuthService:
         file_state: dict[str, Any],
         quota: dict[str, Any] | None,
     ) -> dict[str, str]:
+        if not self._is_auth_file_enabled(file_state):
+            return self._availability("disabled", "已禁用：不会参与请求调度")
+
         access_token = str(payload.get("access_token") or "").strip()
         refresh_token = str(payload.get("refresh_token") or "").strip()
         usage_error_type = str(file_state.get("usage_error_type") or "").strip()
