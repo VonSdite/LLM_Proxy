@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}OAuth 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260522-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260718-1">{% endblock %}
 {% block body_class %}oauth-page{% endblock %}
 {% block header_title %}OAuth 管理{% endblock %}
 {% block header_subtitle %}管理 CLI/OAuth 类认证文件，并查看账号状态与配额。{% endblock %}
@@ -146,6 +146,7 @@
                                         <li><strong>待验证</strong>：access_token 已过期且缺少 refresh_token，会先用当前 access_token 真实请求一次。</li>
                                         <li><strong>认证失败</strong>：上游认证错误、缺少 access_token 或 refresh_token 刷新失败；会跳过，直到重新登录、刷新 token 成功或后续请求成功。</li>
                                         <li><strong>额度用完</strong>：上游返回配额限制，或最近一次配额刷新显示 Codex 窗口无剩余额度；请求时会优先跳过该文件。</li>
+                                        <li><strong>已禁用</strong>：人工停止调度；重新启用后继续按认证和额度状态参与候选选择。</li>
                                     </ul>
                                 </div>
                             </div>
@@ -351,6 +352,7 @@
                                     <ul>
                                         <li>认证文件保存在 <code>data/oauth/claude</code>。</li>
                                         <li>文件格式参考 CLIProxyAPI 的 Claude OAuth token storage。</li>
+                                        <li>已禁用的认证文件保留在本地，并且不参与请求调度。</li>
                                         <li>当前页面负责生成和删除认证文件，不会自动修改 Provider 配置。</li>
                                     </ul>
                                 </div>
@@ -358,6 +360,7 @@
                         </div>
                     </div>
                 </div>
+                <div class="oauth-auth-file-filters" id="claudeAuthFileFilters" hidden></div>
                 <div class="oauth-auth-file-toolbar" id="claudeAuthFileToolbar" hidden>
                     <label class="oauth-checkline" for="claudeSelectAllAuthFiles">
                         <input
@@ -462,6 +465,7 @@
             batchDeleting: false,
             batchExporting: false,
             batchImporting: false,
+            togglingAuthFileName: '',
             models: [],
             modelsLoading: false,
             modelsError: '',
@@ -475,8 +479,10 @@
             loading: false,
             submitting: false,
             authFiles: [],
+            authFileFilter: 'all',
             selectedAuthFiles: new Set(),
             deletingAuthFileName: '',
+            togglingAuthFileName: '',
             deleteConfirmName: '',
             batchDeleteConfirm: false,
             batchDeleting: false,
@@ -544,7 +550,8 @@
                 const importLabel = codexAuthState.batchImporting ? '正在导入认证文件' : '导入认证文件';
                 importAuthFilesButton.disabled = codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting;
+                    || codexAuthState.batchImporting
+                    || Boolean(codexAuthState.togglingAuthFileName);
                 importAuthFilesButton.title = importLabel;
                 importAuthFilesButton.setAttribute('aria-label', importLabel);
             }
@@ -560,7 +567,8 @@
                     || codexAuthState.batchExporting
                     || codexAuthState.batchImporting
                     || isBatchRefreshing
-                    || selectedQuotaLoading;
+                    || selectedQuotaLoading
+                    || Boolean(codexAuthState.togglingAuthFileName);
                 refreshSelectedQuotaButton.title = refreshLabel;
                 refreshSelectedQuotaButton.setAttribute('aria-label', refreshLabel);
             }
@@ -572,7 +580,8 @@
                 exportSelectedAuthFilesButton.disabled = selectedNamesForCurrentFilter.length === 0
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting;
+                    || codexAuthState.batchImporting
+                    || Boolean(codexAuthState.togglingAuthFileName);
                 exportSelectedAuthFilesButton.title = exportLabel;
                 exportSelectedAuthFilesButton.setAttribute('aria-label', exportLabel);
             }
@@ -581,7 +590,8 @@
                 deleteSelectedAuthFilesButton.disabled = selectedNamesForCurrentFilter.length === 0
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting;
+                    || codexAuthState.batchImporting
+                    || Boolean(codexAuthState.togglingAuthFileName);
             }
             const batchDeletePopover = document.getElementById('codexBatchDeletePopover');
             if (batchDeletePopover) {
@@ -824,13 +834,14 @@
                 addModelButton.disabled = claudeAuthState.modelsSaving;
                 addModelButton.textContent = claudeAuthState.modelsSaving ? '添加中...' : '添加模型';
             }
-            const selectedNames = getClaudeSelectedAuthFileNames();
+            const selectedNames = getClaudeSelectedAuthFileNamesForCurrentFilter();
             const importAuthFilesButton = document.getElementById('claudeImportAuthFilesBtn');
             if (importAuthFilesButton) {
                 const importLabel = claudeAuthState.batchImporting ? '正在导入认证文件' : '导入认证文件';
                 importAuthFilesButton.disabled = claudeAuthState.batchDeleting
                     || claudeAuthState.batchExporting
-                    || claudeAuthState.batchImporting;
+                    || claudeAuthState.batchImporting
+                    || Boolean(claudeAuthState.togglingAuthFileName);
                 importAuthFilesButton.title = importLabel;
                 importAuthFilesButton.setAttribute('aria-label', importLabel);
             }
@@ -842,7 +853,8 @@
                 exportSelectedAuthFilesButton.disabled = selectedNames.length === 0
                     || claudeAuthState.batchDeleting
                     || claudeAuthState.batchExporting
-                    || claudeAuthState.batchImporting;
+                    || claudeAuthState.batchImporting
+                    || Boolean(claudeAuthState.togglingAuthFileName);
                 exportSelectedAuthFilesButton.title = exportLabel;
                 exportSelectedAuthFilesButton.setAttribute('aria-label', exportLabel);
             }
@@ -851,7 +863,8 @@
                 deleteSelectedAuthFilesButton.disabled = selectedNames.length === 0
                     || claudeAuthState.batchDeleting
                     || claudeAuthState.batchExporting
-                    || claudeAuthState.batchImporting;
+                    || claudeAuthState.batchImporting
+                    || Boolean(claudeAuthState.togglingAuthFileName);
             }
             const batchDeletePopover = document.getElementById('claudeBatchDeletePopover');
             if (batchDeletePopover) {
@@ -1306,6 +1319,11 @@
             return date.toLocaleString();
         }
 
+        function isOAuthAuthFileEnabled(file) {
+            if (file?.disabled === true) return false;
+            return file?.enabled !== false;
+        }
+
         function renderCodexAuthFiles() {
             const container = document.getElementById('codexAuthFileList');
             if (!container) return;
@@ -1382,10 +1400,13 @@
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
                     || codexAuthState.batchImporting;
+                const isEnabled = isOAuthAuthFileEnabled(file);
+                const isToggling = Boolean(codexAuthState.togglingAuthFileName);
                 const isQuotaActionDisabled = isLoadingQuota
                     || codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
-                    || codexAuthState.batchImporting;
+                    || codexAuthState.batchImporting
+                    || isToggling;
                 const isConfirmingDelete = codexAuthState.deleteConfirmName === (file.name || '');
                 const isSelected = codexAuthState.selectedAuthFiles.has(file.name || '');
                 const availabilityStatus = normalizeCodexAvailabilityStatus(file);
@@ -1393,7 +1414,7 @@
                 const availabilityLabel = formatCodexAvailabilityStatusLabel(file, availabilityStatus);
                 const usageInfo = getCodexAuthFileInfo(file);
                 return `
-                    <article class="oauth-auth-file-item">
+                    <article class="oauth-auth-file-item${isEnabled ? '' : ' is-disabled'}">
                         <div class="oauth-auth-file-main">
                             <label class="oauth-auth-file-select" aria-label="选择 ${escapeHtml(file.name || '')}">
                                 <input
@@ -1408,18 +1429,26 @@
                                     <div class="oauth-auth-file-title-actions">
                                         <button
                                             type="button"
+                                            class="oauth-icon-button${isEnabled ? '' : ' oauth-icon-button-enable'}"
+                                            title="${isEnabled ? '禁用认证文件' : '启用认证文件'}"
+                                            aria-label="${isEnabled ? '禁用' : '启用'} ${escapeHtml(file.name || '')}"
+                                            onclick="setCodexAuthFileEnabled('${encodedName}', ${isEnabled ? 'false' : 'true'})"
+                                            ${isDeleting || isToggling ? 'disabled' : ''}
+                                        >${isEnabled ? renderDisableIcon() : renderEnableIcon()}</button>
+                                        <button
+                                            type="button"
                                             class="oauth-icon-button oauth-icon-button-danger"
                                             title="删除认证文件"
                                             aria-label="删除 ${escapeHtml(file.name || '')}"
                                             onclick="toggleCodexAuthFileDeleteConfirm('${encodedName}')"
-                                            ${isDeleting ? 'disabled' : ''}
+                                            ${isDeleting || isToggling ? 'disabled' : ''}
                                         >${renderTrashIcon()}</button>
                                         ${isConfirmingDelete ? `
                                             <div class="oauth-delete-popover" role="dialog" aria-label="确认删除认证文件">
                                                 <div class="oauth-delete-popover-title">删除这个认证文件？</div>
                                                 <div class="oauth-delete-popover-actions">
                                                     <button type="button" class="btn btn-secondary btn-sm" onclick="cancelCodexAuthFileDelete()">取消</button>
-                                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteCodexAuthFile('${encodedName}')" ${isDeleting ? 'disabled' : ''}>删除</button>
+                                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteCodexAuthFile('${encodedName}')" ${isDeleting || isToggling ? 'disabled' : ''}>删除</button>
                                                 </div>
                                             </div>
                                         ` : ''}
@@ -1465,6 +1494,7 @@
             if ([
                 'all',
                 'available',
+                'disabled',
                 'auth_failed',
                 'quota_exhausted',
                 'other_unavailable',
@@ -1496,6 +1526,7 @@
             const filters = [
                 { key: 'all', label: '总数', count: counts.all },
                 { key: 'available', label: '可用', count: counts.available },
+                { key: 'disabled', label: '禁用', count: counts.disabled },
                 { key: 'auth_failed', label: '认证失败', count: counts.auth_failed },
                 { key: 'quota_exhausted', label: '额度用完', count: counts.quota_exhausted },
                 { key: 'other_unavailable', label: '其他', count: counts.other_unavailable },
@@ -1521,6 +1552,7 @@
             const counts = {
                 all: files.length,
                 available: 0,
+                disabled: 0,
                 auth_failed: 0,
                 quota_exhausted: 0,
                 other_unavailable: 0,
@@ -1562,6 +1594,7 @@
         }
 
         function getCodexAuthFileFilterKey(file) {
+            if (!isOAuthAuthFileEnabled(file)) return 'disabled';
             const status = normalizeCodexAvailabilityStatus(file);
             if (status === 'auth_failed') return 'auth_failed';
             if (status === 'quota_cooldown') return 'quota_exhausted';
@@ -1602,6 +1635,7 @@
                 'refresh_required',
                 'auth_check_required',
                 'auth_failed',
+                'disabled',
                 'quota_cooldown',
                 'quota_exhausted',
                 'filtered',
@@ -1619,6 +1653,7 @@
             if (status === 'refresh_required') return '待刷新';
             if (status === 'auth_check_required') return '待验证';
             if (status === 'auth_failed') return '认证失败';
+            if (status === 'disabled') return '已禁用';
             if (status === 'filtered') return '已过滤';
             return '-';
         }
@@ -1636,6 +1671,25 @@
                     <path d="M4 4v4h4"></path>
                     <path d="M4 13a8 8 0 0 0 14.5 4.7L20 16"></path>
                     <path d="M20 20v-4h-4"></path>
+                </svg>
+            `;
+        }
+
+        function renderDisableIcon() {
+            return `
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <circle cx="12" cy="12" r="9"></circle>
+                    <path d="M9.5 8.5v7"></path>
+                    <path d="M14.5 8.5v7"></path>
+                </svg>
+            `;
+        }
+
+        function renderEnableIcon() {
+            return `
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <circle cx="12" cy="12" r="9"></circle>
+                    <path d="m10 8 5 4-5 4z"></path>
                 </svg>
             `;
         }
@@ -1660,6 +1714,7 @@
             const toolbar = document.getElementById('claudeAuthFileToolbar');
             const selectAll = document.getElementById('claudeSelectAllAuthFiles');
             const selectedCount = document.getElementById('claudeSelectedAuthFileCount');
+            renderClaudeAuthFileFilters(files);
             const existingNames = getClaudeAuthFileNames();
             Array.from(claudeAuthState.selectedAuthFiles).forEach(name => {
                 if (!existingNames.has(name)) {
@@ -1684,29 +1739,41 @@
                 return;
             }
 
+            const filteredFiles = getClaudeFilteredAuthFiles(files);
             const selectedSize = getClaudeSelectedAuthFileNames().length;
+            const visibleSelectedSize = filteredFiles.filter(file => claudeAuthState.selectedAuthFiles.has(file.name || '')).length;
             if (toolbar) toolbar.hidden = false;
             if (selectAll) {
-                selectAll.checked = selectedSize > 0 && selectedSize === files.length;
-                selectAll.indeterminate = selectedSize > 0 && selectedSize < files.length;
-                selectAll.disabled = false;
+                selectAll.checked = filteredFiles.length > 0 && visibleSelectedSize === filteredFiles.length;
+                selectAll.indeterminate = visibleSelectedSize > 0 && visibleSelectedSize < filteredFiles.length;
+                selectAll.disabled = filteredFiles.length === 0;
             }
             if (selectedCount) {
-                selectedCount.textContent = `已选择 ${selectedSize} 个`;
+                selectedCount.textContent = claudeAuthState.authFileFilter === 'all'
+                    ? `已选择 ${selectedSize} 个`
+                    : `当前筛选已选择 ${visibleSelectedSize} 个`;
             }
-            container.innerHTML = files.map(file => {
+            if (!filteredFiles.length) {
+                container.innerHTML = '<div class="empty-state">当前筛选没有认证文件。</div>';
+                syncClaudeAuthControls();
+                return;
+            }
+
+            container.innerHTML = filteredFiles.map(file => {
                 const encodedName = encodeURIComponent(file.name || '');
                 const isDeleting = claudeAuthState.deletingAuthFileName === (file.name || '')
                     || claudeAuthState.batchDeleting
                     || claudeAuthState.batchExporting
                     || claudeAuthState.batchImporting;
+                const isEnabled = isOAuthAuthFileEnabled(file);
+                const isToggling = Boolean(claudeAuthState.togglingAuthFileName);
                 const isConfirmingDelete = claudeAuthState.deleteConfirmName === (file.name || '');
                 const isSelected = claudeAuthState.selectedAuthFiles.has(file.name || '');
                 const availabilityStatus = normalizeClaudeAvailabilityStatus(file);
                 const availabilityClass = availabilityStatus.replace(/_/g, '-');
                 const availabilityLabel = formatClaudeAvailabilityStatusLabel(file, availabilityStatus);
                 return `
-                    <article class="oauth-auth-file-item">
+                    <article class="oauth-auth-file-item${isEnabled ? '' : ' is-disabled'}">
                         <div class="oauth-auth-file-main">
                             <label class="oauth-auth-file-select" aria-label="选择 ${escapeHtml(file.name || '')}">
                                 <input
@@ -1721,18 +1788,26 @@
                                     <div class="oauth-auth-file-title-actions">
                                         <button
                                             type="button"
+                                            class="oauth-icon-button${isEnabled ? '' : ' oauth-icon-button-enable'}"
+                                            title="${isEnabled ? '禁用认证文件' : '启用认证文件'}"
+                                            aria-label="${isEnabled ? '禁用' : '启用'} ${escapeHtml(file.name || '')}"
+                                            onclick="setClaudeAuthFileEnabled('${encodedName}', ${isEnabled ? 'false' : 'true'})"
+                                            ${isDeleting || isToggling ? 'disabled' : ''}
+                                        >${isEnabled ? renderDisableIcon() : renderEnableIcon()}</button>
+                                        <button
+                                            type="button"
                                             class="oauth-icon-button oauth-icon-button-danger"
                                             title="删除认证文件"
                                             aria-label="删除 ${escapeHtml(file.name || '')}"
                                             onclick="toggleClaudeAuthFileDeleteConfirm('${encodedName}')"
-                                            ${isDeleting ? 'disabled' : ''}
+                                            ${isDeleting || isToggling ? 'disabled' : ''}
                                         >${renderTrashIcon()}</button>
                                         ${isConfirmingDelete ? `
                                             <div class="oauth-delete-popover" role="dialog" aria-label="确认删除认证文件">
                                                 <div class="oauth-delete-popover-title">删除这个认证文件？</div>
                                                 <div class="oauth-delete-popover-actions">
                                                     <button type="button" class="btn btn-secondary btn-sm" onclick="cancelClaudeAuthFileDelete()">取消</button>
-                                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteClaudeAuthFile('${encodedName}')" ${isDeleting ? 'disabled' : ''}>删除</button>
+                                                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteClaudeAuthFile('${encodedName}')" ${isDeleting || isToggling ? 'disabled' : ''}>删除</button>
                                                 </div>
                                             </div>
                                         ` : ''}
@@ -1757,7 +1832,7 @@
 
         function normalizeClaudeAvailabilityStatus(file) {
             const status = String(file?.availability_status || '').trim().toLowerCase();
-            if (['available', 'refresh_required', 'auth_check_required', 'auth_failed'].includes(status)) {
+            if (['available', 'refresh_required', 'auth_check_required', 'auth_failed', 'disabled'].includes(status)) {
                 return status;
             }
             return 'unknown';
@@ -1770,7 +1845,69 @@
             if (status === 'refresh_required') return '待刷新';
             if (status === 'auth_check_required') return '待验证';
             if (status === 'auth_failed') return '认证失败';
+            if (status === 'disabled') return '已禁用';
             return '-';
+        }
+
+        function normalizeClaudeAuthFileFilter(filter) {
+            const normalized = String(filter || '').trim();
+            if (['all', 'enabled', 'disabled'].includes(normalized)) {
+                return normalized;
+            }
+            return 'all';
+        }
+
+        function setClaudeAuthFileFilter(filter) {
+            claudeAuthState.authFileFilter = normalizeClaudeAuthFileFilter(filter);
+            claudeAuthState.batchDeleteConfirm = false;
+            claudeAuthState.deleteConfirmName = '';
+            renderClaudeAuthFiles();
+        }
+
+        function renderClaudeAuthFileFilters(files) {
+            const container = document.getElementById('claudeAuthFileFilters');
+            if (!container) return;
+            if (!files.length) {
+                container.hidden = true;
+                container.innerHTML = '';
+                return;
+            }
+            const counts = {
+                all: files.length,
+                enabled: files.filter(file => isOAuthAuthFileEnabled(file)).length,
+                disabled: files.filter(file => !isOAuthAuthFileEnabled(file)).length,
+            };
+            const currentFilter = normalizeClaudeAuthFileFilter(claudeAuthState.authFileFilter);
+            claudeAuthState.authFileFilter = currentFilter;
+            const filters = [
+                { key: 'all', label: '总数', count: counts.all },
+                { key: 'enabled', label: '已启用', count: counts.enabled },
+                { key: 'disabled', label: '禁用', count: counts.disabled },
+            ];
+            container.hidden = false;
+            container.innerHTML = filters.map(item => {
+                const isActive = currentFilter === item.key;
+                return `
+                    <button
+                        type="button"
+                        class="oauth-auth-file-filter-pill${isActive ? ' is-active' : ''}"
+                        aria-pressed="${isActive ? 'true' : 'false'}"
+                        onclick="setClaudeAuthFileFilter('${item.key}')"
+                    >
+                        <span>${item.label}</span>
+                        <strong>${item.count}</strong>
+                    </button>
+                `;
+            }).join('');
+        }
+
+        function getClaudeFilteredAuthFiles(files) {
+            const filter = normalizeClaudeAuthFileFilter(claudeAuthState.authFileFilter);
+            if (filter === 'all') return files;
+            if (filter === 'disabled') {
+                return files.filter(file => !isOAuthAuthFileEnabled(file));
+            }
+            return files.filter(file => isOAuthAuthFileEnabled(file));
         }
 
         function getClaudeAuthFileNames() {
@@ -1786,8 +1923,17 @@
             return Array.from(claudeAuthState.selectedAuthFiles).filter(name => authFileNames.has(name));
         }
 
+        function getClaudeSelectedAuthFileNamesForCurrentFilter() {
+            const filteredNames = new Set(
+                getClaudeFilteredAuthFiles(claudeAuthState.authFiles || [])
+                    .map(file => file.name)
+                    .filter(Boolean)
+            );
+            return Array.from(claudeAuthState.selectedAuthFiles).filter(name => filteredNames.has(name));
+        }
+
         function toggleClaudeSelectAllAuthFiles(checked) {
-            (claudeAuthState.authFiles || []).forEach(file => {
+            getClaudeFilteredAuthFiles(claudeAuthState.authFiles || []).forEach(file => {
                 if (!file.name) return;
                 if (checked) {
                     claudeAuthState.selectedAuthFiles.add(file.name);
@@ -1795,7 +1941,7 @@
                     claudeAuthState.selectedAuthFiles.delete(file.name);
                 }
             });
-            if (!getClaudeSelectedAuthFileNames().length) {
+            if (!getClaudeSelectedAuthFileNamesForCurrentFilter().length) {
                 claudeAuthState.batchDeleteConfirm = false;
             }
             renderClaudeAuthFiles();
@@ -1808,7 +1954,7 @@
                 claudeAuthState.selectedAuthFiles.add(name);
             } else {
                 claudeAuthState.selectedAuthFiles.delete(name);
-                if (!getClaudeSelectedAuthFileNames().length) {
+                if (!getClaudeSelectedAuthFileNamesForCurrentFilter().length) {
                     claudeAuthState.batchDeleteConfirm = false;
                 }
             }
@@ -1816,7 +1962,7 @@
         }
 
         function toggleClaudeBatchDeleteConfirm() {
-            if (!getClaudeSelectedAuthFileNames().length) {
+            if (!getClaudeSelectedAuthFileNamesForCurrentFilter().length) {
                 showMessage('请先选择认证文件', 'error');
                 return;
             }
@@ -1865,7 +2011,7 @@
         }
 
         async function exportSelectedClaudeAuthFiles() {
-            const names = getClaudeSelectedAuthFileNames();
+            const names = getClaudeSelectedAuthFileNamesForCurrentFilter();
             if (!names.length) {
                 showMessage('请先选择认证文件', 'error');
                 return;
@@ -1887,7 +2033,7 @@
         }
 
         async function deleteSelectedClaudeAuthFiles() {
-            const names = getClaudeSelectedAuthFileNames();
+            const names = getClaudeSelectedAuthFileNamesForCurrentFilter();
             if (!names.length || claudeAuthState.batchDeleting || claudeAuthState.batchExporting || claudeAuthState.batchImporting) return;
             claudeAuthState.batchDeleting = true;
             claudeAuthState.batchDeleteConfirm = false;
@@ -1928,10 +2074,37 @@
             renderClaudeAuthFiles();
         }
 
+        async function setClaudeAuthFileEnabled(encodedName, enabled) {
+            const name = decodeURIComponent(encodedName);
+            if (
+                !name
+                || claudeAuthState.togglingAuthFileName
+                || claudeAuthState.deletingAuthFileName
+                || claudeAuthState.batchDeleting
+                || claudeAuthState.batchExporting
+                || claudeAuthState.batchImporting
+            ) return;
+            claudeAuthState.togglingAuthFileName = name;
+            claudeAuthState.deleteConfirmName = '';
+            renderClaudeAuthFiles();
+            try {
+                const result = await requestSetOAuthAuthFileEnabled('claude', name, enabled);
+                replaceClaudeAuthFileInState(name, result.auth_file || { name, enabled, disabled: !enabled });
+                showMessage(`Claude 认证文件已${enabled ? '启用' : '禁用'}`, 'success');
+            } catch (error) {
+                console.error(`${enabled ? '启用' : '禁用'} Claude 认证文件失败:`, error);
+                showActionError(`${enabled ? '启用' : '禁用'} Claude 认证文件`, error, { fallback: '更新认证文件状态失败' });
+            } finally {
+                claudeAuthState.togglingAuthFileName = '';
+                renderClaudeAuthFiles();
+            }
+        }
+
         async function deleteClaudeAuthFile(encodedName) {
             const name = decodeURIComponent(encodedName);
             if (
                 !name
+                || claudeAuthState.togglingAuthFileName
                 || claudeAuthState.deletingAuthFileName
                 || claudeAuthState.batchDeleting
                 || claudeAuthState.batchExporting
@@ -1970,6 +2143,25 @@
         function removeClaudeAuthFileFromState(name) {
             claudeAuthState.authFiles = (claudeAuthState.authFiles || []).filter(file => file.name !== name);
             claudeAuthState.selectedAuthFiles.delete(name);
+        }
+
+        function replaceClaudeAuthFileInState(name, nextFile) {
+            claudeAuthState.authFiles = (claudeAuthState.authFiles || []).map(file => (
+                file.name === name ? { ...file, ...nextFile } : file
+            ));
+        }
+
+        async function requestSetOAuthAuthFileEnabled(provider, name, enabled) {
+            const action = enabled ? 'enable' : 'disable';
+            const response = await fetch(`/api/oauth/${provider}/auth-files/${encodeURIComponent(name)}/${action}`, {
+                method: 'POST',
+                cache: 'no-store',
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || '更新认证文件状态失败');
+            }
+            return result;
         }
 
         async function loadClaudeAuthFiles() {
@@ -2289,10 +2481,39 @@
             renderCodexAuthFiles();
         }
 
+        async function setCodexAuthFileEnabled(encodedName, enabled) {
+            const name = decodeURIComponent(encodedName);
+            if (
+                !name
+                || codexAuthState.togglingAuthFileName
+                || codexAuthState.deletingAuthFileName
+                || codexAuthState.batchDeleting
+                || codexAuthState.batchExporting
+                || codexAuthState.batchImporting
+            ) return;
+            codexAuthState.togglingAuthFileName = name;
+            codexAuthState.deleteConfirmName = '';
+            renderCodexAuthFiles();
+            try {
+                const result = await requestSetOAuthAuthFileEnabled('codex', name, enabled);
+                if (result.auth_file) {
+                    replaceCodexAuthFileInState(name, result.auth_file);
+                }
+                showMessage(`Codex 认证文件已${enabled ? '启用' : '禁用'}`, 'success');
+            } catch (error) {
+                console.error(`${enabled ? '启用' : '禁用'} Codex 认证文件失败:`, error);
+                showActionError(`${enabled ? '启用' : '禁用'} Codex 认证文件`, error, { fallback: '更新认证文件状态失败' });
+            } finally {
+                codexAuthState.togglingAuthFileName = '';
+                renderCodexAuthFiles();
+            }
+        }
+
         async function deleteCodexAuthFile(encodedName) {
             const name = decodeURIComponent(encodedName);
             if (
                 !name
+                || codexAuthState.togglingAuthFileName
                 || codexAuthState.deletingAuthFileName
                 || codexAuthState.batchDeleting
                 || codexAuthState.batchExporting

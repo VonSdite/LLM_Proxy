@@ -39,6 +39,12 @@ class OAuthController:
         self._app.route("/api/oauth/codex/auth-files", methods=["GET"])(auth(self.list_codex_auth_files))
         self._app.route("/api/oauth/codex/auth-files/export", methods=["POST"])(auth(self.export_codex_auth_files))
         self._app.route("/api/oauth/codex/auth-files/import", methods=["POST"])(auth(self.import_codex_auth_files))
+        self._app.route("/api/oauth/codex/auth-files/<name>/disable", methods=["POST"])(
+            auth(self.disable_codex_auth_file)
+        )
+        self._app.route("/api/oauth/codex/auth-files/<name>/enable", methods=["POST"])(
+            auth(self.enable_codex_auth_file)
+        )
         self._app.route("/api/oauth/codex/auth-files/<name>", methods=["DELETE"])(auth(self.delete_codex_auth_file))
         self._app.route("/api/oauth/codex/auth-files/<name>/quota", methods=["GET"])(
             auth(self.get_codex_auth_file_quota)
@@ -54,6 +60,12 @@ class OAuthController:
         self._app.route("/api/oauth/claude/auth-files", methods=["GET"])(auth(self.list_claude_auth_files))
         self._app.route("/api/oauth/claude/auth-files/export", methods=["POST"])(auth(self.export_claude_auth_files))
         self._app.route("/api/oauth/claude/auth-files/import", methods=["POST"])(auth(self.import_claude_auth_files))
+        self._app.route("/api/oauth/claude/auth-files/<name>/disable", methods=["POST"])(
+            auth(self.disable_claude_auth_file)
+        )
+        self._app.route("/api/oauth/claude/auth-files/<name>/enable", methods=["POST"])(
+            auth(self.enable_claude_auth_file)
+        )
         self._app.route("/api/oauth/claude/auth-files/<name>", methods=["DELETE"])(auth(self.delete_claude_auth_file))
         self._app.route("/api/oauth/claude/models", methods=["GET"])(auth(self.list_claude_models))
         self._app.route("/api/oauth/claude/models", methods=["POST"])(auth(self.add_claude_model))
@@ -111,6 +123,36 @@ class OAuthController:
             return jsonify(self._claude_oauth_service.list_auth_files())
         except Exception as exc:
             self._logger.error("Error listing Claude OAuth auth files: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def disable_codex_auth_file(self, name: str) -> ResponseReturnValue:
+        return self._set_codex_auth_file_enabled(name, False)
+
+    def enable_codex_auth_file(self, name: str) -> ResponseReturnValue:
+        return self._set_codex_auth_file_enabled(name, True)
+
+    def _set_codex_auth_file_enabled(self, name: str, enabled: bool) -> ResponseReturnValue:
+        try:
+            return jsonify(self._codex_oauth_service.set_auth_file_enabled(name, enabled))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating Codex OAuth auth file enabled state: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def disable_claude_auth_file(self, name: str) -> ResponseReturnValue:
+        return self._set_claude_auth_file_enabled(name, False)
+
+    def enable_claude_auth_file(self, name: str) -> ResponseReturnValue:
+        return self._set_claude_auth_file_enabled(name, True)
+
+    def _set_claude_auth_file_enabled(self, name: str, enabled: bool) -> ResponseReturnValue:
+        try:
+            return jsonify(self._claude_oauth_service.set_auth_file_enabled(name, enabled))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating Claude OAuth auth file enabled state: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def get_codex_auth_file_quota(self, name: str) -> ResponseReturnValue:
