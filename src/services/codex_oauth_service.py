@@ -468,7 +468,7 @@ class CodexOAuthService:
             name=auth_file.name,
             path=auth_file,
             access_token=access_token,
-            account_id=str(refreshed_payload.get("account_id") or "").strip(),
+            account_id=self._resolve_chatgpt_account_id(refreshed_payload),
             email=str(refreshed_payload.get("email") or "").strip(),
             plan_type=self._normalize_codex_plan_type(refreshed_payload.get("plan_type")),
             payload=refreshed_payload,
@@ -604,7 +604,7 @@ class CodexOAuthService:
             "Content-Type": "application/json",
             "User-Agent": CODEX_USER_AGENT,
         }
-        account_id = str(payload.get("account_id") or "").strip()
+        account_id = self._resolve_chatgpt_account_id(payload)
         if account_id:
             headers["Chatgpt-Account-Id"] = account_id
 
@@ -978,7 +978,7 @@ class CodexOAuthService:
             name=path.name,
             path=path,
             access_token=access_token,
-            account_id=str(payload.get("account_id") or "").strip(),
+            account_id=self._resolve_chatgpt_account_id(payload),
             email=str(payload.get("email") or "").strip(),
             plan_type=self._normalize_codex_plan_type(payload.get("plan_type")),
             payload=payload,
@@ -1211,7 +1211,7 @@ class CodexOAuthService:
             "path": str(path),
             "type": payload.get("type") or "codex",
             "email": payload.get("email") or "",
-            "account_id": payload.get("account_id") or "",
+            "account_id": self._resolve_chatgpt_account_id(payload),
             "plan_type": payload.get("plan_type") or self._extract_plan_type_from_payload(payload),
             "status": token_status,
             "status_message": "Token expired" if token_status == "expired" else "Ready",
@@ -1473,6 +1473,21 @@ class CodexOAuthService:
         except (ValueError, json.JSONDecodeError):
             return {}
         return claims if isinstance(claims, dict) else {}
+
+    @classmethod
+    def _resolve_chatgpt_account_id(cls, payload: dict[str, Any]) -> str:
+        """优先从当前 ID Token 解析 ChatGPT workspace ID。"""
+        claims = cls._parse_jwt_claims(str(payload.get("id_token") or ""))
+        auth_info = claims.get("https://api.openai.com/auth")
+        if isinstance(auth_info, dict):
+            account_id = str(auth_info.get("chatgpt_account_id") or auth_info.get("chatgptAccountId") or "").strip()
+            if account_id:
+                return account_id
+
+        account_id = str(claims.get("chatgpt_account_id") or claims.get("chatgptAccountId") or "").strip()
+        if account_id:
+            return account_id
+        return str(payload.get("account_id") or "").strip()
 
     def _extract_plan_type_from_payload(self, payload: dict[str, Any]) -> str:
         claims = self._parse_jwt_claims(str(payload.get("id_token") or ""))
