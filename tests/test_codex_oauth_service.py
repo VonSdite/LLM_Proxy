@@ -478,6 +478,52 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertTrue(auth_files[0]["quota_refreshed_at"])
         self.assertEqual(auth_files[0]["quota_refreshed_at"], quota_refreshed_at)
 
+    def test_get_auth_file_quota_prefers_id_token_account_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "account_id": "account-stale",
+                        "id_token": build_id_token(account_id="account-current"),
+                        "access_token": "access-demo",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            service.add_model("gpt-5.4")
+            captured: dict[str, Any] = {}
+
+            def fake_get(url, headers=None, **kwargs):
+                del url, kwargs
+                captured["headers"] = dict(headers or {})
+                return FakeResponse(
+                    {
+                        "plan_type": "plus",
+                        "rate_limit": {
+                            "primary_window": {
+                                "used_percent": 25,
+                                "reset_after_seconds": 3600,
+                            }
+                        },
+                    }
+                )
+
+            with patch_requests_session(get=fake_get):
+                service.get_auth_file_quota("codex-demo.json")
+            auth_file = service.list_auth_files()["files"][0]
+            candidate = service.iter_auth_candidates_for_model("gpt-5.4")[0]
+
+        self.assertEqual("account-current", captured["headers"]["Chatgpt-Account-Id"])
+        self.assertEqual("account-current", auth_file["account_id"])
+        self.assertEqual("account-current", candidate.account_id)
+
     def test_build_quota_windows_uses_reported_duration_for_labels(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = self._build_service(Path(tmp_dir))
