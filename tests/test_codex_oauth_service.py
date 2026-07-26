@@ -24,6 +24,7 @@ from src.application.app_context import AppContext
 from src.services.codex_oauth_service import (
     CODEX_CLIENT_ID,
     CODEX_MODEL_REFERENCE_URLS,
+    CODEX_QUOTA_USER_AGENT,
     CODEX_REDIRECT_URI,
     CODEX_USAGE_URL,
     CodexOAuthService,
@@ -422,7 +423,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertEqual(["codex-direct.json", "codex-zip.json"], [item["name"] for item in listed["files"]])
         self.assertEqual("access-direct", imported_direct_payload["access_token"])
 
-    def test_get_auth_file_quota_uses_access_token_and_account_id(self) -> None:
+    def test_get_auth_file_quota_uses_current_token_without_refreshing_expired_auth_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             auth_dir = root / "data" / "oauth" / "codex"
@@ -434,7 +435,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
                         "email": "codex@example.com",
                         "account_id": "account-123",
                         "access_token": "access-demo",
-                        "expired": "2999-01-01T00:00:00Z",
+                        "refresh_token": "refresh-demo",
+                        "expired": "2000-01-01T00:00:00Z",
                     }
                 ),
                 encoding="utf-8",
@@ -467,10 +469,12 @@ class CodexOAuthServiceTests(unittest.TestCase):
 
         self.assertEqual("Bearer access-demo", captured["headers"]["Authorization"])
         self.assertEqual("account-123", captured["headers"]["Chatgpt-Account-Id"])
+        self.assertEqual(CODEX_QUOTA_USER_AGENT, captured["headers"]["User-Agent"])
         self.assertEqual(20, captured["timeout"])
         self.assertEqual({"http": None, "https": None, "all": None}, captured["proxies"])
         self.assertFalse(captured["verify"])
         self.assertEqual("plus", result["plan_type"])
+        self.assertFalse(result["refreshed"])
         self.assertEqual(75.0, result["windows"][0]["remaining_percent"])
         self.assertTrue(result["windows"][0]["reset_at"])
         self.assertEqual(75.0, auth_files[0]["quota"]["windows"][0]["remaining_percent"])
@@ -1003,7 +1007,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
             auth_file["availability_status_message"],
         )
 
-    def test_quota_refresh_can_recover_persisted_auth_failure(self) -> None:
+    def test_quota_refresh_does_not_refresh_token_after_authentication_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             auth_dir = root / "data" / "oauth" / "codex"
@@ -1037,58 +1041,31 @@ class CodexOAuthServiceTests(unittest.TestCase):
             def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
                 del url, timeout, proxies, verify, kwargs
                 captured_authorizations.append(str((headers or {}).get("Authorization") or ""))
-                if len(captured_authorizations) == 1:
-                    return FakeResponse(
-                        {"error": {"message": "invalid or expired token"}},
-                        status_code=401,
-                        text="invalid or expired token",
-                    )
                 return FakeResponse(
-                    {
-                        "rate_limit": {
-                            "primary_window": {
-                                "used_percent": 10,
-                                "reset_after_seconds": 3600,
-                            }
-                        }
-                    }
+                    {"error": {"message": "invalid or expired token"}},
+                    status_code=401,
+                    text="invalid or expired token",
                 )
 
             def fake_post(url, data=None, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
                 del url, data, headers, timeout, proxies, verify, kwargs
-                return FakeResponse(
-                    {
-                        "access_token": "new-access",
-                        "refresh_token": "refresh-next",
-                        "id_token": build_id_token(
-                            email="codex-next@example.com",
-                            account_id="account-next",
-                            plan_type="team",
-                        ),
-                        "expires_in": 3600,
-                    }
-                )
+                raise AssertionError("Quota refresh must not refresh OAuth tokens")
 
             with patch_requests_session(get=fake_get, post=fake_post):
-                quota = service.get_auth_file_quota("codex-demo.json")
+                with self.assertRaisesRegex(ValueError, "invalid or expired token"):
+                    service.get_auth_file_quota("codex-demo.json")
             after = service.list_auth_files()["files"][0]
             next_payload = json.loads(auth_file.read_text(encoding="utf-8"))
 
         self.assertEqual("auth_failed", before["availability_status"])
         self.assertEqual([], skipped_candidates)
-        self.assertEqual(["Bearer old-access", "Bearer new-access"], captured_authorizations)
-        self.assertEqual(90.0, quota["windows"][0]["remaining_percent"])
-        self.assertEqual("new-access", next_payload["access_token"])
-        self.assertEqual("refresh-next", next_payload["refresh_token"])
-        self.assertEqual("account-next", next_payload["account_id"])
-        self.assertEqual("codex-next@example.com", next_payload["email"])
-        self.assertEqual("team", next_payload["plan_type"])
-        self.assertEqual("account-next", after["account_id"])
-        self.assertEqual("codex-next@example.com", after["email"])
-        self.assertEqual("team", after["plan_type"])
-        self.assertEqual("available", after["availability_status"])
-        self.assertEqual("", after["usage_status_message"])
-        self.assertEqual("", after["usage_error_type"])
+        self.assertEqual(["Bearer old-access"], captured_authorizations)
+        self.assertEqual("old-access", next_payload["access_token"])
+        self.assertEqual("refresh-demo", next_payload["refresh_token"])
+        self.assertEqual("account-123", after["account_id"])
+        self.assertEqual("auth_failed", after["availability_status"])
+        self.assertIn("invalid or expired token", after["usage_status_message"])
+        self.assertEqual("authentication_error", after["usage_error_type"])
 
     def test_quota_request_uses_oauth_network_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1128,6 +1105,51 @@ class CodexOAuthServiceTests(unittest.TestCase):
             {
                 "http": "http://127.0.0.1:7890",
                 "https": "http://127.0.0.1:7890",
+                "all": None,
+            },
+            captured["proxies"],
+        )
+        self.assertTrue(captured["verify"])
+
+    def test_quota_request_prefers_auth_file_proxy_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                        "expired": "2999-01-01T00:00:00Z",
+                        "proxy_url": "http://127.0.0.1:7891",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(
+                root,
+                FakeConfigManager(
+                    oauth_proxy="http://127.0.0.1:7890",
+                    oauth_verify_ssl=True,
+                ),
+            )
+            captured: dict[str, Any] = {}
+
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                captured["proxies"] = proxies
+                captured["verify"] = verify
+                del url, headers, timeout, kwargs
+                return FakeResponse({})
+
+            with patch_requests_session(get=fake_get):
+                service.get_auth_file_quota("codex-demo.json")
+
+        self.assertEqual(
+            {
+                "http": "http://127.0.0.1:7891",
+                "https": "http://127.0.0.1:7891",
                 "all": None,
             },
             captured["proxies"],
