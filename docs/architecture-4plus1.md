@@ -113,7 +113,8 @@ downstream request
   - 导入认证文件时支持多 JSON 和多 ZIP，逐个校验合法内容后写入
   - 导出选中认证文件时始终打包为 ZIP
   - 删除本地认证文件时移动到 `data/oauth/codex/deleted/`，并同步清理该文件的本地状态
-  - 读取认证文件状态，并按需刷新 token 后查询 Codex 配额
+  - 读取认证文件状态，并使用当前 access token 查询 Codex 配额
+  - Codex 配额查询优先使用认证文件 `proxy_url`，其后使用全局 OAuth 代理设置
   - token 交换、token 刷新与配额查询遇到代理风险确认页时，会走统一自动确认重试流程
   - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
   - 持久化认证文件人工禁用状态、最近一次配额快照、配额刷新错误、最近成功认证文件与 Codex 模型代理使用状态
@@ -563,7 +564,7 @@ OAuth Codex tab
   -> write data/oauth/codex/*.json
   -> list / manage local Codex model IDs
   -> list auth file token/status/quota snapshot
-  -> optional quota refresh to chatgpt.com/backend-api/wham/usage
+  -> optional quota refresh with current access token to chatgpt.com/backend-api/wham/usage
   -> skip duplicate quota refresh when the same auth file is already refreshing
   -> persist quota snapshot or quota error
   -> optional reset local quota snapshot and cooldown state
@@ -609,7 +610,8 @@ OAuth Claude tab
 - Codex 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - Claude 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
-- Codex 查询配额时如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
+- Codex 查询配额时直接使用认证文件当前的 access token，不执行 token 刷新或认证失败后的刷新重试
+- Codex 配额查询的代理优先级为认证文件 `proxy_url`、全局 OAuth 代理设置、直连
 - Codex 数据面请求遇到 401 或认证类错误时，如果认证文件存在 refresh token，会先刷新认证文件并使用当前认证文件重试一次
 - Claude OAuth 数据面请求前如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
 - Codex / Claude 候选列表仍会按请求重建；人工禁用的认证文件不会进入候选列表；其余文件默认按认证文件修改时间倒序排列，最近一次真实请求成功的认证文件如果未被过滤，会被提升为第一候选
@@ -621,7 +623,7 @@ OAuth Claude tab
 - Codex 数据面请求成功后，如果本地配额快照中的 Codex 窗口重置时间已经到期，会最佳努力刷新该认证文件的前端配额快照；刷新失败不会阻断本次模型响应
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
-- token 交换、token 刷新、Codex 配额查询与 OAuth 数据面代理会使用系统设置中的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`
+- token 交换、token 刷新与 OAuth 数据面代理使用系统设置中的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`；Codex 配额查询在认证文件没有 `proxy_url` 时使用该网络设置
 - Codex 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
 - Claude OAuth 数据面请求会在转发 Anthropic Messages 前按 CPA 请求方式重签已有 Claude Code billing header 的 `cch`
 - 普通 Provider 如果 `source_format=claude_chat`，也会在上游 body 已有 Claude Code billing header 时重签 `cch`；不会主动生成 billing header

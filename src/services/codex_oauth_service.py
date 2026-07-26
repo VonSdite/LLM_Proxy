@@ -21,6 +21,7 @@ import requests
 
 from ..application.app_context import AppContext
 from ..utils.net import (
+    PROXY_MODE_CUSTOM,
     apply_requests_proxy_settings,
     build_requests_proxy_settings,
     build_requests_request_proxies,
@@ -45,6 +46,7 @@ CODEX_MODEL_REFERENCE_URLS = (
     "https://models.router-for.me/models.json",
 )
 CODEX_USER_AGENT = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.135.0)"
+CODEX_QUOTA_USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
 OAUTH_SESSION_TTL_SECONDS = 10 * 60
 DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = ()
 AUTH_FAILURE_ERROR_TYPES = {
@@ -486,41 +488,7 @@ class CodexOAuthService:
             return self._build_skipped_quota_refresh_result(auth_file.name)
         try:
             payload = self._read_auth_file(auth_file)
-            refreshed = False
-            if self._is_auth_payload_expired(payload) and str(payload.get("refresh_token") or "").strip():
-                try:
-                    payload = self._refresh_auth_file(auth_file, payload)
-                except Exception as exc:
-                    if record_auth_failure:
-                        self.record_auth_file_failure(
-                            auth_file.name,
-                            f"Token refresh failed: {exc}",
-                            status_code=401,
-                            error_type="token_refresh_failed",
-                        )
-                    raise
-                refreshed = True
-
             response = self._request_auth_file_quota(payload)
-            if (
-                response.status_code >= 400
-                and not refreshed
-                and str(payload.get("refresh_token") or "").strip()
-                and self._is_auth_error_response(response)
-            ):
-                try:
-                    payload = self._refresh_auth_file(auth_file, payload)
-                except Exception as exc:
-                    if record_auth_failure:
-                        self.record_auth_file_failure(
-                            auth_file.name,
-                            f"Token refresh failed: {exc}",
-                            status_code=401,
-                            error_type="token_refresh_failed",
-                        )
-                    raise
-                refreshed = True
-                response = self._request_auth_file_quota(payload)
             if response.status_code >= 400:
                 if record_auth_failure and self._is_auth_error_response(response):
                     self.record_auth_file_failure(
@@ -536,7 +504,7 @@ class CodexOAuthService:
 
             result = {
                 "status": "ok",
-                "refreshed": refreshed,
+                "refreshed": False,
                 "refreshed_at": self._now_iso(),
                 "plan_type": self._normalize_text(
                     usage_payload.get("plan_type") or usage_payload.get("planType") or payload.get("plan_type")
@@ -602,7 +570,7 @@ class CodexOAuthService:
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
-            "User-Agent": CODEX_USER_AGENT,
+            "User-Agent": CODEX_QUOTA_USER_AGENT,
         }
         account_id = self._resolve_chatgpt_account_id(payload)
         if account_id:
@@ -613,6 +581,7 @@ class CodexOAuthService:
             CODEX_USAGE_URL,
             headers=headers,
             timeout=20,
+            proxy_url_override=str(payload.get("proxy_url") or "").strip() or None,
         )
 
     def _iter_auth_file_paths(self) -> list[Path]:
@@ -1125,10 +1094,15 @@ class CodexOAuthService:
         self,
         method: str,
         url: str,
+        *,
+        proxy_url_override: str | None = None,
         **kwargs: Any,
     ) -> requests.Response:
         session = requests.Session()
-        request_options = self._build_request_options(session=session)
+        request_options = self._build_request_options(
+            session=session,
+            proxy_url_override=proxy_url_override,
+        )
         normalized_method = str(method or "").strip().upper()
 
         def send_request() -> requests.Response:
@@ -1161,25 +1135,37 @@ class CodexOAuthService:
         finally:
             session.close()
 
-    def _build_request_options(self, *, session: requests.Session | None = None) -> dict[str, Any]:
-        if self._config_manager is None:
+    def _build_request_options(
+        self,
+        *,
+        session: requests.Session | None = None,
+        proxy_url_override: str | None = None,
+    ) -> dict[str, Any]:
+        if proxy_url_override:
+            proxy_settings = build_requests_proxy_settings(
+                PROXY_MODE_CUSTOM,
+                proxy_url_override,
+                proxy_url_error_message="OAuth auth file proxy_url must be a valid absolute URL",
+            )
+        elif self._config_manager is None:
             if session is not None:
                 session.trust_env = False
             return {
                 "proxies": {"http": None, "https": None, "all": None},
                 "verify": False,
             }
-        proxy_settings = build_requests_proxy_settings(
-            self._get_oauth_proxy_mode(),
-            self._config_manager.get_oauth_proxy(),
-            proxy_mode_error_message="OAuth proxy_mode must be one of: direct, system, custom",
-            proxy_url_error_message="OAuth proxy must be a valid absolute URL",
-        )
+        else:
+            proxy_settings = build_requests_proxy_settings(
+                self._get_oauth_proxy_mode(),
+                self._config_manager.get_oauth_proxy(),
+                proxy_mode_error_message="OAuth proxy_mode must be one of: direct, system, custom",
+                proxy_url_error_message="OAuth proxy must be a valid absolute URL",
+            )
         if session is not None:
             apply_requests_proxy_settings(session, proxy_settings)
         return {
             "proxies": build_requests_request_proxies(proxy_settings),
-            "verify": self._config_manager.is_oauth_verify_ssl_enabled(),
+            "verify": self._config_manager.is_oauth_verify_ssl_enabled() if self._config_manager is not None else False,
         }
 
     def _get_oauth_proxy_mode(self) -> str | None:
