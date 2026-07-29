@@ -2193,8 +2193,12 @@
         }
 
         function formatCodexQuotaPercent(window) {
-            const remaining = Number.isFinite(Number(window?.remaining_percent))
-                ? Math.max(0, Math.min(100, Number(window.remaining_percent)))
+            const rawRemaining = window?.remaining_percent;
+            const hasRemaining = rawRemaining !== null
+                && rawRemaining !== undefined
+                && String(rawRemaining).trim() !== '';
+            const remaining = hasRemaining && Number.isFinite(Number(rawRemaining))
+                ? Math.max(0, Math.min(100, Number(rawRemaining)))
                 : null;
             if (remaining === null) {
                 return {
