@@ -1857,6 +1857,36 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".oauth-page .oauth-pagination", css)
         self.assertIn(':root[data-theme="dark"] .oauth-page .btn-secondary', css)
 
+    def test_oauth_template_formats_codex_quota_without_coercing_null_to_zero(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "oauth.html"
+        html = template_path.read_text(encoding="utf-8")
+        script_start = html.index("function formatCodexQuotaPercent")
+        script_end = html.index("function renderCodexQuotaSummary", script_start)
+        script = html[script_start:script_end]
+
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+process.stdout.write(JSON.stringify([
+  sandbox.formatCodexQuotaPercent({{ remaining_percent: 100 }}),
+  sandbox.formatCodexQuotaPercent({{ remaining_percent: null }}),
+  sandbox.formatCodexQuotaPercent({{ remaining_percent: 0 }}),
+]));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        full_quota, unknown_quota, empty_quota = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual({"value": 100, "text": "100%", "known": True}, full_quota)
+        self.assertEqual({"value": 0, "text": "--", "known": False}, unknown_quota)
+        self.assertEqual({"value": 0, "text": "0%", "known": True}, empty_quota)
+
     def test_settings_template_contains_oauth_network_settings(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"
         html = (root / "templates" / "settings.html").read_text(encoding="utf-8")

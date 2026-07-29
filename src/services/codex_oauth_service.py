@@ -1534,7 +1534,10 @@ class CodexOAuthService:
             window = rate_limit.get(key) or rate_limit.get(self._camelize(key))
             if not isinstance(window, dict):
                 continue
-            used_percent = self._parse_float(window.get("used_percent") or window.get("usedPercent"))
+            used_percent_value = window.get("used_percent")
+            if used_percent_value is None:
+                used_percent_value = window.get("usedPercent")
+            used_percent = self._parse_float(used_percent_value)
             remaining_percent = None if used_percent is None else max(0.0, min(100.0, 100.0 - used_percent))
             windows.append(
                 {
