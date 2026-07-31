@@ -180,7 +180,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `auth_group`：绑定一个凭据池；和 `api_key` 二选一，不能同时使用
 - `proxy`：上游代理地址
 - `timeout_seconds`：上游请求超时，默认 `1200`
-- `max_retries`：失败重试次数，默认 `3`
+- `max_retries`：一次 Provider 上游操作允许的最大尝试次数，包含首次尝试；默认 `3`，设为 `1` 时只尝试一次
 - `verify_ssl`：是否校验证书；代码默认值为 `false`，公网 HTTPS 建议显式设为 `true`
 - `model_list`：当前 Provider 暴露的模型列表
 - `hook`：相对 `hooks/` 目录的 Hook 文件路径，文件中需要导出名为 `Hook` 的类
@@ -393,6 +393,10 @@ Claude OAuth 模型同样使用裸模型名，例如 `claude-sonnet-4-5`，并�
 - 请求成功后，如果当前使用的认证文件已有配额快照，且 Codex 窗口 `reset_at` 已经过期，会最佳努力刷新这个文件的前端配额快照；刷新失败不会影响本次模型响应
 - 遇到代理风险确认页时，会自动确认一次并重试原请求；自动确认失败或重试后仍被拦截时，向下游返回 `proxy_warning_required` 和确认 URL
 - Codex 上游当前按流式响应处理；下游仍可以请求非流式响应，代理会聚合后返回
+- Codex 流式响应以首个非空目标协议编码字节为提交边界；提交前的 transport 失败会尝试下一个可用认证文件
+- Codex 流提交后的 transport 失败会记录当前认证文件失败，按下游协议发送错误事件并结束当前流
+- Codex 流只有收到 `response.completed` 或 `response.done` 才记录成功；缺少该终止事件的 EOF 按未完成流处理
+- Codex 流被客户端取消时会关闭上游响应，不触发成功完成统计，也不更新认证文件成功或失败状态
 - `/oauth` 页面支持逐个启用或禁用认证文件；禁用文件以灰态显示，可通过顶部“禁用”筛选快速定位，并且不参与后续请求调度
 - 禁用状态作用于后续请求的候选选择，已经发往上游的请求继续完成
 - `/oauth` 页面支持查看配额、筛选认证文件、批量刷新额度和批量删除认证文件
@@ -403,6 +407,11 @@ Claude OAuth 的账号候选和错误记录逻辑与 Codex 类似：每次请求
 
 Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照和配额冷却机制。因此 Claude 的“可不可用”主要来自 token 刷新结果和真实上游请求结果，而不是调用 usage 接口预判。
 
+- Claude 流式响应以首个非空目标协议编码字节为提交边界；提交前的 transport 失败会尝试下一个可用认证文件
+- Claude 流提交后的 transport 失败会记录当前认证文件失败，按下游协议发送错误事件并结束当前流
+- Claude 流只有收到 `message_stop` 才记录成功；缺少该终止事件的 EOF 按未完成流处理
+- Claude 流被客户端取消时会关闭上游响应，不触发成功完成统计，也不更新认证文件成功或失败状态
+
 ## 功能介绍
 
 ### 1. 代理与协议转换
@@ -410,6 +419,13 @@ Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照�
 - 按请求里的 `model` 自动选择对应 Provider
 - 支持流式和非流式响应
 - 自动识别 SSE、NDJSON 等 HTTP 上游返回形态
+- 流式响应以首个非空、已经完成目标协议编码的下游字节为提交边界
+- 普通 Provider 提交前的 transport 异常会在 `max_retries` 定义的最大尝试次数范围内重新执行上游请求；尝试次数耗尽后返回结构化 `502` 错误响应
+- Codex / Claude OAuth 提交前的 transport 异常会记录当前认证文件失败并尝试下一个候选认证文件
+- 提交后的 transport 异常会按当前下游协议发送错误事件并结束流，当前请求不执行透明重试
+- OpenAI Chat 使用 error JSON data block 和 `[DONE]`，OpenAI Responses 使用 `response.failed`，Claude Messages 使用 `event: error`
+- 目标协议终止事件已经发出时，后续 HTTP framing 异常保持当前流的逻辑完成状态
+- 客户端取消会关闭上游响应，不触发成功完成统计
 - 内置 translator 会在 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 和 Claude `thinking` 之间转换思考意图；无法精确映射的档位会使用 `xhigh`
 - OpenAI Chat 上游响应里的 `reasoning_content` 和 `reasoning_details` 会按下游协议转换为 Claude thinking 或 OpenAI Responses reasoning 输出
 - `GET /v1/models` 会返回当前已启用 Provider 和 Codex / Claude OAuth 模型列表，以及 `provider_name`、`source_format` 等元信息
@@ -475,6 +491,7 @@ Provider 编辑页的模型测试基于当前表单快照执行，不要求先�
 - 应用日志写入 `logs/app.log`
 - 访问日志写入 `logs/access.log`
 - 请求明细和每日聚合统计写入 SQLite
+- 流式 transport 失败和客户端取消不触发成功完成统计
 - 后台支持按日期、用户名、模型过滤统计和日志数据
 - 统计面板支持按当前筛选条件导出和导入统计迁移 JSON
 - 统计迁移 JSON 包含 `request_logs` 请求明细和 `daily_request_stats` 日聚合统计
@@ -532,7 +549,7 @@ from src.hooks import BaseHook, HookContext
 当前行为边界：
 
 - `response_guard` 可以改写成功响应，但不会处理上游 `HTTP >= 400` 的错误响应；这类错误会按当前代理逻辑直接返回
-- 对已经开始输出的流式响应，如果 `response_guard` 抛出异常，当前流会被中断，而不是再包装成标准错误响应
+- 已经提交的流式响应中，`response_guard` 异常会按当前下游协议发送错误事件并结束流
 - 如果 `request_guard` 改写了 `body.stream`，后续请求与响应流程会按新的流式设置继续执行
 - Provider 编辑页里的模型拉取使用 `fetch_models`，不会调用 `header_hook`、`request_guard` 或 `response_guard`
 - Provider 编辑页里的模型测试只会复用 `header_hook` 和 `request_guard`，不会调用 `response_guard`
@@ -581,6 +598,7 @@ from src.hooks import BaseHook, HookContext
 - 首次尝试时，`last_status_code` 和 `last_error_type` 都是 `None`
 - 如果上一轮重试失败是 HTTP 状态码导致的，例如 `429`，下一轮会看到 `last_status_code`
 - 如果上一轮失败是本地传输错误，例如超时或连接错误，下一轮会看到 `last_error_type`
+- 流式响应提交后不产生新的 Provider 尝试，该阶段的失败不会进入下一轮 `HookContext`
 
 ## 数据与目录
 

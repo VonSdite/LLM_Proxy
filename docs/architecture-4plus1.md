@@ -47,8 +47,19 @@ downstream request
   -> translator.translate_response()
   -> response_guard
   -> encoder
+  -> prefetch first non-empty encoded downstream bytes (stream only)
   -> downstream response
+  -> response outcome finalization
 ```
+
+流式响应以首个非空、已经完成目标协议编码的下游字节为提交边界：
+
+- 普通 Provider 提交前的 transport 异常会关闭当前上游响应，并在 `max_retries` 定义的最大尝试次数范围内重新执行上游请求
+- 普通 Provider 的最大尝试次数耗尽后返回结构化 `502` 错误响应
+- Codex / Claude OAuth 提交前的 transport 异常会记录当前认证文件失败并尝试下一个候选认证文件
+- 提交后的 transport 异常会编码为当前下游协议的流内错误事件，当前请求不执行透明重试
+- 目标协议终止事件已经发出时，后续 HTTP framing 异常保持当前流的逻辑完成状态
+- 客户端取消会关闭上游响应并释放请求占用的运行时资源，不触发成功完成统计
 
 补充：hook 在 retry 场景下还可以读取上一轮失败摘要，用于做轻量级重试决策：
 
@@ -133,11 +144,19 @@ downstream request
   - 使用 `data/oauth/codex/*.json` 中的 OAuth access token 请求 Codex backend
   - 遇到账号配额耗尽时标记临时冷却并尝试下一个账号
   - 将每个认证文件最近一次数据面成功或失败结果写回 OAuth 状态
+  - 按首个非空目标协议字节区分流提交前后的 transport 失败
+  - 流提交后的 transport 失败会发送下游协议错误事件并记录当前认证文件失败
+  - 缺少 `response.completed` 或 `response.done` 的 EOF 按未完成流处理
+  - 客户端取消会关闭上游响应，不触发成功完成统计，也不更新认证文件成功或失败状态
 - `ClaudeProxyService`
   - 代理下游直接使用的 Claude 普通模型名
   - 使用 `data/oauth/claude/*.json` 中的 OAuth access token 请求 Anthropic Messages
   - 按 CPA / CLIProxyAPI 请求方式补齐 Claude Code OAuth headers，并在存在 billing header 时重签 `cch`
   - 将每个认证文件最近一次数据面成功或失败结果写回 OAuth 状态
+  - 按首个非空目标协议字节区分流提交前后的 transport 失败
+  - 流提交后的 transport 失败会发送下游协议错误事件并记录当前认证文件失败
+  - 缺少 `message_stop` 的 EOF 按未完成流处理
+  - 客户端取消会关闭上游响应，不触发成功完成统计，也不更新认证文件成功或失败状态
 - `ProviderManager`
   - 加载 provider 配置
   - 维护 `provider/model -> provider` 映射
@@ -151,8 +170,15 @@ downstream request
 - `ProxyService`
   - 组装整条代理链路
   - 根据当前请求所处接口选择 translator 和 encoder
+  - 在下游流提交前管理 Provider 上游最大尝试次数
   - 对 `source_format=claude_chat` 的 Provider，在上游 body 已有 Claude Code billing header 时重签 `cch`
   - 在开启 `logging.llm_request_debug_enabled` 时输出独立 trace
+- `ProxyResponseBuilder`
+  - 构建非流式响应和流式响应
+  - 预取首个非空目标协议字节并建立流提交边界
+  - 跟踪协议终止事件、上游 transport 失败和客户端取消
+  - 按下游协议编码流内错误事件并结算上游响应资源
+  - 在流实际结束后记录成功、失败或客户端取消结果
 - `ProviderModelTestService`
   - 复用 translator / executor / request-side hook
   - 按当前 Provider 表单快照直连上游测试模型可用性、首字延迟与 TPS
@@ -355,7 +381,8 @@ OAuth 模型是数据平面的例外路由：
   - 解析结果用于白名单、模型权限、请求统计、访问日志关联和 LLM trace
   - 每次数据面请求读取当前 `api_keys.enabled`，开启时要求有效 API Key
   - 数据面转发始终从发往上游的 header 中移除下游 `Authorization`
-  - 请求完成回调写日志时会带上 `api_key_id`，用于同步累加 key 级用量
+  - 统计完成回调写日志时会带上 `api_key_id`，用于同步累加 key 级用量
+  - 流式 transport 失败和客户端取消不调用统计完成回调
 - `ModelCatalogService`
   - 每次用户 / API Key 权限管理读取当前 Provider 配置模型和 Codex / Claude OAuth 可用模型
   - 不缓存模型目录，OAuth 模型变化后管理端重新加载即可出现在权限选择列表
@@ -400,6 +427,11 @@ Provider 公共配置字段只有：
 - `proxy`
   - 仅在 `proxy_mode=custom` 且非空时生效，`custom` 空值按直连执行
   - 自定义代理 URL 中 userinfo 的账号密码会在保存时规范化转义
+- `max_retries`
+  - 表示一次 Provider 上游操作允许的最大尝试次数，包含首次尝试
+  - 默认值为 `3`
+  - 值为 `1` 时只执行一次上游尝试
+  - 流式 transport 异常只在下游响应提交前进入下一次尝试
 - `hook`
   - 路径固定相对项目根目录 `hooks/`
   - 管理 API 输出和配置写入只保留本机存在且位于 `hooks/` 下的 hook 文件路径
@@ -437,6 +469,22 @@ Hook 运行时上下文还会暴露最小重试状态：
   - 触发首块探测兜底
 
 这层能力保留在 executor / decoder 中，不暴露给用户配置。
+
+#### Stream Commit And Completion
+
+首个非空、已经完成目标协议编码的下游字节定义流提交边界。上游 HTTP 状态和原始上游 chunk 不定义该边界。
+
+普通 Provider 提交前的 `RequestException` 和 `OSError` 会返回 `max_retries` 控制的 Provider 尝试循环。Codex / Claude OAuth 的同类异常会返回认证文件候选循环。提交后的 transport 异常通过当前下游协议结束流：
+
+| downstream protocol | 流内错误输出 |
+| --- | --- |
+| `openai_chat` | OpenAI 兼容 error JSON data block，随后发送 `[DONE]` |
+| `openai_responses` | `response.failed` |
+| `claude_chat` | `event: error` |
+
+目标协议终止事件已经发出时，后续 HTTP framing 异常保持逻辑完成状态。客户端取消会关闭上游响应并释放 Auth Group inflight，不调用成功完成回调，不写入成功请求统计，也不更新 Auth Entry 成功或失败状态。
+
+Codex / Claude OAuth 流分别以 `response.completed` / `response.done` 和 `message_stop` 作为成功终止事件。缺少这些事件的 EOF 按未完成流处理：提交前进入下一认证文件候选，提交后发送下游协议错误事件并记录当前认证文件失败。普通 Provider 保持现有协议兼容收尾行为。
 
 ### 3.5 Runtime Trace Logging
 
@@ -624,10 +672,14 @@ OAuth Claude tab
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
 - token 交换、token 刷新与 OAuth 数据面代理使用系统设置中的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`；Codex 配额查询在认证文件没有 `proxy_url` 时使用该网络设置
-- Codex 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
+- Codex 数据面请求在下游流提交前遇到上游错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
+- Codex 数据面请求在下游流提交后遇到 transport 失败时，会记录当前认证文件失败并发送下游协议错误事件，当前流不切换认证文件
+- Codex 数据面请求被客户端取消时会关闭上游响应，不更新当前认证文件成功或失败状态
 - Claude OAuth 数据面请求会在转发 Anthropic Messages 前按 CPA 请求方式重签已有 Claude Code billing header 的 `cch`
 - 普通 Provider 如果 `source_format=claude_chat`，也会在上游 body 已有 Claude Code billing header 时重签 `cch`；不会主动生成 billing header
-- Claude 数据面请求在上游返回错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
+- Claude 数据面请求在下游流提交前遇到上游错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
+- Claude 数据面请求在下游流提交后遇到 transport 失败时，会记录当前认证文件失败并发送下游协议错误事件，当前流不切换认证文件
+- Claude 数据面请求被客户端取消时会关闭上游响应，不更新当前认证文件成功或失败状态
 - 出站 HTTP 请求遇到代理风险确认页时，会自动确认一次并重试原请求；自动确认失败或重试后仍被拦截时，返回 `proxy_warning_required` 和确认页 URL
 - Codex 数据面请求在刷新重试后仍遇到 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
 - Claude 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
@@ -683,6 +735,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   -> API Key model permission check
   -> API Key token limit check
   -> upstream proxy
+  -> statistics completion callback
   -> request log insert
   -> API Key usage counter update
 ```
@@ -704,7 +757,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 白名单仍按客户端 IP 解析用户
   - 用户模型权限和 API Key 模型权限都必须允许目标模型
   - `/v1/models` 只返回两者交集
-- 请求完成后：
+- 统计完成回调执行后：
   - `request_logs.api_key_id` 记录本次使用的 key
   - `api_keys.total_request_count`
   - `api_keys.prompt_tokens`
@@ -736,6 +789,8 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 
 - [src/services/proxy_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/proxy_service.py)
   - 主代理 orchestration
+- [src/services/proxy_response_builder.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/proxy_response_builder.py)
+  - 首块预取、流提交边界、协议错误事件和流终态结算
 - [src/services/settings_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/settings_service.py)
   - 系统设置保存与生效边界
 - [src/services/provider_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/provider_service.py)
@@ -834,15 +889,38 @@ sequenceDiagram
         Controller->>Controller: 校验 API Key hash、key 模型权限和 token 上限
     end
     Controller->>Service: proxy_request()
-    Service->>Translator: openai_responses -> openai_chat
+    Service->>Translator: openai_chat -> openai_responses
     Translator-->>Service: translated upstream request
     Service->>Executor: execute HTTP request
-    Executor-->>Service: stream events
-    Service->>Translator: translate stream events
-    Translator-->>Service: openai_chat chunks
-    Service->>Service: 编码下游块并移除空 delta.tool_calls
-    Service-->>Controller: SSE response
-    Controller-->>Client: chat.completion.chunk stream
+    Executor-->>Service: HTTP response + lazy stream
+    Service->>Translator: translate first stream event
+    Translator-->>Service: first openai_chat chunk
+    Service->>Service: 编码并预取首个非空下游字节
+    alt 提交前 transport 失败且仍有尝试次数
+        Service->>Executor: 关闭当前上游响应
+        Service->>Service: 下一次尝试重新进入请求、转换、编码与首块预取
+    else 首个下游字节就绪
+        Service-->>Controller: SSE response + prefetched bytes
+        Controller-->>Client: first chat.completion.chunk
+        Note over Controller,Client: 首个下游字节发送后流已提交
+        loop remaining stream events
+            Executor-->>Service: stream event
+            Service->>Translator: translate stream event
+            Translator-->>Service: openai_chat chunk
+            Service-->>Controller: encoded SSE chunk
+            Controller-->>Client: chat.completion.chunk
+        end
+        alt 目标协议终止事件完成
+            Service->>Service: 成功完成回调与统计
+        else 提交后 transport 或流处理失败
+            Service-->>Controller: OpenAI error data + [DONE]
+            Controller-->>Client: protocol error in stream
+        else 客户端取消
+            Client-->>Controller: close downstream connection
+            Controller-->>Service: close response iterator
+            Service->>Executor: close upstream response
+        end
+    end
 ```
 
 ### 6.2 Plain Codex Model -> Codex OAuth Backend
@@ -886,18 +964,35 @@ sequenceDiagram
             CodexProxy->>ChatGPT: 使用下一个认证文件重试
         end
     end
-    ChatGPT-->>CodexProxy: Responses SSE
-    CodexProxy->>CodexOAuth: record_auth_file_success()
-    CodexOAuth->>CodexOAuth: 记录最近成功认证文件
-    opt 本地配额快照 reset_at 已到期
-        CodexOAuth->>ChatGPT: GET /backend-api/wham/usage
-        CodexOAuth->>CodexOAuth: 更新认证文件配额快照
+    ChatGPT-->>CodexProxy: Responses SSE lazy stream
+    CodexProxy->>CodexProxy: 翻译、编码并预取首个非空下游字节
+    alt 提交前 transport 失败
+        CodexProxy->>CodexOAuth: record_auth_file_failure()
+        CodexProxy->>CodexProxy: 下一候选认证文件重新进入请求、转换、编码与首块预取
+    else 下游流已提交
+        CodexProxy-->>Controller: 下游协议响应 + prefetched bytes
+        Controller-->>Client: first stream chunk
+        alt response.completed / response.done
+            CodexProxy->>CodexOAuth: record_auth_file_success()
+            CodexOAuth->>CodexOAuth: 记录最近成功认证文件
+            opt 本地配额快照 reset_at 已到期
+                CodexOAuth->>ChatGPT: GET /backend-api/wham/usage
+                CodexOAuth->>CodexOAuth: 更新认证文件配额快照
+            end
+        else 提交后 transport 失败
+            CodexProxy->>CodexOAuth: record_auth_file_failure()
+            CodexProxy-->>Controller: target protocol error event
+            Controller-->>Client: protocol error in stream
+        else 客户端取消
+            Controller->>CodexProxy: close response iterator
+            CodexProxy->>ChatGPT: close upstream response
+            Note over CodexProxy,CodexOAuth: 认证文件状态保持不变
+        end
     end
-    CodexProxy-->>Controller: 下游协议响应
-    Controller-->>Client: OpenAI-compatible response
+    Note over CodexProxy,ChatGPT: response.completed 后的 HTTP framing error 保持逻辑完成状态
 ```
 
-### 6.2 Claude Downstream -> OpenAI Chat Upstream
+### 6.3 Claude Downstream -> OpenAI Chat Upstream
 
 ```mermaid
 sequenceDiagram
@@ -909,13 +1004,27 @@ sequenceDiagram
 
     Client->>Controller: POST /v1/messages
     Controller->>Service: proxy_request()
-    Service->>Translator: openai_chat -> claude_chat
+    Service->>Translator: claude_chat -> openai_chat
     Translator-->>Service: upstream chat request
     Service->>Executor: execute HTTP request
-    Executor-->>Service: chat SSE stream
-    Service->>Translator: translate to claude events
-    Translator-->>Service: message_start/content_block_delta/message_stop
-    Service-->>Client: Claude-style SSE
+    Executor-->>Service: HTTP response + lazy chat SSE stream
+    Service->>Translator: translate first stream event
+    Translator-->>Service: first Claude event
+    Service->>Service: 编码并预取首个非空下游字节
+    alt 提交前 transport 失败且仍有尝试次数
+        Service->>Executor: 关闭当前上游响应
+        Service->>Service: 下一次尝试重新进入请求、转换、编码与首块预取
+    else 下游流已提交
+        Service-->>Client: first Claude-style SSE event
+        alt message_stop 完成
+            Service->>Service: 成功完成回调与统计
+        else 提交后 transport 或流处理失败
+            Service-->>Client: event: error
+        else 客户端取消
+            Client-->>Service: close downstream connection
+            Service->>Executor: close upstream response
+        end
+    end
 ```
 
 ## 7. Runtime Boundaries
@@ -941,3 +1050,5 @@ sequenceDiagram
 - 下游要暴露成什么协议集合
 
 上游到底是 SSE、NDJSON 还是非流式，由 executor / decoder 自动判断。
+
+流提交边界由首个非空目标协议编码字节定义。提交后的错误输出格式由下游协议决定，当前流不执行透明重试。目标协议终止事件已经发出时，后续 HTTP framing 异常保持逻辑完成状态。

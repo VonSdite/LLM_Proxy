@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import requests
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -58,17 +59,21 @@ class FakeHTTPResponse:
         body: bytes = b"",
         text: str | None = None,
         headers: dict[str, str] | None = None,
+        stream_error: BaseException | None = None,
     ) -> None:
         self.status_code = status_code
         self._chunks = list(chunks or [])
         self.content = body
         self.text = text if text is not None else body.decode("utf-8", errors="replace")
         self.headers = headers or {"Content-Type": "text/event-stream"}
+        self.stream_error = stream_error
         self.closed = False
 
     def iter_content(self, chunk_size=None):
         del chunk_size
         yield from self._chunks
+        if self.stream_error is not None:
+            raise self.stream_error
 
     def json(self) -> Any:
         return json.loads(self.text)
@@ -703,6 +708,379 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual("refresh-new", next_payload["refresh_token"])
         self.assertEqual("success", auth_entries["codex-first.json"]["usage_status"])
 
+    def test_stream_failure_before_first_downstream_chunk_uses_next_account(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            write_auth_file(root, "codex-second.json", "access-second", mtime=1000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            authorizations: list[str] = []
+            completed_meta: list[dict[str, Any]] = []
+            first_response = FakeHTTPResponse(
+                status_code=200,
+                stream_error=requests.exceptions.ChunkedEncodingError("first stream broke"),
+            )
+            second_response = FakeHTTPResponse(
+                status_code=200,
+                chunks=[
+                    b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000}}\n\n',
+                    b'data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"ok"}\n\n',
+                    b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n',
+                ],
+            )
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, json, stream, timeout, kwargs
+                authorizations.append(str((headers or {}).get("Authorization") or ""))
+                return first_response if len(authorizations) == 1 else second_response
+
+            with patch.object(
+                oauth_service,
+                "record_auth_file_failure",
+                wraps=oauth_service.record_auth_file_failure,
+            ) as record_failure:
+                with ctx.flask_app.test_request_context("/v1/chat/completions"):
+                    with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                        response, status_code, failure = proxy_service.proxy_request(
+                            {
+                                "model": "gpt-5.4",
+                                "messages": [{"role": "user", "content": "hi"}],
+                                "stream": True,
+                            },
+                            {},
+                            on_complete=lambda meta: completed_meta.append(dict(meta)),
+                            resolved_target_format="openai_chat",
+                        )
+                    streamed = b"".join(response.response)  # type: ignore[union-attr]
+            auth_entries = {entry["name"]: entry for entry in oauth_service.list_auth_files()["files"]}
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertEqual(["Bearer access-first", "Bearer access-second"], authorizations)
+        self.assertIn(b"ok", streamed)
+        self.assertTrue(first_response.closed)
+        self.assertTrue(second_response.closed)
+        self.assertEqual("error", auth_entries["codex-first.json"]["usage_status"])
+        self.assertEqual("codex_stream_failed", auth_entries["codex-first.json"]["usage_error_type"])
+        self.assertEqual("success", auth_entries["codex-second.json"]["usage_status"])
+        self.assertEqual(1, len(completed_meta))
+        record_failure.assert_called_once()
+
+    def test_stream_precommit_oserror_and_clean_eof_use_next_account(self) -> None:
+        for failure_mode in ("connect_oserror", "clean_eof"):
+            with self.subTest(failure_mode=failure_mode), tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+                write_auth_file(root, "codex-second.json", "access-second", mtime=1000)
+                ctx = build_context(root)
+                oauth_service = CodexOAuthService(ctx)
+                oauth_service.add_model("gpt-5.4")
+                proxy_service = CodexProxyService(ctx, oauth_service)
+                authorizations: list[str] = []
+                first_response = FakeHTTPResponse(status_code=200)
+                second_response = FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000}}\n\n',
+                        b'data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"ok"}\n\n',
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n',
+                    ],
+                )
+
+                def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                    del url, json, stream, timeout, kwargs
+                    authorizations.append(str((headers or {}).get("Authorization") or ""))
+                    if len(authorizations) == 1:
+                        if failure_mode == "connect_oserror":
+                            raise OSError("socket failed")
+                        return first_response
+                    return second_response
+
+                with patch.object(
+                    oauth_service,
+                    "record_auth_file_failure",
+                    wraps=oauth_service.record_auth_file_failure,
+                ) as record_failure:
+                    with ctx.flask_app.test_request_context("/v1/chat/completions"):
+                        with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                            response, status_code, failure = proxy_service.proxy_request(
+                                self._build_stream_request("openai_chat"),
+                                {},
+                                resolved_target_format="openai_chat",
+                            )
+                        streamed = b"".join(response.response)  # type: ignore[union-attr]
+                auth_entries = {entry["name"]: entry for entry in oauth_service.list_auth_files()["files"]}
+
+                self.assertIsNone(failure)
+                self.assertEqual(200, status_code)
+                self.assertEqual(["Bearer access-first", "Bearer access-second"], authorizations)
+                self.assertIn(b"ok", streamed)
+                self.assertEqual("error", auth_entries["codex-first.json"]["usage_status"])
+                self.assertEqual("success", auth_entries["codex-second.json"]["usage_status"])
+                record_failure.assert_called_once()
+                if failure_mode == "clean_eof":
+                    self.assertTrue(first_response.closed)
+                self.assertTrue(second_response.closed)
+
+    def test_nonstream_upstream_read_error_uses_next_account_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            write_auth_file(root, "codex-second.json", "access-second", mtime=1000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            authorizations: list[str] = []
+            first_response = FakeHTTPResponse(
+                status_code=200,
+                stream_error=requests.exceptions.ChunkedEncodingError("nonstream read failed"),
+            )
+            second_response = FakeHTTPResponse(
+                status_code=200,
+                chunks=[
+                    b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n'
+                ],
+            )
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, json, stream, timeout, kwargs
+                authorizations.append(str((headers or {}).get("Authorization") or ""))
+                return first_response if len(authorizations) == 1 else second_response
+
+            with patch.object(
+                oauth_service,
+                "record_auth_file_failure",
+                wraps=oauth_service.record_auth_file_failure,
+            ) as record_failure:
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                    response, status_code, failure = proxy_service.proxy_request(
+                        {
+                            "model": "gpt-5.4",
+                            "messages": [{"role": "user", "content": "hi"}],
+                            "stream": False,
+                        },
+                        {},
+                        resolved_target_format="openai_chat",
+                    )
+            payload = json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
+            auth_entries = {entry["name"]: entry for entry in oauth_service.list_auth_files()["files"]}
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertEqual(["Bearer access-first", "Bearer access-second"], authorizations)
+        self.assertEqual("ok", payload["choices"][0]["message"]["content"])
+        self.assertTrue(first_response.closed)
+        self.assertTrue(second_response.closed)
+        self.assertEqual("error", auth_entries["codex-first.json"]["usage_status"])
+        self.assertEqual("success", auth_entries["codex-second.json"]["usage_status"])
+        record_failure.assert_called_once()
+
+    def test_stream_transport_error_after_start_emits_target_error_without_completion_callback(self) -> None:
+        target_cases = {
+            "openai_chat": (b'"type": "upstream_stream_error"', b"data: [DONE]"),
+            "openai_responses": (b"event: response.failed", None),
+            "claude_chat": (b"event: error", None),
+        }
+        for failure_mode in ("transport_error", "clean_eof"):
+            for target_format, (expected, absent) in target_cases.items():
+                with (
+                    self.subTest(failure_mode=failure_mode, target_format=target_format),
+                    tempfile.TemporaryDirectory() as tmp_dir,
+                ):
+                    root = Path(tmp_dir)
+                    write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+                    ctx = build_context(root)
+                    oauth_service = CodexOAuthService(ctx)
+                    oauth_service.add_model("gpt-5.4")
+                    proxy_service = CodexProxyService(ctx, oauth_service)
+                    completed_meta: list[dict[str, Any]] = []
+                    fake_response = FakeHTTPResponse(
+                        status_code=200,
+                        chunks=[
+                            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000}}\n\n',
+                            b'data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"partial"}\n\n',
+                        ]
+                        + ([b"data: [DONE]\n\n"] if failure_mode == "clean_eof" else []),
+                        stream_error=(
+                            requests.exceptions.ChunkedEncodingError("stream broke after output")
+                            if failure_mode == "transport_error"
+                            else None
+                        ),
+                    )
+
+                    with ctx.flask_app.test_request_context("/v1/chat/completions"):
+                        with patch(
+                            "src.services.codex_proxy_service.requests.post",
+                            return_value=fake_response,
+                        ):
+                            response, status_code, failure = proxy_service.proxy_request(
+                                self._build_stream_request(target_format),
+                                {},
+                                on_complete=lambda meta: completed_meta.append(dict(meta)),
+                                resolved_target_format=target_format,
+                            )
+                        streamed = b"".join(response.response)  # type: ignore[union-attr]
+                    auth_entry = oauth_service.list_auth_files()["files"][0]
+
+                    self.assertIsNone(failure)
+                    self.assertEqual(200, status_code)
+                    self.assertIn(expected, streamed)
+                    if absent is None:
+                        self.assertNotIn(b"data: [DONE]", streamed)
+                    else:
+                        self.assertEqual(1, streamed.count(absent))
+                    self.assertIn(b"partial", streamed)
+                    self.assertTrue(fake_response.closed)
+                    self.assertEqual([], completed_meta)
+                    self.assertEqual("error", auth_entry["usage_status"])
+                    self.assertEqual("codex_stream_failed", auth_entry["usage_error_type"])
+
+    def test_nonstream_response_done_succeeds_and_cancelled_fails(self) -> None:
+        terminal_cases = {
+            "response.done": None,
+            "response.cancelled": "cancelled upstream",
+        }
+        for event_type, error_message in terminal_cases.items():
+            with self.subTest(event_type=event_type), tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+                ctx = build_context(root)
+                oauth_service = CodexOAuthService(ctx)
+                oauth_service.add_model("gpt-5.4")
+                proxy_service = CodexProxyService(ctx, oauth_service)
+                completed_meta: list[dict[str, Any]] = []
+                response_payload: dict[str, Any] = {
+                    "id": "resp_1",
+                    "model": "gpt-5.4",
+                    "created_at": 1770000000,
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "ok"}],
+                        }
+                    ],
+                    "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                }
+                if error_message is not None:
+                    response_payload["error"] = {
+                        "type": "cancelled",
+                        "message": error_message,
+                    }
+                event_payload = {"type": event_type, "response": response_payload}
+                fake_response = FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[f"data: {json.dumps(event_payload)}\n\n".encode()],
+                )
+
+                with patch("src.services.codex_proxy_service.requests.post", return_value=fake_response):
+                    response, status_code, failure = proxy_service.proxy_request(
+                        {
+                            "model": "gpt-5.4",
+                            "messages": [{"role": "user", "content": "hi"}],
+                            "stream": False,
+                        },
+                        {},
+                        on_complete=lambda meta: completed_meta.append(dict(meta)),
+                        resolved_target_format="openai_chat",
+                    )
+                auth_entry = oauth_service.list_auth_files()["files"][0]
+
+                if event_type == "response.done":
+                    self.assertIsNone(failure)
+                    self.assertEqual(200, status_code)
+                    payload = json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
+                    self.assertEqual("ok", payload["choices"][0]["message"]["content"])
+                    self.assertEqual(1, len(completed_meta))
+                    self.assertEqual("success", auth_entry["usage_status"])
+                else:
+                    self.assertIsNone(response)
+                    self.assertEqual(502, status_code)
+                    self.assertEqual("codex_stream_incomplete", failure.error_code)  # type: ignore[union-attr]
+                    self.assertEqual([], completed_meta)
+                    self.assertEqual("error", auth_entry["usage_status"])
+                self.assertTrue(fake_response.closed)
+
+    def test_stream_framing_error_after_terminal_keeps_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            completed_meta: list[dict[str, Any]] = []
+            fake_response = FakeHTTPResponse(
+                status_code=200,
+                chunks=[
+                    b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000}}\n\n',
+                    b'data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"ok"}\n\n',
+                    b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n',
+                ],
+                stream_error=requests.exceptions.ChunkedEncodingError("trailing framing error"),
+            )
+
+            with ctx.flask_app.test_request_context("/v1/chat/completions"):
+                with patch("src.services.codex_proxy_service.requests.post", return_value=fake_response):
+                    response, status_code, failure = proxy_service.proxy_request(
+                        self._build_stream_request("openai_chat"),
+                        {},
+                        on_complete=lambda meta: completed_meta.append(dict(meta)),
+                        resolved_target_format="openai_chat",
+                    )
+                streamed = b"".join(response.response)  # type: ignore[union-attr]
+            auth_entry = oauth_service.list_auth_files()["files"][0]
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertEqual(1, streamed.count(b"data: [DONE]"))
+        self.assertNotIn(b"upstream_stream_error", streamed)
+        self.assertEqual(1, len(completed_meta))
+        self.assertEqual(3, completed_meta[0]["total_tokens"])
+        self.assertEqual("success", auth_entry["usage_status"])
+        self.assertTrue(fake_response.closed)
+
+    def test_stream_close_marks_client_cancelled_without_completion_or_auth_update(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            completed_meta: list[dict[str, Any]] = []
+            fake_response = FakeHTTPResponse(
+                status_code=200,
+                chunks=[
+                    b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000}}\n\n',
+                    b'data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"partial"}\n\n',
+                    b'data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"more"}\n\n',
+                ],
+            )
+
+            with ctx.flask_app.test_request_context("/v1/chat/completions"):
+                with patch("src.services.codex_proxy_service.requests.post", return_value=fake_response):
+                    response, status_code, failure = proxy_service.proxy_request(
+                        self._build_stream_request("openai_chat"),
+                        {},
+                        on_complete=lambda meta: completed_meta.append(dict(meta)),
+                        resolved_target_format="openai_chat",
+                    )
+                first_chunk = next(iter(response.response))  # type: ignore[union-attr]
+                response.close()  # type: ignore[union-attr]
+            auth_entry = oauth_service.list_auth_files()["files"][0]
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIn(b"partial", first_chunk)
+        self.assertEqual([], completed_meta)
+        self.assertEqual("unknown", auth_entry["usage_status"])
+        self.assertTrue(fake_response.closed)
+
     def test_stream_top_level_error_is_forwarded_and_marks_auth_file_failed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -711,6 +1089,7 @@ class CodexProxyServiceTests(unittest.TestCase):
             oauth_service = CodexOAuthService(ctx)
             oauth_service.add_model("gpt-5.4")
             proxy_service = CodexProxyService(ctx, oauth_service)
+            completed_meta: list[dict[str, Any]] = []
 
             def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
                 del url, headers, json, stream, timeout, kwargs
@@ -730,6 +1109,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                             "stream": True,
                         },
                         {},
+                        on_complete=lambda meta: completed_meta.append(dict(meta)),
                         resolved_target_format="openai_chat",
                     )
                 streamed = b"".join(response.response)  # type: ignore[union-attr]
@@ -742,6 +1122,28 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual("error", auth_entries["codex-first.json"]["usage_status"])
         self.assertEqual("too many tokens", auth_entries["codex-first.json"]["usage_status_message"])
         self.assertEqual("codex_stream_failed", auth_entries["codex-first.json"]["usage_error_type"])
+        self.assertEqual(1, len(completed_meta))
+
+    @staticmethod
+    def _build_stream_request(target_format: str) -> dict[str, Any]:
+        if target_format == "openai_responses":
+            return {
+                "model": "gpt-5.4",
+                "input": "hi",
+                "stream": True,
+            }
+        if target_format == "claude_chat":
+            return {
+                "model": "gpt-5.4",
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+                "max_tokens": 64,
+                "stream": True,
+            }
+        return {
+            "model": "gpt-5.4",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        }
 
 
 if __name__ == "__main__":

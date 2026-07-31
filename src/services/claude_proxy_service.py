@@ -11,7 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 import requests
-from flask import Response, stream_with_context
+from flask import Response
 
 from ..application.app_context import AppContext
 from ..proxy_core import (
@@ -208,28 +208,12 @@ class ClaudeProxyService:
                 exc.auto_confirm_error or "",
             )
             return None, CLAUDE_PROXY_WARNING_STATUS_CODE, self._build_proxy_warning_error(exc)
-        except requests.exceptions.RequestException as exc:
-            self._logger.error(
-                "Claude upstream request error: model=%s auth_file=%s error=%s",
-                model_name,
-                candidate.name,
-                exc,
-            )
-            self._claude_oauth_service.record_auth_file_failure(
-                candidate.name,
-                f"HTTP upstream request failed after 1 attempts: {exc}",
-                status_code=502,
-                error_type="upstream_request_failed",
-            )
-            return (
-                None,
-                502,
-                ProxyErrorInfo(
-                    message=f"HTTP upstream request failed after 1 attempts: {exc}",
-                    status_code=502,
-                    error_type="upstream_error",
-                    error_code="upstream_request_failed",
-                ),
+        except (requests.exceptions.RequestException, OSError) as exc:
+            return self._build_candidate_transport_failure(
+                candidate_name=candidate.name,
+                model_name=model_name,
+                exc=exc,
+                response_started=False,
             )
 
         if 300 <= upstream_response.status_code < 400:
@@ -277,8 +261,8 @@ class ClaudeProxyService:
             )
 
         if requested_stream:
-            return (
-                self._build_stream_response(
+            try:
+                stream_response = self._build_stream_response(
                     response=upstream_response,
                     translator=translator,
                     model_name=model_name,
@@ -289,22 +273,79 @@ class ClaudeProxyService:
                     route_name=route_name,
                     client_ip=client_ip,
                     auth_file_name=candidate.name,
-                ),
+                )
+            except (requests.exceptions.RequestException, OSError) as exc:
+                return self._build_candidate_transport_failure(
+                    candidate_name=candidate.name,
+                    model_name=model_name,
+                    exc=exc,
+                    response_started=True,
+                )
+            return (
+                stream_response,
                 upstream_response.status_code,
                 None,
             )
 
-        return self._build_nonstream_response(
-            response=upstream_response,
-            translator=translator,
-            model_name=model_name,
-            original_request=request_data,
-            translated_request=upstream_body,
-            target_format=target_format,
-            on_complete=on_complete,
-            route_name=route_name,
-            client_ip=client_ip,
-            auth_file_name=candidate.name,
+        try:
+            return self._build_nonstream_response(
+                response=upstream_response,
+                translator=translator,
+                model_name=model_name,
+                original_request=request_data,
+                translated_request=upstream_body,
+                target_format=target_format,
+                on_complete=on_complete,
+                route_name=route_name,
+                client_ip=client_ip,
+                auth_file_name=candidate.name,
+            )
+        except (requests.exceptions.RequestException, OSError) as exc:
+            return self._build_candidate_transport_failure(
+                candidate_name=candidate.name,
+                model_name=model_name,
+                exc=exc,
+                response_started=True,
+            )
+
+    def _build_candidate_transport_failure(
+        self,
+        *,
+        candidate_name: str,
+        model_name: str,
+        exc: BaseException,
+        response_started: bool,
+    ) -> tuple[None, int, ProxyErrorInfo]:
+        if response_started:
+            message = f"HTTP upstream response failed before downstream response started: {exc}"
+            auth_error_type = "claude_stream_failed"
+            log_context = "response"
+        else:
+            message = f"HTTP upstream request failed after 1 attempts: {exc}"
+            auth_error_type = "upstream_request_failed"
+            log_context = "request"
+        self._logger.error(
+            "Claude upstream %s error: model=%s auth_file=%s error=%s",
+            log_context,
+            model_name,
+            candidate_name,
+            exc,
+        )
+        self._claude_oauth_service.record_auth_file_failure(
+            candidate_name,
+            message,
+            status_code=502,
+            error_type=auth_error_type,
+        )
+        return (
+            None,
+            502,
+            ProxyErrorInfo(
+                message=message,
+                status_code=502,
+                error_type="upstream_error",
+                error_code="upstream_request_failed",
+            ),
         )
 
     @staticmethod
@@ -402,13 +443,54 @@ class ClaudeProxyService:
         downstream_headers = self._filter_response_headers(response.headers)
         downstream_headers["Content-Type"] = "text/event-stream; charset=utf-8"
         downstream_headers["Cache-Control"] = "no-cache"
+        downstream_started = False
+        downstream_cancelled = False
+
+        def mark_downstream_started() -> None:
+            nonlocal downstream_started
+            downstream_started = True
+
+        def mark_downstream_cancelled() -> None:
+            nonlocal downstream_cancelled
+            downstream_cancelled = True
 
         def generate() -> Iterator[bytes]:
+            nonlocal downstream_cancelled
             state: dict[str, Any] = {}
             meta = ProxyResponseBuilder._create_empty_meta()
             terminal_sent = False
             completed = False
-            stream_error_message = ""
+            upstream_error_message = ""
+            stream_failure_message = ""
+            transport_failed = False
+            processing_failed = False
+
+            def emit_stream_error(message: str, error_type: str) -> Iterator[bytes]:
+                nonlocal terminal_sent
+                response_model = str(meta.get("response_model") or model_name)
+                for error_chunk in ProxyResponseBuilder.build_stream_error_chunks(
+                    downstream_target_format=target_format,
+                    message=message,
+                    error_type=error_type,
+                    response_id=f"stream_error_{CLAUDE_PROVIDER_NAME}",
+                    response_model=response_model,
+                ):
+                    terminal_chunk = is_terminal_chunk(error_chunk, target_format)
+                    encoded_chunk = encode_downstream_chunk(error_chunk, target_format)
+                    if encoded_chunk:
+                        if terminal_chunk:
+                            terminal_sent = True
+                        yield encoded_chunk
+
+            def emit_chat_terminal_if_needed() -> Iterator[bytes]:
+                nonlocal terminal_sent
+                if not should_emit_terminal_chunk(target_format) or terminal_sent:
+                    return
+                encoded_chunk = encode_downstream_chunk(DownstreamChunk(kind="done"), target_format)
+                if encoded_chunk:
+                    terminal_sent = True
+                    yield encoded_chunk
+
             try:
                 for event in decode_stream_events(response.iter_content(chunk_size=None), "sse_json"):
                     if event.kind == "json" and isinstance(event.payload, dict):
@@ -416,7 +498,7 @@ class ClaudeProxyService:
                         if event_type == "message_stop":
                             completed = True
                         elif event_type == "error":
-                            stream_error_message = self._extract_stream_error_message(event.payload)
+                            upstream_error_message = self._extract_stream_error_message(event.payload)
                     chunks = translator.translate_stream_event(
                         model_name,
                         original_request,
@@ -426,45 +508,118 @@ class ClaudeProxyService:
                     )
                     ProxyResponseBuilder._update_meta_from_stream_state(meta, state)
                     for chunk in chunks:
+                        terminal_chunk = chunk.kind == "done" or is_terminal_chunk(chunk, target_format)
                         if chunk.kind == "done":
                             if terminal_sent:
                                 continue
-                            terminal_sent = True
-                        elif is_terminal_chunk(chunk, target_format):
-                            terminal_sent = True
+                        if terminal_chunk and not completed and not upstream_error_message:
+                            continue
 
                         if chunk.kind == "json" and isinstance(chunk.payload, dict):
                             ProxyResponseBuilder._update_meta_from_payload(meta, chunk.payload)
                         encoded = encode_downstream_chunk(chunk, target_format)
                         if encoded:
+                            if terminal_chunk:
+                                terminal_sent = True
                             yield encoded
-
-                if should_emit_terminal_chunk(target_format) and not terminal_sent:
-                    yield encode_downstream_chunk(DownstreamChunk(kind="done"), target_format)
-            except Exception as exc:
-                stream_error_message = str(exc)
+            except GeneratorExit:
+                downstream_cancelled = True
                 raise
+            except (requests.exceptions.RequestException, OSError) as exc:
+                if terminal_sent or completed:
+                    self._logger.warning(
+                        "Claude upstream framing error ignored after terminal event: model=%s auth_file=%s error=%s",
+                        model_name,
+                        auth_file_name,
+                        exc,
+                    )
+                    yield from emit_chat_terminal_if_needed()
+                    return
+                if upstream_error_message:
+                    self._logger.warning(
+                        "Claude upstream framing error ignored after upstream error event: "
+                        "model=%s auth_file=%s error=%s",
+                        model_name,
+                        auth_file_name,
+                        exc,
+                    )
+                    yield from emit_chat_terminal_if_needed()
+                    return
+                transport_failed = True
+                stream_failure_message = str(exc)
+                if not downstream_started:
+                    raise
+                self._logger.error(
+                    "Claude streamed upstream transport error: model=%s auth_file=%s error=%s",
+                    model_name,
+                    auth_file_name,
+                    exc,
+                )
+                yield from emit_stream_error(
+                    "Upstream stream interrupted",
+                    "upstream_stream_error",
+                )
+            except Exception as exc:
+                processing_failed = True
+                stream_failure_message = str(exc)
+                raise
+            else:
+                if not completed and not upstream_error_message:
+                    transport_failed = True
+                    stream_failure_message = "Claude stream closed before message_stop"
+                    if not downstream_started:
+                        raise requests.exceptions.ChunkedEncodingError(stream_failure_message)
+                    self._logger.error(
+                        "Claude upstream stream ended before terminal event: model=%s auth_file=%s",
+                        model_name,
+                        auth_file_name,
+                    )
+                    yield from emit_stream_error(
+                        "Upstream stream interrupted",
+                        "upstream_stream_error",
+                    )
+                elif should_emit_terminal_chunk(target_format) and not terminal_sent:
+                    yield from emit_chat_terminal_if_needed()
             finally:
-                response.close()
-                if stream_error_message:
+                try:
+                    response.close()
+                except Exception as exc:
+                    self._logger.error("Error closing Claude upstream stream response: %s", exc)
+                if downstream_cancelled and not transport_failed and not processing_failed:
+                    pass
+                elif stream_failure_message and (downstream_started or processing_failed):
                     self._claude_oauth_service.record_auth_file_failure(
                         auth_file_name,
-                        stream_error_message,
+                        stream_failure_message,
+                        status_code=502,
+                        error_type="claude_stream_failed",
+                    )
+                elif upstream_error_message:
+                    self._claude_oauth_service.record_auth_file_failure(
+                        auth_file_name,
+                        upstream_error_message,
                         status_code=502,
                         error_type="claude_stream_failed",
                     )
                 elif completed:
                     self._claude_oauth_service.record_auth_file_success(auth_file_name)
-                if on_complete is not None:
+                if (
+                    on_complete is not None
+                    and not downstream_cancelled
+                    and not transport_failed
+                    and not processing_failed
+                ):
                     try:
                         on_complete(meta)
                     except Exception as exc:
                         self._logger.error("Error in Claude on_complete callback: %s", exc)
 
-        return Response(
-            stream_with_context(generate()),
-            status=response.status_code,
+        return ProxyResponseBuilder.create_streaming_response(
+            generate(),
+            status_code=response.status_code,
             headers=downstream_headers,
+            on_started=mark_downstream_started,
+            on_cancelled=mark_downstream_cancelled,
         )
 
     def _build_nonstream_response(
