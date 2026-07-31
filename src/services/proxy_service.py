@@ -394,8 +394,10 @@ class ProxyService:
                         client_ip=client_ip,
                     )
 
+                log_message = "Upstream response opened" if opened.is_stream else "Upstream request completed"
                 self._logger.info(
-                    "Upstream request completed: provider=%s transport=%s source=%s target=%s status=%s stream=%s",
+                    "%s: provider=%s transport=%s source=%s target=%s status=%s stream=%s",
+                    log_message,
                     provider.name,
                     provider.transport,
                     provider.source_format,

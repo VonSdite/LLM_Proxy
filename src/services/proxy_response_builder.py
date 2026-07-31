@@ -27,6 +27,52 @@ from ..translators import Translator
 from .proxy_trace_logger import ProxyTraceLogger
 
 
+class _PrefetchedStreamIterator:
+    """保存预取首块，并在下游首次拉取数据时标记流已提交。"""
+
+    def __init__(
+        self,
+        first_chunk: bytes | None,
+        stream: Iterator[bytes],
+        on_started: Callable[[], None],
+        on_cancelled: Callable[[], None],
+    ) -> None:
+        self._first_chunk = first_chunk
+        self._stream = stream
+        self._on_started = on_started
+        self._on_cancelled = on_cancelled
+        self._closed = False
+        self._exhausted = False
+
+    def __iter__(self) -> _PrefetchedStreamIterator:
+        return self
+
+    def __next__(self) -> bytes:
+        if self._closed:
+            raise StopIteration
+        try:
+            if self._first_chunk is not None:
+                chunk = self._first_chunk
+                self._first_chunk = None
+            else:
+                chunk = next(self._stream)
+        except StopIteration:
+            self._exhausted = True
+            raise
+        self._on_started()
+        return chunk
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if not self._exhausted:
+            self._on_cancelled()
+        close = getattr(self._stream, "close", None)
+        if callable(close):
+            close()
+
+
 class ProxyResponseBuilder:
     """负责把上游响应转换为下游响应。"""
 
@@ -42,6 +88,38 @@ class ProxyResponseBuilder:
         self._trace = trace
         self._filter_response_headers = filter_response_headers
         self._extend_trace_buffer = extend_trace_buffer
+
+    @staticmethod
+    def create_streaming_response(
+        stream: Iterator[bytes],
+        *,
+        status_code: int,
+        headers: dict[str, str],
+        on_started: Callable[[], None],
+        on_cancelled: Callable[[], None] | None = None,
+    ) -> Response:
+        """预取首个下游块，并创建具备关闭传递能力的流式响应。"""
+        try:
+            first_chunk = next(stream)
+        except StopIteration:
+            first_chunk = None
+        response_stream = _PrefetchedStreamIterator(
+            first_chunk,
+            stream,
+            on_started,
+            on_cancelled or (lambda: None),
+        )
+        try:
+            response = Response(
+                stream_with_context(response_stream),
+                status=status_code,
+                headers=headers,
+            )
+        except BaseException:
+            response_stream.close()
+            raise
+        response.call_on_close(response_stream.close)
+        return response
 
     def build_stream_response(
         self,
@@ -64,6 +142,8 @@ class ProxyResponseBuilder:
         meta = self._create_empty_meta()
         completed = False
         terminal_sent = False
+        downstream_started = False
+        downstream_cancelled = False
         trace_enabled = self._trace.is_enabled(trace_id)
         raw_response_headers = dict(getattr(response, "headers", {}) or {})
         upstream_payload_buffer = bytearray() if trace_enabled else None
@@ -72,8 +152,17 @@ class ProxyResponseBuilder:
         downstream_headers["Content-Type"] = "text/event-stream; charset=utf-8"
         downstream_headers["Cache-Control"] = "no-cache"
 
+        def mark_downstream_started() -> None:
+            nonlocal downstream_started
+            downstream_started = True
+
+        def mark_downstream_cancelled() -> None:
+            nonlocal downstream_cancelled
+            downstream_cancelled = True
+
         def safe_on_complete(
             *,
+            outcome: str,
             error_type: HookErrorType | None = None,
             error_message: str | None = None,
             hook_abort: HookAbortError | None = None,
@@ -83,22 +172,27 @@ class ProxyResponseBuilder:
                 return
             completed = True
             if finalize_attempt is not None:
-                if hook_abort is not None:
-                    if meta.get("response_model") is None:
-                        meta["response_model"] = request_ctx.upstream_model or request_ctx.request_model
-                    finalize_attempt(
-                        status_code=opened.status_code,
-                        error_message=hook_abort.message,
-                        usage=meta,
-                    )
-                else:
-                    finalize_attempt(
-                        status_code=(opened.status_code if error_type is None else None),
-                        error_type=error_type,
-                        error_message=error_message,
-                        usage=(meta if error_type is None else None),
-                    )
-            if on_complete and (error_type is None or hook_abort is not None):
+                try:
+                    if hook_abort is not None:
+                        if meta.get("response_model") is None:
+                            meta["response_model"] = request_ctx.upstream_model or request_ctx.request_model
+                        finalize_attempt(
+                            status_code=opened.status_code,
+                            error_message=hook_abort.message,
+                            usage=meta,
+                        )
+                    elif outcome == "success":
+                        finalize_attempt(status_code=opened.status_code, usage=meta)
+                    elif error_type is not None:
+                        finalize_attempt(
+                            error_type=error_type,
+                            error_message=error_message,
+                        )
+                    else:
+                        finalize_attempt()
+                except Exception as exc:
+                    self._logger.error("Error finalizing upstream stream attempt: %s", exc)
+            if on_complete and (outcome == "success" or hook_abort is not None):
                 try:
                     on_complete(meta)
                 except Exception as exc:
@@ -111,6 +205,7 @@ class ProxyResponseBuilder:
             completion_trace_error_type: str | None = None
             completion_error_message: str | None = None
             completion_hook_abort: HookAbortError | None = None
+            completion_outcome = "pending"
 
             def emit_downstream_chunks(downstream_chunks: list[DownstreamChunk]) -> Iterator[bytes]:
                 nonlocal terminal_sent
@@ -118,15 +213,16 @@ class ProxyResponseBuilder:
                     guarded_chunk = self._guard_stream_chunk(provider, request_ctx, downstream_chunk)
                     if guarded_chunk is None:
                         continue
+                    terminal_chunk = is_terminal_chunk(guarded_chunk, downstream_target_format)
                     terminal_already_sent = terminal_sent
-                    if is_terminal_chunk(guarded_chunk, downstream_target_format):
-                        terminal_sent = True
                     if guarded_chunk.kind == "done":
                         if terminal_already_sent:
                             continue
                         encoded_terminal = encode_downstream_chunk(guarded_chunk, downstream_target_format)
                         if encoded_terminal:
                             self._extend_trace_buffer(downstream_payload_buffer, encoded_terminal)
+                            if terminal_chunk:
+                                terminal_sent = True
                             yield encoded_terminal
                         continue
                     if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
@@ -141,6 +237,25 @@ class ProxyResponseBuilder:
                     encoded_chunk = encode_downstream_chunk(guarded_chunk, downstream_target_format)
                     if encoded_chunk:
                         self._extend_trace_buffer(downstream_payload_buffer, encoded_chunk)
+                        if terminal_chunk:
+                            terminal_sent = True
+                        yield encoded_chunk
+
+            def emit_stream_error(message: str, error_type: str) -> Iterator[bytes]:
+                nonlocal terminal_sent
+                for error_chunk in self.build_stream_error_chunks(
+                    downstream_target_format=downstream_target_format,
+                    message=message,
+                    error_type=error_type,
+                    response_id=f"stream_error_{provider.name}",
+                    response_model=request_ctx.upstream_model or request_ctx.request_model,
+                ):
+                    terminal_chunk = is_terminal_chunk(error_chunk, downstream_target_format)
+                    encoded_chunk = encode_downstream_chunk(error_chunk, downstream_target_format)
+                    if encoded_chunk:
+                        self._extend_trace_buffer(downstream_payload_buffer, encoded_chunk)
+                        if terminal_chunk:
+                            terminal_sent = True
                         yield encoded_chunk
 
             try:
@@ -172,7 +287,9 @@ class ProxyResponseBuilder:
 
                 if should_emit_terminal_chunk(downstream_target_format) and not terminal_sent:
                     yield from emit_downstream_chunks([DownstreamChunk(kind="done")])
+                completion_outcome = "success"
             except HookAbortError as exc:
+                completion_outcome = "hook_abort"
                 completion_hook_abort = exc
                 completion_error_message = exc.message
                 completion_trace_error_type = exc.error_type
@@ -183,40 +300,142 @@ class ProxyResponseBuilder:
                     exc.status_code,
                     exc.message,
                 )
-                for abort_chunk in self._build_stream_hook_abort_chunks(
-                    request_ctx=request_ctx,
+                for abort_chunk in self.build_stream_error_chunks(
                     downstream_target_format=downstream_target_format,
                     message=exc.message,
                     error_type=exc.error_type,
+                    response_id=f"hook_abort_{request_ctx.provider_name}",
+                    response_model=request_ctx.upstream_model or request_ctx.request_model,
                 ):
-                    if is_terminal_chunk(abort_chunk, downstream_target_format):
-                        terminal_sent = True
+                    terminal_chunk = is_terminal_chunk(abort_chunk, downstream_target_format)
                     encoded_chunk = encode_downstream_chunk(abort_chunk, downstream_target_format)
                     if encoded_chunk:
                         self._extend_trace_buffer(downstream_payload_buffer, encoded_chunk)
+                        if terminal_chunk:
+                            terminal_sent = True
                         yield encoded_chunk
             except requests.exceptions.RequestException as exc:
+                completion_outcome = "upstream_error"
                 completion_error_type = self._classify_request_error(exc)
                 completion_trace_error_type = completion_error_type.value
                 completion_error_message = str(exc)
-                self._logger.error("Streamed HTTP upstream error: provider=%s error=%s", provider.name, exc)
-                raise
+                if not downstream_started:
+                    raise
+                if terminal_sent:
+                    completion_outcome = "success"
+                    completion_error_type = None
+                    completion_trace_error_type = None
+                    completion_error_message = None
+                    self._logger.warning(
+                        "Upstream HTTP framing error ignored after terminal event: provider=%s route=%s "
+                        "model=%s error=%s",
+                        provider.name,
+                        route_name or "<none>",
+                        request_ctx.request_model,
+                        exc,
+                    )
+                    return
+                self._logger.error(
+                    "Streamed HTTP upstream error: provider=%s route=%s model=%s attempt=%s "
+                    "downstream_started=true error=%s",
+                    provider.name,
+                    route_name or "<none>",
+                    request_ctx.request_model,
+                    request_ctx.retry + 1,
+                    exc,
+                )
+                if not terminal_sent:
+                    yield from emit_stream_error(
+                        "Upstream stream interrupted",
+                        "upstream_stream_error",
+                    )
             except OSError as exc:
+                completion_outcome = "upstream_error"
                 completion_error_type = HookErrorType.TRANSPORT_ERROR
                 completion_trace_error_type = completion_error_type.value
                 completion_error_message = str(exc)
-                self._logger.error("Streamed HTTP upstream error: provider=%s error=%s", provider.name, exc)
+                if not downstream_started:
+                    raise
+                if terminal_sent:
+                    completion_outcome = "success"
+                    completion_error_type = None
+                    completion_trace_error_type = None
+                    completion_error_message = None
+                    self._logger.warning(
+                        "Upstream socket error ignored after terminal event: provider=%s route=%s model=%s error=%s",
+                        provider.name,
+                        route_name or "<none>",
+                        request_ctx.request_model,
+                        exc,
+                    )
+                    return
+                self._logger.error(
+                    "Streamed HTTP upstream error: provider=%s route=%s model=%s attempt=%s "
+                    "downstream_started=true error=%s",
+                    provider.name,
+                    route_name or "<none>",
+                    request_ctx.request_model,
+                    request_ctx.retry + 1,
+                    exc,
+                )
+                if not terminal_sent:
+                    yield from emit_stream_error(
+                        "Upstream stream interrupted",
+                        "upstream_stream_error",
+                    )
+            except GeneratorExit:
+                completion_outcome = "client_cancelled"
+                completion_trace_error_type = "client_cancelled"
+                completion_error_message = "Downstream client cancelled the stream"
                 raise
             except Exception as exc:
-                completion_error_type = HookErrorType.TRANSPORT_ERROR
-                completion_trace_error_type = completion_error_type.value
+                completion_outcome = "processing_error"
+                completion_trace_error_type = "stream_processing_error"
                 completion_error_message = str(exc)
-                self._logger.error("Streamed upstream processing error: provider=%s error=%s", provider.name, exc)
-                raise
+                if not downstream_started:
+                    raise
+                if terminal_sent:
+                    completion_outcome = "success"
+                    completion_error_type = None
+                    completion_trace_error_type = None
+                    completion_error_message = None
+                    self._logger.warning(
+                        "Upstream processing error ignored after terminal event: provider=%s route=%s "
+                        "model=%s error=%s",
+                        provider.name,
+                        route_name or "<none>",
+                        request_ctx.request_model,
+                        exc,
+                    )
+                    return
+                self._logger.error(
+                    "Streamed upstream processing error: provider=%s route=%s model=%s attempt=%s error=%s",
+                    provider.name,
+                    route_name or "<none>",
+                    request_ctx.request_model,
+                    request_ctx.retry + 1,
+                    exc,
+                )
+                if not terminal_sent:
+                    yield from emit_stream_error(
+                        "Upstream stream processing failed",
+                        "upstream_stream_processing_error",
+                    )
             finally:
+                if downstream_cancelled and completion_outcome not in {
+                    "upstream_error",
+                    "processing_error",
+                }:
+                    completion_outcome = "client_cancelled"
+                    completion_error_type = None
+                    completion_trace_error_type = "client_cancelled"
+                    completion_error_message = "Downstream client cancelled the stream"
+                    completion_hook_abort = None
                 try:
                     response.close()
-                finally:
+                except Exception as exc:
+                    self._logger.error("Error closing upstream stream response: %s", exc)
+                try:
                     if trace_enabled:
                         self._trace.log_entry(
                             stage="upstream_response",
@@ -235,7 +454,7 @@ class ProxyResponseBuilder:
                             target_format=downstream_target_format,
                             status_code=opened.status_code,
                             stream=True,
-                            completed=completion_trace_error_type is None,
+                            completed=completion_outcome == "success",
                             error_type=completion_trace_error_type,
                         )
                         self._trace.log_entry(
@@ -252,19 +471,39 @@ class ProxyResponseBuilder:
                             target_format=downstream_target_format,
                             status_code=opened.status_code,
                             stream=True,
-                            completed=completion_trace_error_type is None,
+                            completed=completion_outcome == "success",
                             error_type=completion_trace_error_type,
                         )
-                    safe_on_complete(
-                        error_type=completion_error_type,
-                        error_message=completion_error_message,
-                        hook_abort=completion_hook_abort,
+                except Exception as exc:
+                    self._logger.error("Error writing upstream stream trace: %s", exc)
+                if completion_outcome == "success":
+                    self._logger.info(
+                        "Upstream stream completed: provider=%s route=%s model=%s status=%s",
+                        provider.name,
+                        route_name or "<none>",
+                        request_ctx.request_model,
+                        opened.status_code,
                     )
+                elif completion_outcome == "client_cancelled":
+                    self._logger.info(
+                        "Downstream stream cancelled: provider=%s route=%s model=%s",
+                        provider.name,
+                        route_name or "<none>",
+                        request_ctx.request_model,
+                    )
+                safe_on_complete(
+                    outcome=completion_outcome,
+                    error_type=completion_error_type,
+                    error_message=completion_error_message,
+                    hook_abort=completion_hook_abort,
+                )
 
-        return Response(
-            stream_with_context(generate()),
-            status=opened.status_code,
+        return self.create_streaming_response(
+            generate(),
+            status_code=opened.status_code,
             headers=downstream_headers,
+            on_started=mark_downstream_started,
+            on_cancelled=mark_downstream_cancelled,
         )
 
     def build_nonstream_response(
@@ -473,12 +712,13 @@ class ProxyResponseBuilder:
         return DownstreamChunk(kind="text", payload=payload, event=chunk.event)
 
     @staticmethod
-    def _build_stream_hook_abort_chunks(
+    def build_stream_error_chunks(
         *,
-        request_ctx: HookContext,
         downstream_target_format: str,
         message: str,
         error_type: str,
+        response_id: str,
+        response_model: str,
     ) -> list[DownstreamChunk]:
         normalized_target_format = str(downstream_target_format or "").strip().lower()
         if normalized_target_format == "claude_chat":
@@ -503,7 +743,7 @@ class ProxyResponseBuilder:
                     payload={
                         "type": "response.failed",
                         "response": {
-                            "id": f"hook_abort_{request_ctx.provider_name}",
+                            "id": response_id,
                             "object": "response",
                             "status": "failed",
                             "error": {
@@ -511,7 +751,7 @@ class ProxyResponseBuilder:
                                 "type": error_type,
                                 "code": error_type,
                             },
-                            "model": request_ctx.upstream_model or request_ctx.request_model,
+                            "model": response_model,
                         },
                     },
                 )

@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+import requests
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -64,6 +65,30 @@ class FakeStreamResponse:
         self.closed = True
 
 
+class FailingStreamResponse(FakeStreamResponse):
+    def __init__(
+        self,
+        chunks,
+        *,
+        fail_after_chunks: int,
+        error: Exception | None = None,
+        content_type: str = "text/event-stream",
+        status_code: int = 200,
+    ) -> None:
+        super().__init__(chunks, content_type=content_type, status_code=status_code)
+        self._fail_after_chunks = fail_after_chunks
+        self._error = error or requests.exceptions.ChunkedEncodingError("simulated incomplete chunk")
+
+    def iter_content(self, chunk_size=None):
+        del chunk_size
+        for index, chunk in enumerate(self._chunks):
+            if index == self._fail_after_chunks:
+                raise self._error
+            yield chunk
+        if self._fail_after_chunks >= len(self._chunks):
+            raise self._error
+
+
 class AbortOnResponseHook(BaseHook):
     def __init__(self, *, message: str, status_code: int, error_type: str) -> None:
         self._message = message
@@ -77,6 +102,16 @@ class AbortOnResponseHook(BaseHook):
             status_code=self._status_code,
             error_type=self._error_type,
         )
+
+
+class UnserializableTerminalHook(BaseHook):
+    def response_guard(self, ctx: Any, body: Any) -> Any:
+        del ctx
+        if isinstance(body, dict) and body.get("type") == "response.completed":
+            changed = dict(body)
+            changed["invalid"] = {"not-json-serializable"}
+            return changed
+        return body
 
 
 class RewriteRequestModelHook(BaseHook):
@@ -1367,6 +1402,356 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(200, status_code)
         self.assertIn(b"Hello", stream_body)
         self.assertEqual(b"".join(upstream_chunks), upstream_trace["payload"])
+
+    def test_stream_transport_error_before_first_downstream_chunk_retries(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=2,
+        )
+        failed_response = FailingStreamResponse(
+            [
+                b'data: {"id":"chatcmpl_usage","object":"chat.completion.chunk","created":123,'
+                b'"model":"gpt-4.1","choices":[],"usage":{"prompt_tokens":1,'
+                b'"completion_tokens":0,"total_tokens":1}}\n\n'
+            ],
+            fail_after_chunks=1,
+        )
+        success_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":123,'
+                b'"model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"retried"},'
+                b'"finish_reason":null}]}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+        responses = iter((failed_response, success_response))
+        open_calls = 0
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            nonlocal open_calls
+            del provider_arg, headers, body, args, kwargs
+            open_calls += 1
+            response = next(responses)
+            return OpenedUpstreamResponse(
+                response=response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+            )
+            self.assertEqual(2, open_calls)
+            self.assertTrue(failed_response.closed)
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(b"retried", stream_body)
+        self.assertNotIn(b"upstream_stream_error", stream_body)
+        self.assertTrue(success_response.closed)
+
+    def test_stream_transport_error_after_commit_emits_protocol_error(self) -> None:
+        upstream_chunk = (
+            b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":123,'
+            b'"model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"partial"},'
+            b'"finish_reason":null}]}\n\n'
+        )
+        cases = (
+            (
+                "openai_chat",
+                "/v1/chat/completions",
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                b"upstream_stream_error",
+                True,
+            ),
+            (
+                "openai_responses",
+                "/v1/responses",
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "input": "Hello",
+                    "stream": True,
+                },
+                b"event: response.failed",
+                False,
+            ),
+            (
+                "claude_chat",
+                "/v1/messages",
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "max_tokens": 256,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                b"event: error",
+                False,
+            ),
+        )
+
+        for target_format, route, request_body, expected_error, expects_done in cases:
+            with self.subTest(target_format=target_format):
+                app, service = self._build_service()
+                provider = LLMProvider(
+                    name="chat-upstream",
+                    api="https://example.com/v1/chat/completions",
+                    transport="http",
+                    source_format="openai_chat",
+                    target_formats=(target_format,),
+                    model_list=("gpt-4.1",),
+                    max_retries=3,
+                )
+                failed_response = FailingStreamResponse([upstream_chunk], fail_after_chunks=1)
+                open_calls = 0
+                completed_meta: list[dict[str, Any]] = []
+
+                def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+                    nonlocal open_calls
+                    del provider_arg, headers, body, args, kwargs
+                    open_calls += 1
+                    return OpenedUpstreamResponse(
+                        response=failed_response,
+                        status_code=200,
+                        content_type="text/event-stream",
+                        is_stream=True,
+                        stream_format="sse_json",
+                    )
+
+                service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+                with app.test_request_context(route):
+                    response, status_code, failure_info = service.proxy_request(
+                        provider,
+                        request_body,
+                        {},
+                        on_complete=completed_meta.append,
+                        resolved_target_format=target_format,
+                    )
+                    stream_body = self._collect_response_body(response)
+
+                self.assertIsNone(failure_info)
+                self.assertEqual(200, status_code)
+                self.assertEqual(1, open_calls)
+                self.assertIn(b"partial", stream_body)
+                self.assertIn(expected_error, stream_body)
+                self.assertEqual(1 if expects_done else 0, stream_body.count(b"data: [DONE]"))
+                self.assertEqual([], completed_meta)
+                self.assertTrue(failed_response.closed)
+
+    def test_stream_client_cancel_does_not_call_completion_callback(self) -> None:
+        app, service = self._build_service(llm_request_debug_enabled=True)
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"model":"gpt-4.1","choices":[{"delta":{"content":"first"}}]}\n\n',
+                b'data: {"model":"gpt-4.1","choices":[{"delta":{"content":"second"}}]}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+        service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+            response=fake_response,
+            status_code=200,
+            content_type="text/event-stream",
+            is_stream=True,
+            stream_format="sse_json",
+        )
+        completed_meta: list[dict[str, Any]] = []
+        trace_entries: list[dict[str, Any]] = []
+        service._trace.log_entry = lambda **kwargs: trace_entries.append(kwargs)  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, _, _ = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+                on_complete=completed_meta.append,
+                trace_id="cancelled-trace",
+            )
+            assert response is not None
+            first_chunk = next(iter(response.response))
+            response.close()
+
+        self.assertIn(b"first", first_chunk)
+        self.assertEqual([], completed_meta)
+        self.assertTrue(fake_response.closed)
+        response_traces = [
+            entry for entry in trace_entries if entry["stage"] in {"upstream_response", "downstream_response"}
+        ]
+        self.assertEqual(2, len(response_traces))
+        self.assertTrue(all(entry["completed"] is False for entry in response_traces))
+        self.assertTrue(all(entry["error_type"] == "client_cancelled" for entry in response_traces))
+
+    def test_stream_close_before_first_iteration_closes_prefetched_upstream(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        fake_response = FakeStreamResponse([b'data: {"model":"gpt-4.1","choices":[{"delta":{"content":"first"}}]}\n\n'])
+        service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+            response=fake_response,
+            status_code=200,
+            content_type="text/event-stream",
+            is_stream=True,
+            stream_format="sse_json",
+        )
+        completed_meta: list[dict[str, Any]] = []
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, _, _ = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+                on_complete=completed_meta.append,
+            )
+            assert response is not None
+            response.close()
+
+        self.assertEqual([], completed_meta)
+        self.assertTrue(fake_response.closed)
+
+    def test_stream_framing_error_after_terminal_keeps_success(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        fake_response = FailingStreamResponse(
+            [
+                b'data: {"model":"gpt-4.1","choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\n',
+                b"data: [DONE]\n\n",
+            ],
+            fail_after_chunks=2,
+        )
+        service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+            response=fake_response,
+            status_code=200,
+            content_type="text/event-stream",
+            is_stream=True,
+            stream_format="sse_json",
+        )
+        completed_meta: list[dict[str, Any]] = []
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+                on_complete=completed_meta.append,
+            )
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual(1, stream_body.count(b"data: [DONE]"))
+        self.assertNotIn(b"upstream_stream_error", stream_body)
+        self.assertEqual(1, len(completed_meta))
+        self.assertTrue(fake_response.closed)
+
+    def test_stream_terminal_encoding_error_emits_processing_failure(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            transport="http",
+            source_format="openai_chat",
+            target_formats=("openai_responses",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            hook=UnserializableTerminalHook(),
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":123,'
+                b'"model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"hi"},'
+                b'"finish_reason":null}]}\n\n',
+                b'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":123,'
+                b'"model":"gpt-4.1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+        service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+            response=fake_response,
+            status_code=200,
+            content_type="text/event-stream",
+            is_stream=True,
+            stream_format="sse_json",
+        )
+        completed_meta: list[dict[str, Any]] = []
+
+        with app.test_request_context("/v1/responses"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "input": "Hello",
+                    "stream": True,
+                },
+                {},
+                on_complete=completed_meta.append,
+                resolved_target_format="openai_responses",
+            )
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(b"event: response.failed", stream_body)
+        self.assertIn(b"upstream_stream_processing_error", stream_body)
+        self.assertNotIn(b"event: response.completed", stream_body)
+        self.assertEqual([], completed_meta)
+        self.assertTrue(fake_response.closed)
 
     def test_stream_hook_abort_emits_openai_chat_error_chunk_and_done(self) -> None:
         app, service = self._build_service()
