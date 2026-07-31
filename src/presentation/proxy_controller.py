@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Iterable, Sequence
 from typing import Any, Protocol
 from uuid import uuid4
@@ -43,7 +44,19 @@ class CodexProxyServiceLike(Protocol):
 
     def list_model_names(self) -> Iterable[str]: ...
 
+    def has_image_model(self, model_name: str) -> bool: ...
+
+    def list_image_model_names(self) -> Iterable[str]: ...
+
+    def get_default_image_model(self) -> str: ...
+
     def proxy_request(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]: ...
+
+    def proxy_image_request(
         self,
         *args: Any,
         **kwargs: Any,
@@ -227,6 +240,8 @@ class ProxyController:
         self._app.route("/v1/chat/completions", methods=["POST"])(self.chat_completions)
         self._app.route("/v1/responses", methods=["POST"])(self.responses)
         self._app.route("/v1/messages", methods=["POST"])(self.messages)
+        self._app.route("/v1/images/generations", methods=["POST"])(self.images_generations)
+        self._app.route("/v1/images/edits", methods=["POST"])(self.images_edits)
         self._app.route("/v1/models", methods=["GET"])(self.list_models)
 
     def _get_user_by_ip(self, ip_address: str) -> dict[str, Any] | None:
@@ -422,6 +437,7 @@ class ProxyController:
         if self._codex_proxy_service is not None:
             try:
                 codex_models = list(self._codex_proxy_service.list_model_names())
+                codex_models.extend(self._codex_proxy_service.list_image_model_names())
             except Exception as exc:
                 self._logger.warning("Codex model list skipped: error=%s", exc)
         claude_models: list[str] = []
@@ -452,6 +468,216 @@ class ProxyController:
             target_format="claude_chat",
             inspect_stream_usage=False,
         )
+
+    def images_generations(self) -> ResponseReturnValue:
+        return self._proxy_image_request(
+            route_name="images_generations",
+            action="generate",
+        )
+
+    def images_edits(self) -> ResponseReturnValue:
+        return self._proxy_image_request(
+            route_name="images_edits",
+            action="edit",
+        )
+
+    def _proxy_image_request(
+        self,
+        *,
+        route_name: str,
+        action: str,
+    ) -> ResponseReturnValue:
+        client_ip = self._get_request_client_ip()
+        trace_id: str | None = None
+        model_name: str | None = None
+        provider_name = CODEX_PROVIDER_NAME
+        target_format = "openai_images"
+        try:
+            self._logger.info("Proxy image request received: route=%s ip=%s", route_name, client_ip)
+            user, denial_response = self._get_authorized_user_for_request(
+                client_ip,
+                error_format="openai_chat",
+            )
+            if denial_response is not None:
+                return denial_response
+            api_key, denial_response = self._get_authorized_api_key_for_request(
+                error_format="openai_chat",
+            )
+            if denial_response is not None:
+                return denial_response
+            if self._codex_proxy_service is None:
+                return self._error_response(
+                    "Codex OAuth image generation is not configured",
+                    503,
+                    error_type="upstream_error",
+                    code="codex_proxy_unavailable",
+                    error_format="openai_chat",
+                    provider_name=provider_name,
+                    target_format=target_format,
+                )
+
+            request_data = self._read_image_request_data(action)
+            model_name = str(request_data.get("model") or "").strip()
+            if not model_name:
+                model_name = self._codex_proxy_service.get_default_image_model()
+                if model_name:
+                    request_data["model"] = model_name
+            if not model_name:
+                return self._error_response(
+                    "Missing image model",
+                    400,
+                    error_type="invalid_request_error",
+                    code="missing_model",
+                    error_format="openai_chat",
+                    provider_name=provider_name,
+                    target_format=target_format,
+                )
+            if not self._codex_proxy_service.has_image_model(model_name):
+                return self._error_response(
+                    f"Unknown image model: {model_name}",
+                    400,
+                    error_type="invalid_request_error",
+                    code="unknown_model",
+                    error_format="openai_chat",
+                    provider_name=provider_name,
+                    request_model=model_name,
+                    target_format=target_format,
+                )
+
+            available_model_names = tuple(sorted(dict.fromkeys([*self._list_available_model_names(), model_name])))
+            if self._is_whitelist_required() and not self._user_service.can_user_access_model(
+                user,
+                model_name,
+                available_models=available_model_names,
+            ):
+                return self._error_response(
+                    f"IP address {client_ip} is not allowed to access model {model_name}",
+                    403,
+                    error_type="permission_error",
+                    code="model_not_allowed",
+                    error_format="openai_chat",
+                    provider_name=provider_name,
+                    request_model=model_name,
+                    target_format=target_format,
+                )
+            if self._is_api_key_required() and not self._api_key_service.can_api_key_access_model(
+                api_key,
+                model_name,
+                available_models=available_model_names,
+            ):
+                return self._error_response(
+                    f"API key is not allowed to access model {model_name}",
+                    403,
+                    error_type="permission_error",
+                    code="api_key_model_not_allowed",
+                    error_format="openai_chat",
+                    provider_name=provider_name,
+                    request_model=model_name,
+                    target_format=target_format,
+                )
+            if self._is_api_key_required() and self._api_key_service.is_token_limit_exceeded(api_key):
+                return self._error_response(
+                    "API key token limit exceeded",
+                    429,
+                    error_type="rate_limit_error",
+                    code="api_key_token_limit_exceeded",
+                    error_format="openai_chat",
+                    provider_name=provider_name,
+                    request_model=model_name,
+                    target_format=target_format,
+                )
+
+            trace_id = uuid4().hex
+            self._log_downstream_request_trace_safe(
+                trace_id=trace_id,
+                start_line=self._build_request_start_line(request.method, request.full_path),
+                headers=self._copy_headers(request.headers, redact_api_key=self._is_api_key_required()),
+                payload=request_data,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider_name,
+                request_model=model_name,
+                target_format=target_format,
+            )
+            headers = self._filter_request_headers(request.headers)
+            start_time = now_local_datetime()
+            api_key_id = self._get_api_key_id(api_key)
+
+            def on_proxy_complete(response_meta: dict[str, Any]) -> None:
+                log_kwargs = {
+                    "request_model": model_name,
+                    "response_model": response_meta.get("response_model"),
+                    "total_tokens": response_meta.get("total_tokens", 0),
+                    "prompt_tokens": response_meta.get("prompt_tokens", 0),
+                    "completion_tokens": response_meta.get("completion_tokens", 0),
+                    "start_time": start_time,
+                    "end_time": now_local_datetime(),
+                    "ip_address": client_ip,
+                }
+                if api_key_id is not None:
+                    log_kwargs["api_key_id"] = api_key_id
+                self._log_request(**log_kwargs)
+
+            result, status_code, failure_info = self._codex_proxy_service.proxy_image_request(
+                request_data,
+                headers,
+                action=action,
+                on_complete=on_proxy_complete,
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
+            )
+            if result is None:
+                failure_info = failure_info or ProxyErrorInfo(
+                    message="Upstream image request failed after retries",
+                    status_code=status_code,
+                    error_type="upstream_error",
+                    error_code="upstream_request_failed",
+                )
+                return self._error_response(
+                    failure_info.message,
+                    status_code,
+                    error_type=failure_info.error_type,
+                    code=failure_info.error_code,
+                    details=failure_info.details,
+                    error_format="openai_chat",
+                    trace_id=trace_id,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                    provider_name=provider_name,
+                    request_model=model_name,
+                    target_format=target_format,
+                )
+            return result
+        except ValueError as exc:
+            return self._error_response(
+                str(exc),
+                400,
+                error_type="invalid_request_error",
+                code="invalid_request_body",
+                error_format="openai_chat",
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider_name,
+                request_model=model_name,
+                target_format=target_format,
+            )
+        except Exception as exc:
+            self._logger.error("Error in %s: %s", route_name, exc)
+            return self._error_response(
+                str(exc),
+                500,
+                error_type="server_error",
+                code="internal_error",
+                error_format="openai_chat",
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
+                provider_name=provider_name,
+                request_model=model_name,
+                target_format=target_format,
+            )
 
     def _proxy_completion_request(
         self,
@@ -775,9 +1001,11 @@ class ProxyController:
 
             data = []
             codex_model_names = set()
+            codex_image_model_names = set()
             if self._codex_proxy_service is not None:
                 try:
                     codex_model_names = set(self._codex_proxy_service.list_model_names())
+                    codex_image_model_names = set(self._codex_proxy_service.list_image_model_names())
                 except Exception as exc:
                     self._logger.warning("Codex model list skipped: error=%s", exc)
             claude_model_names = set()
@@ -799,6 +1027,23 @@ class ProxyController:
                                 "openai_chat",
                                 "openai_responses",
                                 "claude_chat",
+                            ],
+                        }
+                    )
+                    continue
+                if model_key in codex_image_model_names:
+                    data.append(
+                        {
+                            "id": model_key,
+                            "object": "model",
+                            "owned_by": "openai",
+                            "provider_name": CODEX_PROVIDER_NAME,
+                            "source_format": "openai_responses",
+                            "target_formats": [
+                                "openai_images",
+                            ],
+                            "capabilities": [
+                                "image_generation",
                             ],
                         }
                     )
@@ -842,6 +1087,65 @@ class ProxyController:
                 error_type="server_error",
                 code="internal_error",
             )
+
+    def _read_image_request_data(self, action: str) -> dict[str, Any]:
+        """读取 OpenAI Images JSON 或 multipart 请求。"""
+        content_type = str(request.content_type or "").lower()
+        if "multipart/form-data" not in content_type:
+            raw_request_data = request.get_json(silent=True)
+            if raw_request_data is None:
+                return {}
+            if not isinstance(raw_request_data, dict):
+                raise ValueError("Request body must be a JSON object")
+            return dict(raw_request_data)
+
+        payload: dict[str, Any] = {}
+        for field in (
+            "prompt",
+            "model",
+            "response_format",
+            "size",
+            "quality",
+            "background",
+            "output_format",
+            "input_fidelity",
+            "moderation",
+            "output_compression",
+            "partial_images",
+            "stream",
+        ):
+            value = str(request.form.get(field) or "").strip()
+            if value:
+                payload[field] = value
+        if "stream" in payload:
+            payload["stream"] = str(payload["stream"]).strip().lower() == "true"
+        if action == "edit":
+            images = []
+            for field in ("image", "images"):
+                for uploaded_file in request.files.getlist(field):
+                    data_url = self._uploaded_image_to_data_url(uploaded_file)
+                    if data_url:
+                        images.append({"image_url": data_url})
+            if images:
+                payload["images"] = images
+            mask_files = request.files.getlist("mask")
+            if mask_files:
+                mask_url = self._uploaded_image_to_data_url(mask_files[0])
+                if mask_url:
+                    payload["mask"] = {"image_url": mask_url}
+        return payload
+
+    @staticmethod
+    def _uploaded_image_to_data_url(uploaded_file: Any) -> str:
+        filename = str(getattr(uploaded_file, "filename", "") or "").strip()
+        if not filename:
+            return ""
+        content = uploaded_file.read()
+        if not content:
+            return ""
+        mime_type = str(getattr(uploaded_file, "mimetype", "") or "").strip() or "application/octet-stream"
+        encoded_content = base64.b64encode(content).decode("ascii")
+        return f"data:{mime_type};base64,{encoded_content}"
 
     @staticmethod
     def _filter_request_headers(headers: Any) -> dict[str, str]:

@@ -43,6 +43,7 @@ CODEX_ORIGINATOR = "codex-tui"
 CODEX_PROVIDER_NAME = "codex"
 CODEX_PROXY_WARNING_ERROR_CODE = PROXY_WARNING_ERROR_CODE
 CODEX_PROXY_WARNING_STATUS_CODE = PROXY_WARNING_STATUS_CODE
+CODEX_RESPONSES_LITE_HEADER = "X-OpenAI-Internal-Codex-Responses-Lite"
 CODEX_UPSTREAM_REDIRECT_ERROR_CODE = "codex_upstream_redirect"
 
 
@@ -64,6 +65,18 @@ class CodexProxyService:
     def list_model_names(self) -> tuple[str, ...]:
         """返回 Codex OAuth 当前模型名。"""
         return self._codex_oauth_service.list_model_names()
+
+    def has_image_model(self, model_name: str) -> bool:
+        """判断 Codex OAuth 是否支持指定图片模型。"""
+        return self._codex_oauth_service.has_image_model(model_name)
+
+    def list_image_model_names(self) -> tuple[str, ...]:
+        """返回 Codex OAuth 当前图片模型名。"""
+        return self._codex_oauth_service.list_image_model_names()
+
+    def get_default_image_model(self) -> str:
+        """返回 Codex OAuth 图片生成默认模型。"""
+        return self._codex_oauth_service.get_default_image_model()
 
     def proxy_request(
         self,
@@ -148,6 +161,145 @@ class CodexProxyService:
             )
         return None, last_failure.status_code, last_failure
 
+    def proxy_image_request(
+        self,
+        request_data: dict[str, Any],
+        request_headers: dict[str, str],
+        *,
+        action: str,
+        on_complete: Callable[[dict[str, Any]], None] | None = None,
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
+        """把 OpenAI Images 请求包装成 Codex image_generation 工具调用。"""
+        del trace_id, route_name, client_ip
+        normalized_action = self._normalize_image_action(action)
+        if not normalized_action:
+            return (
+                None,
+                400,
+                ProxyErrorInfo(
+                    message="Unsupported image action",
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="unsupported_image_action",
+                ),
+            )
+
+        image_model = (
+            str(request_data.get("model") or "").strip() or self._codex_oauth_service.get_default_image_model()
+        )
+        if not image_model:
+            return (
+                None,
+                400,
+                ProxyErrorInfo(
+                    message="Missing image model",
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="missing_model",
+                ),
+            )
+        if not self._codex_oauth_service.has_image_model(image_model):
+            return (
+                None,
+                400,
+                ProxyErrorInfo(
+                    message=f"Unknown image model: {image_model}",
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="unknown_model",
+                ),
+            )
+
+        prompt = str(request_data.get("prompt") or "").strip()
+        if not prompt:
+            return (
+                None,
+                400,
+                ProxyErrorInfo(
+                    message="Missing 'prompt' in request body",
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="missing_prompt",
+                ),
+            )
+
+        if normalized_action == "edit" and not self._extract_image_input_urls(request_data):
+            return (
+                None,
+                400,
+                ProxyErrorInfo(
+                    message="Image edit requests require at least one input image",
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="missing_image",
+                ),
+            )
+
+        main_model = self._codex_oauth_service.get_image_generation_main_model()
+        if not main_model:
+            return (
+                None,
+                503,
+                ProxyErrorInfo(
+                    message="No Codex OAuth text model is configured for image generation",
+                    status_code=503,
+                    error_type="upstream_error",
+                    error_code="codex_model_unavailable",
+                ),
+            )
+
+        candidates = [
+            candidate
+            for candidate in self._codex_oauth_service.iter_auth_candidates_for_model(main_model)
+            if not self._is_free_plan_candidate(candidate)
+        ]
+        if not candidates:
+            return (
+                None,
+                503,
+                ProxyErrorInfo(
+                    message="No available Codex OAuth account for image generation",
+                    status_code=503,
+                    error_type="upstream_error",
+                    error_code="codex_auth_unavailable",
+                ),
+            )
+
+        image_request_data = dict(request_data)
+        image_request_data["model"] = image_model
+        last_failure: ProxyErrorInfo | None = None
+        for candidate in candidates:
+            response, status_code, failure = self._proxy_image_with_candidate(
+                candidate=candidate,
+                request_data=image_request_data,
+                request_headers=request_headers,
+                action=normalized_action,
+                image_model=image_model,
+                main_model=main_model,
+                on_complete=on_complete,
+            )
+            if failure is not None:
+                if failure.error_code in {
+                    CODEX_PROXY_WARNING_ERROR_CODE,
+                    CODEX_UPSTREAM_REDIRECT_ERROR_CODE,
+                }:
+                    return response, status_code, failure
+                last_failure = failure
+                continue
+            return response, status_code, failure
+
+        if last_failure is None:
+            last_failure = ProxyErrorInfo(
+                message="All Codex OAuth accounts are unavailable for image generation",
+                status_code=503,
+                error_type="upstream_error",
+                error_code="codex_auth_unavailable",
+            )
+        return None, last_failure.status_code, last_failure
+
     def _proxy_with_candidate(
         self,
         *,
@@ -168,7 +320,17 @@ class CodexProxyService:
             dict(request_data),
             True,
         )
-        self._apply_codex_body_defaults(upstream_body, model_name)
+        self._apply_codex_body_defaults(
+            upstream_body,
+            model_name,
+            image_generation_model=self._codex_oauth_service.get_default_image_model(),
+            allow_image_generation=self._should_enable_image_generation_tool(
+                upstream_body,
+                request_headers,
+                model_name=model_name,
+                candidate=candidate,
+            ),
+        )
         upstream_headers = self._build_codex_headers(
             request_headers,
             candidate,
@@ -269,15 +431,10 @@ class CodexProxyService:
                     return None, refresh_failure.status_code, refresh_failure
             if self._is_quota_exhausted_response(upstream_response.status_code, body):
                 retry_after = self._extract_retry_after_seconds(upstream_response, body)
-                self._codex_oauth_service.mark_auth_file_quota_exhausted(
+                self._record_quota_exhausted_response(
                     candidate.name,
-                    retry_after_seconds=retry_after,
-                )
-                self._codex_oauth_service.record_auth_file_failure(
-                    candidate.name,
-                    error_message or "Codex OAuth account quota exhausted",
-                    status_code=429,
-                    error_type=error_type or "usage_limit_reached",
+                    error_message=error_message,
+                    error_type=error_type,
                     retry_after_seconds=retry_after,
                 )
                 self._logger.warning(
@@ -361,6 +518,174 @@ class CodexProxyService:
                 response_started=True,
             )
 
+    def _proxy_image_with_candidate(
+        self,
+        *,
+        candidate: CodexAuthCandidate,
+        request_data: dict[str, Any],
+        request_headers: dict[str, str],
+        action: str,
+        image_model: str,
+        main_model: str,
+        on_complete: Callable[[dict[str, Any]], None] | None,
+        allow_auth_refresh_retry: bool = True,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
+        upstream_body = self._build_image_responses_body(
+            request_data,
+            action=action,
+            image_model=image_model,
+            main_model=main_model,
+        )
+        upstream_headers = self._build_codex_headers(
+            request_headers,
+            candidate,
+            stream=True,
+        )
+        request_options = self._build_request_options()
+
+        try:
+            upstream_response = request_with_proxy_warning_retry(
+                lambda: requests.post(
+                    CODEX_BACKEND_RESPONSES_URL,
+                    headers=upstream_headers,
+                    json=upstream_body,
+                    stream=True,
+                    timeout=1200,
+                    allow_redirects=False,
+                    **request_options,
+                ),
+                request_options=request_options,
+                logger=self._logger,
+                log_context=f"provider=codex image_model={image_model} auth_file={candidate.name}",
+            )
+        except ProxyWarningRequired as exc:
+            self._logger.warning(
+                "Codex image upstream blocked by network proxy warning: image_model=%s auth_file=%s "
+                "status=%s confirmation_url=%s auto_confirm_error=%s",
+                image_model,
+                candidate.name,
+                exc.upstream_status,
+                exc.confirmation_url,
+                exc.auto_confirm_error or "",
+            )
+            return (
+                None,
+                CODEX_PROXY_WARNING_STATUS_CODE,
+                self._build_proxy_warning_error(exc),
+            )
+        except (requests.exceptions.RequestException, OSError) as exc:
+            return self._build_candidate_transport_failure(
+                candidate_name=candidate.name,
+                model_name=image_model,
+                exc=exc,
+                response_started=False,
+            )
+
+        if 300 <= upstream_response.status_code < 400:
+            location = str(upstream_response.headers.get("Location") or "").strip()
+            upstream_response.close()
+            message = f"Codex upstream returned redirect {upstream_response.status_code}"
+            if location:
+                message = f"{message}: {location}"
+            return (
+                None,
+                502,
+                ProxyErrorInfo(
+                    message=message,
+                    status_code=502,
+                    error_type="upstream_error",
+                    error_code=CODEX_UPSTREAM_REDIRECT_ERROR_CODE,
+                    details={
+                        "redirect_url": location,
+                        "upstream_status": upstream_response.status_code,
+                    },
+                ),
+            )
+
+        if upstream_response.status_code >= 400:
+            body = self._read_response_body(upstream_response)
+            error_message, error_type = self._extract_response_error_info(
+                body,
+                fallback=f"Codex upstream returned {upstream_response.status_code}",
+            )
+            if (
+                allow_auth_refresh_retry
+                and str(candidate.payload.get("refresh_token") or "").strip()
+                and self._is_authentication_error_response(upstream_response.status_code, error_type, error_message)
+            ):
+                refreshed_candidate, refresh_failure = self._refresh_candidate_after_auth_error(
+                    candidate,
+                    model_name=main_model,
+                )
+                if refreshed_candidate is not None:
+                    return self._proxy_image_with_candidate(
+                        candidate=refreshed_candidate,
+                        request_data=request_data,
+                        request_headers=request_headers,
+                        action=action,
+                        image_model=image_model,
+                        main_model=main_model,
+                        on_complete=on_complete,
+                        allow_auth_refresh_retry=False,
+                    )
+                if refresh_failure is not None:
+                    return None, refresh_failure.status_code, refresh_failure
+            if self._is_quota_exhausted_response(upstream_response.status_code, body):
+                self._record_quota_exhausted_response(
+                    candidate.name,
+                    error_message=error_message,
+                    error_type=error_type,
+                    retry_after_seconds=self._extract_retry_after_seconds(upstream_response, body),
+                )
+                return (
+                    None,
+                    429,
+                    ProxyErrorInfo(
+                        message="Codex OAuth account quota exhausted",
+                        status_code=429,
+                        error_type="upstream_error",
+                        error_code="codex_quota_exhausted",
+                    ),
+                )
+            self._codex_oauth_service.record_auth_file_failure(
+                candidate.name,
+                error_message,
+                status_code=upstream_response.status_code,
+                error_type=error_type,
+            )
+            return (
+                None,
+                upstream_response.status_code,
+                ProxyErrorInfo(
+                    message=error_message,
+                    status_code=upstream_response.status_code,
+                    error_type="upstream_error",
+                    error_code=error_type or "codex_upstream_error",
+                ),
+            )
+
+        if bool(request_data.get("stream", False)):
+            return (
+                self._build_image_stream_response(
+                    response=upstream_response,
+                    image_model=image_model,
+                    action=action,
+                    response_format=self._normalize_image_response_format(request_data.get("response_format")),
+                    on_complete=on_complete,
+                    auth_file_name=candidate.name,
+                ),
+                upstream_response.status_code,
+                None,
+            )
+
+        return self._build_image_nonstream_response(
+            response=upstream_response,
+            image_model=image_model,
+            response_format=self._normalize_image_response_format(request_data.get("response_format")),
+            on_complete=on_complete,
+            auth_file_name=candidate.name,
+        )
+
     def _build_candidate_transport_failure(
         self,
         *,
@@ -402,7 +727,13 @@ class CodexProxyService:
         )
 
     @staticmethod
-    def _apply_codex_body_defaults(body: dict[str, Any], model_name: str) -> None:
+    def _apply_codex_body_defaults(
+        body: dict[str, Any],
+        model_name: str,
+        *,
+        image_generation_model: str | None = None,
+        allow_image_generation: bool = True,
+    ) -> None:
         body["model"] = model_name
         body["stream"] = True
         body["store"] = False
@@ -439,6 +770,8 @@ class CodexProxyService:
             body.pop(field, None)
         body.pop("previous_response_id", None)
         CodexProxyService._normalize_codex_builtin_tools(body)
+        if allow_image_generation:
+            CodexProxyService._ensure_image_generation_tool(body, image_generation_model)
         body.setdefault("instructions", "")
 
     @staticmethod
@@ -466,6 +799,200 @@ class CodexProxyService:
             if isinstance(choice_tools, list):
                 for tool in choice_tools:
                     normalize_tool(tool)
+
+    @staticmethod
+    def _ensure_image_generation_tool(body: dict[str, Any], image_generation_model: str | None) -> None:
+        """确保 Codex 请求携带内置图片生成工具。"""
+        normalized_model = str(image_generation_model or "").strip()
+        default_tool: dict[str, Any] = {
+            "type": "image_generation",
+            "output_format": "png",
+        }
+        if normalized_model:
+            default_tool["model"] = normalized_model
+
+        tools = body.get("tools")
+        if not isinstance(tools, list):
+            body["tools"] = [default_tool]
+            return
+
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            if str(tool.get("type") or "").strip() == "image_generation":
+                tool.setdefault("output_format", "png")
+                if normalized_model and not str(tool.get("model") or "").strip():
+                    tool["model"] = normalized_model
+                return
+            if CodexProxyService._is_image_generation_function_tool(tool):
+                return
+        tools.append(default_tool)
+
+    @staticmethod
+    def _is_image_generation_function_tool(tool: dict[str, Any]) -> bool:
+        tool_type = str(tool.get("type") or "").strip()
+        if tool_type == "function":
+            return str(tool.get("name") or "").strip() == "image_gen.imagegen"
+        if tool_type != "namespace" or str(tool.get("name") or "").strip() != "image_gen":
+            return False
+        nested_tools = tool.get("tools")
+        if not isinstance(nested_tools, list):
+            return False
+        for nested_tool in nested_tools:
+            if not isinstance(nested_tool, dict):
+                continue
+            if (
+                str(nested_tool.get("type") or "").strip() == "function"
+                and str(nested_tool.get("name") or "").strip() == "imagegen"
+            ):
+                return True
+        return False
+
+    def _should_enable_image_generation_tool(
+        self,
+        body: dict[str, Any],
+        request_headers: dict[str, str],
+        *,
+        model_name: str,
+        candidate: CodexAuthCandidate,
+    ) -> bool:
+        if self._is_codex_responses_lite_request(body, request_headers):
+            return False
+        if str(model_name or "").strip().endswith("spark"):
+            return False
+        return not self._is_free_plan_candidate(candidate)
+
+    @staticmethod
+    def _is_codex_responses_lite_request(body: dict[str, Any], request_headers: dict[str, str]) -> bool:
+        for key, value in (request_headers or {}).items():
+            if key.lower() == CODEX_RESPONSES_LITE_HEADER.lower() and str(value or "").strip().lower() == "true":
+                return True
+        client_metadata = body.get("client_metadata")
+        if not isinstance(client_metadata, dict):
+            return False
+        value = client_metadata.get("ws_request_header_x_openai_internal_codex_responses_lite")
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() == "true"
+
+    @staticmethod
+    def _is_free_plan_candidate(candidate: CodexAuthCandidate) -> bool:
+        return str(candidate.plan_type or "").strip().lower() == "free"
+
+    def _build_image_responses_body(
+        self,
+        request_data: dict[str, Any],
+        *,
+        action: str,
+        image_model: str,
+        main_model: str,
+    ) -> dict[str, Any]:
+        tool: dict[str, Any] = {
+            "type": "image_generation",
+            "action": action,
+            "model": image_model,
+        }
+        string_fields = [
+            "size",
+            "quality",
+            "background",
+            "output_format",
+            "moderation",
+        ]
+        if action == "edit":
+            string_fields.append("input_fidelity")
+        for field in string_fields:
+            value = str(request_data.get(field) or "").strip()
+            if value:
+                tool[field] = value
+
+        for field in ("output_compression", "partial_images"):
+            value = request_data.get(field)
+            if value in (None, ""):
+                continue
+            try:
+                tool[field] = int(value)
+            except (TypeError, ValueError):
+                continue
+
+        mask_url = self._extract_mask_image_url(request_data)
+        if mask_url:
+            tool["input_image_mask"] = {"image_url": mask_url}
+
+        content: list[dict[str, Any]] = [
+            {
+                "type": "input_text",
+                "text": str(request_data.get("prompt") or "").strip(),
+            }
+        ]
+        for image_url in self._extract_image_input_urls(request_data):
+            content.append({"type": "input_image", "image_url": image_url})
+
+        return {
+            "instructions": "",
+            "stream": True,
+            "reasoning": {"effort": "medium", "summary": "auto"},
+            "parallel_tool_calls": True,
+            "include": ["reasoning.encrypted_content"],
+            "model": main_model,
+            "store": False,
+            "tool_choice": {"type": "image_generation"},
+            "tools": [tool],
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": content,
+                }
+            ],
+        }
+
+    @staticmethod
+    def _normalize_image_action(action: str) -> str:
+        normalized_action = str(action or "").strip().lower()
+        return normalized_action if normalized_action in {"generate", "edit"} else ""
+
+    @staticmethod
+    def _normalize_image_response_format(response_format: Any) -> str:
+        return "url" if str(response_format or "").strip().lower() == "url" else "b64_json"
+
+    @classmethod
+    def _extract_image_input_urls(cls, request_data: dict[str, Any]) -> list[str]:
+        urls: list[str] = []
+
+        def append_url(value: Any) -> None:
+            if isinstance(value, str):
+                image_url = value.strip()
+            elif isinstance(value, dict):
+                image_url = str(value.get("image_url") or value.get("url") or "").strip()
+            else:
+                image_url = ""
+            if image_url:
+                urls.append(image_url)
+
+        images = request_data.get("images")
+        if isinstance(images, list):
+            for item in images:
+                append_url(item)
+        else:
+            append_url(images)
+
+        image = request_data.get("image")
+        if isinstance(image, list):
+            for item in image:
+                append_url(item)
+        else:
+            append_url(image)
+        return list(dict.fromkeys(urls))
+
+    @staticmethod
+    def _extract_mask_image_url(request_data: dict[str, Any]) -> str:
+        mask = request_data.get("mask")
+        if isinstance(mask, str):
+            return mask.strip()
+        if isinstance(mask, dict):
+            return str(mask.get("image_url") or mask.get("url") or "").strip()
+        return ""
 
     def _build_codex_headers(
         self,
@@ -811,6 +1338,357 @@ class CodexProxyService:
         finally:
             response.close()
 
+    def _build_image_nonstream_response(
+        self,
+        *,
+        response: requests.Response,
+        image_model: str,
+        response_format: str,
+        on_complete: Callable[[dict[str, Any]], None] | None,
+        auth_file_name: str,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
+        try:
+            completed_payload, failed_payload, image_items = self._collect_image_response_events(response)
+            if completed_payload is None:
+                error_message = self._extract_stream_failure_message(failed_payload)
+                self._codex_oauth_service.record_auth_file_failure(
+                    auth_file_name,
+                    error_message,
+                    status_code=502,
+                    error_type="codex_image_stream_incomplete",
+                )
+                return (
+                    None,
+                    502,
+                    ProxyErrorInfo(
+                        message=error_message,
+                        status_code=502,
+                        error_type="upstream_error",
+                        error_code="codex_image_stream_incomplete",
+                    ),
+                )
+
+            results, created_at, usage = self._extract_image_results(completed_payload, image_items)
+            if not results:
+                self._codex_oauth_service.record_auth_file_failure(
+                    auth_file_name,
+                    "Codex image generation completed without image output",
+                    status_code=502,
+                    error_type="codex_image_output_missing",
+                )
+                return (
+                    None,
+                    502,
+                    ProxyErrorInfo(
+                        message="Codex image generation completed without image output",
+                        status_code=502,
+                        error_type="upstream_error",
+                        error_code="codex_image_output_missing",
+                    ),
+                )
+
+            payload = self._build_images_api_response(results, created_at, usage, response_format)
+            if on_complete is not None:
+                try:
+                    on_complete(self._build_image_response_meta(image_model, usage))
+                except Exception as exc:
+                    self._logger.error("Error in Codex image on_complete callback: %s", exc)
+            self._codex_oauth_service.record_auth_file_success(auth_file_name)
+            return (
+                Response(
+                    json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    status=response.status_code,
+                    headers={"Content-Type": "application/json; charset=utf-8"},
+                ),
+                response.status_code,
+                None,
+            )
+        finally:
+            response.close()
+
+    def _build_image_stream_response(
+        self,
+        *,
+        response: requests.Response,
+        image_model: str,
+        action: str,
+        response_format: str,
+        on_complete: Callable[[dict[str, Any]], None] | None,
+        auth_file_name: str,
+    ) -> Response:
+        downstream_headers = self._filter_response_headers(response.headers)
+        downstream_headers["Content-Type"] = "text/event-stream; charset=utf-8"
+        downstream_headers["Cache-Control"] = "no-cache"
+        stream_prefix = "image_edit" if action == "edit" else "image_generation"
+
+        def generate() -> Iterator[bytes]:
+            completed = False
+            failed_payload: dict[str, Any] | None = None
+            image_items: list[tuple[int, dict[str, Any]]] = []
+            usage: dict[str, Any] | None = None
+            try:
+                for event in decode_stream_events(response.iter_content(chunk_size=None), "sse_json"):
+                    if event.kind != "json" or not isinstance(event.payload, dict):
+                        continue
+                    payload = event.payload
+                    event_type = str(payload.get("type") or event.event or "").strip()
+                    if event_type == "response.image_generation_call.partial_image":
+                        frame = self._build_image_partial_frame(payload, response_format, stream_prefix)
+                        if frame:
+                            yield frame
+                        continue
+                    if event_type == "response.output_item.done":
+                        item = payload.get("item")
+                        if isinstance(item, dict) and str(item.get("type") or "") == "image_generation_call":
+                            image_items.append((int(payload.get("output_index") or 0), item))
+                        continue
+                    if event_type in {"response.completed", "response.done"}:
+                        completed = True
+                        results, _, usage = self._extract_image_results(payload, image_items)
+                        for result in results:
+                            yield self._build_image_completed_frame(
+                                result,
+                                usage,
+                                response_format,
+                                stream_prefix,
+                            )
+                        continue
+                    if event_type in {"response.failed", "response.cancelled", "error"}:
+                        failed_payload = payload
+                        yield self._build_image_error_frame(
+                            self._extract_stream_failure_message(failed_payload),
+                            stream_prefix,
+                        )
+            except GeneratorExit:
+                raise
+            except (requests.exceptions.RequestException, OSError) as exc:
+                self._logger.error(
+                    "Codex image upstream stream error: image_model=%s auth_file=%s error=%s",
+                    image_model,
+                    auth_file_name,
+                    exc,
+                )
+                self._codex_oauth_service.record_auth_file_failure(
+                    auth_file_name,
+                    str(exc),
+                    status_code=502,
+                    error_type="codex_image_stream_failed",
+                )
+                yield self._build_image_error_frame("Upstream stream interrupted", stream_prefix)
+            finally:
+                try:
+                    response.close()
+                except Exception as exc:
+                    self._logger.error("Error closing Codex image upstream stream response: %s", exc)
+                if failed_payload is not None:
+                    self._codex_oauth_service.record_auth_file_failure(
+                        auth_file_name,
+                        self._extract_stream_failure_message(failed_payload),
+                        status_code=502,
+                        error_type="codex_image_stream_failed",
+                    )
+                elif completed:
+                    self._codex_oauth_service.record_auth_file_success(auth_file_name)
+                    if on_complete is not None:
+                        try:
+                            on_complete(self._build_image_response_meta(image_model, usage))
+                        except Exception as exc:
+                            self._logger.error("Error in Codex image on_complete callback: %s", exc)
+
+        return ProxyResponseBuilder.create_streaming_response(
+            generate(),
+            status_code=response.status_code,
+            headers=downstream_headers,
+            on_started=lambda: None,
+        )
+
+    def _collect_image_response_events(
+        self,
+        response: requests.Response,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[tuple[int, dict[str, Any]]]]:
+        completed_payload: dict[str, Any] | None = None
+        failed_payload: dict[str, Any] | None = None
+        image_items: list[tuple[int, dict[str, Any]]] = []
+        for event in decode_stream_events(response.iter_content(chunk_size=None), "sse_json"):
+            if event.kind != "json" or not isinstance(event.payload, dict):
+                continue
+            event_type = str(event.payload.get("type") or event.event or "").strip()
+            if event_type in {"response.completed", "response.done"}:
+                completed_payload = event.payload
+            elif event_type in {"response.failed", "response.cancelled", "error"}:
+                failed_payload = event.payload
+            elif event_type == "response.output_item.done":
+                item = event.payload.get("item")
+                if isinstance(item, dict) and str(item.get("type") or "").strip() == "image_generation_call":
+                    image_items.append((int(event.payload.get("output_index") or 0), item))
+        return completed_payload, failed_payload, image_items
+
+    @classmethod
+    def _extract_image_results(
+        cls,
+        completed_payload: dict[str, Any],
+        image_items: list[tuple[int, dict[str, Any]]],
+    ) -> tuple[list[dict[str, Any]], int, dict[str, Any] | None]:
+        response = completed_payload.get("response")
+        if not isinstance(response, dict):
+            response = completed_payload
+        created_at = cls._safe_int(response.get("created_at"), int(time.time()))
+        usage = cls._extract_image_usage(response)
+
+        output_items = response.get("output")
+        source_items: list[dict[str, Any]] = []
+        if isinstance(output_items, list) and output_items:
+            source_items = [item for item in output_items if isinstance(item, dict)]
+        elif image_items:
+            source_items = [item for _, item in sorted(image_items, key=lambda pair: pair[0])]
+
+        results: list[dict[str, Any]] = []
+        for item in source_items:
+            if str(item.get("type") or "").strip() != "image_generation_call":
+                continue
+            result = str(item.get("result") or "").strip()
+            if not result:
+                continue
+            results.append(
+                {
+                    "result": result,
+                    "revised_prompt": str(item.get("revised_prompt") or "").strip(),
+                    "output_format": str(item.get("output_format") or "").strip(),
+                    "size": str(item.get("size") or "").strip(),
+                    "background": str(item.get("background") or "").strip(),
+                    "quality": str(item.get("quality") or "").strip(),
+                }
+            )
+        return results, created_at, usage
+
+    @staticmethod
+    def _extract_image_usage(response: dict[str, Any]) -> dict[str, Any] | None:
+        tool_usage = response.get("tool_usage")
+        if isinstance(tool_usage, dict) and isinstance(tool_usage.get("image_gen"), dict):
+            return dict(tool_usage["image_gen"])
+        usage = response.get("usage")
+        return dict(usage) if isinstance(usage, dict) else None
+
+    @classmethod
+    def _build_images_api_response(
+        cls,
+        results: list[dict[str, Any]],
+        created_at: int,
+        usage: dict[str, Any] | None,
+        response_format: str,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "created": created_at,
+            "data": [],
+        }
+        first = results[0] if results else {}
+        for field in ("background", "output_format", "quality", "size"):
+            if first.get(field):
+                payload[field] = first[field]
+        if usage:
+            payload["usage"] = usage
+
+        for result in results:
+            item: dict[str, Any] = {}
+            revised_prompt = str(result.get("revised_prompt") or "").strip()
+            if revised_prompt:
+                item["revised_prompt"] = revised_prompt
+            b64_json = str(result.get("result") or "")
+            if response_format == "url":
+                item["url"] = f"data:{cls._image_mime_type(result.get('output_format'))};base64,{b64_json}"
+            else:
+                item["b64_json"] = b64_json
+            payload["data"].append(item)
+        return payload
+
+    @classmethod
+    def _build_image_partial_frame(
+        cls,
+        payload: dict[str, Any],
+        response_format: str,
+        stream_prefix: str,
+    ) -> bytes:
+        partial_image_b64 = str(payload.get("partial_image_b64") or "").strip()
+        if not partial_image_b64:
+            return b""
+        event_name = f"{stream_prefix}.partial_image"
+        data: dict[str, Any] = {
+            "type": event_name,
+            "partial_image_index": cls._safe_int(payload.get("partial_image_index"), 0),
+        }
+        if response_format == "url":
+            data["url"] = f"data:{cls._image_mime_type(payload.get('output_format'))};base64,{partial_image_b64}"
+        else:
+            data["b64_json"] = partial_image_b64
+        return cls._build_image_sse_frame(event_name, data)
+
+    @classmethod
+    def _build_image_completed_frame(
+        cls,
+        result: dict[str, Any],
+        usage: dict[str, Any] | None,
+        response_format: str,
+        stream_prefix: str,
+    ) -> bytes:
+        event_name = f"{stream_prefix}.completed"
+        data: dict[str, Any] = {"type": event_name}
+        if usage:
+            data["usage"] = usage
+        b64_json = str(result.get("result") or "")
+        if response_format == "url":
+            data["url"] = f"data:{cls._image_mime_type(result.get('output_format'))};base64,{b64_json}"
+        else:
+            data["b64_json"] = b64_json
+        return cls._build_image_sse_frame(event_name, data)
+
+    @classmethod
+    def _build_image_error_frame(cls, message: str, stream_prefix: str) -> bytes:
+        event_name = f"{stream_prefix}.error"
+        return cls._build_image_sse_frame(
+            event_name,
+            {
+                "type": event_name,
+                "error": {
+                    "message": message,
+                    "type": "upstream_error",
+                },
+            },
+        )
+
+    @staticmethod
+    def _build_image_sse_frame(event_name: str, payload: dict[str, Any]) -> bytes:
+        data = json.dumps(payload, ensure_ascii=False)
+        return f"event: {event_name}\ndata: {data}\n\n".encode("utf-8")
+
+    @staticmethod
+    def _image_mime_type(output_format: Any) -> str:
+        normalized_format = str(output_format or "").strip().lower()
+        if normalized_format in {"jpg", "jpeg"}:
+            return "image/jpeg"
+        if normalized_format == "webp":
+            return "image/webp"
+        return "image/png"
+
+    @staticmethod
+    def _safe_int(value: Any, fallback: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    @classmethod
+    def _build_image_response_meta(cls, image_model: str, usage: dict[str, Any] | None) -> dict[str, Any]:
+        usage = usage or {}
+        input_tokens = cls._safe_int(usage.get("input_tokens") or usage.get("prompt_tokens"), 0)
+        output_tokens = cls._safe_int(usage.get("output_tokens") or usage.get("completion_tokens"), 0)
+        total_tokens = cls._safe_int(usage.get("total_tokens"), input_tokens + output_tokens)
+        return {
+            "response_model": image_model,
+            "total_tokens": total_tokens,
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+        }
+
     @staticmethod
     def _extract_stream_failure_message(payload: dict[str, Any] | None) -> str:
         if not isinstance(payload, dict):
@@ -888,6 +1766,28 @@ class CodexProxyService:
             candidate.name,
         )
         return refreshed_candidate, None
+
+    def _record_quota_exhausted_response(
+        self,
+        auth_file_name: str,
+        *,
+        error_message: str,
+        error_type: str,
+        retry_after_seconds: float | None,
+    ) -> None:
+        """记录额度耗尽，并立即刷新配额快照供前端展示。"""
+        self._codex_oauth_service.mark_auth_file_quota_exhausted(
+            auth_file_name,
+            retry_after_seconds=retry_after_seconds,
+        )
+        self._codex_oauth_service.record_auth_file_failure(
+            auth_file_name,
+            error_message or "Codex OAuth account quota exhausted",
+            status_code=429,
+            error_type=error_type or "usage_limit_reached",
+            retry_after_seconds=retry_after_seconds,
+        )
+        self._codex_oauth_service.refresh_auth_file_quota_snapshot(auth_file_name)
 
     @staticmethod
     def _is_quota_exhausted_response(status_code: int, body: bytes) -> bool:

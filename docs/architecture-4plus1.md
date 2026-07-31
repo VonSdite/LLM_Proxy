@@ -14,6 +14,8 @@
   - `POST /v1/chat/completions`
   - `POST /v1/responses`
   - `POST /v1/messages`
+  - `POST /v1/images/generations`
+  - `POST /v1/images/edits`
   - `GET /v1/models`
   - `OPTIONS /v1/*` CORS 预检
 
@@ -80,6 +82,7 @@ downstream request
   - 根据 `client_ip.real_ip_enabled` 和 `client_ip.real_ip_header` 解析白名单、模型权限、统计和 trace 使用的客户端 IP
   - 在 `api_keys.enabled=true` 时校验下游 API Key，并按 key 模型权限与总 token 上限收窄可访问模型和请求
   - 同时启用 Chat 白名单和 API Key 管理时，最终模型权限为用户权限与 key 权限的交集
+  - 处理 `/v1/images/generations` 与 `/v1/images/edits`，图片模型使用 Codex OAuth 图片模型目录和默认图片模型
   - 构造标准错误体
 - `DataPlaneCors`
   - 只为 `/v1/*` 数据平面添加 CORS 响应头
@@ -114,10 +117,11 @@ downstream request
 - `ModelCatalogService`
   - 汇总模型权限控制平面的可选模型目录
   - Provider 模型从配置中的 `providers[].model_list` 读取，继续包含已禁用 Provider 的模型
-  - OAuth 模型从 Codex / Claude OAuth 服务读取当前可用模型目录
+  - OAuth 模型从 Codex / Claude OAuth 服务读取当前可用模型目录，Codex 图片模型同时进入权限目录
   - 供用户模型权限与 API Key 模型权限的选择、保存校验、展示计数和同步清理共用
 - `OAuthController`
   - 暴露 Codex / Claude OAuth 登录、回调提交、认证文件列表、启停、JSON/ZIP 导入、ZIP 导出、归档删除与 Codex 配额刷新接口
+  - 暴露 Codex 文本模型、图片模型、默认图片模型和添加内置模型目录接口
 - `CodexOAuthService`
   - 生成 Codex OAuth PKCE 授权链接
   - 使用回调 URL 换取 token 并写入本地认证文件
@@ -129,7 +133,9 @@ downstream request
   - token 交换、token 刷新与配额查询遇到代理风险确认页时，会走统一自动确认重试流程
   - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
   - 持久化认证文件人工禁用状态、最近一次配额快照、配额刷新错误、最近成功认证文件与 Codex 模型代理使用状态
-  - 维护本地手动 Codex OAuth 模型目录
+  - 启动 Codex 配额后台刷新任务，每 5 小时刷新一轮可查询认证文件，认证文件之间间隔 10 秒
+  - 维护本地 Codex OAuth 文本模型目录、图片模型目录和默认图片模型
+  - 内置常用 Codex 文本模型和图片模型 ID；添加内置模型只把缺失的内置 ID 加回本地目录，保留用户自行添加的模型 ID
   - 按本地模型目录、人工禁用状态、本地冷却、认证失败状态和最近成功认证文件提供 Codex 请求候选账号
 - `ClaudeOAuthService`
   - 生成 Claude OAuth PKCE 授权链接
@@ -142,7 +148,9 @@ downstream request
 - `CodexProxyService`
   - 代理下游直接使用的 Codex 普通模型名
   - 使用 `data/oauth/codex/*.json` 中的 OAuth access token 请求 Codex backend
-  - 遇到账号配额耗尽时标记临时冷却并尝试下一个账号
+  - 按默认图片模型为普通 Codex 请求补齐 `image_generation` 工具配置
+  - 将 OpenAI Images 兼容请求包装成 Codex `image_generation` 工具调用
+  - 遇到账号配额耗尽时标记临时冷却、刷新该认证文件配额快照并尝试下一个账号
   - 将每个认证文件最近一次数据面成功或失败结果写回 OAuth 状态
   - 按首个非空目标协议字节区分流提交前后的 transport 失败
   - 流提交后的 transport 失败会发送下游协议错误事件并记录当前认证文件失败
@@ -231,6 +239,7 @@ Hook 组件除了 header / guard / 模型拉取 payload，还会收到最小重�
 | --- | --- |
 | `openai_chat` | OpenAI Chat Completions 语义 |
 | `openai_responses` | OpenAI Responses 语义 |
+| `openai_images` | OpenAI Images 生成和编辑语义 |
 | `claude_chat` | Anthropic Messages 语义 |
 
 OpenAI Chat SSE 下游编码会移除空的 `choices[].delta.tool_calls`，避免兼容客户端把空列表误判为工具调用开始；非空工具调用保持原样。
@@ -246,10 +255,15 @@ route family 直接决定当前请求的下游接口协议：
 | `/v1/chat/completions` | `openai_chat` |
 | `/v1/responses` | `openai_responses` |
 | `/v1/messages` | `claude_chat` |
+| `/v1/images/generations` | `openai_images` |
+| `/v1/images/edits` | `openai_images` |
 
-`GET /v1/models` 除了模型 id，还会返回模型所属 provider 的：
+`GET /v1/models` 除了模型 id，还会按模型类型返回：
 
+- `provider_name`
 - `source_format`
+- `target_formats`
+- `capabilities`
 
 当 `api_keys.enabled=true` 时，`GET /v1/models` 与模型请求接口一样必须携带有效 API Key。返回模型列表会按以下顺序收窄：
 
@@ -263,12 +277,15 @@ OAuth 模型是数据平面的例外路由：
 
 - Provider 配置模型仍使用 `{provider}/{model}` key
 - Codex / Claude OAuth 模型使用原始模型名，例如 `gpt-5-codex`、`claude-sonnet-4-5`
+- Codex OAuth 图片模型使用原始模型名，例如 `gpt-image-2`
 - 用户模型权限和 API Key 模型权限的可选目录同时包含 Provider 模型和当前可用 OAuth 模型
 - 权限字段保存显式列表时，Provider 模型保存 `{provider}/{model}`，OAuth 模型保存原始模型名
 - `ProxyController` 先查 Provider 映射，未命中时再查 Codex OAuth 模型目录，最后查 Claude OAuth 模型目录
 - `/v1/models` 对 Codex OAuth 暴露普通模型名，`provider_name` 固定为 `codex`
+- `/v1/models` 对 Codex OAuth 图片模型暴露 `target_formats=["openai_images"]` 与 `capabilities=["image_generation"]`
 - `/v1/models` 对 Claude OAuth 暴露普通模型名，`provider_name` 固定为 `claude`
 - Codex OAuth 代理复用 translator registry，把下游 `openai_chat` / `openai_responses` / `claude_chat` 转成 Codex backend 的 Responses 请求
+- Codex OAuth 图片代理把 `/v1/images/generations` 和 `/v1/images/edits` 包装成 Codex backend Responses `image_generation` 工具调用
 - Claude OAuth 代理复用 translator registry，把下游 `openai_chat` / `openai_responses` / `claude_chat` 转成 Anthropic Messages 请求
 
 `OPTIONS /v1/*` 由表现层 CORS 钩子直接返回 `204`，用于支持浏览器、Obsidian 插件等第三方应用的跨域预检，不进入 provider lookup、白名单校验或上游代理链路。实际 `/v1/*` 响应也会附加 CORS 响应头；后台 `/api/*` 和管理页面不开放跨域。
@@ -365,7 +382,7 @@ OAuth 模型是数据平面的例外路由：
   - 归类为“API Key 管理”
   - 页面修改后自动生效
   - 保存后立即影响后台顶部 API Key 管理页签是否显示
-  - 保存后立即影响数据平面 `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 和 `/v1/models` 是否要求下游携带 API Key
+  - 保存后立即影响数据平面 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 是否要求下游携带 API Key
   - 默认值为 `false`
 
 运行时内存状态补充：
@@ -385,11 +402,13 @@ OAuth 模型是数据平面的例外路由：
   - 流式 transport 失败和客户端取消不调用统计完成回调
 - `ModelCatalogService`
   - 每次用户 / API Key 权限管理读取当前 Provider 配置模型和 Codex / Claude OAuth 可用模型
+  - Codex OAuth 图片模型和普通 OAuth 模型使用同一显式权限列表语义
   - 不缓存模型目录，OAuth 模型变化后管理端重新加载即可出现在权限选择列表
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
-  - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态与认证文件配额刷新锁
+  - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet
   - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件人工禁用状态、配额、最近一次模型代理状态与最近成功认证文件
+  - 在 `data/oauth/codex/models.json`、`data/oauth/codex/image_models.json` 和 `data/oauth/codex/image_settings.json` 持久化本地文本模型目录、图片模型目录和默认图片模型
 - `ClaudeOAuthService`
   - 每次 token / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话
@@ -397,6 +416,8 @@ OAuth 模型是数据平面的例外路由：
   - 在 `data/oauth/claude/.state/auth_files.json` 持久化认证文件人工禁用状态、最近一次模型代理状态与最近成功认证文件
 - `CodexProxyService`
   - 每次 Codex 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
+  - 普通 Codex 数据面请求按模型、账号计划、responses-lite 标记和默认图片模型决定是否携带 `image_generation` 工具
+  - OpenAI Images 数据面请求固定使用 Codex OAuth 文本模型作为主请求模型，并用图片模型作为 `image_generation` 工具模型
 - `ClaudeProxyService`
   - 每次 Claude 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
 
@@ -537,7 +558,7 @@ provider editor form snapshot
 
 行为约束：
 
-- 这两条都是控制平面能力，不经过下游 `/v1/chat/completions` / `/v1/responses` / `/v1/messages`
+- 这两条都是控制平面能力，不经过下游 `/v1/chat/completions` / `/v1/responses` / `/v1/messages` / `/v1/images/*`
 - 测试模型列表中的模型值按真实上游模型 ID 处理，不执行 `{provider_name}/` 路由前缀裁剪
 - 两条链路都会使用 Provider 表单快照中的 `proxy_mode`、`proxy` 和 `verify_ssl`
 - Provider 编辑页的 `model_list` 采用表格编辑，并以当前前端行状态作为唯一数据源
@@ -578,7 +599,13 @@ OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并�
   - `POST /api/oauth/codex/callback`
   - `GET /api/oauth/codex/models`
   - `POST /api/oauth/codex/models`
+  - `POST /api/oauth/codex/models/restore-builtins`
   - `DELETE /api/oauth/codex/models/<model_id>`
+  - `GET /api/oauth/codex/image-models`
+  - `POST /api/oauth/codex/image-models`
+  - `POST /api/oauth/codex/image-models/restore-builtins`
+  - `PUT /api/oauth/codex/image-models/default`
+  - `DELETE /api/oauth/codex/image-models/<model_id>`
   - `GET /api/oauth/codex/auth-files`
   - `POST /api/oauth/codex/auth-files/export`
   - `POST /api/oauth/codex/auth-files/import`
@@ -610,7 +637,8 @@ OAuth Codex tab
   -> user pastes full callback URL
   -> token exchange
   -> write data/oauth/codex/*.json
-  -> list / manage local Codex model IDs
+  -> list / manage local Codex text model IDs
+  -> list / manage local Codex image model IDs and default image model
   -> list auth file token/status/quota snapshot
   -> optional quota refresh with current access token to chatgpt.com/backend-api/wham/usage
   -> skip duplicate quota refresh when the same auth file is already refreshing
@@ -643,7 +671,9 @@ OAuth Claude tab
 - 删除归档文件名前缀为删除时的本地年月日时分秒，例如 `20260605123045_<原文件名>`；如果目标文件已存在，会在扩展名前追加 `-1`、`-2`、`-3`
 - Codex 认证文件名沿用 CLIProxyAPI 规则：普通账号为 `codex-{email}-{plan}.json`，team 账号为 `codex-{account_id_sha256前8位}-{email}-team.json`
 - Claude 认证文件名沿用 CLIProxyAPI 规则：`claude-{email}.json`
-- Codex 模型目录缓存在 `data/oauth/codex/models.json`，文件内容只保存模型 ID 字符串数组
+- Codex 文本模型目录缓存在 `data/oauth/codex/models.json`，文件内容只保存模型 ID 字符串数组
+- Codex 图片模型目录缓存在 `data/oauth/codex/image_models.json`，文件内容只保存模型 ID 字符串数组
+- Codex 图片模型设置缓存在 `data/oauth/codex/image_settings.json`，当前保存默认图片模型 ID
 - Claude 模型目录缓存在 `data/oauth/claude/models.json`，文件内容只保存模型 ID 字符串数组
 - 认证文件的人工禁用状态、最近配额、配额错误、数据面使用状态和最近成功认证文件保存在 `data/oauth/codex/.state/auth_files.json`
 - Claude 认证文件的人工禁用状态、最近一次数据面使用状态和最近成功认证文件保存在 `data/oauth/claude/.state/auth_files.json`
@@ -655,7 +685,10 @@ OAuth Claude tab
 - OAuth 页面导出选中认证文件时调用导出 API，单个文件也会以 ZIP 下载
 - OAuth 页面删除认证文件前会用气泡确认，确认后调用删除 API 把文件移动到 `deleted/`
 - 同名 OAuth 登录和认证文件导入会更新认证内容并保留人工禁用状态；只有显式启用或删除文件会清除该禁用约束
-- Codex 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
+- Codex 文本模型 ID 由用户在 OAuth 页面维护，初始目录包含项目内置常用 Codex 文本模型 ID
+- Codex 图片模型 ID 由用户在 OAuth 页面维护，初始目录包含项目内置常用 Codex 图片模型 ID
+- Codex 图片默认模型由用户在 OAuth 页面对应图片模型项中设置；当前默认值优先使用内置默认图片模型，目录中不存在时使用图片模型目录第一项
+- Codex 文本模型和图片模型都支持添加内置模型；添加操作只追加缺失的项目内置模型 ID，不删除用户自行添加的模型 ID
 - Claude 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
 - Codex 查询配额时直接使用认证文件当前的 access token，不执行 token 刷新或认证失败后的刷新重试
@@ -667,8 +700,10 @@ OAuth Claude tab
 - 同一个认证文件的配额刷新使用进程内非阻塞锁；重复刷新请求会直接返回跳过结果，不重复访问 Codex 上游
 - Codex 认证文件的 `reset-quota` 会清除本地配额快照、配额错误和进程内额度冷却；该操作不重置 OpenAI / ChatGPT 上游真实额度，也不清除认证失败状态
 - 如果认证文件 access token 已过期且缺少 refresh token，请求候选筛选不会直接跳过；系统会先用当前 access token 尝试请求一次，再按上游返回的认证、配额或其他错误决定后续状态
+- Codex 配额后台刷新任务随应用启动，第一轮在启动后 5 小时触发；每轮刷新所有未标记为认证失败、类型合法且包含 access token 的 Codex 认证文件，每个文件之间间隔 10 秒
 - 配额刷新会同步内存冷却状态：Codex 窗口耗尽时冷却该认证文件，恢复可用时立即清除冷却
 - Codex 数据面请求成功后，如果本地配额快照中的 Codex 窗口重置时间已经到期，会最佳努力刷新该认证文件的前端配额快照；刷新失败不会阻断本次模型响应
+- Codex 数据面请求收到上游额度耗尽响应后，会立即真实刷新该认证文件的配额快照；刷新结果写入 OAuth 页面展示数据，刷新失败写入配额错误且不阻断候选账号切换
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
 - token 交换、token 刷新与 OAuth 数据面代理使用系统设置中的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`；Codex 配额查询在认证文件没有 `proxy_url` 时使用该网络设置
@@ -683,8 +718,9 @@ OAuth Claude tab
 - 出站 HTTP 请求遇到代理风险确认页时，会自动确认一次并重试原请求；自动确认失败或重试后仍被拦截时，返回 `proxy_warning_required` 和确认页 URL
 - Codex 数据面请求在刷新重试后仍遇到 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
 - Claude 上游返回 401 或认证类错误时，会将当前认证文件标记为认证失败，后续请求优先跳过
-- OAuth 登录、文件、配额与模型目录管理属于控制平面
+- OAuth 登录、文件、配额、模型目录与默认图片模型管理属于控制平面
 - Codex / Claude 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
+- Codex 图片生成和图片编辑接口属于 `/v1/*` 数据平面，使用 Codex OAuth 认证文件和图片模型目录，不进入 Provider 路由或 Auth Group 选择流程
 
 ### 3.8 Control-Plane API Key Management
 
@@ -746,7 +782,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 数据面不要求下游 key
   - API Key 管理页签不显示
 - `api_keys.enabled=true`
-  - `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 和 `/v1/models` 必须携带有效且启用的 key
+  - `/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 必须携带有效且启用的 key
   - 支持 `Authorization: Bearer sk-...`
   - 支持 `X-API-Key`
   - 缺少 key 返回 `missing_api_key`
@@ -806,17 +842,17 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - [src/services/api_key_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/api_key_service.py)
   - API Key 生成、hash 鉴权、模型权限、token 上限和 key 级用量管理
 - [src/services/model_catalog_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_catalog_service.py)
-  - 汇总 Provider 配置模型与 Codex / Claude OAuth 可用模型，供用户和 API Key 模型权限共用
+  - 汇总 Provider 配置模型、Codex / Claude OAuth 可用模型与 Codex 图片模型，供用户和 API Key 模型权限共用
 - [src/repositories/api_key_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/api_key_repository.py)
   - API Key 持久化、列表排序和累计用量字段
 - [src/services/codex_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/codex_oauth_service.py)
-  - Codex OAuth PKCE、token 文件、本地模型 ID 目录与配额查询
+  - Codex OAuth PKCE、token 文件、本地文本模型目录、图片模型目录、默认图片模型与配额查询
 - [src/services/claude_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/claude_oauth_service.py)
   - Claude OAuth PKCE、token 文件、本地模型 ID 目录与认证文件管理
 - [src/services/oauth_auth_file_archive.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/oauth_auth_file_archive.py)
   - OAuth 认证文件 ZIP 导出、JSON/ZIP 导入展开与删除归档移动
 - [src/services/codex_proxy_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/codex_proxy_service.py)
-  - Codex OAuth 数据面代理与账号配额切换
+  - Codex OAuth 数据面代理、账号配额切换、`image_generation` 工具补齐与 OpenAI Images 兼容桥接
 - [src/services/claude_proxy_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/claude_proxy_service.py)
   - Claude OAuth 数据面代理与账号切换
 - [src/presentation/oauth_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/oauth_controller.py)
@@ -842,7 +878,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - [src/presentation/templates/api_keys.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/api_keys.html)
   - API Key 管理页面、创建/编辑弹窗、模型权限选择、Key 复制气泡和用量表格
 - [src/presentation/templates/oauth.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/oauth.html)
-  - OAuth 管理页面与 Codex / Claude 子 tab
+  - OAuth 管理页面、Codex 文本模型与图片模型设置、Claude 子 tab
 
 ## 5. Physical View
 
@@ -852,8 +888,10 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - 一个配置文件
 - 一个 SQLite 数据库，保存用户、请求日志、日聚合统计与 API Key
 - 一组滚动日志文件
+- 一个 Codex 配额后台刷新 greenlet
 - 一组本地 OAuth 认证文件
 - 一组本地 OAuth 模型目录缓存
+- 一组本地 Codex 图片模型默认设置
 - 多个 provider 指向多个真实上游
 - 下游统一接入这个代理
 
@@ -952,6 +990,7 @@ sequenceDiagram
         ChatGPT-->>CodexProxy: 429 usage_limit_reached
         CodexProxy->>CodexOAuth: mark_auth_file_quota_exhausted()
         CodexProxy->>CodexOAuth: record_auth_file_failure()
+        CodexProxy->>CodexOAuth: refresh_auth_file_quota_snapshot()
         CodexProxy->>ChatGPT: 使用下一个认证文件重试
     else 账号认证失败
         ChatGPT-->>CodexProxy: 401 authentication_error
@@ -992,7 +1031,39 @@ sequenceDiagram
     Note over CodexProxy,ChatGPT: response.completed 后的 HTTP framing error 保持逻辑完成状态
 ```
 
-### 6.3 Claude Downstream -> OpenAI Chat Upstream
+### 6.3 OpenAI Images Downstream -> Codex Image Generation Tool
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Controller
+    participant CodexOAuth
+    participant CodexProxy
+    participant ChatGPT
+
+    Client->>Controller: POST /v1/images/generations
+    Controller->>Controller: 读取 JSON 或 multipart 请求体
+    Controller->>Controller: 缺少 model 时使用 Codex 默认图片模型
+    Controller->>Controller: 校验白名单、API Key、图片模型权限和 token 上限
+    Controller->>CodexOAuth: iter_auth_candidates_for_model(main_text_model)
+    CodexOAuth->>CodexOAuth: 过滤 free plan、人工禁用、认证失败和冷却文件
+    Controller->>CodexProxy: proxy_image_request(action=generate)
+    CodexProxy->>CodexProxy: 构造 Responses 请求与 image_generation 工具配置
+    CodexProxy->>ChatGPT: POST /backend-api/codex/responses
+    ChatGPT-->>CodexProxy: image_generation_call result or stream events
+    alt 非流式
+        CodexProxy-->>Controller: OpenAI Images JSON data
+        Controller-->>Client: b64_json or data URL
+    else 流式
+        CodexProxy-->>Controller: image_generation partial/completed SSE
+        Controller-->>Client: OpenAI Images compatible SSE
+    end
+    CodexProxy->>CodexOAuth: record_auth_file_success()
+```
+
+`/v1/images/edits` 使用同一链路，并把上传文件或请求中的图片 URL 作为 `input_image` 内容传给 Codex `image_generation` 工具。
+
+### 6.4 Claude Downstream -> OpenAI Chat Upstream
 
 ```mermaid
 sequenceDiagram

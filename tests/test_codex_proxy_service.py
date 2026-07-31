@@ -232,6 +232,50 @@ class CodexProxyServiceTests(unittest.TestCase):
         CodexProxyService._apply_codex_body_defaults(direct_choice_body, "gpt-5.4")
         self.assertEqual("web_search", direct_choice_body["tool_choice"]["type"])
 
+    def test_codex_body_defaults_inject_image_generation_tool_with_default_model(self) -> None:
+        body: dict[str, Any] = {
+            "tools": [
+                {"type": "function", "name": "lookup"},
+            ],
+        }
+
+        CodexProxyService._apply_codex_body_defaults(
+            body,
+            "gpt-5.4",
+            image_generation_model="gpt-image-2",
+        )
+
+        self.assertEqual("function", body["tools"][0]["type"])
+        self.assertEqual(
+            {
+                "type": "image_generation",
+                "output_format": "png",
+                "model": "gpt-image-2",
+            },
+            body["tools"][1],
+        )
+
+        existing_tool_body: dict[str, Any] = {"tools": [{"type": "image_generation"}]}
+        CodexProxyService._apply_codex_body_defaults(
+            existing_tool_body,
+            "gpt-5.4",
+            image_generation_model="gpt-image-2",
+        )
+        self.assertEqual(1, len(existing_tool_body["tools"]))
+        self.assertEqual("gpt-image-2", existing_tool_body["tools"][0]["model"])
+
+    def test_codex_body_defaults_can_skip_image_generation_tool(self) -> None:
+        body: dict[str, Any] = {}
+
+        CodexProxyService._apply_codex_body_defaults(
+            body,
+            "gpt-5.4",
+            image_generation_model="gpt-image-2",
+            allow_image_generation=False,
+        )
+
+        self.assertNotIn("tools", body)
+
     def test_nonstream_request_falls_back_to_next_account_after_upstream_400(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -315,6 +359,7 @@ class CodexProxyServiceTests(unittest.TestCase):
             proxy_service = CodexProxyService(ctx, oauth_service)
             captured_headers: list[dict[str, str]] = []
             captured_bodies: list[dict[str, Any]] = []
+            quota_get_calls: list[dict[str, Any]] = []
 
             def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
                 self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
@@ -336,7 +381,27 @@ class CodexProxyServiceTests(unittest.TestCase):
                     ],
                 )
 
-            with patch.object(oauth_service, "get_auth_file_quota") as quota_mock:
+            class FakeQuotaSession:
+                def get(self, url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                    quota_get_calls.append(
+                        {
+                            "url": url,
+                            "headers": dict(headers or {}),
+                            "timeout": timeout,
+                            "proxies": proxies,
+                            "verify": verify,
+                            "kwargs": dict(kwargs),
+                        }
+                    )
+                    return FakeHTTPResponse(
+                        status_code=200,
+                        body=b'{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"reset_after_seconds":3600}}}',
+                    )
+
+                def close(self) -> None:
+                    pass
+
+            with patch("src.services.codex_oauth_service.requests.Session", side_effect=FakeQuotaSession):
                 with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
                     response, status_code, failure = proxy_service.proxy_request(
                         {
@@ -347,7 +412,6 @@ class CodexProxyServiceTests(unittest.TestCase):
                         {"Authorization": "Bearer downstream-token"},
                         resolved_target_format="openai_chat",
                     )
-                quota_mock.assert_not_called()
 
             self.assertIsNone(failure)
             self.assertEqual(200, status_code)
@@ -381,6 +445,10 @@ class CodexProxyServiceTests(unittest.TestCase):
             "usage_limit_reached",
             auth_entries["codex-first.json"]["usage_status_message"],
         )
+        self.assertEqual(1, len(quota_get_calls))
+        self.assertEqual("Bearer access-first", quota_get_calls[0]["headers"]["Authorization"])
+        self.assertEqual(0.0, auth_entries["codex-first.json"]["quota"]["windows"][0]["remaining_percent"])
+        self.assertEqual("", auth_entries["codex-first.json"]["quota_error"])
         self.assertEqual("quota_cooldown", auth_entries["codex-first.json"]["availability_status"])
         self.assertEqual("success", auth_entries["codex-second.json"]["usage_status"])
 
@@ -435,6 +503,83 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual("request-id", captured_headers["X-Client-Request-Id"])
         self.assertNotIn("Cookie", captured_headers)
         self.assertNotIn("Host", captured_headers)
+
+    def test_image_generation_request_uses_codex_tool_and_returns_images_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            captured_body: dict[str, Any] = {}
+            captured_headers: dict[str, str] = {}
+            completed_event = {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_image",
+                    "created_at": 1770000000,
+                    "model": "gpt-5.4",
+                    "tool_usage": {
+                        "image_gen": {
+                            "input_tokens": 4,
+                            "output_tokens": 6,
+                            "total_tokens": 10,
+                        }
+                    },
+                    "output": [
+                        {
+                            "type": "image_generation_call",
+                            "output_format": "png",
+                            "result": "aGVsbG8=",
+                            "revised_prompt": "draw a tidy diagram",
+                        }
+                    ],
+                },
+            }
+            completed_chunk = f"data: {json.dumps(completed_event)}\n\n".encode("utf-8")
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del timeout, kwargs
+                self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
+                self.assertTrue(stream)
+                captured_headers.update(dict(headers or {}))
+                captured_body.update(dict(json or {}))
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[completed_chunk],
+                )
+
+            complete_meta: dict[str, Any] = {}
+            with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_image_request(
+                    {
+                        "prompt": "draw",
+                        "model": "gpt-image-2",
+                        "response_format": "url",
+                        "size": "1024x1024",
+                    },
+                    {"Authorization": "Bearer downstream-token"},
+                    action="generate",
+                    on_complete=complete_meta.update,
+                )
+            payload = json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertEqual("Bearer access-first", captured_headers["Authorization"])
+        self.assertEqual({"type": "image_generation"}, captured_body["tool_choice"])
+        self.assertEqual("image_generation", captured_body["tools"][0]["type"])
+        self.assertEqual("generate", captured_body["tools"][0]["action"])
+        self.assertEqual("gpt-image-2", captured_body["tools"][0]["model"])
+        self.assertEqual("1024x1024", captured_body["tools"][0]["size"])
+        self.assertEqual("draw", captured_body["input"][0]["content"][0]["text"])
+        self.assertEqual(1770000000, payload["created"])
+        self.assertEqual("data:image/png;base64,aGVsbG8=", payload["data"][0]["url"])
+        self.assertEqual("draw a tidy diagram", payload["data"][0]["revised_prompt"])
+        self.assertEqual(10, payload["usage"]["total_tokens"])
+        self.assertEqual("gpt-image-2", complete_meta["response_model"])
+        self.assertEqual(10, complete_meta["total_tokens"])
 
     def test_proxy_warning_confirmation_failure_returns_confirmation_url_without_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

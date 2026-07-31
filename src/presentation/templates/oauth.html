@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}OAuth 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260718-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260801-2">{% endblock %}
 {% block body_class %}oauth-page{% endblock %}
 {% block header_title %}OAuth 管理{% endblock %}
 {% block header_subtitle %}管理 CLI/OAuth 类认证文件，并查看账号状态与配额。{% endblock %}
@@ -92,7 +92,7 @@
                                     <p>这里维护的是下游可见的 Codex 模型 ID。</p>
                                     <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
                                     <ul>
-                                        <li>模型 ID 由用户手动添加，不会自动从 OpenAI 拉取。</li>
+                                        <li>模型 ID 使用本地目录，内置模型可删除，删除后可通过添加内置模型补回。</li>
                                         <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
                                         <li>命中 Codex 模型后，LLM Proxy 会转换请求格式，并使用 Codex OAuth 认证文件访问 <code>POST https://chatgpt.com/backend-api/codex/responses</code>。</li>
                                     </ul>
@@ -110,7 +110,8 @@
                             placeholder="输入模型 ID，例如 gpt-5.5"
                             onkeydown="handleCodexModelInputKeydown(event)"
                         >
-                        <button type="button" class="btn btn-primary" id="codexAddModelBtn" onclick="addCodexModel()">添加模型</button>
+                        <button type="button" class="btn btn-primary" id="codexAddModelBtn" onclick="addCodexModel()">添加</button>
+                        <button type="button" class="btn btn-secondary" id="codexRestoreBuiltInModelsBtn" onclick="restoreCodexBuiltInModels()">添加内置模型</button>
                     </div>
                     <div class="oauth-model-reference-links">
                         <div>参考：</div>
@@ -123,6 +124,50 @@
                 <div class="oauth-model-summary" id="codexModelSummary"></div>
                 <div class="oauth-model-list" id="codexModelList">
                     <div class="empty-state">正在加载模型...</div>
+                </div>
+            </div>
+
+            <div class="oauth-section">
+                <div class="oauth-card-header">
+                    <div>
+                        <div class="oauth-title-with-help">
+                            <h2>Codex 图片模型</h2>
+                            <div class="oauth-help-wrap">
+                                <button
+                                    type="button"
+                                    class="oauth-help-button"
+                                    aria-label="查看 Codex 图片模型说明"
+                                    aria-describedby="codexImageModelsHelp"
+                                >?</button>
+                                <div class="oauth-help-popover" id="codexImageModelsHelp" role="tooltip">
+                                    <p>这里维护 Codex 图片生成可用模型，并指定自动补齐时使用的默认模型。</p>
+                                    <ul>
+                                        <li><code>/v1/images/generations</code> 和 <code>/v1/images/edits</code> 可手动指定这里的图片模型。</li>
+                                        <li>Images 请求未传 <code>model</code> 时，会使用默认模型作为本次图片生成模型。</li>
+                                        <li>Codex Responses 请求未声明图片工具模型时，会使用默认模型补齐 <code>image_generation</code> 工具。</li>
+                                        <li>默认模型只决定自动补齐时的选择，不限制手动指定其他可用图片模型。</li>
+                                        <li>内置图片模型可删除，删除后可通过添加内置模型补回；用户自行添加的模型 ID 会保留。</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="oauth-model-editor">
+                    <div class="oauth-model-editor-row">
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="codexImageModelIdInput"
+                            placeholder="输入图片模型 ID，例如 gpt-image-2"
+                            onkeydown="handleCodexImageModelInputKeydown(event)"
+                        >
+                        <button type="button" class="btn btn-primary" id="codexAddImageModelBtn" onclick="addCodexImageModel()">添加</button>
+                        <button type="button" class="btn btn-secondary" id="codexRestoreBuiltInImageModelsBtn" onclick="restoreCodexBuiltInImageModels()">添加内置模型</button>
+                    </div>
+                </div>
+                <div class="oauth-model-list" id="codexImageModelList">
+                    <div class="empty-state">正在加载图片模型...</div>
                 </div>
             </div>
 
@@ -319,7 +364,7 @@
                             placeholder="输入模型 ID，例如 claude-sonnet-4-5-20250929"
                             onkeydown="handleClaudeModelInputKeydown(event)"
                         >
-                        <button type="button" class="btn btn-primary" id="claudeAddModelBtn" onclick="addClaudeModel()">添加模型</button>
+                        <button type="button" class="btn btn-primary" id="claudeAddModelBtn" onclick="addClaudeModel()">添加</button>
                     </div>
                     <div class="oauth-model-reference-links">
                         <div>参考：</div>
@@ -472,6 +517,16 @@
             modelsSaving: false,
             deletingModelId: '',
             modelDeleteConfirmId: '',
+            restoringBuiltInModels: false,
+            imageModels: [],
+            imageModelsLoading: false,
+            imageModelsError: '',
+            imageModelsSaving: false,
+            deletingImageModelId: '',
+            imageModelDeleteConfirmId: '',
+            restoringBuiltInImageModels: false,
+            defaultImageModel: '',
+            defaultImageModelSaving: false,
         };
         let claudeAuthState = {
             authorizationUrl: '',
@@ -542,7 +597,22 @@
             const addModelButton = document.getElementById('codexAddModelBtn');
             if (addModelButton) {
                 addModelButton.disabled = codexAuthState.modelsSaving;
-                addModelButton.textContent = codexAuthState.modelsSaving ? '添加中...' : '添加模型';
+                addModelButton.textContent = codexAuthState.modelsSaving ? '添加中...' : '添加';
+            }
+            const restoreBuiltInModelsButton = document.getElementById('codexRestoreBuiltInModelsBtn');
+            if (restoreBuiltInModelsButton) {
+                restoreBuiltInModelsButton.disabled = codexAuthState.restoringBuiltInModels;
+                restoreBuiltInModelsButton.textContent = codexAuthState.restoringBuiltInModels ? '添加中...' : '添加内置模型';
+            }
+            const addImageModelButton = document.getElementById('codexAddImageModelBtn');
+            if (addImageModelButton) {
+                addImageModelButton.disabled = codexAuthState.imageModelsSaving;
+                addImageModelButton.textContent = codexAuthState.imageModelsSaving ? '添加中...' : '添加';
+            }
+            const restoreBuiltInImageModelsButton = document.getElementById('codexRestoreBuiltInImageModelsBtn');
+            if (restoreBuiltInImageModelsButton) {
+                restoreBuiltInImageModelsButton.disabled = codexAuthState.restoringBuiltInImageModels;
+                restoreBuiltInImageModelsButton.textContent = codexAuthState.restoringBuiltInImageModels ? '添加中...' : '添加内置模型';
             }
             const selectedNamesForCurrentFilter = getCodexSelectedAuthFileNamesForCurrentFilter();
             const importAuthFilesButton = document.getElementById('codexImportAuthFilesBtn');
@@ -799,6 +869,7 @@
                 showMessage('Codex 认证文件已生成', 'success');
                 await loadCodexAuthFiles();
                 await loadCodexModels();
+                await loadCodexImageModels();
             } catch (error) {
                 console.error('提交 Codex 回调 URL 失败:', error);
                 setCodexOAuthStatus(error?.message || '提交回调 URL 失败', 'error');
@@ -832,7 +903,7 @@
             }
             if (addModelButton) {
                 addModelButton.disabled = claudeAuthState.modelsSaving;
-                addModelButton.textContent = claudeAuthState.modelsSaving ? '添加中...' : '添加模型';
+                addModelButton.textContent = claudeAuthState.modelsSaving ? '添加中...' : '添加';
             }
             const selectedNames = getClaudeSelectedAuthFileNamesForCurrentFilter();
             const importAuthFilesButton = document.getElementById('claudeImportAuthFilesBtn');
@@ -987,20 +1058,22 @@
             container.innerHTML = `
                 <div class="oauth-model-grid">
                     ${models.map(model => {
-                        const encodedModelId = encodeURIComponent(model.id || '');
-                        const isDeleting = codexAuthState.deletingModelId === (model.id || '');
-                        const isConfirmingDelete = codexAuthState.modelDeleteConfirmId === (model.id || '');
+                        const modelId = model.id || '';
+                        const encodedModelId = encodeURIComponent(modelId);
+                        const isDeleting = codexAuthState.deletingModelId === modelId;
+                        const isConfirmingDelete = codexAuthState.modelDeleteConfirmId === modelId;
                         return `
                             <article class="oauth-model-item">
                                 <button type="button" class="oauth-model-main" onclick="copyCodexModelName(decodeURIComponent('${encodedModelId}'))">
-                                    <span class="oauth-model-id">${escapeHtml(model.id || '')}</span>
+                                    <span class="oauth-model-id">${escapeHtml(modelId)}</span>
+                                    ${model.built_in ? '<span class="oauth-model-tag">内置</span>' : ''}
                                 </button>
                                 <div class="oauth-model-delete-wrap">
                                     <button
                                         type="button"
                                         class="oauth-icon-button oauth-icon-button-danger"
                                         title="删除模型"
-                                        aria-label="删除模型 ${escapeHtml(model.id || '')}"
+                                        aria-label="删除模型 ${escapeHtml(modelId)}"
                                         onclick="toggleCodexModelDeleteConfirm(decodeURIComponent('${encodedModelId}'))"
                                         ${isDeleting ? 'disabled' : ''}
                                     >${renderTrashIcon()}</button>
@@ -1038,6 +1111,32 @@
                 codexAuthState.modelsError = error?.message || '加载模型失败';
             } finally {
                 codexAuthState.modelsLoading = false;
+                syncCodexAuthControls();
+                renderCodexModels();
+            }
+        }
+
+        async function restoreCodexBuiltInModels() {
+            if (codexAuthState.restoringBuiltInModels) return;
+            codexAuthState.restoringBuiltInModels = true;
+            syncCodexAuthControls();
+            try {
+                const response = await fetch('/api/oauth/codex/models/restore-builtins', {
+                    method: 'POST',
+                    cache: 'no-store',
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '添加内置模型失败');
+                }
+                codexAuthState.models = Array.isArray(result.models) ? result.models : [];
+                codexAuthState.modelsError = '';
+                showMessage('内置模型已添加', 'success');
+            } catch (error) {
+                console.error('添加 Codex 内置模型失败:', error);
+                showActionError('添加 Codex 内置模型', error, { fallback: '添加内置模型失败' });
+            } finally {
+                codexAuthState.restoringBuiltInModels = false;
                 syncCodexAuthControls();
                 renderCodexModels();
             }
@@ -1117,6 +1216,7 @@
                 showActionError('删除 Codex 模型', error, { fallback: '删除模型失败' });
             } finally {
                 codexAuthState.deletingModelId = '';
+                syncCodexAuthControls();
                 renderCodexModels();
             }
         }
@@ -1131,6 +1231,237 @@
                 console.error('复制模型名失败:', error);
                 showActionError('复制模型名', error, { fallback: '复制模型名失败' });
             }
+        }
+
+        function updateCodexImageModelsFromResult(result) {
+            codexAuthState.imageModels = Array.isArray(result?.models) ? result.models : [];
+            codexAuthState.defaultImageModel = String(result?.default_model || '').trim();
+            codexAuthState.imageModelsError = '';
+        }
+
+        function renderCodexImageModels() {
+            const container = document.getElementById('codexImageModelList');
+            if (!container) return;
+            const models = Array.isArray(codexAuthState.imageModels) ? codexAuthState.imageModels : [];
+            if (codexAuthState.imageModelsLoading) {
+                container.innerHTML = '<div class="empty-state">正在加载图片模型...</div>';
+                return;
+            }
+            if (codexAuthState.imageModelsError) {
+                container.innerHTML = `<div class="error">${escapeHtml(codexAuthState.imageModelsError)}</div>`;
+                return;
+            }
+            if (!models.length) {
+                container.innerHTML = '<div class="empty-state">暂无可用 Codex 图片模型。</div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="oauth-model-grid">
+                    ${models.map(model => {
+                        const modelId = model.id || '';
+                        const encodedModelId = encodeURIComponent(modelId);
+                        const isDeleting = codexAuthState.deletingImageModelId === modelId;
+                        const isConfirmingDelete = codexAuthState.imageModelDeleteConfirmId === modelId;
+                        const isDefault = codexAuthState.defaultImageModel === modelId;
+                        return `
+                            <article class="oauth-model-item">
+                                <div class="oauth-model-main">
+                                    <button type="button" class="oauth-model-copy-button" onclick="copyCodexImageModelName(decodeURIComponent('${encodedModelId}'))">
+                                        <span class="oauth-model-id">${escapeHtml(modelId)}</span>
+                                    </button>
+                                    <span class="oauth-model-meta">
+                                        ${model.built_in ? '<span class="oauth-model-tag">内置</span>' : ''}
+                                        ${isDefault ? '<span class="oauth-model-tag oauth-model-tag-primary">默认</span>' : ''}
+                                        ${isDefault ? '' : `
+                                            <button
+                                                type="button"
+                                                class="oauth-model-default-button"
+                                                onclick="setDefaultCodexImageModel(decodeURIComponent('${encodedModelId}'))"
+                                                ${codexAuthState.defaultImageModelSaving ? 'disabled' : ''}
+                                            >设为默认</button>
+                                        `}
+                                    </span>
+                                </div>
+                                <div class="oauth-model-delete-wrap">
+                                    <button
+                                        type="button"
+                                        class="oauth-icon-button oauth-icon-button-danger"
+                                        title="删除图片模型"
+                                        aria-label="删除图片模型 ${escapeHtml(modelId)}"
+                                        onclick="toggleCodexImageModelDeleteConfirm(decodeURIComponent('${encodedModelId}'))"
+                                        ${isDeleting ? 'disabled' : ''}
+                                    >${renderTrashIcon()}</button>
+                                    ${isConfirmingDelete ? `
+                                        <div class="oauth-delete-popover" role="dialog" aria-label="确认删除图片模型">
+                                            <div class="oauth-delete-popover-title">删除这个图片模型？</div>
+                                            <div class="oauth-delete-popover-actions">
+                                                <button type="button" class="btn btn-secondary btn-sm" onclick="cancelCodexImageModelDelete()">取消</button>
+                                                <button type="button" class="btn btn-danger btn-sm" onclick="deleteCodexImageModel(decodeURIComponent('${encodedModelId}'))" ${isDeleting ? 'disabled' : ''}>删除</button>
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </article>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        async function loadCodexImageModels() {
+            codexAuthState.imageModelsLoading = true;
+            syncCodexAuthControls();
+            renderCodexImageModels();
+            try {
+                const response = await fetch('/api/oauth/codex/image-models', { cache: 'no-store' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '加载图片模型失败');
+                }
+                updateCodexImageModelsFromResult(result);
+            } catch (error) {
+                console.error('加载 Codex 图片模型失败:', error);
+                codexAuthState.imageModelsError = error?.message || '加载图片模型失败';
+            } finally {
+                codexAuthState.imageModelsLoading = false;
+                syncCodexAuthControls();
+                renderCodexImageModels();
+            }
+        }
+
+        function handleCodexImageModelInputKeydown(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addCodexImageModel();
+            }
+        }
+
+        async function addCodexImageModel() {
+            const input = document.getElementById('codexImageModelIdInput');
+            const modelId = input?.value?.trim() || '';
+            if (!modelId) {
+                showMessage('请先填写图片模型 ID', 'error');
+                return;
+            }
+            codexAuthState.imageModelsSaving = true;
+            syncCodexAuthControls();
+            try {
+                const response = await fetch('/api/oauth/codex/image-models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_id: modelId }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '添加图片模型失败');
+                }
+                updateCodexImageModelsFromResult(result);
+                if (input) input.value = '';
+            } catch (error) {
+                console.error('添加 Codex 图片模型失败:', error);
+                showActionError('添加 Codex 图片模型', error, { fallback: '添加图片模型失败' });
+            } finally {
+                codexAuthState.imageModelsSaving = false;
+                syncCodexAuthControls();
+                renderCodexImageModels();
+            }
+        }
+
+        function toggleCodexImageModelDeleteConfirm(modelId) {
+            const normalizedModelId = String(modelId || '').trim();
+            codexAuthState.imageModelDeleteConfirmId = codexAuthState.imageModelDeleteConfirmId === normalizedModelId
+                ? ''
+                : normalizedModelId;
+            renderCodexImageModels();
+        }
+
+        function cancelCodexImageModelDelete() {
+            codexAuthState.imageModelDeleteConfirmId = '';
+            renderCodexImageModels();
+        }
+
+        async function deleteCodexImageModel(modelId) {
+            const normalizedModelId = String(modelId || '').trim();
+            if (!normalizedModelId || codexAuthState.deletingImageModelId) return;
+            codexAuthState.deletingImageModelId = normalizedModelId;
+            renderCodexImageModels();
+            try {
+                const response = await fetch(`/api/oauth/codex/image-models/${encodeURIComponent(normalizedModelId)}`, {
+                    method: 'DELETE',
+                    cache: 'no-store',
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '删除图片模型失败');
+                }
+                updateCodexImageModelsFromResult(result);
+                codexAuthState.imageModelDeleteConfirmId = '';
+            } catch (error) {
+                console.error('删除 Codex 图片模型失败:', error);
+                showActionError('删除 Codex 图片模型', error, { fallback: '删除图片模型失败' });
+            } finally {
+                codexAuthState.deletingImageModelId = '';
+                syncCodexAuthControls();
+                renderCodexImageModels();
+            }
+        }
+
+        async function restoreCodexBuiltInImageModels() {
+            if (codexAuthState.restoringBuiltInImageModels) return;
+            codexAuthState.restoringBuiltInImageModels = true;
+            syncCodexAuthControls();
+            try {
+                const response = await fetch('/api/oauth/codex/image-models/restore-builtins', {
+                    method: 'POST',
+                    cache: 'no-store',
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '添加内置图片模型失败');
+                }
+                updateCodexImageModelsFromResult(result);
+                showMessage('内置图片模型已添加', 'success');
+            } catch (error) {
+                console.error('添加 Codex 内置图片模型失败:', error);
+                showActionError('添加 Codex 内置图片模型', error, { fallback: '添加内置图片模型失败' });
+            } finally {
+                codexAuthState.restoringBuiltInImageModels = false;
+                syncCodexAuthControls();
+                renderCodexImageModels();
+            }
+        }
+
+        async function setDefaultCodexImageModel(modelId) {
+            const normalizedModelId = String(modelId || '').trim();
+            if (!normalizedModelId || normalizedModelId === codexAuthState.defaultImageModel) return;
+            codexAuthState.defaultImageModelSaving = true;
+            syncCodexAuthControls();
+            renderCodexImageModels();
+            try {
+                const response = await fetch('/api/oauth/codex/image-models/default', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_id: normalizedModelId }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '设置默认图片模型失败');
+                }
+                updateCodexImageModelsFromResult(result);
+                showMessage('默认图片模型已更新', 'success');
+            } catch (error) {
+                console.error('设置 Codex 默认图片模型失败:', error);
+                showActionError('设置 Codex 默认图片模型', error, { fallback: '设置默认图片模型失败' });
+            } finally {
+                codexAuthState.defaultImageModelSaving = false;
+                syncCodexAuthControls();
+                renderCodexImageModels();
+            }
+        }
+
+        async function copyCodexImageModelName(modelName) {
+            await copyCodexModelName(modelName);
         }
 
         function renderClaudeModels() {
@@ -2665,9 +2996,10 @@
             syncClaudeAuthControls();
             renderOAuthToolbarSummary();
             renderCodexAuthUrl();
-            renderClaudeAuthUrl();
-            loadCodexModels();
-            loadClaudeModels();
+                renderClaudeAuthUrl();
+                loadCodexModels();
+                loadCodexImageModels();
+                loadClaudeModels();
             loadCodexAuthFiles();
             loadClaudeAuthFiles();
         }

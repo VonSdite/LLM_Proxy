@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import requests
-from flask import Flask
+from flask import Flask, Response
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -195,15 +195,34 @@ class RecordingProxyService:
 
 
 class FakeCodexProxyService:
-    def __init__(self, models: tuple[str, ...] = ("gpt-5",), proxy_result=None) -> None:
+    def __init__(
+        self,
+        models: tuple[str, ...] = ("gpt-5",),
+        proxy_result=None,
+        image_models: tuple[str, ...] = ("gpt-image-2",),
+        image_proxy_result=None,
+    ) -> None:
         self._models = models
         self._proxy_result = proxy_result
+        self._image_models = image_models
+        self._image_proxy_result = image_proxy_result
+        self.last_image_args: tuple[object, ...] | None = None
+        self.last_image_kwargs: dict[str, object] | None = None
 
     def has_model(self, model_name: str) -> bool:
         return model_name in self._models
 
     def list_model_names(self) -> tuple[str, ...]:
         return self._models
+
+    def has_image_model(self, model_name: str) -> bool:
+        return model_name in self._image_models
+
+    def list_image_model_names(self) -> tuple[str, ...]:
+        return self._image_models
+
+    def get_default_image_model(self) -> str:
+        return self._image_models[0] if self._image_models else ""
 
     def proxy_request(self, *args, **kwargs):
         del args, kwargs
@@ -214,6 +233,22 @@ class FakeCodexProxyService:
             503,
             ProxyErrorInfo(
                 message="No available Codex OAuth account for model: gpt-5",
+                status_code=503,
+                error_type="upstream_error",
+                error_code="codex_auth_unavailable",
+            ),
+        )
+
+    def proxy_image_request(self, *args, **kwargs):
+        self.last_image_args = args
+        self.last_image_kwargs = kwargs
+        if self._image_proxy_result is not None:
+            return self._image_proxy_result
+        return (
+            None,
+            503,
+            ProxyErrorInfo(
+                message="No available Codex OAuth account for image generation",
                 status_code=503,
                 error_type="upstream_error",
                 error_code="codex_auth_unavailable",
@@ -331,9 +366,14 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         model_ids = [item["id"] for item in payload["data"]]
         self.assertIn("demo/regular", model_ids)
         self.assertIn("gpt-5", model_ids)
+        self.assertIn("gpt-image-2", model_ids)
         codex_entry = next(item for item in payload["data"] if item["id"] == "gpt-5")
         self.assertEqual("codex", codex_entry["provider_name"])
         self.assertEqual("openai_responses", codex_entry["source_format"])
+        image_entry = next(item for item in payload["data"] if item["id"] == "gpt-image-2")
+        self.assertEqual("codex", image_entry["provider_name"])
+        self.assertEqual(["openai_images"], image_entry["target_formats"])
+        self.assertEqual(["image_generation"], image_entry["capabilities"])
 
     def test_list_models_includes_claude_oauth_models_without_provider_prefix(self) -> None:
         provider = LLMProvider(
@@ -367,6 +407,48 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         claude_entry = next(item for item in payload["data"] if item["id"] == "claude-sonnet-4-5")
         self.assertEqual("claude", claude_entry["provider_name"])
         self.assertEqual("claude_chat", claude_entry["source_format"])
+
+    def test_images_generations_uses_default_codex_image_model(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("regular",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        codex_proxy_service = FakeCodexProxyService(
+            image_proxy_result=(
+                Response(
+                    b'{"created":1770000000,"data":[]}',
+                    status=200,
+                    headers={"Content-Type": "application/json; charset=utf-8"},
+                ),
+                200,
+                None,
+            )
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            codex_proxy_service=codex_proxy_service,
+        )
+
+        response = app.test_client().post("/v1/images/generations", json={"prompt": "draw"})
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"created": 1770000000, "data": []}, response.get_json())
+        self.assertIsNotNone(codex_proxy_service.last_image_args)
+        request_data = codex_proxy_service.last_image_args[0]
+        self.assertEqual("gpt-image-2", request_data["model"])  # type: ignore[index]
+        self.assertEqual("generate", codex_proxy_service.last_image_kwargs["action"])  # type: ignore[index]
 
     def test_list_models_filters_to_models_allowed_for_whitelisted_user(self) -> None:
         provider = LLMProvider(
