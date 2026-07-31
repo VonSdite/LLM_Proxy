@@ -11,6 +11,7 @@ import re
 import secrets
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -47,8 +48,21 @@ CODEX_MODEL_REFERENCE_URLS = (
 )
 CODEX_USER_AGENT = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.135.0)"
 CODEX_QUOTA_USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
+CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS = 5 * 60 * 60
+CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS = 10
 OAUTH_SESSION_TTL_SECONDS = 10 * 60
-DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = ()
+DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = (
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+)
+DEFAULT_CODEX_IMAGE_MODEL_IDS: tuple[str, ...] = (
+    "gpt-image-2",
+    "gpt-image-1.5",
+    "gpt-image-1",
+)
+DEFAULT_CODEX_IMAGE_MODEL_ID = "gpt-image-2"
 AUTH_FAILURE_ERROR_TYPES = {
     "authentication_error",
     "invalid_api_key",
@@ -90,11 +104,14 @@ class CodexOAuthService:
         self._auth_dir = ctx.root_path / "data" / "oauth" / "codex"
         self._deleted_dir = self._auth_dir / "deleted"
         self._models_file = self._auth_dir / "models.json"
+        self._image_models_file = self._auth_dir / "image_models.json"
+        self._image_settings_file = self._auth_dir / "image_settings.json"
         self._state_file = self._auth_dir / ".state" / "auth_files.json"
         self._sessions: dict[str, _CodexOAuthSession] = {}
         self._quota_cooldowns: dict[str, float] = {}
         self._quota_refresh_locks: dict[str, threading.Lock] = {}
         self._quota_refresh_lock_guard = threading.RLock()
+        self._quota_auto_refresh_worker: Any | None = None
 
     def start_login(self) -> dict[str, Any]:
         """生成新的 Codex OAuth 授权链接。"""
@@ -197,6 +214,66 @@ class CodexOAuthService:
             "auth_dir": str(self._auth_dir),
         }
 
+    def start_quota_auto_refresh_worker(
+        self,
+        *,
+        interval_seconds: float = CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS,
+        file_delay_seconds: float = CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS,
+    ) -> None:
+        """启动 Codex 认证文件配额后台刷新任务。"""
+        if self._quota_auto_refresh_worker is not None and not getattr(
+            self._quota_auto_refresh_worker,
+            "dead",
+            True,
+        ):
+            return
+        try:
+            from gevent import spawn
+        except Exception as exc:
+            self._logger.warning("Codex quota auto refresh worker not started: error=%s", exc)
+            return
+
+        self._quota_auto_refresh_worker = spawn(
+            self._run_quota_auto_refresh_loop,
+            interval_seconds,
+            file_delay_seconds,
+        )
+        self._logger.info(
+            "Codex quota auto refresh worker started: interval_seconds=%s file_delay_seconds=%s",
+            interval_seconds,
+            file_delay_seconds,
+        )
+
+    def refresh_all_auth_file_quota_snapshots(
+        self,
+        *,
+        file_delay_seconds: float = CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS,
+        sleep_func: Callable[[float], None] | None = None,
+    ) -> dict[str, Any]:
+        """刷新全部可查询认证文件的配额快照。"""
+        auth_file_names, skipped = self._list_quota_auto_refresh_auth_file_names()
+        refreshed: list[str] = []
+        failed: list[dict[str, str]] = []
+        delay_seconds = max(float(file_delay_seconds), 0.0)
+
+        for index, name in enumerate(auth_file_names):
+            if index > 0 and delay_seconds > 0 and sleep_func is not None:
+                sleep_func(delay_seconds)
+            try:
+                self.get_auth_file_quota(name)
+                refreshed.append(name)
+            except Exception as exc:
+                failed.append({"name": name, "error": str(exc)})
+                self._logger.warning("Codex quota auto refresh failed: file=%s error=%s", name, exc)
+
+        return {
+            "status": "ok",
+            "total": len(auth_file_names) + len(skipped),
+            "refreshed": refreshed,
+            "failed": failed,
+            "skipped": skipped,
+        }
+
     def set_auth_file_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
         """设置 Codex OAuth 认证文件是否参与请求调度。"""
         if not isinstance(enabled, bool):
@@ -290,12 +367,14 @@ class CodexOAuthService:
 
     def list_models(self) -> dict[str, Any]:
         """返回当前 Codex OAuth 可用模型目录。"""
-        models = self._build_model_entries(self._load_model_ids())
+        model_ids = self._load_model_ids()
+        models = self._build_model_entries(model_ids, DEFAULT_CODEX_MODEL_IDS)
         return {
             "status": "ok",
             "provider": "codex",
             "models": models,
             "total": len(models),
+            "built_in_models": list(DEFAULT_CODEX_MODEL_IDS),
             "reference_urls": list(CODEX_MODEL_REFERENCE_URLS),
         }
 
@@ -318,16 +397,103 @@ class CodexOAuthService:
         self._write_model_ids(model_ids)
         return self.list_models()
 
+    def restore_builtin_models(self) -> dict[str, Any]:
+        """把内置 Codex 模型 ID 重新加入本地目录。"""
+        model_ids = self._merge_model_ids(self._load_model_ids(), DEFAULT_CODEX_MODEL_IDS)
+        self._write_model_ids(model_ids)
+        return self.list_models()
+
+    def list_image_models(self) -> dict[str, Any]:
+        """返回当前 Codex OAuth 图片模型目录和默认模型。"""
+        model_ids = self._load_image_model_ids()
+        models = self._build_model_entries(model_ids, DEFAULT_CODEX_IMAGE_MODEL_IDS)
+        return {
+            "status": "ok",
+            "provider": "codex",
+            "models": models,
+            "total": len(models),
+            "default_model": self.get_default_image_model(),
+            "built_in_models": list(DEFAULT_CODEX_IMAGE_MODEL_IDS),
+            "reference_urls": list(CODEX_MODEL_REFERENCE_URLS),
+        }
+
+    def add_image_model(self, model_id: str) -> dict[str, Any]:
+        """添加一个本地 Codex 图片模型 ID。"""
+        normalized_model_id = self._normalize_model_id(model_id)
+        model_ids = list(self._load_image_model_ids())
+        if normalized_model_id not in model_ids:
+            model_ids.append(normalized_model_id)
+            self._write_image_model_ids(model_ids)
+        if not self.get_default_image_model():
+            self.set_default_image_model(normalized_model_id)
+        return self.list_image_models()
+
+    def delete_image_model(self, model_id: str) -> dict[str, Any]:
+        """删除一个本地 Codex 图片模型 ID。"""
+        normalized_model_id = self._normalize_model_id(model_id)
+        model_ids = [
+            current_model_id
+            for current_model_id in self._load_image_model_ids()
+            if current_model_id != normalized_model_id
+        ]
+        self._write_image_model_ids(model_ids)
+        self._ensure_default_image_model(model_ids)
+        return self.list_image_models()
+
+    def restore_builtin_image_models(self) -> dict[str, Any]:
+        """把内置 Codex 图片模型 ID 重新加入本地目录。"""
+        model_ids = self._merge_model_ids(self._load_image_model_ids(), DEFAULT_CODEX_IMAGE_MODEL_IDS)
+        self._write_image_model_ids(model_ids)
+        self._ensure_default_image_model(model_ids)
+        return self.list_image_models()
+
+    def set_default_image_model(self, model_id: str) -> dict[str, Any]:
+        """设置 Codex 图片生成默认模型。"""
+        normalized_model_id = self._normalize_model_id(model_id)
+        if normalized_model_id not in set(self._load_image_model_ids()):
+            raise ValueError("Image model ID is not in the Codex image model catalog")
+        self._write_image_settings({"default_model": normalized_model_id})
+        return self.list_image_models()
+
     def list_model_names(self) -> tuple[str, ...]:
         """返回当前认证文件实际可用的 Codex 模型名。"""
         if not self._iter_auth_file_paths():
             return ()
         return tuple(sorted(dict.fromkeys(self._load_model_ids())))
 
+    def list_image_model_names(self) -> tuple[str, ...]:
+        """返回当前认证文件实际可用的 Codex 图片模型名。"""
+        if not self._iter_auth_file_paths():
+            return ()
+        return tuple(sorted(dict.fromkeys(self._load_image_model_ids())))
+
     def has_model(self, model_name: str) -> bool:
         """判断模型名是否属于当前 Codex OAuth 可代理模型。"""
         normalized_model = str(model_name or "").strip()
         return bool(normalized_model) and normalized_model in set(self.list_model_names())
+
+    def has_image_model(self, model_name: str) -> bool:
+        """判断模型名是否属于当前 Codex OAuth 图片模型目录。"""
+        normalized_model = str(model_name or "").strip()
+        return bool(normalized_model) and normalized_model in set(self._load_image_model_ids())
+
+    def get_default_image_model(self) -> str:
+        """返回 Codex 图片生成默认模型。"""
+        model_ids = self._load_image_model_ids()
+        if not model_ids:
+            return ""
+        settings = self._load_image_settings()
+        configured_default = str(settings.get("default_model") or settings.get("default_image_model") or "").strip()
+        if configured_default in set(model_ids):
+            return configured_default
+        if DEFAULT_CODEX_IMAGE_MODEL_ID in set(model_ids):
+            return DEFAULT_CODEX_IMAGE_MODEL_ID
+        return model_ids[0]
+
+    def get_image_generation_main_model(self) -> str:
+        """返回驱动 Codex 图片工具调用的文本模型。"""
+        model_ids = self._load_model_ids()
+        return model_ids[0] if model_ids else ""
 
     def iter_auth_candidates_for_model(self, model_name: str) -> list[CodexAuthCandidate]:
         """按填满一个账号再使用下一个账号的策略返回认证候选。"""
@@ -480,6 +646,17 @@ class CodexOAuthService:
         """查询指定认证文件的 Codex 使用配额。"""
         return self._get_auth_file_quota(name, record_auth_failure=True)
 
+    def refresh_auth_file_quota_snapshot(self, name: str) -> dict[str, Any] | None:
+        """刷新认证文件配额快照，供数据面额度错误后更新前端展示。"""
+        normalized_name = self._normalize_auth_file_name(name)
+        if not normalized_name:
+            return None
+        try:
+            return self._get_auth_file_quota(normalized_name, record_auth_failure=False)
+        except Exception as exc:
+            self._logger.warning("Codex quota snapshot refresh failed: file=%s error=%s", normalized_name, exc)
+            return None
+
     def _get_auth_file_quota(self, name: str, *, record_auth_failure: bool) -> dict[str, Any]:
         """查询认证文件配额，并按调用场景决定是否写入认证失败状态。"""
         auth_file = self._resolve_auth_file(name)
@@ -526,10 +703,68 @@ class CodexOAuthService:
         """在本地配额窗口已到重置时间时，最佳努力刷新前端展示快照。"""
         if not self._is_auth_file_quota_snapshot_refresh_due(name):
             return
-        try:
-            self._get_auth_file_quota(name, record_auth_failure=False)
-        except Exception as exc:
-            self._logger.warning("Codex quota snapshot refresh failed: file=%s error=%s", name, exc)
+        self.refresh_auth_file_quota_snapshot(name)
+
+    def _run_quota_auto_refresh_loop(
+        self,
+        interval_seconds: float,
+        file_delay_seconds: float,
+    ) -> None:
+        """按固定间隔循环刷新 Codex 认证文件配额。"""
+        from gevent import sleep
+
+        normalized_interval_seconds = max(float(interval_seconds), 1.0)
+        normalized_file_delay_seconds = max(float(file_delay_seconds), 0.0)
+        while True:
+            sleep(normalized_interval_seconds)
+            try:
+                result = self.refresh_all_auth_file_quota_snapshots(
+                    file_delay_seconds=normalized_file_delay_seconds,
+                    sleep_func=sleep,
+                )
+                self._logger.info(
+                    "Codex quota auto refresh finished: refreshed=%s failed=%s skipped=%s",
+                    len(result["refreshed"]),
+                    len(result["failed"]),
+                    len(result["skipped"]),
+                )
+            except Exception as exc:
+                self._logger.warning("Codex quota auto refresh loop failed: error=%s", exc)
+
+    def _list_quota_auto_refresh_auth_file_names(self) -> tuple[list[str], list[dict[str, str]]]:
+        """列出后台配额刷新可查询的认证文件名。"""
+        auth_file_names: list[str] = []
+        skipped: list[dict[str, str]] = []
+        state = self._load_auth_file_state()
+        state_files = state.get("files")
+        for path in self._iter_auth_file_paths():
+            try:
+                payload = self._read_auth_file(path)
+            except Exception as exc:
+                skipped.append({"name": path.name, "reason": f"invalid_auth_file: {exc}"})
+                continue
+
+            file_state = {}
+            if isinstance(state_files, dict) and isinstance(state_files.get(path.name), dict):
+                file_state = state_files[path.name]
+
+            skip_reason = self._quota_auto_refresh_skip_reason(payload, file_state)
+            if skip_reason:
+                skipped.append({"name": path.name, "reason": skip_reason})
+                continue
+            auth_file_names.append(path.name)
+        return auth_file_names, skipped
+
+    def _quota_auto_refresh_skip_reason(self, payload: dict[str, Any], file_state: dict[str, Any]) -> str:
+        """返回后台配额刷新跳过原因；空字符串表示可以查询。"""
+        auth_type = str(payload.get("type") or "codex").strip()
+        if auth_type and auth_type != "codex":
+            return "invalid_auth_type"
+        if not str(payload.get("access_token") or "").strip():
+            return "missing_access_token"
+        if self._is_auth_failure_state(file_state):
+            return "auth_failed"
+        return ""
 
     def _get_quota_refresh_lock(self, name: str) -> threading.Lock:
         """返回单个认证文件的配额刷新锁。"""
@@ -587,9 +822,8 @@ class CodexOAuthService:
     def _iter_auth_file_paths(self) -> list[Path]:
         if not self._auth_dir.exists():
             return []
-        paths = [
-            path for path in self._auth_dir.glob("*.json") if path.name != self._models_file.name and path.is_file()
-        ]
+        reserved_names = self._reserved_auth_config_file_names()
+        paths = [path for path in self._auth_dir.glob("*.json") if path.name not in reserved_names and path.is_file()]
         return sorted(paths, key=lambda item: item.stat().st_mtime, reverse=True)
 
     def _load_model_ids(self) -> list[str]:
@@ -608,8 +842,78 @@ class CodexOAuthService:
         self._write_json_file(self._models_file, self._normalize_model_ids(model_ids))
 
     @staticmethod
-    def _build_model_entries(model_ids: list[str]) -> list[dict[str, Any]]:
-        return [{"id": model_id} for model_id in model_ids]
+    def _build_model_entries(
+        model_ids: list[str],
+        built_in_model_ids: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
+        built_in_set = set(built_in_model_ids)
+        entries: list[dict[str, Any]] = []
+        for model_id in model_ids:
+            entry: dict[str, Any] = {"id": model_id}
+            if model_id in built_in_set:
+                entry["built_in"] = True
+            entries.append(entry)
+        return entries
+
+    def _load_image_model_ids(self) -> list[str]:
+        if not self._image_models_file.exists():
+            return list(DEFAULT_CODEX_IMAGE_MODEL_IDS)
+        try:
+            with self._image_models_file.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception as exc:
+            self._logger.warning("Codex image models file ignored: error=%s", exc)
+            return list(DEFAULT_CODEX_IMAGE_MODEL_IDS)
+        return self._normalize_model_ids(payload)
+
+    def _write_image_model_ids(self, model_ids: list[str]) -> None:
+        self._auth_dir.mkdir(parents=True, exist_ok=True)
+        self._write_json_file(self._image_models_file, self._normalize_model_ids(model_ids))
+
+    def _load_image_settings(self) -> dict[str, Any]:
+        if not self._image_settings_file.exists():
+            return {}
+        try:
+            payload = self._read_auth_file(self._image_settings_file)
+        except Exception as exc:
+            self._logger.warning("Codex image settings file ignored: error=%s", exc)
+            return {}
+        return payload
+
+    def _write_image_settings(self, payload: dict[str, Any]) -> None:
+        self._auth_dir.mkdir(parents=True, exist_ok=True)
+        self._write_json_file(self._image_settings_file, dict(payload))
+
+    def _ensure_default_image_model(self, model_ids: list[str]) -> None:
+        settings = self._load_image_settings()
+        configured_default = str(settings.get("default_model") or settings.get("default_image_model") or "").strip()
+        if configured_default and configured_default in set(model_ids):
+            return
+        next_default = ""
+        if DEFAULT_CODEX_IMAGE_MODEL_ID in set(model_ids):
+            next_default = DEFAULT_CODEX_IMAGE_MODEL_ID
+        elif model_ids:
+            next_default = model_ids[0]
+        self._write_image_settings({"default_model": next_default})
+
+    @classmethod
+    def _merge_model_ids(cls, model_ids: list[str], built_in_model_ids: tuple[str, ...]) -> list[str]:
+        merged = cls._normalize_model_ids(model_ids)
+        seen_ids = set(merged)
+        for model_id in built_in_model_ids:
+            normalized_model_id = cls._normalize_model_id(model_id)
+            if normalized_model_id in seen_ids:
+                continue
+            seen_ids.add(normalized_model_id)
+            merged.append(normalized_model_id)
+        return merged
+
+    def _reserved_auth_config_file_names(self) -> set[str]:
+        return {
+            self._models_file.name,
+            self._image_models_file.name,
+            self._image_settings_file.name,
+        }
 
     def _load_auth_file_state(self) -> dict[str, Any]:
         if not self._state_file.exists():
@@ -1309,7 +1613,7 @@ class CodexOAuthService:
         cleaned_name = Path(str(name or "").strip()).name
         if not cleaned_name or cleaned_name != str(name or "").strip():
             raise ValueError("Invalid auth file name")
-        if cleaned_name == self._models_file.name:
+        if cleaned_name in self._reserved_auth_config_file_names():
             raise ValueError("Auth file not found")
         auth_file = self._auth_dir / cleaned_name
         if not auth_file.exists() or not auth_file.is_file():
@@ -1337,7 +1641,7 @@ class CodexOAuthService:
         cleaned_name = Path(str(name or "").strip()).name
         if not cleaned_name or cleaned_name != str(name or "").strip():
             raise ValueError("Invalid auth file name")
-        if not cleaned_name.lower().endswith(".json") or cleaned_name == self._models_file.name:
+        if not cleaned_name.lower().endswith(".json") or cleaned_name in self._reserved_auth_config_file_names():
             raise ValueError("Invalid auth file name")
         return cleaned_name
 

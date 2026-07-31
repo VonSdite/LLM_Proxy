@@ -210,6 +210,8 @@ class Application:
         """仅数据平面模型请求需要解析 JSON 读取 model。"""
         return request.method == "POST" and request.path in {
             "/v1/chat/completions",
+            "/v1/images/edits",
+            "/v1/images/generations",
             "/v1/responses",
             "/v1/messages",
         }
@@ -260,6 +262,7 @@ class Application:
         auth_service = AuthenticationService(self._ctx)
         codex_oauth_service = CodexOAuthService(self._ctx)
         claude_oauth_service = ClaudeOAuthService(self._ctx)
+        self._codex_oauth_service = codex_oauth_service
         model_catalog_service = ModelCatalogService(
             self._ctx,
             codex_oauth_service=codex_oauth_service,
@@ -364,9 +367,15 @@ class Application:
 
         from gevent.pywsgi import WSGIServer
 
+        self._start_background_workers()
         server = WSGIServer((host, port), self._flask_app)
         self._logger.info("Starting LLM Proxy on %s:%s...", host, port)
         server.serve_forever()
+
+    def _start_background_workers(self) -> None:
+        """启动应用后台任务。"""
+        if hasattr(self, "_codex_oauth_service"):
+            self._codex_oauth_service.start_quota_auto_refresh_worker()
 
     def reload_logging_settings(self) -> None:
         """按当前配置重新装配日志输出。"""

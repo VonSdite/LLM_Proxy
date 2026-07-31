@@ -40,6 +40,7 @@ class ModelCatalogService:
                     [
                         *self._list_provider_model_names(),
                         *self._list_oauth_model_names("Codex", self._codex_oauth_service),
+                        *self._list_oauth_image_model_names("Codex", self._codex_oauth_service),
                         *self._list_oauth_model_names("Claude", self._claude_oauth_service),
                     ]
                 )
@@ -103,4 +104,28 @@ class ModelCatalogService:
             return tuple(model_names)
         except Exception as exc:
             self._logger.warning("%s OAuth model catalog skipped: error=%s", service_name, exc)
+            return ()
+
+    def _list_oauth_image_model_names(
+        self,
+        service_name: str,
+        model_provider: ModelListProvider | None,
+    ) -> tuple[str, ...]:
+        """读取 OAuth 图片模型目录，服务不存在时返回空列表。"""
+        if model_provider is None:
+            return ()
+
+        list_image_model_names = getattr(model_provider, "list_image_model_names", None)
+        if not callable(list_image_model_names):
+            return ()
+
+        try:
+            model_names: list[str] = []
+            for model_name in list_image_model_names():
+                normalized_model_name = str(model_name or "").strip()
+                if normalized_model_name:
+                    model_names.append(normalized_model_name)
+            return tuple(model_names)
+        except Exception as exc:
+            self._logger.warning("%s OAuth image model catalog skipped: error=%s", service_name, exc)
             return ()

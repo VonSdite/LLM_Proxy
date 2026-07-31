@@ -54,7 +54,21 @@ class OAuthController:
         )
         self._app.route("/api/oauth/codex/models", methods=["GET"])(auth(self.list_codex_models))
         self._app.route("/api/oauth/codex/models", methods=["POST"])(auth(self.add_codex_model))
+        self._app.route("/api/oauth/codex/models/restore-builtins", methods=["POST"])(
+            auth(self.restore_codex_builtin_models)
+        )
         self._app.route("/api/oauth/codex/models/<path:model_id>", methods=["DELETE"])(auth(self.delete_codex_model))
+        self._app.route("/api/oauth/codex/image-models", methods=["GET"])(auth(self.list_codex_image_models))
+        self._app.route("/api/oauth/codex/image-models", methods=["POST"])(auth(self.add_codex_image_model))
+        self._app.route("/api/oauth/codex/image-models/restore-builtins", methods=["POST"])(
+            auth(self.restore_codex_builtin_image_models)
+        )
+        self._app.route("/api/oauth/codex/image-models/default", methods=["PUT"])(
+            auth(self.set_default_codex_image_model)
+        )
+        self._app.route("/api/oauth/codex/image-models/<path:model_id>", methods=["DELETE"])(
+            auth(self.delete_codex_image_model)
+        )
         self._app.route("/api/oauth/claude/session", methods=["POST"])(auth(self.create_claude_session))
         self._app.route("/api/oauth/claude/callback", methods=["POST"])(auth(self.complete_claude_callback))
         self._app.route("/api/oauth/claude/auth-files", methods=["GET"])(auth(self.list_claude_auth_files))
@@ -330,4 +344,56 @@ class OAuthController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error deleting Codex OAuth model: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def restore_codex_builtin_models(self) -> ResponseReturnValue:
+        try:
+            return jsonify(self._codex_oauth_service.restore_builtin_models())
+        except Exception as exc:
+            self._logger.error("Error restoring Codex OAuth built-in models: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def list_codex_image_models(self) -> ResponseReturnValue:
+        try:
+            return jsonify(self._codex_oauth_service.list_image_models())
+        except Exception as exc:
+            self._logger.error("Error listing Codex OAuth image models: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def add_codex_image_model(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            model_id = str(payload.get("model_id") or payload.get("id") or "").strip()
+            return jsonify(self._codex_oauth_service.add_image_model(model_id))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error adding Codex OAuth image model: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def delete_codex_image_model(self, model_id: str) -> ResponseReturnValue:
+        try:
+            return jsonify(self._codex_oauth_service.delete_image_model(model_id))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error deleting Codex OAuth image model: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def restore_codex_builtin_image_models(self) -> ResponseReturnValue:
+        try:
+            return jsonify(self._codex_oauth_service.restore_builtin_image_models())
+        except Exception as exc:
+            self._logger.error("Error restoring Codex OAuth built-in image models: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def set_default_codex_image_model(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            model_id = str(payload.get("model_id") or payload.get("id") or payload.get("default_model") or "").strip()
+            return jsonify(self._codex_oauth_service.set_default_image_model(model_id))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error setting Codex OAuth default image model: %s", exc)
             return jsonify({"error": str(exc)}), 500

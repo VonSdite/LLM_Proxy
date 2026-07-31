@@ -24,9 +24,14 @@ from src.application.app_context import AppContext
 from src.services.codex_oauth_service import (
     CODEX_CLIENT_ID,
     CODEX_MODEL_REFERENCE_URLS,
+    CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS,
+    CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS,
     CODEX_QUOTA_USER_AGENT,
     CODEX_REDIRECT_URI,
     CODEX_USAGE_URL,
+    DEFAULT_CODEX_IMAGE_MODEL_ID,
+    DEFAULT_CODEX_IMAGE_MODEL_IDS,
+    DEFAULT_CODEX_MODEL_IDS,
     CodexOAuthService,
 )
 
@@ -146,6 +151,114 @@ class CodexOAuthServiceTests(unittest.TestCase):
             flask_app=Flask(__name__),
         )
         return CodexOAuthService(ctx)
+
+    def test_start_quota_auto_refresh_worker_spawns_default_loop_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = self._build_service(Path(tmp_dir))
+            spawned: list[tuple[Any, tuple[Any, ...]]] = []
+
+            class FakeWorker:
+                dead = False
+
+            def fake_spawn(func: Any, *args: Any) -> FakeWorker:
+                spawned.append((func, args))
+                return FakeWorker()
+
+            with patch("gevent.spawn", side_effect=fake_spawn):
+                service.start_quota_auto_refresh_worker()
+                service.start_quota_auto_refresh_worker()
+
+        self.assertEqual(1, len(spawned))
+        self.assertEqual(service._run_quota_auto_refresh_loop, spawned[0][0])
+        self.assertEqual(
+            (
+                CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS,
+                CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS,
+            ),
+            spawned[0][1],
+        )
+
+    def test_refresh_all_auth_file_quota_snapshots_skips_invalid_files_and_delays_between_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+
+            def write_auth_payload(name: str, payload: dict[str, Any], mtime: int) -> None:
+                path = auth_dir / name
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                os.utime(path, (mtime, mtime))
+
+            write_auth_payload(
+                "codex-valid.json",
+                {"type": "codex", "email": "valid@example.com", "access_token": "access-valid"},
+                5000,
+            )
+            write_auth_payload(
+                "codex-disabled.json",
+                {"type": "codex", "email": "disabled@example.com", "access_token": "access-disabled"},
+                4000,
+            )
+            write_auth_payload(
+                "codex-auth-failed.json",
+                {"type": "codex", "email": "failed@example.com", "access_token": "access-failed"},
+                3000,
+            )
+            write_auth_payload(
+                "codex-missing-token.json",
+                {"type": "codex", "email": "missing@example.com"},
+                2000,
+            )
+            write_auth_payload(
+                "codex-invalid-type.json",
+                {"type": "claude", "email": "invalid@example.com", "access_token": "access-invalid"},
+                1000,
+            )
+
+            state_file = auth_dir / ".state" / "auth_files.json"
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "files": {
+                            "codex-disabled.json": {"disabled": True},
+                            "codex-auth-failed.json": {
+                                "usage_status": "error",
+                                "usage_status_code": 401,
+                                "usage_error_type": "authentication_error",
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            refreshed_names: list[str] = []
+            sleep_calls: list[float] = []
+
+            def fake_get_quota(name: str) -> dict[str, Any]:
+                refreshed_names.append(name)
+                return {"status": "ok"}
+
+            with patch.object(service, "get_auth_file_quota", side_effect=fake_get_quota):
+                result = service.refresh_all_auth_file_quota_snapshots(
+                    file_delay_seconds=10,
+                    sleep_func=sleep_calls.append,
+                )
+
+        self.assertEqual(["codex-valid.json", "codex-disabled.json"], refreshed_names)
+        self.assertEqual([10.0], sleep_calls)
+        self.assertEqual(["codex-valid.json", "codex-disabled.json"], result["refreshed"])
+        self.assertEqual([], result["failed"])
+        self.assertEqual(5, result["total"])
+        self.assertEqual(
+            {
+                "codex-auth-failed.json": "auth_failed",
+                "codex-missing-token.json": "missing_access_token",
+                "codex-invalid-type.json": "invalid_auth_type",
+            },
+            {item["name"]: item["reason"] for item in result["skipped"]},
+        )
 
     def test_start_login_builds_codex_pkce_authorization_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1182,7 +1295,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
             result = service.list_models()
 
         model_ids = [model["id"] for model in result["models"]]
-        self.assertEqual([], model_ids)
+        self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), model_ids)
+        self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), result["built_in_models"])
         self.assertNotIn("source", result)
         self.assertNotIn("updated_at", result)
         self.assertNotIn("tiers", result)
@@ -1205,9 +1319,50 @@ class CodexOAuthServiceTests(unittest.TestCase):
                 service.delete_auth_file("models.json")
 
         self.assertIn("gpt-custom", [model["id"] for model in added["models"]])
-        self.assertEqual([], [model["id"] for model in deleted["models"]])
-        self.assertEqual(["gpt-custom"], added_payload)
-        self.assertEqual([], deleted_payload)
+        self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), [model["id"] for model in deleted["models"]])
+        self.assertEqual([*DEFAULT_CODEX_MODEL_IDS, "gpt-custom"], added_payload)
+        self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), deleted_payload)
+
+    def test_restore_builtin_models_readds_defaults_without_removing_custom_models(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = self._build_service(Path(tmp_dir))
+
+            service.add_model("gpt-custom")
+            service.delete_model(DEFAULT_CODEX_MODEL_IDS[0])
+            restored = service.restore_builtin_models()
+
+        model_ids = [model["id"] for model in restored["models"]]
+        self.assertIn("gpt-custom", model_ids)
+        self.assertTrue(set(DEFAULT_CODEX_MODEL_IDS).issubset(set(model_ids)))
+
+    def test_codex_image_models_manage_default_and_reserved_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            service = self._build_service(root)
+
+            initial = service.list_image_models()
+            service.add_image_model("gpt-image-custom")
+            service.set_default_image_model("gpt-image-custom")
+            service.delete_image_model(DEFAULT_CODEX_IMAGE_MODEL_ID)
+            restored = service.restore_builtin_image_models()
+            image_models_file = root / "data" / "oauth" / "codex" / "image_models.json"
+            image_settings_file = root / "data" / "oauth" / "codex" / "image_settings.json"
+            with self.assertRaisesRegex(ValueError, "Auth file not found"):
+                service.export_auth_files(["image_models.json"])
+            with self.assertRaisesRegex(ValueError, "Auth file not found"):
+                service.delete_auth_file("image_settings.json")
+            image_models_file_exists = image_models_file.exists()
+            image_settings_file_exists = image_settings_file.exists()
+
+        initial_model_ids = [model["id"] for model in initial["models"]]
+        restored_model_ids = [model["id"] for model in restored["models"]]
+        self.assertEqual(list(DEFAULT_CODEX_IMAGE_MODEL_IDS), initial_model_ids)
+        self.assertEqual(DEFAULT_CODEX_IMAGE_MODEL_ID, initial["default_model"])
+        self.assertIn("gpt-image-custom", restored_model_ids)
+        self.assertTrue(set(DEFAULT_CODEX_IMAGE_MODEL_IDS).issubset(set(restored_model_ids)))
+        self.assertEqual("gpt-image-custom", restored["default_model"])
+        self.assertTrue(image_models_file_exists)
+        self.assertTrue(image_settings_file_exists)
 
     def test_iter_auth_candidates_does_not_precheck_quota(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
