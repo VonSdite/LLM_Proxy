@@ -349,6 +349,44 @@ class ProviderTransportTests(unittest.TestCase):
         runtime = RuntimeProviderSpec.from_schema(schema)
         self.assertTrue(runtime.enabled)
 
+    def test_provider_force_upstream_stream_defaults_to_false_and_accepts_true(self) -> None:
+        default_schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "default-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "model_list": ["gpt-4.1"],
+            }
+        )
+        enabled_schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "stream-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "force_upstream_stream": True,
+                "model_list": ["gpt-4.1"],
+            }
+        )
+
+        self.assertFalse(default_schema.force_upstream_stream)
+        self.assertFalse(RuntimeProviderSpec.from_schema(default_schema).force_upstream_stream)
+        self.assertTrue(enabled_schema.force_upstream_stream)
+        self.assertTrue(RuntimeProviderSpec.from_schema(enabled_schema).force_upstream_stream)
+        self.assertFalse(default_schema.to_mapping()["force_upstream_stream"])
+        self.assertTrue(enabled_schema.to_mapping()["force_upstream_stream"])
+
+    def test_provider_force_upstream_stream_rejects_invalid_value(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Provider force_upstream_stream must be a boolean value"):
+            ProviderConfigSchema.from_mapping(
+                {
+                    "name": "demo",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "demo-key",
+                    "force_upstream_stream": "maybe",
+                    "model_list": ["gpt-4.1"],
+                }
+            )
+
     def test_provider_schema_accepts_safe_provider_name_payload(self) -> None:
         schema = ProviderConfigSchema.from_payload(
             {
@@ -2056,6 +2094,7 @@ const sandbox = {{
       tidyModelListBtn: {{ disabled: false }},
       modelTestSelectAllCheckbox: {{ checked: false, indeterminate: false }},
       providerSourceFormat: {{ value: "openai_chat" }},
+      providerForceUpstreamStream: {{ value: "false" }},
       providerApiKey: {{ value: " secret " }},
       providerProxy: {{ value: "" }},
       providerTimeout: {{ value: "" }},

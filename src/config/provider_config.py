@@ -20,6 +20,7 @@ from ..utils.net import (
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 1200
 DEFAULT_PROVIDER_MAX_RETRIES = 3
 DEFAULT_PROVIDER_VERIFY_SSL = False
+DEFAULT_PROVIDER_FORCE_UPSTREAM_STREAM = False
 DEFAULT_PROVIDER_TRANSPORT = "http"
 DEFAULT_PROVIDER_SOURCE_FORMAT = "openai_chat"
 DEFAULT_PROVIDER_TARGET_FORMAT = "openai_chat"
@@ -52,6 +53,7 @@ SUPPORTED_PROVIDER_FIELDS = {
     "timeout_seconds",
     "max_retries",
     "verify_ssl",
+    "force_upstream_stream",
     "model_list",
     "hook",
 }
@@ -441,6 +443,7 @@ class ProviderConfigSchema:
     timeout_seconds: int | None = None
     max_retries: int | None = None
     verify_ssl: bool | None = None
+    force_upstream_stream: bool = DEFAULT_PROVIDER_FORCE_UPSTREAM_STREAM
     model_list: tuple[str, ...] = ()
     hook: str | None = None
 
@@ -510,6 +513,13 @@ class ProviderConfigSchema:
             timeout_seconds=parse_optional_positive_int(config.get("timeout_seconds")),
             max_retries=parse_optional_positive_int(config.get("max_retries")),
             verify_ssl=parse_optional_bool(config.get("verify_ssl")),
+            force_upstream_stream=bool(
+                parse_optional_bool(
+                    config.get("force_upstream_stream"),
+                    default=DEFAULT_PROVIDER_FORCE_UPSTREAM_STREAM,
+                    error_message="Provider force_upstream_stream must be a boolean value",
+                )
+            ),
             model_list=tuple(normalize_model_list(config.get("model_list"))),
             hook=clean_optional_string(config.get("hook")),
         )
@@ -529,6 +539,7 @@ class ProviderConfigSchema:
             "enabled": bool(self.enabled),
             "api": self.api,
             "source_format": self.source_format,
+            "force_upstream_stream": bool(self.force_upstream_stream),
         }
 
         if self.api_key is not None:
@@ -574,6 +585,7 @@ class RuntimeProviderSpec:
     timeout_seconds: int
     max_retries: int
     verify_ssl: bool
+    force_upstream_stream: bool
     hook: str | None
 
     @classmethod
@@ -597,6 +609,7 @@ class RuntimeProviderSpec:
             timeout_seconds=config.timeout_seconds or DEFAULT_PROVIDER_TIMEOUT_SECONDS,
             max_retries=config.max_retries or DEFAULT_PROVIDER_MAX_RETRIES,
             verify_ssl=(config.verify_ssl if config.verify_ssl is not None else DEFAULT_PROVIDER_VERIFY_SSL),
+            force_upstream_stream=bool(config.force_upstream_stream),
             hook=config.hook,
         )
 
@@ -623,6 +636,7 @@ class ProviderRuntimeView:
     timeout_seconds: int
     max_retries: int
     verify_ssl: bool
+    force_upstream_stream: bool
     hook: str | None
 
     @classmethod
@@ -642,6 +656,7 @@ class ProviderRuntimeView:
             timeout_seconds=spec.timeout_seconds,
             max_retries=spec.max_retries,
             verify_ssl=spec.verify_ssl,
+            force_upstream_stream=spec.force_upstream_stream,
             hook=spec.hook,
         )
 

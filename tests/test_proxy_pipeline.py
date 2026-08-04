@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -749,6 +750,220 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual("user-token", hook.headers[0]["X-API-Key"])
         self.assertIn(b"data: [DONE]", stream_body)
 
+    def test_force_upstream_stream_aggregates_nonstream_downstream_response(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            force_upstream_stream=True,
+        )
+        captured: dict[str, Any] = {}
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl_1","created":123,"model":"gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
+                b'data: {"id":"chatcmpl_1","created":123,"model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
+                b'data: {"id":"chatcmpl_1","created":123,"model":"gpt-4.1","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, requested_stream, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            captured["requested_stream"] = requested_stream
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+        completed_meta: dict[str, Any] = {}
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
+                {},
+                on_complete=completed_meta.update,
+            )
+            response_body = self._collect_response_body(response)
+
+        payload = json.loads(response_body)
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertFalse(response.is_streamed)
+        self.assertTrue(captured["requested_stream"])
+        self.assertTrue(captured["body"]["stream"])
+        self.assertEqual("Hello world", payload["choices"][0]["message"]["content"])
+        self.assertEqual("stop", payload["choices"][0]["finish_reason"])
+        self.assertEqual(5, payload["usage"]["total_tokens"])
+        self.assertEqual("gpt-4.1", completed_meta["response_model"])
+        self.assertEqual(5, completed_meta["total_tokens"])
+        self.assertTrue(fake_response.closed)
+
+    def test_force_upstream_stream_keeps_explicit_downstream_streaming(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            force_upstream_stream=True,
+        )
+        captured: dict[str, Any] = {}
+        fake_response = FakeStreamResponse([b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', b"data: [DONE]\n\n"])
+
+        def stub_open_upstream_response(provider_arg, headers, body, requested_stream, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            captured["requested_stream"] = requested_stream
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+                {},
+            )
+            stream_body = self._collect_response_body(response)
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertTrue(response.is_streamed)
+        self.assertTrue(captured["requested_stream"])
+        self.assertTrue(captured["body"]["stream"])
+        self.assertIn(b"data: [DONE]", stream_body)
+        self.assertTrue(fake_response.closed)
+
+    def test_force_upstream_stream_aggregates_openai_responses_source(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="responses-upstream",
+            api="https://example.com/v1/responses",
+            source_format="openai_responses",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            force_upstream_stream=True,
+        )
+        captured: dict[str, Any] = {}
+        fake_response = FakeStreamResponse(
+            [
+                b'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","created_at":123,"model":"gpt-4.1"}}\n\n',
+                b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"Hello from Responses"}\n\n',
+                b'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_1","created_at":123,"model":"gpt-4.1","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n',
+            ]
+        )
+
+        def stub_open_upstream_response(provider_arg, headers, body, requested_stream, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            captured["requested_stream"] = requested_stream
+            return OpenedUpstreamResponse(
+                response=fake_response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "responses-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
+                {},
+            )
+            response_body = self._collect_response_body(response)
+
+        payload = json.loads(response_body)
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertTrue(captured["requested_stream"])
+        self.assertTrue(captured["body"]["stream"])
+        self.assertEqual("Hello from Responses", payload["choices"][0]["message"]["content"])
+        self.assertEqual("resp_1", payload["id"])
+        self.assertEqual(5, payload["usage"]["total_tokens"])
+        self.assertTrue(fake_response.closed)
+
+    def test_force_upstream_stream_aggregates_claude_source(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="claude-upstream",
+            api="https://example.com/v1/messages",
+            source_format="claude_chat",
+            target_formats=("openai_chat",),
+            model_list=("claude-sonnet-4-5",),
+            max_retries=1,
+            force_upstream_stream=True,
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-5","role":"assistant","content":[]}}\n\n',
+                b'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello from Claude"}}\n\n',
+                b'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":3,"output_tokens":2}}\n\n',
+                b'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+            ]
+        )
+
+        service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+            response=fake_response,
+            status_code=200,
+            content_type="text/event-stream",
+            is_stream=True,
+            stream_format="sse_json",
+        )
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "claude-upstream/claude-sonnet-4-5",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
+                {},
+            )
+            response_body = self._collect_response_body(response)
+
+        payload = json.loads(response_body)
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual("Hello from Claude", payload["choices"][0]["message"]["content"])
+        self.assertEqual(3, payload["usage"]["prompt_tokens"])
+        self.assertEqual(2, payload["usage"]["completion_tokens"])
+        self.assertTrue(fake_response.closed)
+
     def test_provider_without_api_key_drops_client_authorization_header(self) -> None:
         app, service = self._build_service()
         provider = LLMProvider(
@@ -966,6 +1181,42 @@ class ProxyServicePipelineTests(unittest.TestCase):
 
         self.assertTrue(built_request.request_ctx.stream)
         self.assertTrue(built_request.translated_body["stream"])
+        self.assertTrue(built_request.translated_body["stream_options"]["include_usage"])
+
+    def test_build_upstream_request_forces_stream_after_request_guard(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            force_upstream_stream=True,
+        )
+
+        built_request = build_upstream_request(
+            root_path=Path(__file__).resolve().parents[1],
+            logger=FakeLogger(),
+            provider=provider,
+            request_model="demo/gpt-4.1",
+            upstream_model="gpt-4.1",
+            provider_target_format="openai_chat",
+            request_data={
+                "model": "demo/gpt-4.1",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
+            request_headers={"content-type": "application/json"},
+            translator=OpenAIChatTranslator(),
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+            auth_group_name=None,
+            auth_entry_id=None,
+            force_upstream_stream=True,
+        )
+
+        self.assertFalse(built_request.original_body["stream"])
+        self.assertTrue(built_request.translated_body["stream"])
+        self.assertTrue(built_request.request_ctx.stream)
         self.assertTrue(built_request.translated_body["stream_options"]["include_usage"])
 
     def test_build_upstream_request_keeps_provider_like_upstream_model_id(self) -> None:

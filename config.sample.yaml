@@ -74,6 +74,7 @@ providers:
     source_format: openai_chat
     auth_group: openai-shared
     proxy_mode: direct
+    force_upstream_stream: false
     verify_ssl: true
     timeout_seconds: 1200
     max_retries: 3

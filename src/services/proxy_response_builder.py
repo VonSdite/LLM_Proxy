@@ -24,6 +24,7 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..translators import Translator
+from ..translators.stream_aggregator import aggregate_stream_to_openai_chat
 from .proxy_trace_logger import ProxyTraceLogger
 
 
@@ -505,6 +506,113 @@ class ProxyResponseBuilder:
             on_started=mark_downstream_started,
             on_cancelled=mark_downstream_cancelled,
         )
+
+    def build_aggregated_nonstream_response(
+        self,
+        *,
+        provider: LLMProvider,
+        source_stream_translator: Translator,
+        target_nonstream_translator: Translator,
+        request_ctx: HookContext,
+        downstream_target_format: str,
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
+        opened: OpenedUpstreamResponse,
+        on_complete: Callable[[dict[str, Any]], None] | None,
+        finalize_attempt: Callable[..., None] | None = None,
+        trace_id: str | None = None,
+        route_name: str | None = None,
+        client_ip: str | None = None,
+    ) -> Response:
+        """聚合上游流式响应，并以单个非流式响应返回给下游。"""
+        response = opened.response
+        trace_enabled = self._trace.is_enabled(trace_id)
+        raw_response_headers = dict(getattr(response, "headers", {}) or {})
+        upstream_payload_buffer = bytearray() if trace_enabled else None
+
+        try:
+            upstream_chunks = self._iter_stream_chunks_with_trace(
+                response.iter_content(chunk_size=None),
+                upstream_payload_buffer,
+            )
+            chat_payload = aggregate_stream_to_openai_chat(
+                translator=source_stream_translator,
+                model_name=request_ctx.upstream_model,
+                original_request=original_request,
+                translated_request=translated_request,
+                events=decode_stream_events(upstream_chunks, opened.stream_format),
+            )
+            target_request = target_nonstream_translator.translate_request(
+                request_ctx.upstream_model,
+                original_request,
+                False,
+            )
+            translated_payload = target_nonstream_translator.translate_nonstream_response(
+                request_ctx.upstream_model,
+                original_request,
+                target_request,
+                chat_payload,
+            )
+            guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
+            body_to_send = translated_payload if guarded_payload is None else guarded_payload
+
+            meta = self._create_empty_meta()
+            if isinstance(body_to_send, dict):
+                self._update_meta_from_payload(meta, body_to_send)
+            if on_complete:
+                try:
+                    on_complete(meta)
+                except Exception as exc:
+                    self._logger.error("Error in on_complete callback: %s", exc)
+            if finalize_attempt is not None:
+                finalize_attempt(status_code=opened.status_code, usage=meta)
+
+            response_body = encode_downstream_response_body(body_to_send, downstream_target_format)
+            headers = self._filter_response_headers(getattr(response, "headers", {}))
+            headers["Content-Type"] = self._resolve_nonstream_content_type(body_to_send, opened.content_type)
+            if trace_enabled:
+                self._trace.log_entry(
+                    stage="upstream_response",
+                    trace_id=trace_id,
+                    start_line=self._trace.build_response_start_line(
+                        opened.status_code,
+                        getattr(response, "reason", None),
+                    ),
+                    headers=raw_response_headers,
+                    payload=bytes(upstream_payload_buffer or b""),
+                    route_name=route_name,
+                    client_ip=client_ip,
+                    provider_name=provider.name,
+                    request_model=request_ctx.request_model,
+                    upstream_model=request_ctx.upstream_model,
+                    target_format=downstream_target_format,
+                    status_code=opened.status_code,
+                    stream=True,
+                    completed=True,
+                )
+                self._trace.log_entry(
+                    stage="downstream_response",
+                    trace_id=trace_id,
+                    start_line=self._trace.build_response_start_line(opened.status_code),
+                    headers=headers,
+                    payload=response_body,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                    provider_name=provider.name,
+                    request_model=request_ctx.request_model,
+                    upstream_model=request_ctx.upstream_model,
+                    target_format=downstream_target_format,
+                    status_code=opened.status_code,
+                    stream=False,
+                    completed=True,
+                )
+            return Response(
+                response_body,
+                status=opened.status_code,
+                headers=headers,
+            )
+        finally:
+            response.close()
 
     def build_nonstream_response(
         self,
