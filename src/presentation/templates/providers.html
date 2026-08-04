@@ -128,16 +128,6 @@
                             </select>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label field-label-with-help">
-                                <span>上游强制流式</span>
-                                <button type="button" class="field-help-button" data-provider-help-topic="force_upstream_stream" onclick="toggleProviderHelp('force_upstream_stream', event)" aria-label="查看上游强制流式说明">?</button>
-                            </label>
-                            <select class="form-control" id="providerForceUpstreamStream" data-custom-select="true">
-                                <option value="false">关闭</option>
-                                <option value="true">启用</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
                             <label class="form-label">Auth 方式</label>
                             <select class="form-control" id="providerAuthMode" data-custom-select="true" onchange="updateProviderAuthModeFields()">
                                 <option value="legacy_api_key">Legacy API Key</option>
@@ -267,6 +257,16 @@
                             <select class="form-control" id="providerVerifySsl" data-custom-select="true">
                                 <option value="true">启用</option>
                                 <option value="false">禁用</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label field-label-with-help">
+                                <span>上游强制流式</span>
+                                <button type="button" class="field-help-button" data-provider-help-topic="force_upstream_stream" onclick="toggleProviderHelp('force_upstream_stream', event)" aria-label="查看上游强制流式说明">?</button>
+                            </label>
+                            <select class="form-control" id="providerForceUpstreamStream" data-custom-select="true">
+                                <option value="false">关闭</option>
+                                <option value="true">启用</option>
                             </select>
                         </div>
                     </div>

@@ -2047,6 +2047,10 @@ process.stdout.write(JSON.stringify([
         self.assertIn('<option value="false">关闭</option>', html)
         self.assertIn('<option value="true">启用</option>', html)
         self.assertIn("setupCustomSelect('providerForceUpstreamStream');", html)
+        self.assertLess(
+            html.index('id="providerVerifySsl"'),
+            html.index('id="providerForceUpstreamStream"'),
+        )
 
     def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(
         self,
