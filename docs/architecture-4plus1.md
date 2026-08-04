@@ -67,6 +67,10 @@ decoder
 
 该分支向上游发送 `stream=true`，在代理进程内完成响应聚合，向下游只发送一个非流式 JSON 响应。下游明确发送 `stream=true` 时继续使用标准流式链路。
 
+- 原生聚合器校验协议完整性：OpenAI Chat 要求至少一个 choice，并以 `[DONE]` 或全部 choice 的 `finish_reason` 结束；OpenAI Responses 要求 `response.completed` / `response.done`；Claude 要求 `message_stop`
+- 聚合阶段出现流内错误、非 JSON 事件、非法文本或不完整 EOF 时，下游响应尚未提交；系统按错误 `type` / `code` 推断本次尝试状态，结算当前 Auth Entry 后进入下一次 Provider 尝试
+- 聚合错误耗尽最大尝试次数时，系统按目标协议生成非流式结构化 `502` 响应；认证项仍按推断出的 `401`、`403`、`429` 或 `502` 状态结算
+
 流式响应以首个非空、已经完成目标协议编码的下游字节为提交边界：
 
 - 普通 Provider 提交前的 transport 异常会关闭当前上游响应，并在 `max_retries` 定义的最大尝试次数范围内重新执行上游请求
@@ -192,12 +196,14 @@ decoder
   - 组装整条代理链路
   - 根据当前请求所处接口选择 translator 和 encoder
   - Provider 开启 `force_upstream_stream` 且下游非流式时，强制上游请求使用流式并选择聚合响应路径
-  - 在下游流提交前管理 Provider 上游最大尝试次数
+  - 在下游流提交前管理 Provider 上游 transport 失败和原生流聚合失败的最大尝试次数
+  - 聚合失败时重新选择 Auth Entry，并把推断出的尝试状态提供给 Hook 重试上下文和 Auth Group 运行态
   - 对 `source_format=claude_chat` 的 Provider，在上游 body 已有 Claude Code billing header 时重签 `cch`
   - 在开启 `logging.llm_request_debug_enabled` 时输出独立 trace
 - `ProxyResponseBuilder`
   - 构建非流式响应和流式响应
-  - 将强制上游流式场景的上游事件聚合为完整响应，再编码为非流式 JSON
+  - 将强制上游流式场景的上游事件聚合为完整 source payload，再依次执行 response translation、`response_guard` 和非流式编码
+  - 在中间尝试传播聚合错误，在最后一次尝试按目标协议构造结构化 `502` 响应
   - 预取首个非空目标协议字节并建立流提交边界
   - 跟踪协议终止事件、上游 transport 失败和客户端取消
   - 按下游协议编码流内错误事件并结算上游响应资源
@@ -225,6 +231,8 @@ decoder
   - 将上游流拆成统一事件
 - `StreamAggregator`
   - 按上游协议原生结构聚合 OpenAI Chat、OpenAI Responses 和 Claude 流式事件
+  - 校验各源协议终止条件，拒绝非 JSON 事件和不完整响应
+  - 保留源协议扩展字段、usage、工具调用、音频、引用和自定义 output item
   - 在上游响应完成后向 response translator 提供完整 source payload
 - `TranslatorRegistry`
   - 负责协议适配

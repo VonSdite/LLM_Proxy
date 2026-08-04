@@ -834,13 +834,14 @@ def convert_openai_chat_response_to_responses(
         )
     legacy_function_call = message.get("function_call")
     if isinstance(legacy_function_call, dict) and legacy_function_call.get("name"):
+        legacy_call_id = f"call_{response_id}_legacy"
         output_items.append(
             {
                 "id": f"fc_{response_id}_legacy",
                 "type": "function_call",
                 "status": "completed",
                 "arguments": str(legacy_function_call.get("arguments") or "{}"),
-                "call_id": "",
+                "call_id": legacy_call_id,
                 "name": str(legacy_function_call.get("name")),
             }
         )

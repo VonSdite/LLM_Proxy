@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import time
 from dataclasses import dataclass
@@ -757,19 +758,13 @@ class ClaudeChatTranslator:
         outputs: list[DownstreamChunk] = []
 
         if event_type == "message_start":
-            usage_chunk = None
             message = payload.get("message") or {}
             if isinstance(message, dict):
                 response_id = str(message.get("id") or response_id)
                 response_model = str(message.get("model") or response_model)
                 state["response_id"] = response_id
                 state["response_model"] = response_model
-                usage_chunk = _build_openai_usage_chunk_from_usage(
-                    _extract_claude_usage(message.get("usage")),
-                    response_model,
-                    response_id=response_id,
-                    created=created,
-                )
+                _merge_claude_usage_state(state, message.get("usage"))
             outputs.append(
                 DownstreamChunk(
                     kind="json",
@@ -782,8 +777,6 @@ class ClaudeChatTranslator:
                     ),
                 )
             )
-            if usage_chunk is not None:
-                outputs.append(usage_chunk)
             return outputs
 
         if event_type == "content_block_start":
@@ -878,12 +871,18 @@ class ClaudeChatTranslator:
 
         if event_type == "message_delta":
             delta = payload.get("delta") or {}
-            usage_chunk = _build_openai_usage_chunk_from_usage(
-                _extract_claude_usage(payload.get("usage")),
-                response_model,
-                response_id=response_id,
-                created=created,
-            )
+            usage_chunk = None
+            if isinstance(payload.get("usage"), dict):
+                merged_usage = _merge_claude_usage_state(state, payload["usage"])
+                if not state.get("claude_usage_emitted"):
+                    usage_chunk = _build_openai_usage_chunk_from_usage(
+                        _extract_claude_usage(merged_usage),
+                        response_model,
+                        response_id=response_id,
+                        created=created,
+                    )
+                    if usage_chunk is not None:
+                        state["claude_usage_emitted"] = True
             if isinstance(delta, dict):
                 finish_reason = _map_claude_stop_reason(delta.get("stop_reason"))
                 if finish_reason:
@@ -1542,6 +1541,19 @@ def _extract_claude_usage(payload: Any) -> dict[str, Any]:
     reasoning_tokens = int(payload.get("thinking_tokens") or 0)
     if reasoning_tokens > 0:
         usage["completion_tokens_details"] = {"reasoning_tokens": reasoning_tokens}
+    return usage
+
+
+def _merge_claude_usage_state(state: dict[str, Any], payload: Any) -> dict[str, Any]:
+    usage = state.setdefault("claude_usage", {})
+    if not isinstance(usage, dict):
+        usage = {}
+        state["claude_usage"] = usage
+    if not isinstance(payload, dict):
+        return usage
+    for field, value in payload.items():
+        if value is not None and (usage.get(field) in (None, 0, "") or value not in (0, "")):
+            usage[field] = copy.deepcopy(value)
     return usage
 
 

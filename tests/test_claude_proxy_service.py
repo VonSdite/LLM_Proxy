@@ -563,7 +563,7 @@ class ClaudeProxyServiceTests(unittest.TestCase):
         self.assertEqual(1, streamed.count(b"data: [DONE]"))
         self.assertNotIn(b"upstream_stream_error", streamed)
         self.assertEqual(1, len(completed_meta))
-        self.assertEqual(2, completed_meta[0]["total_tokens"])
+        self.assertEqual(3, completed_meta[0]["total_tokens"])
         self.assertEqual("success", auth_entry["usage_status"])
         self.assertTrue(fake_response.closed)
 

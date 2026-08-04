@@ -24,7 +24,11 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..translators import Translator
-from ..translators.stream_aggregator import StreamAggregationError, aggregate_stream_to_native_response
+from ..translators.stream_aggregator import (
+    StreamAggregationError,
+    aggregate_stream_to_native_response,
+    infer_stream_aggregation_status_code,
+)
 from .proxy_trace_logger import ProxyTraceLogger
 
 
@@ -519,6 +523,7 @@ class ProxyResponseBuilder:
         opened: OpenedUpstreamResponse,
         on_complete: Callable[[dict[str, Any]], None] | None,
         finalize_attempt: Callable[..., None] | None = None,
+        return_error_response: bool = True,
         trace_id: str | None = None,
         route_name: str | None = None,
         client_ip: str | None = None,
@@ -604,6 +609,8 @@ class ProxyResponseBuilder:
                 headers=headers,
             )
         except StreamAggregationError as exc:
+            if not return_error_response:
+                raise
             return self._build_aggregated_error_response(
                 provider=provider,
                 opened=opened,
@@ -615,6 +622,7 @@ class ProxyResponseBuilder:
                 message=exc.message,
                 error_payload=exc.error_payload,
                 finalize_attempt=finalize_attempt,
+                finalize_status_code=infer_stream_aggregation_status_code(exc),
                 trace_id=trace_id,
                 route_name=route_name,
                 client_ip=client_ip,
@@ -639,7 +647,13 @@ class ProxyResponseBuilder:
                 raw_response_headers=raw_response_headers,
                 upstream_payload_buffer=upstream_payload_buffer,
             )
-        except UnicodeError:
+        except UnicodeError as exc:
+            aggregation_error = StreamAggregationError.from_message(
+                "Upstream stream contains invalid text",
+                error_type="upstream_stream_processing_error",
+            )
+            if not return_error_response:
+                raise aggregation_error from exc
             return self._build_aggregated_error_response(
                 provider=provider,
                 opened=opened,
@@ -678,6 +692,7 @@ class ProxyResponseBuilder:
         client_ip: str | None,
         raw_response_headers: dict[str, Any],
         upstream_payload_buffer: bytearray | None,
+        finalize_status_code: int | None = None,
     ) -> Response:
         """把尚未提交下游的聚合错误转换为目标协议的普通响应。"""
         payload = self._build_nonstream_error_payload(
@@ -693,7 +708,11 @@ class ProxyResponseBuilder:
 
         if finalize_attempt is not None:
             try:
-                finalize_attempt(status_code=status_code, error_message=message)
+                finalize_attempt(
+                    status_code=finalize_status_code or status_code,
+                    error_message=message,
+                    response_headers=raw_response_headers,
+                )
             except Exception as exc:
                 self._logger.error("Error finalizing aggregated upstream error: %s", exc)
 
