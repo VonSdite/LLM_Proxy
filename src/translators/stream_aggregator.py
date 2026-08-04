@@ -56,6 +56,56 @@ class StreamAggregationError(RuntimeError):
         )
 
 
+def infer_stream_aggregation_status_code(exc: StreamAggregationError) -> int:
+    """根据流内错误标识推断本次上游尝试的状态码。"""
+    identifiers = {
+        str(value).strip().lower().replace("-", "_").replace(" ", "_")
+        for value in (exc.error_type, exc.error_code)
+        if value not in (None, "")
+    }
+    compact_identifiers = {identifier.replace("_", "") for identifier in identifiers}
+
+    def contains(*markers: str) -> bool:
+        return any(marker in identifier for identifier in identifiers for marker in markers) or any(
+            marker.replace("_", "") in identifier for identifier in compact_identifiers for marker in markers
+        )
+
+    if "429" in identifiers or contains(
+        "rate_limit",
+        "quota",
+        "usage_limit",
+        "too_many_requests",
+        "billing_hard_limit",
+    ):
+        return 429
+    if "403" in identifiers or contains(
+        "permission",
+        "forbidden",
+        "access_denied",
+        "not_allowed",
+        "authorization",
+        "account_deactivated",
+        "organization_disabled",
+    ):
+        return 403
+    if "401" in identifiers or contains(
+        "authentication",
+        "unauthorized",
+        "unauthenticated",
+        "invalid_api_key",
+        "api_key_invalid",
+        "invalid_token",
+        "token_expired",
+        "expired_token",
+        "invalid_grant",
+        "refresh_token_reused",
+        "token_refresh_failed",
+        "missing_access_token",
+    ):
+        return 401
+    return 502
+
+
 def aggregate_stream_to_native_response(
     *,
     source_format: str,
@@ -75,10 +125,17 @@ def aggregate_stream_to_native_response(
 
 def _aggregate_openai_chat_response(model_name: str, events: Iterable[StreamEvent]) -> dict[str, Any]:
     accumulator = _OpenAIChatResponseAccumulator(model_name)
+    saw_done_event = False
     for event in events:
         if event.kind == "done":
-            continue
+            saw_done_event = True
+            break
+        if event.kind == "text" and isinstance(event.payload, str) and event.payload.strip():
+            raise StreamAggregationError.from_message(
+                "OpenAI Chat stream contains a non-JSON event",
+            )
         accumulator.consume(DownstreamChunk(kind=event.kind, payload=event.payload, event=event.event))
+    accumulator.validate_native_stream(saw_done_event=saw_done_event)
     return accumulator.build()
 
 
@@ -86,6 +143,8 @@ def _aggregate_openai_responses_response(model_name: str, events: Iterable[Strea
     accumulator = _OpenAIResponsesResponseAccumulator(model_name)
     for event in events:
         accumulator.consume(event)
+        if accumulator.is_complete:
+            break
     return accumulator.build()
 
 
@@ -93,6 +152,8 @@ def _aggregate_claude_response(model_name: str, events: Iterable[StreamEvent]) -
     accumulator = _ClaudeResponseAccumulator(model_name)
     for event in events:
         accumulator.consume(event)
+        if accumulator.is_complete:
+            break
     return accumulator.build()
 
 
@@ -168,6 +229,7 @@ class _OpenAIChatResponseAccumulator:
         self._response_model = model_name
         self._choices: dict[int, dict[str, Any]] = {}
         self._usage: dict[str, Any] | None = None
+        self._response_fields: dict[str, Any] = {}
         self._reasoning_state: dict[str, str] = {}
 
     def consume(self, chunk: DownstreamChunk) -> None:
@@ -195,13 +257,13 @@ class _OpenAIChatResponseAccumulator:
         choices = payload.get("choices")
         if not isinstance(choices, list):
             return
+        if any(isinstance(choice, dict) and isinstance(choice.get("message"), dict) for choice in choices):
+            self.consume_full_response(payload)
+            return
         for position, raw_choice in enumerate(choices):
             if not isinstance(raw_choice, dict):
                 continue
             index = _coerce_int(raw_choice.get("index"), position)
-            if isinstance(raw_choice.get("message"), dict):
-                self.consume_full_response(payload)
-                continue
             delta = raw_choice.get("delta")
             if not isinstance(delta, dict):
                 delta = {}
@@ -214,6 +276,20 @@ class _OpenAIChatResponseAccumulator:
                 delta = dict(delta)
                 delta["reasoning_content"] = reasoning_text
             self._merge_choice(index, delta, raw_choice.get("finish_reason"))
+            self._merge_choice_fields(index, raw_choice)
+
+    def validate_native_stream(self, *, saw_done_event: bool) -> None:
+        """确认原生 Chat 流包含回答，并且在无 DONE 时由 finish_reason 完成。"""
+        if not self._choices:
+            raise StreamAggregationError.from_message(
+                "OpenAI Chat stream is incomplete: no choices were received",
+                error_type="upstream_stream_incomplete",
+            )
+        if not saw_done_event and any(entry.get("finish_reason") in (None, "") for entry in self._choices.values()):
+            raise StreamAggregationError.from_message(
+                "OpenAI Chat stream is incomplete: ended before a terminal event",
+                error_type="upstream_stream_incomplete",
+            )
 
     def build(self) -> dict[str, Any]:
         choices = []
@@ -230,30 +306,26 @@ class _OpenAIChatResponseAccumulator:
                     finish_reason = "function_call"
                 else:
                     finish_reason = "stop"
-            choices.append(
+            choice = copy.deepcopy(entry.get("fields") or {})
+            choice.update(
                 {
                     "index": index,
                     "message": message,
                     "finish_reason": finish_reason,
                 }
             )
+            choices.append(choice)
 
-        if not choices:
-            choices.append(
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": ""},
-                    "finish_reason": "stop",
-                }
-            )
-
-        response: dict[str, Any] = {
-            "id": self._response_id,
-            "object": "chat.completion",
-            "created": self._created or int(time.time()),
-            "model": self._response_model or self._default_model_name,
-            "choices": choices,
-        }
+        response: dict[str, Any] = copy.deepcopy(self._response_fields)
+        response.update(
+            {
+                "id": self._response_id,
+                "object": "chat.completion",
+                "created": self._created or int(time.time()),
+                "model": self._response_model or self._default_model_name,
+                "choices": choices,
+            }
+        )
         if self._usage:
             response["usage"] = self._usage
         return response
@@ -274,10 +346,12 @@ class _OpenAIChatResponseAccumulator:
             entry = self._choices.get(index)
             if entry is None:
                 self._merge_choice(index, message, raw_choice.get("finish_reason"))
+                self._merge_choice_fields(index, raw_choice)
                 continue
             self._replace_message_from_full(entry["message"], message)
             if entry.get("finish_reason") in (None, "") and raw_choice.get("finish_reason") not in (None, ""):
                 entry["finish_reason"] = raw_choice["finish_reason"]
+            self._merge_choice_fields(index, raw_choice)
 
     def _merge_choice(self, index: int, delta: dict[str, Any], finish_reason: Any) -> None:
         entry = self._choices.setdefault(
@@ -285,6 +359,7 @@ class _OpenAIChatResponseAccumulator:
             {
                 "message": {"role": "assistant", "content": ""},
                 "finish_reason": None,
+                "fields": {},
             },
         )
         message = entry["message"]
@@ -312,6 +387,23 @@ class _OpenAIChatResponseAccumulator:
         if isinstance(function_call, dict):
             self._merge_function_call(message, function_call)
 
+        audio = delta.get("audio")
+        if isinstance(audio, dict):
+            self._merge_audio(message, audio)
+
+        known_fields = {
+            "role",
+            "content",
+            "refusal",
+            "reasoning_content",
+            "tool_calls",
+            "function_call",
+            "audio",
+        }
+        for field, value in delta.items():
+            if field not in known_fields:
+                message[field] = copy.deepcopy(value)
+
         if finish_reason not in (None, ""):
             entry["finish_reason"] = finish_reason
 
@@ -331,6 +423,39 @@ class _OpenAIChatResponseAccumulator:
             for field, value in usage.items():
                 if value is not None and (self._usage.get(field) in (None, 0, "") or value not in (0, "")):
                     self._usage[field] = copy.deepcopy(value)
+        for field, value in payload.items():
+            if field not in {"id", "object", "created", "model", "choices", "usage"}:
+                self._response_fields[field] = copy.deepcopy(value)
+
+    def _merge_choice_fields(self, index: int, raw_choice: dict[str, Any]) -> None:
+        entry = self._choices.get(index)
+        if entry is None:
+            return
+        fields = entry.setdefault("fields", {})
+        for field, value in raw_choice.items():
+            if field in {"index", "delta", "message", "finish_reason", "logprobs"}:
+                continue
+            fields[field] = copy.deepcopy(value)
+        if "logprobs" not in raw_choice:
+            return
+        incoming = raw_choice.get("logprobs")
+        current = fields.get("logprobs")
+        if not isinstance(incoming, dict):
+            if current is None:
+                fields["logprobs"] = copy.deepcopy(incoming)
+            return
+        if not isinstance(current, dict):
+            current = {}
+            fields["logprobs"] = current
+        for field, value in incoming.items():
+            if isinstance(value, list):
+                existing = current.get(field)
+                if not isinstance(existing, list):
+                    existing = []
+                    current[field] = existing
+                existing.extend(copy.deepcopy(value))
+            elif value is not None:
+                current[field] = copy.deepcopy(value)
 
     @staticmethod
     def _merge_tool_calls(message: dict[str, Any], tool_calls: list[Any]) -> None:
@@ -376,9 +501,20 @@ class _OpenAIChatResponseAccumulator:
 
     @staticmethod
     def _replace_message_from_full(current: dict[str, Any], full: dict[str, Any]) -> None:
-        for field in ("role", "content", "refusal", "reasoning_content", "tool_calls", "function_call"):
-            if field in full:
-                current[field] = copy.deepcopy(full[field])
+        for field, value in full.items():
+            current[field] = copy.deepcopy(value)
+
+    @staticmethod
+    def _merge_audio(message: dict[str, Any], audio: dict[str, Any]) -> None:
+        target = message.setdefault("audio", {})
+        if not isinstance(target, dict):
+            target = {}
+            message["audio"] = target
+        for field, value in audio.items():
+            if field in {"data", "transcript"} and isinstance(value, str):
+                target[field] = str(target.get(field) or "") + value
+            else:
+                target[field] = copy.deepcopy(value)
 
     @staticmethod
     def _merge_function_call(message: dict[str, Any], function_call: dict[str, Any]) -> None:
@@ -414,6 +550,10 @@ class _OpenAIResponsesResponseAccumulator:
         self._output_item_ids: dict[str, int] = {}
         self._next_output_index = 0
         self._terminal_response: dict[str, Any] | None = None
+
+    @property
+    def is_complete(self) -> bool:
+        return self._terminal_response is not None
 
     def consume(self, event: StreamEvent) -> None:
         if event.kind == "done":
@@ -853,12 +993,18 @@ class _ClaudeResponseAccumulator:
         self._usage: dict[str, Any] = {}
         self._message_stopped = False
 
+    @property
+    def is_complete(self) -> bool:
+        return self._message_stopped
+
     def consume(self, event: StreamEvent) -> None:
         if event.kind == "done":
             return
         if event.kind == "text":
-            if isinstance(event.payload, str) and event.payload:
-                self._append_text_block(event.payload)
+            if isinstance(event.payload, str) and event.payload.strip():
+                raise StreamAggregationError.from_message(
+                    "Claude stream contains a non-JSON event",
+                )
             return
         if event.kind != "json" or not isinstance(event.payload, dict):
             return
@@ -954,6 +1100,12 @@ class _ClaudeResponseAccumulator:
             block["signature"] = str(block.get("signature") or "") + delta["signature"]
         elif delta_type == "input_json_delta" and isinstance(delta.get("partial_json"), str):
             block.setdefault("_input_json_parts", []).append(delta["partial_json"])
+        elif delta_type == "citations_delta" and isinstance(delta.get("citation"), dict):
+            citations = block.setdefault("citations", [])
+            if not isinstance(citations, list):
+                citations = []
+                block["citations"] = citations
+            citations.append(copy.deepcopy(delta["citation"]))
 
     def _stop_content_block(self, payload: dict[str, Any]) -> None:
         index = _coerce_int(payload.get("index"), 0)
@@ -995,14 +1147,6 @@ class _ClaudeResponseAccumulator:
             current = self._usage.get(field)
             if current in (None, 0, "") or value not in (0, ""):
                 self._usage[field] = copy.deepcopy(value)
-
-    def _append_text_block(self, text: str) -> None:
-        if self._block_order:
-            block = self._blocks[self._block_order[-1]]
-            if block.get("type") == "text":
-                block["text"] = str(block.get("text") or "") + text
-                return
-        self._merge_block(len(self._block_order), {"type": "text", "text": text})
 
     @staticmethod
     def _finalize_tool_input(block: dict[str, Any]) -> None:
@@ -1058,6 +1202,8 @@ def _default_responses_output_item(item: dict[str, Any]) -> dict[str, Any]:
             "status": item.get("status") or "in_progress",
             "summary": [],
         }
+    if item_type != "message":
+        return copy.deepcopy(item)
     return {
         "id": str(item.get("id") or ""),
         "type": item.get("type") or "message",

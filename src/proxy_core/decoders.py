@@ -93,20 +93,17 @@ def _parse_sse_event(event_text: str, *, parse_json: bool) -> Iterator[StreamEve
 
     event_name: str | None = None
     data_lines: list[str] = []
-    passthrough_lines: list[str] = []
     for raw_line in normalized.split("\n"):
+        if raw_line.startswith(":"):
+            continue
         if raw_line.startswith("event:"):
             event_name = raw_line[6:].strip() or None
-            passthrough_lines.append(raw_line)
             continue
         if raw_line.startswith("data:"):
             data_lines.append(raw_line[5:].strip())
             continue
-        if raw_line != "":
-            passthrough_lines.append(raw_line)
 
     if not data_lines:
-        yield StreamEvent(kind="text", payload=normalized, raw=normalized, event=event_name)
         return
 
     data_text = "\n".join(data_lines).strip()

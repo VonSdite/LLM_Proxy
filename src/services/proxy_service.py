@@ -22,6 +22,10 @@ from ..executors import OpenedUpstreamResponse, build_default_executor_registry
 from ..external import LLMProvider
 from ..hooks import HookContext, HookErrorType
 from ..translators import build_default_translator_registry
+from ..translators.stream_aggregator import (
+    StreamAggregationError,
+    infer_stream_aggregation_status_code,
+)
 from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_requests_proxy_settings, build_requests_request_proxies
 from ..utils.proxy_warning import (
@@ -376,6 +380,7 @@ class ProxyService:
                         opened=opened,
                         on_complete=on_complete,
                         finalize_attempt=finalize_attempt,
+                        return_error_response=attempt >= max_retries - 1,
                         trace_id=trace_id,
                         route_name=route_name,
                         client_ip=client_ip,
@@ -440,6 +445,32 @@ class ProxyService:
                     exc.message,
                 )
                 return None, exc.status_code, last_error
+            except StreamAggregationError as exc:
+                inferred_status_code = infer_stream_aggregation_status_code(exc)
+                previous_status_code = inferred_status_code
+                previous_error_type = None
+                last_error = ProxyErrorInfo(
+                    message=exc.message,
+                    status_code=502,
+                    error_type=exc.error_type,
+                    error_code=str(exc.error_code) if exc.error_code not in (None, "") else None,
+                )
+                raw_response_headers = dict(getattr(opened.response, "headers", {}) or {})
+                self._logger.warning(
+                    "Upstream stream aggregation failed (attempt %s/%s): provider=%s status=%s error=%s",
+                    attempt + 1,
+                    max_retries,
+                    provider.name,
+                    inferred_status_code,
+                    exc.message,
+                )
+                finalize_attempt(
+                    status_code=inferred_status_code,
+                    error_message=exc.message,
+                    response_headers=raw_response_headers,
+                )
+                if attempt < max_retries - 1:
+                    continue
             except requests.exceptions.RequestException as exc:
                 previous_status_code = None
                 previous_error_type = self._transport.classify_request_error(exc)

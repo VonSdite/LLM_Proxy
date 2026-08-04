@@ -10,6 +10,7 @@ from flask import Flask
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
+from src.config.auth_group_manager import SelectedAuthEntry
 from src.executors import OpenedUpstreamResponse
 from src.external import LLMProvider
 from src.hooks import BaseHook, HookAbortError
@@ -31,6 +32,7 @@ from src.translators.stream_aggregator import (
     StreamAggregationError,
     aggregate_stream_to_native_response,
     aggregate_stream_to_openai_chat,
+    infer_stream_aggregation_status_code,
 )
 
 
@@ -163,6 +165,26 @@ class HeaderRecordingHook(BaseHook):
         return headers
 
 
+class RotatingAuthGroupManager:
+    def __init__(self) -> None:
+        self._selections = [
+            SelectedAuthEntry("pool", "key-a", (("Authorization", "Bearer key-a"),)),
+            SelectedAuthEntry("pool", "key-b", (("Authorization", "Bearer key-b"),)),
+        ]
+        self.acquire_calls: list[str | None] = []
+        self.finish_calls: list[tuple[str | None, dict[str, Any]]] = []
+
+    def acquire(self, auth_group_name: str | None) -> SelectedAuthEntry:
+        self.acquire_calls.append(auth_group_name)
+        return self._selections[len(self.acquire_calls) - 1]
+
+    def mark_request_dispatched(self, selection: SelectedAuthEntry | None) -> None:
+        del selection
+
+    def finish(self, selection: SelectedAuthEntry | None, **kwargs: Any) -> None:
+        self.finish_calls.append((selection.entry_id if selection is not None else None, dict(kwargs)))
+
+
 class StreamDecoderTests(unittest.TestCase):
     def test_sse_json_decoder_handles_split_utf8_and_done(self) -> None:
         chunks = [
@@ -187,6 +209,22 @@ class StreamDecoderTests(unittest.TestCase):
         with self.assertRaises(UnicodeDecodeError):
             list(decode_stream_events(chunks, "sse_json"))
 
+    def test_sse_json_decoder_ignores_comments_and_metadata_only_events(self) -> None:
+        events = list(
+            decode_stream_events(
+                [
+                    b": keep-alive\n\n",
+                    b"event: ping\nid: 1\nretry: 1000\n\n",
+                    b'data: {"id":1}\n\n',
+                    b"data: [DONE]\n\n",
+                ],
+                "sse_json",
+            )
+        )
+
+        self.assertEqual(["json", "done"], [event.kind for event in events])
+        self.assertEqual(1, events[0].payload["id"])
+
     def test_ndjson_decoder_handles_split_lines(self) -> None:
         chunks = [
             b'{"id":1}\n{"id"',
@@ -202,6 +240,200 @@ class StreamDecoderTests(unittest.TestCase):
 
 
 class TranslatorTests(unittest.TestCase):
+    def test_stream_aggregation_error_status_inference_covers_auth_and_quota_errors(self) -> None:
+        cases = [
+            ("rate_limit_error", "rate_limit_exceeded", 429),
+            ("invalid_request_error", "insufficient_quota", 429),
+            ("authentication_error", None, 401),
+            ("invalid_request_error", "invalid_api_key", 401),
+            ("invalidRequestError", "refreshTokenReused", 401),
+            ("permission_error", None, 403),
+            ("authorization_error", None, 403),
+            ("upstream_stream_incomplete", None, 502),
+        ]
+
+        for error_type, error_code, expected_status_code in cases:
+            with self.subTest(error_type=error_type, error_code=error_code):
+                exc = StreamAggregationError(
+                    {
+                        "error": {
+                            "message": "failed",
+                            "type": error_type,
+                            "code": error_code,
+                        }
+                    }
+                )
+                self.assertEqual(expected_status_code, infer_stream_aggregation_status_code(exc))
+
+    def test_openai_chat_native_aggregation_rejects_empty_and_incomplete_streams(self) -> None:
+        cases = {
+            "empty": [],
+            "partial": [
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": "partial"},
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                )
+            ],
+        }
+
+        for name, events in cases.items():
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(StreamAggregationError, "incomplete"):
+                    aggregate_stream_to_native_response(
+                        source_format="openai_chat",
+                        model_name="gpt-4.1",
+                        events=events,
+                    )
+
+    def test_openai_chat_native_aggregation_accepts_clean_eof_after_finish_reason(self) -> None:
+        payload = aggregate_stream_to_native_response(
+            source_format="openai_chat",
+            model_name="gpt-4.1",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": "complete"},
+                                "finish_reason": "stop",
+                            }
+                        ]
+                    },
+                )
+            ],
+        )
+
+        self.assertEqual("complete", payload["choices"][0]["message"]["content"])
+        self.assertEqual("stop", payload["choices"][0]["finish_reason"])
+
+    def test_native_json_aggregators_reject_non_json_events(self) -> None:
+        for source_format in ("openai_chat", "claude_chat"):
+            with self.subTest(source_format=source_format):
+                with self.assertRaisesRegex(StreamAggregationError, "non-JSON"):
+                    aggregate_stream_to_native_response(
+                        source_format=source_format,
+                        model_name="model",
+                        events=[StreamEvent(kind="text", payload='{"truncated":')],
+                    )
+
+    def test_native_aggregators_stop_consuming_after_terminal_event(self) -> None:
+        cases = {
+            "openai_chat": [
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": "done"},
+                                "finish_reason": "stop",
+                            }
+                        ]
+                    },
+                ),
+                StreamEvent(kind="done", payload="[DONE]"),
+            ],
+            "openai_responses": [
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp-done",
+                            "object": "response",
+                            "status": "completed",
+                            "output": [],
+                        },
+                    },
+                )
+            ],
+            "claude_chat": [
+                StreamEvent(
+                    kind="json",
+                    payload={"type": "message_start", "message": {"content": []}},
+                ),
+                StreamEvent(kind="json", payload={"type": "message_stop"}),
+            ],
+        }
+
+        for source_format, terminal_events in cases.items():
+            with self.subTest(source_format=source_format):
+
+                def events():
+                    yield from terminal_events
+                    raise AssertionError("aggregator consumed events after protocol completion")
+
+                payload = aggregate_stream_to_native_response(
+                    source_format=source_format,
+                    model_name="model",
+                    events=events(),
+                )
+                self.assertIsInstance(payload, dict)
+
+    def test_openai_chat_native_aggregation_preserves_extended_fields(self) -> None:
+        payload = aggregate_stream_to_native_response(
+            source_format="openai_chat",
+            model_name="gpt-4.1",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "id": "chatcmpl-fields",
+                        "created": 123,
+                        "model": "gpt-4.1",
+                        "system_fingerprint": "fp_test",
+                        "service_tier": "priority",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "content": "Hello",
+                                    "audio": {"id": "audio-1", "data": "YWJj", "transcript": "Hel"},
+                                },
+                                "logprobs": {
+                                    "content": [{"token": "Hello", "logprob": -0.1}],
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"audio": {"data": "ZA==", "transcript": "lo"}},
+                                "logprobs": {
+                                    "content": [{"token": "!", "logprob": -0.2}],
+                                },
+                                "finish_reason": "stop",
+                            }
+                        ]
+                    },
+                ),
+                StreamEvent(kind="done", payload="[DONE]"),
+            ],
+        )
+
+        choice = payload["choices"][0]
+        self.assertEqual("fp_test", payload["system_fingerprint"])
+        self.assertEqual("priority", payload["service_tier"])
+        self.assertEqual(["Hello", "!"], [item["token"] for item in choice["logprobs"]["content"]])
+        self.assertEqual("YWJjZA==", choice["message"]["audio"]["data"])
+        self.assertEqual("Hello", choice["message"]["audio"]["transcript"])
+
     def test_stream_aggregator_does_not_duplicate_repeated_tool_name(self) -> None:
         translator = OpenAIChatTranslator()
 
@@ -446,6 +678,122 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual('{"q": "x"}', message["tool_calls"][0]["function"]["arguments"])
         self.assertEqual(3, payload["usage"]["prompt_tokens"])
         self.assertEqual(2, payload["usage"]["completion_tokens"])
+
+    def test_claude_stream_emits_one_complete_usage_chunk(self) -> None:
+        translator = ClaudeChatTranslator()
+        state: dict[str, Any] = {}
+
+        start_chunks = translator.translate_stream_event(
+            "claude-sonnet-4-5",
+            {},
+            {},
+            StreamEvent(
+                kind="json",
+                payload={
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg-usage",
+                        "model": "claude-sonnet-4-5",
+                        "usage": {"input_tokens": 3, "output_tokens": 0},
+                    },
+                },
+            ),
+            state,
+        )
+        delta_chunks = translator.translate_stream_event(
+            "claude-sonnet-4-5",
+            {},
+            {},
+            StreamEvent(
+                kind="json",
+                payload={
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn"},
+                    "usage": {"output_tokens": 2},
+                },
+            ),
+            state,
+        )
+
+        usage_chunks = [
+            chunk.payload["usage"]
+            for chunk in [*start_chunks, *delta_chunks]
+            if chunk.kind == "json" and isinstance(chunk.payload, dict) and isinstance(chunk.payload.get("usage"), dict)
+        ]
+        self.assertEqual(
+            [{"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}],
+            usage_chunks,
+        )
+
+    def test_native_claude_aggregation_preserves_citations(self) -> None:
+        citation = {
+            "type": "char_location",
+            "cited_text": "source",
+            "document_index": 0,
+            "document_title": "doc",
+            "start_char_index": 0,
+            "end_char_index": 6,
+        }
+        payload = aggregate_stream_to_native_response(
+            source_format="claude_chat",
+            model_name="claude-sonnet-4-5",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={"type": "message_start", "message": {"content": []}},
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": "answer", "citations": []},
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "citations_delta", "citation": citation},
+                    },
+                ),
+                StreamEvent(kind="json", payload={"type": "message_stop"}),
+            ],
+        )
+
+        self.assertEqual([citation], payload["content"][0]["citations"])
+
+    def test_native_responses_aggregation_preserves_custom_output_item_shape(self) -> None:
+        custom_item = {
+            "id": "ct_1",
+            "type": "custom_tool_call",
+            "status": "completed",
+            "call_id": "call_1",
+            "name": "shell",
+            "input": "ls",
+        }
+        payload = aggregate_stream_to_native_response(
+            source_format="openai_responses",
+            model_name="gpt-5-codex",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp-custom",
+                            "object": "response",
+                            "status": "completed",
+                            "model": "gpt-5-codex",
+                            "output": [custom_item],
+                        },
+                    },
+                )
+            ],
+        )
+
+        self.assertEqual(custom_item, payload["output"][0])
 
     def test_responses_and_claude_targets_preserve_refusal(self) -> None:
         registry = build_default_translator_registry()
@@ -975,6 +1323,7 @@ class TranslatorTests(unittest.TestCase):
         responses_call = next(item for item in responses["output"] if item["type"] == "function_call")
         self.assertEqual("lookup", responses_call["name"])
         self.assertEqual('{"q":"x"}', responses_call["arguments"])
+        self.assertTrue(responses_call["call_id"])
         self.assertEqual("lookup", claude["content"][0]["name"])
         self.assertEqual({"q": "x"}, claude["content"][0]["input"])
 
@@ -1457,7 +1806,12 @@ class ProxyServicePipelineTests(unittest.TestCase):
         assert chunks is not None
         return b"".join(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8") for chunk in chunks)
 
-    def _build_service(self, *, llm_request_debug_enabled: bool = False):
+    def _build_service(
+        self,
+        *,
+        llm_request_debug_enabled: bool = False,
+        auth_group_manager: Any = None,
+    ):
         app = Flask(__name__)
         ctx = AppContext(
             logger=FakeLogger(),
@@ -1465,7 +1819,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
             root_path=Path(__file__).resolve().parents[1],
             flask_app=app,
         )
-        return app, ProxyService(ctx)
+        return app, ProxyService(ctx, auth_group_manager=auth_group_manager)
 
     def test_provider_api_key_replaces_client_authorization_before_header_hook(
         self,
@@ -1918,12 +2272,14 @@ class ProxyServicePipelineTests(unittest.TestCase):
 
         for target_format, expected_error_type in expected_error_types.items():
             with self.subTest(target_format=target_format):
-                app, service = self._build_service()
+                auth_group_manager = RotatingAuthGroupManager()
+                app, service = self._build_service(auth_group_manager=auth_group_manager)
                 provider = LLMProvider(
                     name="chat-upstream",
                     api="https://example.com/v1/chat/completions",
                     source_format="openai_chat",
                     target_formats=(target_format,),
+                    auth_group="pool",
                     model_list=("gpt-4.1",),
                     max_retries=1,
                     force_upstream_stream=True,
@@ -1934,6 +2290,7 @@ class ProxyServicePipelineTests(unittest.TestCase):
                         b'"code":"rate_limit_exceeded"}}\n\n'
                     ]
                 )
+                fake_response.headers["Retry-After"] = "17"
                 service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
                     response=fake_response,
                     status_code=200,
@@ -1967,7 +2324,83 @@ class ProxyServicePipelineTests(unittest.TestCase):
                 else:
                     self.assertEqual(expected_error_type, payload["error"]["type"])
                 self.assertEqual("quota exceeded", payload["error"]["message"])
+                self.assertEqual("key-a", auth_group_manager.finish_calls[0][0])
+                self.assertEqual(429, auth_group_manager.finish_calls[0][1]["status_code"])
+                self.assertEqual(
+                    "17",
+                    auth_group_manager.finish_calls[0][1]["response_headers"]["Retry-After"],
+                )
                 self.assertTrue(fake_response.closed)
+
+    def test_force_upstream_stream_retries_with_next_auth_entry_before_returning(self) -> None:
+        auth_group_manager = RotatingAuthGroupManager()
+        app, service = self._build_service(auth_group_manager=auth_group_manager)
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            auth_group="pool",
+            model_list=("gpt-4.1",),
+            max_retries=2,
+            force_upstream_stream=True,
+        )
+        upstream_responses = [
+            FakeStreamResponse(
+                [
+                    b'data: {"error":{"message":"quota exceeded","type":"rate_limit_error",'
+                    b'"code":"rate_limit_exceeded"}}\n\n'
+                ]
+            ),
+            FakeStreamResponse(
+                [
+                    b'data: {"id":"chatcmpl-ok","model":"gpt-4.1",'
+                    b'"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n',
+                    b"data: [DONE]\n\n",
+                ]
+            ),
+        ]
+        authorization_headers: list[str] = []
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, body, args, kwargs
+            authorization_headers.append(
+                next(value for key, value in headers.items() if key.lower() == "authorization")
+            )
+            response = upstream_responses[len(authorization_headers) - 1]
+            return OpenedUpstreamResponse(
+                response=response,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
+                {},
+            )
+            response_body = self._collect_response_body(response)
+
+        payload = json.loads(response_body)
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual("ok", payload["choices"][0]["message"]["content"])
+        self.assertEqual(["Bearer key-a", "Bearer key-b"], authorization_headers)
+        self.assertEqual(["pool", "pool"], auth_group_manager.acquire_calls)
+        self.assertEqual("key-a", auth_group_manager.finish_calls[0][0])
+        self.assertEqual(429, auth_group_manager.finish_calls[0][1]["status_code"])
+        self.assertEqual("key-b", auth_group_manager.finish_calls[1][0])
+        self.assertEqual(200, auth_group_manager.finish_calls[1][1]["status_code"])
+        self.assertTrue(all(item.closed for item in upstream_responses))
 
     def test_force_upstream_stream_handles_response_guard_abort_without_success_callback(self) -> None:
         app, service = self._build_service()
