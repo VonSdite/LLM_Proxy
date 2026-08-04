@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把上游流式事件聚合为 OpenAI Chat 非流式响应。"""
+"""按上游协议聚合流式事件并生成原生非流式响应。"""
 
 from __future__ import annotations
 
+import copy
+import json
 import time
 from collections.abc import Iterable
 from typing import Any
@@ -15,6 +17,83 @@ from .registry import Translator
 
 class StreamAggregationError(RuntimeError):
     """上游流返回了无法转换为完整响应的错误事件。"""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        error_payload = payload.get("error")
+        if not isinstance(error_payload, dict):
+            response = payload.get("response")
+            if isinstance(response, dict):
+                error_payload = response.get("error")
+        if not isinstance(error_payload, dict):
+            error_payload = {
+                "message": "Upstream stream failed",
+                "type": "upstream_stream_error",
+                "code": "upstream_stream_error",
+            }
+        self.payload = dict(payload)
+        self.error_payload = dict(error_payload)
+        self.message = str(self.error_payload.get("message") or "Upstream stream failed")
+        self.error_type = str(self.error_payload.get("type") or "upstream_stream_error")
+        self.error_code = self.error_payload.get("code")
+        super().__init__(self.message)
+
+    @classmethod
+    def from_message(
+        cls,
+        message: str,
+        *,
+        error_type: str = "upstream_stream_processing_error",
+        error_code: str | None = None,
+    ) -> "StreamAggregationError":
+        return cls(
+            {
+                "error": {
+                    "message": message,
+                    "type": error_type,
+                    "code": error_code or error_type,
+                }
+            }
+        )
+
+
+def aggregate_stream_to_native_response(
+    *,
+    source_format: str,
+    model_name: str,
+    events: Iterable[StreamEvent],
+) -> dict[str, Any]:
+    """先按上游协议合并流，再交给 response translator 转换。"""
+    normalized_source = str(source_format or "").strip().lower()
+    if normalized_source == "openai_chat":
+        return _aggregate_openai_chat_response(model_name, events)
+    if normalized_source == "openai_responses":
+        return _aggregate_openai_responses_response(model_name, events)
+    if normalized_source == "claude_chat":
+        return _aggregate_claude_response(model_name, events)
+    raise ValueError(f"Unsupported native stream aggregation source format: {source_format}")
+
+
+def _aggregate_openai_chat_response(model_name: str, events: Iterable[StreamEvent]) -> dict[str, Any]:
+    accumulator = _OpenAIChatResponseAccumulator(model_name)
+    for event in events:
+        if event.kind == "done":
+            continue
+        accumulator.consume(DownstreamChunk(kind=event.kind, payload=event.payload, event=event.event))
+    return accumulator.build()
+
+
+def _aggregate_openai_responses_response(model_name: str, events: Iterable[StreamEvent]) -> dict[str, Any]:
+    accumulator = _OpenAIResponsesResponseAccumulator(model_name)
+    for event in events:
+        accumulator.consume(event)
+    return accumulator.build()
+
+
+def _aggregate_claude_response(model_name: str, events: Iterable[StreamEvent]) -> dict[str, Any]:
+    accumulator = _ClaudeResponseAccumulator(model_name)
+    for event in events:
+        accumulator.consume(event)
+    return accumulator.build()
 
 
 def aggregate_stream_to_openai_chat(
@@ -29,6 +108,7 @@ def aggregate_stream_to_openai_chat(
     state: dict[str, Any] = {}
     accumulator = _OpenAIChatResponseAccumulator(model_name)
     saw_done_event = False
+    saw_native_terminal_event = False
 
     for event in events:
         if event.kind == "done":
@@ -36,6 +116,7 @@ def aggregate_stream_to_openai_chat(
         if event.kind == "json" and isinstance(event.payload, dict):
             event_type = str(event.payload.get("type") or event.event or "").strip().lower()
             if event_type in {"response.completed", "response.done"}:
+                saw_native_terminal_event = True
                 full_payload = translator.translate_nonstream_response(
                     model_name,
                     original_request,
@@ -44,6 +125,8 @@ def aggregate_stream_to_openai_chat(
                 )
                 if isinstance(full_payload, dict):
                     accumulator.consume_full_response(full_payload)
+            elif event_type == "message_stop":
+                saw_native_terminal_event = True
         downstream_chunks = translator.translate_stream_event(
             model_name,
             original_request,
@@ -53,6 +136,13 @@ def aggregate_stream_to_openai_chat(
         )
         for chunk in downstream_chunks:
             accumulator.consume(chunk)
+
+    if translator.source_format in {"openai_responses", "claude_chat"} and not saw_native_terminal_event:
+        protocol_name = "Responses" if translator.source_format == "openai_responses" else "Claude"
+        raise StreamAggregationError.from_message(
+            f"{protocol_name} stream is incomplete: ended before its terminal event",
+            error_type="upstream_stream_incomplete",
+        )
 
     if not saw_done_event:
         downstream_chunks = translator.translate_stream_event(
@@ -93,8 +183,12 @@ class _OpenAIChatResponseAccumulator:
         payload = chunk.payload
         error_payload = payload.get("error")
         if isinstance(error_payload, dict):
-            message = str(error_payload.get("message") or "Upstream stream failed")
-            raise StreamAggregationError(message)
+            raise StreamAggregationError(payload)
+        if str(payload.get("type") or "").strip().lower() == "error":
+            raise StreamAggregationError.from_message(
+                str(payload.get("message") or "Upstream Chat stream failed"),
+                error_type=str(payload.get("error_type") or "upstream_stream_error"),
+            )
 
         self._update_response_metadata(payload)
 
@@ -105,6 +199,9 @@ class _OpenAIChatResponseAccumulator:
             if not isinstance(raw_choice, dict):
                 continue
             index = _coerce_int(raw_choice.get("index"), position)
+            if isinstance(raw_choice.get("message"), dict):
+                self.consume_full_response(payload)
+                continue
             delta = raw_choice.get("delta")
             if not isinstance(delta, dict):
                 delta = {}
@@ -127,7 +224,12 @@ class _OpenAIChatResponseAccumulator:
             message.setdefault("content", "")
             finish_reason = entry.get("finish_reason")
             if finish_reason in (None, ""):
-                finish_reason = "tool_calls" if message.get("tool_calls") else "stop"
+                if message.get("tool_calls"):
+                    finish_reason = "tool_calls"
+                elif message.get("function_call"):
+                    finish_reason = "function_call"
+                else:
+                    finish_reason = "stop"
             choices.append(
                 {
                     "index": index,
@@ -159,8 +261,6 @@ class _OpenAIChatResponseAccumulator:
     def consume_full_response(self, payload: dict[str, Any]) -> None:
         """在流仅提供完整终止 payload 时补充正文。"""
         self._update_response_metadata(payload)
-        if self._has_content():
-            return
         choices = payload.get("choices")
         if not isinstance(choices, list):
             return
@@ -171,7 +271,13 @@ class _OpenAIChatResponseAccumulator:
             if not isinstance(message, dict):
                 continue
             index = _coerce_int(raw_choice.get("index"), position)
-            self._merge_choice(index, message, raw_choice.get("finish_reason"))
+            entry = self._choices.get(index)
+            if entry is None:
+                self._merge_choice(index, message, raw_choice.get("finish_reason"))
+                continue
+            self._replace_message_from_full(entry["message"], message)
+            if entry.get("finish_reason") in (None, "") and raw_choice.get("finish_reason") not in (None, ""):
+                entry["finish_reason"] = raw_choice["finish_reason"]
 
     def _merge_choice(self, index: int, delta: dict[str, Any], finish_reason: Any) -> None:
         entry = self._choices.setdefault(
@@ -209,13 +315,6 @@ class _OpenAIChatResponseAccumulator:
         if finish_reason not in (None, ""):
             entry["finish_reason"] = finish_reason
 
-    def _has_content(self) -> bool:
-        for entry in self._choices.values():
-            message = entry.get("message") or {}
-            if message.get("content") or message.get("reasoning_content") or message.get("tool_calls"):
-                return True
-        return False
-
     def _update_response_metadata(self, payload: dict[str, Any]) -> None:
         response_id = payload.get("id")
         if response_id not in (None, ""):
@@ -227,7 +326,11 @@ class _OpenAIChatResponseAccumulator:
             self._created = _coerce_int(payload.get("created"), self._created)
         usage = payload.get("usage")
         if isinstance(usage, dict):
-            self._usage = dict(usage)
+            if self._usage is None:
+                self._usage = {}
+            for field, value in usage.items():
+                if value is not None and (self._usage.get(field) in (None, 0, "") or value not in (0, "")):
+                    self._usage[field] = copy.deepcopy(value)
 
     @staticmethod
     def _merge_tool_calls(message: dict[str, Any], tool_calls: list[Any]) -> None:
@@ -249,6 +352,13 @@ class _OpenAIChatResponseAccumulator:
                     }
                 )
             target = merged[index]
+            if not isinstance(target, dict):
+                target = {
+                    "id": "",
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                }
+                merged[index] = target
             if raw_tool_call.get("id") not in (None, ""):
                 target["id"] = str(raw_tool_call["id"])
             if raw_tool_call.get("type") not in (None, ""):
@@ -257,11 +367,18 @@ class _OpenAIChatResponseAccumulator:
             if not isinstance(function, dict):
                 continue
             target_function = target.setdefault("function", {})
-            if function.get("name") not in (None, ""):
-                target_function["name"] = str(target_function.get("name") or "") + str(function["name"])
+            name = function.get("name")
+            if name not in (None, ""):
+                _merge_stream_name(target_function, str(name))
             arguments = function.get("arguments")
             if isinstance(arguments, str):
                 target_function["arguments"] = str(target_function.get("arguments") or "") + arguments
+
+    @staticmethod
+    def _replace_message_from_full(current: dict[str, Any], full: dict[str, Any]) -> None:
+        for field in ("role", "content", "refusal", "reasoning_content", "tool_calls", "function_call"):
+            if field in full:
+                current[field] = copy.deepcopy(full[field])
 
     @staticmethod
     def _merge_function_call(message: dict[str, Any], function_call: dict[str, Any]) -> None:
@@ -269,11 +386,726 @@ class _OpenAIChatResponseAccumulator:
         if not isinstance(target, dict):
             target = {"name": "", "arguments": ""}
             message["function_call"] = target
-        if function_call.get("name") not in (None, ""):
-            target["name"] = str(target.get("name") or "") + str(function_call["name"])
+        name = function_call.get("name")
+        if name not in (None, ""):
+            _merge_stream_name(target, str(name))
         arguments = function_call.get("arguments")
         if isinstance(arguments, str):
             target["arguments"] = str(target.get("arguments") or "") + arguments
+
+
+class _OpenAIResponsesResponseAccumulator:
+    """合并 OpenAI Responses 原生事件，生成完整 response 对象。"""
+
+    _SUCCESS_EVENTS = {"response.completed", "response.done"}
+    _FAILURE_EVENTS = {"response.failed", "response.incomplete", "response.cancelled", "response.canceled"}
+
+    def __init__(self, model_name: str) -> None:
+        self._default_model_name = model_name
+        self._response: dict[str, Any] = {
+            "id": f"resp_{model_name}",
+            "object": "response",
+            "created_at": 0,
+            "status": "in_progress",
+            "model": model_name,
+            "output": [],
+        }
+        self._output_items: dict[int, dict[str, Any]] = {}
+        self._output_item_ids: dict[str, int] = {}
+        self._next_output_index = 0
+        self._terminal_response: dict[str, Any] | None = None
+
+    def consume(self, event: StreamEvent) -> None:
+        if event.kind == "done":
+            return
+        if event.kind == "text":
+            if isinstance(event.payload, str) and event.payload.strip():
+                raise StreamAggregationError.from_message(
+                    "OpenAI Responses stream contains a non-JSON event",
+                )
+            return
+        if event.kind != "json" or not isinstance(event.payload, dict):
+            return
+
+        payload = event.payload
+        if isinstance(payload.get("error"), dict):
+            raise StreamAggregationError(payload)
+
+        event_type = _stream_event_type(event)
+        if event_type == "error":
+            raise StreamAggregationError.from_message(
+                str(payload.get("message") or "Upstream Responses stream failed"),
+                error_type=str(payload.get("error_type") or "upstream_stream_error"),
+            )
+        if event_type in self._FAILURE_EVENTS:
+            self._raise_response_failure(payload, event_type)
+        if event_type in self._SUCCESS_EVENTS:
+            response = self._extract_response(payload)
+            if response is None:
+                raise StreamAggregationError.from_message(
+                    "OpenAI Responses completion event does not contain a response",
+                )
+            self._absorb_response(response)
+            self._terminal_response = copy.deepcopy(response)
+            return
+
+        if event_type == "response.created":
+            response = self._extract_response(payload)
+            if response is not None:
+                self._absorb_response(response)
+            return
+
+        if event_type == "response.output_item.added":
+            self._absorb_output_item(payload)
+            return
+        if event_type == "response.output_item.done":
+            self._absorb_output_item(payload, completed=True)
+            return
+        if event_type in {"response.content_part.added", "response.content_part.done"}:
+            self._absorb_content_part(payload)
+            return
+        if event_type == "response.output_text.delta":
+            self._append_message_content(payload, "output_text", payload.get("delta"))
+            return
+        if event_type == "response.output_text.done":
+            self._set_message_content(payload, "output_text", payload.get("text"))
+            return
+        if event_type in {"response.refusal.delta", "response.refusal.done"}:
+            field = "delta" if event_type.endswith("delta") else "refusal"
+            if event_type.endswith("delta"):
+                self._append_message_content(payload, "refusal", payload.get(field))
+            else:
+                self._set_message_content(payload, "refusal", payload.get(field))
+            return
+        if event_type in {"response.reasoning_summary_part.added", "response.reasoning_summary_part.done"}:
+            self._absorb_reasoning_part(payload)
+            return
+        if event_type in {"response.reasoning_summary_text.delta", "response.reasoning_summary_text.done"}:
+            field = "delta" if event_type.endswith("delta") else "text"
+            if event_type.endswith("delta"):
+                self._append_reasoning_summary(payload, payload.get(field))
+            else:
+                self._set_reasoning_summary(payload, payload.get(field))
+            return
+        if event_type in {"response.function_call_arguments.delta", "response.function_call_arguments.done"}:
+            self._consume_function_arguments(payload, event_type.endswith("done"))
+            return
+        if event_type in {"response.custom_tool_call_input.delta", "response.custom_tool_call_input.done"}:
+            self._consume_custom_tool_input(payload, event_type.endswith("done"))
+            return
+        if event_type == "response.output_text.annotation.added":
+            self._absorb_text_annotation(payload)
+
+    def build(self) -> dict[str, Any]:
+        if self._terminal_response is None:
+            raise StreamAggregationError.from_message(
+                "OpenAI Responses stream is incomplete: ended before a completion event",
+                error_type="upstream_stream_incomplete",
+            )
+
+        response = copy.deepcopy(self._terminal_response)
+        response.setdefault("object", "response")
+        response.setdefault("id", self._response.get("id") or f"resp_{self._default_model_name}")
+        response.setdefault("created_at", self._response.get("created_at") or int(time.time()))
+        response.setdefault("status", "completed")
+        response.setdefault("model", self._response.get("model") or self._default_model_name)
+
+        terminal_output = response.get("output")
+        if not isinstance(terminal_output, list):
+            terminal_output = []
+        response["output"] = self._merge_terminal_output(terminal_output)
+        if not isinstance(response.get("usage"), dict) and isinstance(self._response.get("usage"), dict):
+            response["usage"] = copy.deepcopy(self._response["usage"])
+        return response
+
+    def _absorb_response(self, response: dict[str, Any]) -> None:
+        for field, value in response.items():
+            if field == "output":
+                continue
+            if value is not None:
+                self._response[field] = copy.deepcopy(value)
+        output = response.get("output")
+        if isinstance(output, list):
+            for index, item in enumerate(output):
+                if isinstance(item, dict):
+                    self._absorb_output_item(
+                        {
+                            "output_index": index,
+                            "item": item,
+                        }
+                    )
+
+    def _absorb_output_item(self, payload: dict[str, Any], *, completed: bool = False) -> None:
+        raw_item = payload.get("item")
+        if not isinstance(raw_item, dict):
+            return
+        index = self._resolve_output_index(payload, raw_item)
+        item = self._ensure_output_item(index, raw_item)
+        self._merge_output_item(item, raw_item)
+        if completed:
+            item["status"] = raw_item.get("status") or "completed"
+
+    def _absorb_content_part(self, payload: dict[str, Any]) -> None:
+        part = payload.get("part")
+        if not isinstance(part, dict):
+            return
+        item = self._ensure_output_item(
+            self._coerce_optional_index(payload.get("output_index")),
+            {
+                "id": payload.get("item_id"),
+                "type": "message",
+                "role": "assistant",
+            },
+        )
+        content = item.setdefault("content", [])
+        if not isinstance(content, list):
+            content = []
+            item["content"] = content
+        content_index = _coerce_int(payload.get("content_index"), len(content))
+        while len(content) <= content_index:
+            content.append({})
+        if isinstance(content[content_index], dict):
+            _merge_content_block(content[content_index], part)
+        else:
+            content[content_index] = copy.deepcopy(part)
+
+    def _append_message_content(self, payload: dict[str, Any], content_type: str, value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        item = self._ensure_message_item(payload)
+        content = item.setdefault("content", [])
+        if not isinstance(content, list):
+            content = []
+            item["content"] = content
+        content_index = _coerce_int(payload.get("content_index"), 0)
+        while len(content) <= content_index:
+            content.append({"type": content_type})
+        block = content[content_index]
+        if not isinstance(block, dict):
+            block = {"type": content_type}
+            content[content_index] = block
+        block.setdefault("type", content_type)
+        if content_type == "refusal":
+            block["refusal"] = str(block.get("refusal") or "") + value
+        else:
+            block["text"] = str(block.get("text") or "") + value
+
+    def _set_message_content(self, payload: dict[str, Any], content_type: str, value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        item = self._ensure_message_item(payload)
+        content = item.setdefault("content", [])
+        if not isinstance(content, list):
+            content = []
+            item["content"] = content
+        content_index = _coerce_int(payload.get("content_index"), 0)
+        while len(content) <= content_index:
+            content.append({"type": content_type})
+        block = content[content_index]
+        if not isinstance(block, dict):
+            block = {"type": content_type}
+            content[content_index] = block
+        block["type"] = content_type
+        if content_type == "refusal":
+            block["refusal"] = value
+        else:
+            block["text"] = value
+
+    def _append_reasoning_summary(self, payload: dict[str, Any], value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        summary = self._ensure_reasoning_item(payload).setdefault("summary", [])
+        if not isinstance(summary, list):
+            summary = []
+            self._ensure_reasoning_item(payload)["summary"] = summary
+        index = _coerce_int(payload.get("summary_index"), 0)
+        while len(summary) <= index:
+            summary.append({"type": "summary_text", "text": ""})
+        part = summary[index]
+        if not isinstance(part, dict):
+            part = {"type": "summary_text", "text": ""}
+            summary[index] = part
+        part["type"] = "summary_text"
+        part["text"] = str(part.get("text") or "") + value
+
+    def _absorb_reasoning_part(self, payload: dict[str, Any]) -> None:
+        part = payload.get("part")
+        if not isinstance(part, dict):
+            return
+        item = self._ensure_reasoning_item(payload)
+        summary = item.setdefault("summary", [])
+        if not isinstance(summary, list):
+            summary = []
+            item["summary"] = summary
+        index = _coerce_int(payload.get("summary_index"), len(summary))
+        while len(summary) <= index:
+            summary.append({})
+        if isinstance(summary[index], dict):
+            _merge_content_block(summary[index], part)
+        else:
+            summary[index] = copy.deepcopy(part)
+
+    def _set_reasoning_summary(self, payload: dict[str, Any], value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        item = self._ensure_reasoning_item(payload)
+        summary = item.setdefault("summary", [])
+        if not isinstance(summary, list):
+            summary = []
+            item["summary"] = summary
+        index = _coerce_int(payload.get("summary_index"), 0)
+        while len(summary) <= index:
+            summary.append({"type": "summary_text", "text": ""})
+        summary[index] = {"type": "summary_text", "text": value}
+
+    def _consume_function_arguments(self, payload: dict[str, Any], completed: bool) -> None:
+        item = self._ensure_output_item(
+            self._coerce_optional_index(payload.get("output_index")),
+            {
+                "id": payload.get("item_id"),
+                "type": "function_call",
+                "status": "in_progress",
+            },
+        )
+        item["type"] = "function_call"
+        value = payload.get("arguments") if completed else payload.get("delta")
+        if not isinstance(value, str):
+            return
+        if completed:
+            item["arguments"] = value
+            item["status"] = "completed"
+        else:
+            item["arguments"] = str(item.get("arguments") or "") + value
+
+    def _consume_custom_tool_input(self, payload: dict[str, Any], completed: bool) -> None:
+        item = self._ensure_output_item(
+            self._coerce_optional_index(payload.get("output_index")),
+            {
+                "id": payload.get("item_id"),
+                "type": "custom_tool_call",
+                "status": "in_progress",
+            },
+        )
+        item["type"] = "custom_tool_call"
+        value = payload.get("input") if completed else payload.get("delta")
+        if not isinstance(value, str):
+            return
+        if completed:
+            item["input"] = value
+            item["status"] = "completed"
+        else:
+            item["input"] = str(item.get("input") or "") + value
+
+    def _absorb_text_annotation(self, payload: dict[str, Any]) -> None:
+        annotation = payload.get("annotation")
+        if not isinstance(annotation, dict):
+            return
+        item = self._ensure_message_item(payload)
+        content = item.setdefault("content", [])
+        if not isinstance(content, list):
+            return
+        content_index = _coerce_int(payload.get("content_index"), 0)
+        while len(content) <= content_index:
+            content.append({"type": "output_text", "text": ""})
+        block = content[content_index]
+        if not isinstance(block, dict):
+            block = {"type": "output_text", "text": ""}
+            content[content_index] = block
+        block.setdefault("annotations", []).append(copy.deepcopy(annotation))
+
+    def _ensure_message_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._ensure_output_item(
+            self._coerce_optional_index(payload.get("output_index")),
+            {
+                "id": payload.get("item_id"),
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+            },
+        )
+
+    def _ensure_reasoning_item(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._ensure_output_item(
+            self._coerce_optional_index(payload.get("output_index")),
+            {
+                "id": payload.get("item_id"),
+                "type": "reasoning",
+                "summary": [],
+            },
+        )
+
+    def _ensure_output_item(self, index: int | None, item: dict[str, Any]) -> dict[str, Any]:
+        item_id = str(item.get("id") or "").strip()
+        if item_id and item_id in self._output_item_ids:
+            resolved_index = self._output_item_ids[item_id]
+        elif index is not None:
+            resolved_index = index
+        else:
+            resolved_index = self._next_output_index
+        current = self._output_items.get(resolved_index)
+        if current is None:
+            current = _default_responses_output_item(item)
+            self._output_items[resolved_index] = current
+        if item_id:
+            self._output_item_ids[item_id] = resolved_index
+            current.setdefault("id", item_id)
+        self._next_output_index = max(self._next_output_index, resolved_index + 1)
+        return current
+
+    def _resolve_output_index(self, payload: dict[str, Any], item: dict[str, Any]) -> int | None:
+        explicit = self._coerce_optional_index(payload.get("output_index"))
+        if explicit is not None:
+            return explicit
+        item_id = str(item.get("id") or payload.get("item_id") or "").strip()
+        if item_id and item_id in self._output_item_ids:
+            return self._output_item_ids[item_id]
+        return None
+
+    @staticmethod
+    def _coerce_optional_index(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _merge_output_item(target: dict[str, Any], source: dict[str, Any]) -> None:
+        for field, value in source.items():
+            if field == "content" and isinstance(value, list):
+                existing = target.get("content")
+                target["content"] = _merge_content_lists(existing, value)
+            elif field == "summary" and isinstance(value, list):
+                existing = target.get("summary")
+                target["summary"] = _merge_content_lists(existing, value)
+            elif field in {"arguments", "input"} and value in (None, "") and target.get(field) not in (None, ""):
+                continue
+            elif value is not None:
+                target[field] = copy.deepcopy(value)
+
+    def _merge_terminal_output(
+        self,
+        terminal_output: list[Any],
+    ) -> list[dict[str, Any]]:
+        output = [copy.deepcopy(item) for item in terminal_output if isinstance(item, dict)]
+        id_to_position = {
+            str(item.get("id")): position for position, item in enumerate(output) if item.get("id") not in (None, "")
+        }
+        for index, accumulated in sorted(self._output_items.items()):
+            item_id = str(accumulated.get("id") or "")
+            position = id_to_position.get(item_id) if item_id else None
+            if position is None and index < len(output):
+                position = index
+            if position is None:
+                missing_item = copy.deepcopy(accumulated)
+                if missing_item.get("status") == "in_progress":
+                    missing_item["status"] = "completed"
+                output.append(missing_item)
+                continue
+            _merge_missing_output_item(output[position], accumulated)
+        return output
+
+    def _extract_response(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        response = payload.get("response")
+        if isinstance(response, dict):
+            return response
+        if isinstance(payload.get("output"), list) or payload.get("object") == "response":
+            return payload
+        return None
+
+    def _raise_response_failure(self, payload: dict[str, Any], event_type: str) -> None:
+        response = payload.get("response")
+        if isinstance(response, dict):
+            error = response.get("error")
+            if isinstance(error, dict):
+                raise StreamAggregationError({"response": response, "error": error})
+            incomplete_details = response.get("incomplete_details")
+            if isinstance(incomplete_details, dict):
+                reason = incomplete_details.get("reason") or incomplete_details.get("details")
+                raise StreamAggregationError.from_message(
+                    str(reason or f"OpenAI Responses stream ended with {event_type}"),
+                    error_type=event_type.replace("response.", ""),
+                )
+        error = payload.get("error")
+        if isinstance(error, dict):
+            raise StreamAggregationError(payload)
+        raise StreamAggregationError.from_message(
+            f"OpenAI Responses stream ended with {event_type}",
+            error_type=event_type.replace("response.", ""),
+        )
+
+
+class _ClaudeResponseAccumulator:
+    """合并 Claude 原生事件，生成完整 message 对象。"""
+
+    def __init__(self, model_name: str) -> None:
+        self._default_model_name = model_name
+        self._message: dict[str, Any] = {
+            "id": f"msg_{model_name}",
+            "type": "message",
+            "role": "assistant",
+            "model": model_name,
+            "content": [],
+        }
+        self._blocks: dict[int, dict[str, Any]] = {}
+        self._block_order: list[int] = []
+        self._usage: dict[str, Any] = {}
+        self._message_stopped = False
+
+    def consume(self, event: StreamEvent) -> None:
+        if event.kind == "done":
+            return
+        if event.kind == "text":
+            if isinstance(event.payload, str) and event.payload:
+                self._append_text_block(event.payload)
+            return
+        if event.kind != "json" or not isinstance(event.payload, dict):
+            return
+
+        payload = event.payload
+        if isinstance(payload.get("error"), dict):
+            raise StreamAggregationError(payload)
+        event_type = _stream_event_type(event)
+        if event_type == "error":
+            raise StreamAggregationError(payload)
+        if event_type == "message_start":
+            message = payload.get("message")
+            if isinstance(message, dict):
+                self._merge_message_start(message)
+            return
+        if event_type == "content_block_start":
+            self._start_content_block(payload)
+            return
+        if event_type == "content_block_delta":
+            self._consume_content_delta(payload)
+            return
+        if event_type == "content_block_stop":
+            self._stop_content_block(payload)
+            return
+        if event_type == "message_delta":
+            self._consume_message_delta(payload)
+            return
+        if event_type == "message_stop":
+            self._message_stopped = True
+
+    def build(self) -> dict[str, Any]:
+        if not self._message_stopped:
+            raise StreamAggregationError.from_message(
+                "Claude stream is incomplete: ended before message_stop",
+                error_type="upstream_stream_incomplete",
+            )
+        content = []
+        for index in self._block_order:
+            block = self._blocks[index]
+            self._finalize_tool_input(block)
+            content.append(copy.deepcopy(block))
+        self._message["content"] = content
+        if self._message.get("stop_reason") in (None, ""):
+            self._message["stop_reason"] = "end_turn"
+        self._message.setdefault("stop_sequence", None)
+        if self._usage:
+            self._message["usage"] = copy.deepcopy(self._usage)
+        self._message.setdefault("type", "message")
+        self._message.setdefault("role", "assistant")
+        self._message.setdefault("model", self._default_model_name)
+        return copy.deepcopy(self._message)
+
+    def _merge_message_start(self, message: dict[str, Any]) -> None:
+        for field, value in message.items():
+            if field == "content":
+                if isinstance(value, list):
+                    for index, block in enumerate(value):
+                        if isinstance(block, dict):
+                            self._merge_block(index, block)
+                continue
+            if field == "usage" and isinstance(value, dict):
+                self._merge_usage(value)
+                continue
+            if value is not None:
+                self._message[field] = copy.deepcopy(value)
+
+    def _start_content_block(self, payload: dict[str, Any]) -> None:
+        index = _coerce_int(payload.get("index"), len(self._block_order))
+        block = payload.get("content_block")
+        if not isinstance(block, dict):
+            block = {}
+        self._merge_block(index, block)
+
+    def _consume_content_delta(self, payload: dict[str, Any]) -> None:
+        delta = payload.get("delta")
+        if not isinstance(delta, dict):
+            return
+        index = _coerce_int(payload.get("index"), len(self._block_order))
+        delta_type = str(delta.get("type") or "").strip().lower()
+        if index not in self._blocks:
+            default_type = {
+                "text_delta": "text",
+                "thinking_delta": "thinking",
+                "input_json_delta": "tool_use",
+            }.get(delta_type, "text")
+            self._merge_block(index, {"type": default_type})
+        block = self._blocks[index]
+        if delta_type == "text_delta" and isinstance(delta.get("text"), str):
+            block["text"] = str(block.get("text") or "") + delta["text"]
+        elif delta_type == "thinking_delta" and isinstance(delta.get("thinking"), str):
+            block["thinking"] = str(block.get("thinking") or "") + delta["thinking"]
+        elif delta_type == "signature_delta" and isinstance(delta.get("signature"), str):
+            block["signature"] = str(block.get("signature") or "") + delta["signature"]
+        elif delta_type == "input_json_delta" and isinstance(delta.get("partial_json"), str):
+            block.setdefault("_input_json_parts", []).append(delta["partial_json"])
+
+    def _stop_content_block(self, payload: dict[str, Any]) -> None:
+        index = _coerce_int(payload.get("index"), 0)
+        block = self._blocks.get(index)
+        if block is not None:
+            self._finalize_tool_input(block)
+
+    def _consume_message_delta(self, payload: dict[str, Any]) -> None:
+        delta = payload.get("delta")
+        if isinstance(delta, dict):
+            for field in ("stop_reason", "stop_sequence"):
+                if field in delta:
+                    self._message[field] = copy.deepcopy(delta[field])
+        usage = payload.get("usage")
+        if isinstance(usage, dict):
+            self._merge_usage(usage)
+
+    def _merge_block(self, index: int, source: dict[str, Any]) -> dict[str, Any]:
+        target = self._blocks.get(index)
+        if target is None:
+            target = {}
+            self._blocks[index] = target
+            self._block_order.append(index)
+        for field, value in source.items():
+            if field == "input" and isinstance(value, dict):
+                target[field] = copy.deepcopy(value)
+            elif field == "text" and isinstance(value, str):
+                target[field] = value if len(value) >= len(str(target.get(field) or "")) else target.get(field)
+            elif field == "thinking" and isinstance(value, str):
+                target[field] = value if len(value) >= len(str(target.get(field) or "")) else target.get(field)
+            elif value is not None:
+                target[field] = copy.deepcopy(value)
+        return target
+
+    def _merge_usage(self, usage: dict[str, Any]) -> None:
+        for field, value in usage.items():
+            if value is None:
+                continue
+            current = self._usage.get(field)
+            if current in (None, 0, "") or value not in (0, ""):
+                self._usage[field] = copy.deepcopy(value)
+
+    def _append_text_block(self, text: str) -> None:
+        if self._block_order:
+            block = self._blocks[self._block_order[-1]]
+            if block.get("type") == "text":
+                block["text"] = str(block.get("text") or "") + text
+                return
+        self._merge_block(len(self._block_order), {"type": "text", "text": text})
+
+    @staticmethod
+    def _finalize_tool_input(block: dict[str, Any]) -> None:
+        parts = block.pop("_input_json_parts", None)
+        if not parts:
+            if block.get("type") == "tool_use":
+                block.setdefault("input", {})
+            return
+        raw_input = "".join(str(part) for part in parts)
+        try:
+            parsed_input = json.loads(raw_input)
+        except json.JSONDecodeError as exc:
+            raise StreamAggregationError.from_message(
+                "Claude tool input is not valid JSON",
+                error_type="upstream_stream_processing_error",
+            ) from exc
+        block["input"] = parsed_input
+
+
+def _merge_stream_name(target: dict[str, Any], incoming: str) -> None:
+    current = str(target.get("name") or "")
+    if not current:
+        target["name"] = incoming
+    elif incoming == current or incoming.startswith(current) or current.startswith(incoming):
+        target["name"] = incoming if len(incoming) > len(current) else current
+    else:
+        target["name"] = current + incoming
+
+
+def _stream_event_type(event: StreamEvent) -> str:
+    if isinstance(event.payload, dict):
+        payload_type = str(event.payload.get("type") or "").strip().lower()
+        if payload_type:
+            return payload_type
+    return str(event.event or "").strip().lower()
+
+
+def _default_responses_output_item(item: dict[str, Any]) -> dict[str, Any]:
+    item_type = str(item.get("type") or "message").strip().lower()
+    if item_type == "function_call":
+        return {
+            "id": str(item.get("id") or ""),
+            "type": "function_call",
+            "status": "in_progress",
+            "call_id": str(item.get("call_id") or ""),
+            "name": str(item.get("name") or ""),
+            "arguments": "",
+        }
+    if item_type == "reasoning":
+        return {
+            "id": str(item.get("id") or ""),
+            "type": "reasoning",
+            "status": item.get("status") or "in_progress",
+            "summary": [],
+        }
+    return {
+        "id": str(item.get("id") or ""),
+        "type": item.get("type") or "message",
+        "role": item.get("role") or "assistant",
+        "status": item.get("status") or "in_progress",
+        "content": [],
+    }
+
+
+def _merge_content_lists(existing: Any, incoming: list[Any]) -> list[Any]:
+    result = copy.deepcopy(existing) if isinstance(existing, list) else []
+    for index, raw_block in enumerate(incoming):
+        if not isinstance(raw_block, dict):
+            continue
+        while len(result) <= index:
+            result.append({})
+        if not isinstance(result[index], dict):
+            result[index] = copy.deepcopy(raw_block)
+            continue
+        _merge_content_block(result[index], raw_block)
+    return result
+
+
+def _merge_content_block(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for field, value in source.items():
+        if field in {"text", "refusal"} and isinstance(value, str):
+            current = str(target.get(field) or "")
+            if len(value) >= len(current):
+                target[field] = value
+        elif value is not None:
+            target[field] = copy.deepcopy(value)
+
+
+def _merge_missing_output_item(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for field, value in source.items():
+        if field in {"content", "summary"} and isinstance(value, list):
+            current = target.get(field)
+            merged = _merge_content_lists(current, value)
+            if not isinstance(current, list) or len(merged) > len(current) or merged != current:
+                target[field] = merged
+        elif field in {"arguments", "input"}:
+            current = target.get(field)
+            if current in (None, "", {}):
+                target[field] = copy.deepcopy(value)
+        elif field == "status" and value == "in_progress":
+            continue
+        elif target.get(field) in (None, "") and value not in (None, ""):
+            target[field] = copy.deepcopy(value)
 
 
 def _coerce_int(value: Any, default: int) -> int:

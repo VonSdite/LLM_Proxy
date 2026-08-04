@@ -200,7 +200,7 @@ class OpenAIResponsesTranslator:
             return []
 
         payload = event.payload
-        event_type = str(payload.get("type") or event.event or "").strip()
+        event_type = str(payload.get("type") or event.event or "").strip().lower()
         response_id = str(state.get("response_id") or f"chatcmpl_{model_name}")
         created = int(state.get("created") or 0)
         response_model = str(state.get("response_model") or translated_request.get("model") or model_name)
@@ -218,6 +218,7 @@ class OpenAIResponsesTranslator:
             state.setdefault("response_items", {})
             state.setdefault("saw_text", False)
             state.setdefault("saw_tool_call", False)
+            state.setdefault("next_tool_index", 0)
             return outputs
 
         items = state.setdefault("response_items", {})
@@ -230,25 +231,122 @@ class OpenAIResponsesTranslator:
                     call_id = str(item.get("call_id") or "").strip()
                     if not call_id:
                         call_id = item_id[3:] if item_id.startswith("fc_") else item_id
-                    items[item_id] = {
-                        "id": call_id,
-                        "name": str(item.get("name") or ""),
-                        "index": int(payload.get("output_index") or 0),
-                        "delta_emitted": False,
-                    }
+                    accumulator = items.get(item_id)
+                    if accumulator is None:
+                        tool_index = int(state.get("next_tool_index") or 0)
+                        state["next_tool_index"] = tool_index + 1
+                        initial_input = item.get("input")
+                        initial_arguments = []
+                        if isinstance(initial_input, dict) and initial_input:
+                            initial_arguments.append(json.dumps(initial_input, ensure_ascii=False))
+                        accumulator = {
+                            "id": call_id,
+                            "name": str(item.get("name") or ""),
+                            "tool_index": tool_index,
+                            "delta_emitted": False,
+                            "arguments": initial_arguments,
+                        }
+                        items[item_id] = accumulator
+                    else:
+                        accumulator["id"] = call_id or accumulator.get("id") or item_id
+                        if item.get("name") not in (None, ""):
+                            accumulator["name"] = str(item["name"])
                     state["saw_tool_call"] = True
+                    if not accumulator.get("delta_emitted"):
+                        accumulator["delta_emitted"] = True
+                        outputs.append(
+                            DownstreamChunk(
+                                kind="json",
+                                payload=_build_openai_delta_chunk(
+                                    response_model,
+                                    0,
+                                    response_id=response_id,
+                                    created=created,
+                                    tool_call={
+                                        "index": int(accumulator.get("tool_index") or 0),
+                                        "id": accumulator.get("id") or item_id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": accumulator.get("name") or "",
+                                            "arguments": "",
+                                        },
+                                    },
+                                ),
+                            )
+                        )
+            return outputs
+
+        if event_type == "response.output_item.done":
+            item = payload.get("item") or {}
+            if not isinstance(item, dict):
+                return outputs
+            item_type = str(item.get("type") or "").strip().lower()
+            if item_type != "function_call":
+                return outputs
+            item_id = str(item.get("id") or payload.get("item_id") or "").strip()
+            if not item_id:
+                return outputs
+            accumulator = items.get(item_id)
+            if accumulator is None:
+                tool_index = int(state.get("next_tool_index") or 0)
+                state["next_tool_index"] = tool_index + 1
+                accumulator = {
+                    "id": str(item.get("call_id") or item_id),
+                    "name": str(item.get("name") or ""),
+                    "tool_index": tool_index,
+                    "delta_emitted": False,
+                    "arguments": [],
+                }
+                items[item_id] = accumulator
+            elif item.get("name") not in (None, ""):
+                accumulator["name"] = str(item["name"])
+            state["saw_tool_call"] = True
+            arguments = item.get("arguments")
+            current_arguments = "".join(accumulator.get("arguments") or [])
+            function: dict[str, Any] = {}
+            if isinstance(arguments, str):
+                arguments_delta = (
+                    arguments[len(current_arguments) :] if arguments.startswith(current_arguments) else arguments
+                )
+                if arguments_delta:
+                    accumulator.setdefault("arguments", []).append(arguments_delta)
+                    function["arguments"] = arguments_delta
+            if not accumulator.get("delta_emitted"):
+                function["name"] = accumulator.get("name") or ""
+                accumulator["delta_emitted"] = True
+            if function:
+                outputs.append(
+                    DownstreamChunk(
+                        kind="json",
+                        payload=_build_openai_delta_chunk(
+                            response_model,
+                            0,
+                            response_id=response_id,
+                            created=created,
+                            tool_call={
+                                "index": int(accumulator.get("tool_index") or 0),
+                                "id": accumulator.get("id") or item_id,
+                                "type": "function",
+                                "function": function,
+                            },
+                        ),
+                    )
+                )
             return outputs
 
         if event_type == "response.output_text.delta":
             delta = payload.get("delta")
             if isinstance(delta, str) and delta:
                 state["saw_text"] = True
+                response_text = state.setdefault("response_text", {})
+                item_id = str(payload.get("item_id") or payload.get("output_index") or "0")
+                response_text[item_id] = str(response_text.get(item_id) or "") + delta
                 outputs.append(
                     DownstreamChunk(
                         kind="json",
                         payload=_build_openai_delta_chunk(
                             response_model,
-                            int(payload.get("output_index") or 0),
+                            0,
                             response_id=response_id,
                             created=created,
                             content=delta,
@@ -265,7 +363,7 @@ class OpenAIResponsesTranslator:
                         kind="json",
                         payload=_build_openai_delta_chunk(
                             response_model,
-                            int(payload.get("output_index") or 0),
+                            0,
                             response_id=response_id,
                             created=created,
                             delta_fields={"reasoning_content": delta},
@@ -278,32 +376,96 @@ class OpenAIResponsesTranslator:
             item_id = str(payload.get("item_id") or "")
             accumulator = items.get(item_id)
             delta = payload.get("delta")
+            if accumulator is None and item_id:
+                tool_index = int(state.get("next_tool_index") or 0)
+                state["next_tool_index"] = tool_index + 1
+                accumulator = {
+                    "id": item_id[3:] if item_id.startswith("fc_") else item_id,
+                    "name": "",
+                    "tool_index": tool_index,
+                    "delta_emitted": False,
+                }
+                items[item_id] = accumulator
+                state["saw_tool_call"] = True
             if accumulator is not None and isinstance(delta, str):
                 accumulator.setdefault("arguments", [])
                 accumulator["arguments"].append(delta)
+                function: dict[str, Any] = {"arguments": delta}
+                if not accumulator.get("delta_emitted"):
+                    function["name"] = accumulator.get("name") or ""
+                    accumulator["delta_emitted"] = True
                 outputs.append(
                     DownstreamChunk(
                         kind="json",
                         payload=_build_openai_delta_chunk(
                             response_model,
-                            int(accumulator.get("index") or 0),
+                            0,
                             response_id=response_id,
                             created=created,
                             tool_call={
-                                "index": int(accumulator.get("index") or 0),
+                                "index": int(accumulator.get("tool_index") or 0),
                                 "id": accumulator.get("id") or item_id,
                                 "type": "function",
-                                "function": {
-                                    "name": accumulator.get("name") or "",
-                                    "arguments": delta,
-                                },
+                                "function": function,
                             },
                         ),
                     )
                 )
             return outputs
 
-        if event_type in {"response.output_text.done", "response.function_call_arguments.done"}:
+        if event_type == "response.output_text.done":
+            text = payload.get("text")
+            if isinstance(text, str) and text:
+                response_text = state.setdefault("response_text", {})
+                item_id = str(payload.get("item_id") or payload.get("output_index") or "0")
+                current = str(response_text.get(item_id) or "")
+                text_delta = text[len(current) :] if text.startswith(current) else text
+                if text_delta:
+                    response_text[item_id] = text
+                    state["saw_text"] = True
+                    outputs.append(
+                        DownstreamChunk(
+                            kind="json",
+                            payload=_build_openai_delta_chunk(
+                                response_model,
+                                0,
+                                response_id=response_id,
+                                created=created,
+                                content=text_delta,
+                            ),
+                        )
+                    )
+            return outputs
+
+        if event_type == "response.function_call_arguments.done":
+            item_id = str(payload.get("item_id") or "")
+            accumulator = items.get(item_id)
+            arguments = payload.get("arguments")
+            if accumulator is not None and isinstance(arguments, str):
+                current_arguments = "".join(accumulator.get("arguments") or [])
+                if arguments.startswith(current_arguments):
+                    arguments_delta = arguments[len(current_arguments) :]
+                else:
+                    arguments_delta = arguments
+                if arguments_delta:
+                    accumulator.setdefault("arguments", []).append(arguments_delta)
+                    outputs.append(
+                        DownstreamChunk(
+                            kind="json",
+                            payload=_build_openai_delta_chunk(
+                                response_model,
+                                0,
+                                response_id=response_id,
+                                created=created,
+                                tool_call={
+                                    "index": int(accumulator.get("tool_index") or 0),
+                                    "id": accumulator.get("id") or item_id,
+                                    "type": "function",
+                                    "function": {"arguments": arguments_delta},
+                                },
+                            ),
+                        )
+                    )
             return outputs
 
         if event_type in {"response.completed", "response.done"}:
@@ -595,12 +757,19 @@ class ClaudeChatTranslator:
         outputs: list[DownstreamChunk] = []
 
         if event_type == "message_start":
+            usage_chunk = None
             message = payload.get("message") or {}
             if isinstance(message, dict):
                 response_id = str(message.get("id") or response_id)
                 response_model = str(message.get("model") or response_model)
                 state["response_id"] = response_id
                 state["response_model"] = response_model
+                usage_chunk = _build_openai_usage_chunk_from_usage(
+                    _extract_claude_usage(message.get("usage")),
+                    response_model,
+                    response_id=response_id,
+                    created=created,
+                )
             outputs.append(
                 DownstreamChunk(
                     kind="json",
@@ -613,17 +782,32 @@ class ClaudeChatTranslator:
                     ),
                 )
             )
+            if usage_chunk is not None:
+                outputs.append(usage_chunk)
             return outputs
 
         if event_type == "content_block_start":
             content_block = payload.get("content_block") or {}
             if isinstance(content_block, dict) and content_block.get("type") == "tool_use":
                 tool_calls = state.setdefault("tool_calls", {})
-                tool_calls[int(payload.get("index") or 0)] = {
-                    "id": str(content_block.get("id") or ""),
-                    "name": str(content_block.get("name") or ""),
-                    "arguments": [],
-                }
+                block_index = int(payload.get("index") or 0)
+                tool_state = tool_calls.get(block_index)
+                if tool_state is None:
+                    initial_input = content_block.get("input")
+                    initial_arguments = []
+                    if isinstance(initial_input, dict) and initial_input:
+                        initial_arguments.append(json.dumps(initial_input, ensure_ascii=False))
+                    tool_state = {
+                        "tool_index": int(state.get("next_tool_index") or 0),
+                        "id": str(content_block.get("id") or ""),
+                        "name": str(content_block.get("name") or ""),
+                        "arguments": initial_arguments,
+                    }
+                    state["next_tool_index"] = tool_state["tool_index"] + 1
+                    tool_calls[block_index] = tool_state
+                else:
+                    tool_state["id"] = str(content_block.get("id") or tool_state.get("id") or "")
+                    tool_state["name"] = str(content_block.get("name") or tool_state.get("name") or "")
             return []
 
         if event_type == "content_block_delta":
@@ -679,7 +863,7 @@ class ClaudeChatTranslator:
                             response_id=response_id,
                             created=created,
                             tool_call={
-                                "index": index,
+                                "index": int(accumulator.get("tool_index") or 0),
                                 "id": accumulator.get("id") or f"toolu_{index}",
                                 "type": "function",
                                 "function": {
@@ -1250,6 +1434,8 @@ def _extract_openai_responses_message_and_tool_calls(outputs: Any) -> tuple[dict
                 part_type = str(part.get("type") or "").strip().lower()
                 if part_type in {"output_text", "text"} and isinstance(part.get("text"), str):
                     message["content"] += part["text"]
+                elif part_type == "refusal" and isinstance(part.get("refusal"), str):
+                    message["refusal"] = str(message.get("refusal") or "") + part["refusal"]
         elif item_type == "function_call":
             tool_calls.append(
                 {

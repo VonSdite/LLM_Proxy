@@ -368,14 +368,7 @@ class ProxyService:
                 if force_nonstream_response and opened.is_stream:
                     response = self._response_builder.build_aggregated_nonstream_response(
                         provider=provider,
-                        source_stream_translator=self._translator_registry.get(
-                            provider.source_format,
-                            "openai_chat",
-                        ),
-                        target_nonstream_translator=self._translator_registry.get(
-                            "openai_chat",
-                            downstream_target_format,
-                        ),
+                        translator=translator,
                         request_ctx=request_ctx,
                         downstream_target_format=downstream_target_format,
                         original_request=original_body,
@@ -430,7 +423,8 @@ class ProxyService:
                     opened.status_code,
                     opened.is_stream,
                 )
-                return response, opened.status_code, None
+                response_status_code = int(getattr(response, "status_code", opened.status_code))
+                return response, response_status_code, None
             except AuthGroupSelectionError as exc:
                 last_error = ProxyErrorInfo(
                     message=exc.message,

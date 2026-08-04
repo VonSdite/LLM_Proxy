@@ -24,7 +24,7 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..translators import Translator
-from ..translators.stream_aggregator import aggregate_stream_to_openai_chat
+from ..translators.stream_aggregator import StreamAggregationError, aggregate_stream_to_native_response
 from .proxy_trace_logger import ProxyTraceLogger
 
 
@@ -511,8 +511,7 @@ class ProxyResponseBuilder:
         self,
         *,
         provider: LLMProvider,
-        source_stream_translator: Translator,
-        target_nonstream_translator: Translator,
+        translator: Translator,
         request_ctx: HookContext,
         downstream_target_format: str,
         original_request: dict[str, Any],
@@ -535,26 +534,22 @@ class ProxyResponseBuilder:
                 response.iter_content(chunk_size=None),
                 upstream_payload_buffer,
             )
-            chat_payload = aggregate_stream_to_openai_chat(
-                translator=source_stream_translator,
+            native_payload = aggregate_stream_to_native_response(
+                source_format=translator.source_format,
                 model_name=request_ctx.upstream_model,
-                original_request=original_request,
-                translated_request=translated_request,
                 events=decode_stream_events(upstream_chunks, opened.stream_format),
             )
-            target_request = target_nonstream_translator.translate_request(
+            translated_payload = translator.translate_nonstream_response(
                 request_ctx.upstream_model,
                 original_request,
-                False,
-            )
-            translated_payload = target_nonstream_translator.translate_nonstream_response(
-                request_ctx.upstream_model,
-                original_request,
-                target_request,
-                chat_payload,
+                translated_request,
+                native_payload,
             )
             guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
             body_to_send = translated_payload if guarded_payload is None else guarded_payload
+            response_body = encode_downstream_response_body(body_to_send, downstream_target_format)
+            headers = self._filter_response_headers(getattr(response, "headers", {}))
+            headers["Content-Type"] = self._resolve_nonstream_content_type(body_to_send, opened.content_type)
 
             meta = self._create_empty_meta()
             if isinstance(body_to_send, dict):
@@ -567,9 +562,6 @@ class ProxyResponseBuilder:
             if finalize_attempt is not None:
                 finalize_attempt(status_code=opened.status_code, usage=meta)
 
-            response_body = encode_downstream_response_body(body_to_send, downstream_target_format)
-            headers = self._filter_response_headers(getattr(response, "headers", {}))
-            headers["Content-Type"] = self._resolve_nonstream_content_type(body_to_send, opened.content_type)
             if trace_enabled:
                 self._trace.log_entry(
                     stage="upstream_response",
@@ -611,8 +603,169 @@ class ProxyResponseBuilder:
                 status=opened.status_code,
                 headers=headers,
             )
+        except StreamAggregationError as exc:
+            return self._build_aggregated_error_response(
+                provider=provider,
+                opened=opened,
+                request_ctx=request_ctx,
+                downstream_target_format=downstream_target_format,
+                status_code=502,
+                error_type=exc.error_type,
+                error_code=exc.error_code,
+                message=exc.message,
+                error_payload=exc.error_payload,
+                finalize_attempt=finalize_attempt,
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
+                raw_response_headers=raw_response_headers,
+                upstream_payload_buffer=upstream_payload_buffer,
+            )
+        except HookAbortError as exc:
+            return self._build_aggregated_error_response(
+                provider=provider,
+                opened=opened,
+                request_ctx=request_ctx,
+                downstream_target_format=downstream_target_format,
+                status_code=exc.status_code,
+                error_type=exc.error_type,
+                error_code=exc.error_type,
+                message=exc.message,
+                error_payload=None,
+                finalize_attempt=finalize_attempt,
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
+                raw_response_headers=raw_response_headers,
+                upstream_payload_buffer=upstream_payload_buffer,
+            )
+        except UnicodeError:
+            return self._build_aggregated_error_response(
+                provider=provider,
+                opened=opened,
+                request_ctx=request_ctx,
+                downstream_target_format=downstream_target_format,
+                status_code=502,
+                error_type="upstream_stream_processing_error",
+                error_code="upstream_stream_processing_error",
+                message="Upstream stream contains invalid text",
+                error_payload=None,
+                finalize_attempt=finalize_attempt,
+                trace_id=trace_id,
+                route_name=route_name,
+                client_ip=client_ip,
+                raw_response_headers=raw_response_headers,
+                upstream_payload_buffer=upstream_payload_buffer,
+            )
         finally:
             response.close()
+
+    def _build_aggregated_error_response(
+        self,
+        *,
+        provider: LLMProvider,
+        opened: OpenedUpstreamResponse,
+        request_ctx: HookContext,
+        downstream_target_format: str,
+        status_code: int,
+        error_type: str,
+        error_code: Any,
+        message: str,
+        error_payload: dict[str, Any] | None,
+        finalize_attempt: Callable[..., None] | None,
+        trace_id: str | None,
+        route_name: str | None,
+        client_ip: str | None,
+        raw_response_headers: dict[str, Any],
+        upstream_payload_buffer: bytearray | None,
+    ) -> Response:
+        """把尚未提交下游的聚合错误转换为目标协议的普通响应。"""
+        payload = self._build_nonstream_error_payload(
+            downstream_target_format=downstream_target_format,
+            message=message,
+            error_type=error_type,
+            error_code=error_code,
+            error_payload=error_payload,
+        )
+        response_body = encode_downstream_response_body(payload, downstream_target_format)
+        headers = self._filter_response_headers(raw_response_headers)
+        headers["Content-Type"] = "application/json; charset=utf-8"
+
+        if finalize_attempt is not None:
+            try:
+                finalize_attempt(status_code=status_code, error_message=message)
+            except Exception as exc:
+                self._logger.error("Error finalizing aggregated upstream error: %s", exc)
+
+        self._trace.log_entry(
+            stage="upstream_response",
+            trace_id=trace_id,
+            start_line=self._trace.build_response_start_line(
+                opened.status_code,
+                getattr(opened.response, "reason", None),
+            ),
+            headers=raw_response_headers,
+            payload=bytes(upstream_payload_buffer or b""),
+            route_name=route_name,
+            client_ip=client_ip,
+            provider_name=provider.name,
+            request_model=request_ctx.request_model,
+            upstream_model=request_ctx.upstream_model,
+            target_format=downstream_target_format,
+            status_code=opened.status_code,
+            stream=True,
+            completed=False,
+            error_type=error_type,
+        )
+        self._trace.log_entry(
+            stage="downstream_response",
+            trace_id=trace_id,
+            start_line=self._trace.build_response_start_line(status_code),
+            headers=headers,
+            payload=response_body,
+            route_name=route_name,
+            client_ip=client_ip,
+            provider_name=provider.name,
+            request_model=request_ctx.request_model,
+            upstream_model=request_ctx.upstream_model,
+            target_format=downstream_target_format,
+            status_code=status_code,
+            stream=False,
+            completed=False,
+            error_type=error_type,
+        )
+        return Response(response_body, status=status_code, headers=headers)
+
+    @staticmethod
+    def _build_nonstream_error_payload(
+        *,
+        downstream_target_format: str,
+        message: str,
+        error_type: str,
+        error_code: Any,
+        error_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        normalized_target_format = str(downstream_target_format or "").strip().lower()
+        resolved_message = str((error_payload or {}).get("message") or message)
+        resolved_type = str((error_payload or {}).get("type") or error_type or "upstream_error")
+        resolved_code = (error_payload or {}).get("code")
+        if resolved_code in (None, ""):
+            resolved_code = error_code
+        if normalized_target_format == "claude_chat":
+            return {
+                "type": "error",
+                "error": {
+                    "type": resolved_type,
+                    "message": resolved_message,
+                },
+            }
+        error = {
+            "message": resolved_message,
+            "type": resolved_type,
+            "param": (error_payload or {}).get("param"),
+            "code": resolved_code,
+        }
+        return {"error": error}
 
     def build_nonstream_response(
         self,

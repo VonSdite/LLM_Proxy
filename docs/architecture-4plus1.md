@@ -46,7 +46,7 @@ downstream request
   -> usage request enrichment / provider protocol signing
   -> executor
   -> decoder
-  -> translator.translate_response()
+  -> translator.translate_nonstream_response() or translate_stream_event()
   -> response_guard
   -> encoder
   -> prefetch first non-empty encoded downstream bytes (stream only)
@@ -58,8 +58,8 @@ Provider 开启 `force_upstream_stream=true` 且下游请求未开启流式时�
 
 ```text
 decoder
-  -> upstream stream translator -> OpenAI Chat chunk accumulator
-  -> target nonstream translator
+  -> source protocol native stream accumulator
+  -> complete source-to-target response translator
   -> response_guard
   -> JSON encoder
   -> downstream response
@@ -223,9 +223,12 @@ decoder
   - 统一处理 Provider 出站请求中的代理风险确认页自动确认与一次重试
 - `Decoder`
   - 将上游流拆成统一事件
+- `StreamAggregator`
+  - 按上游协议原生结构聚合 OpenAI Chat、OpenAI Responses 和 Claude 流式事件
+  - 在上游响应完成后向 response translator 提供完整 source payload
 - `TranslatorRegistry`
   - 负责协议适配
-  - 为上游强制流式聚合提供各上游协议到 OpenAI Chat chunk 的归一化入口
+  - 为原生响应聚合后的完整 source payload 提供 source-to-target response translation
   - 维护 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 与 Claude `thinking` 的请求语义映射
   - 将 OpenAI Chat 上游 reasoning 内容转换为下游协议对应的 thinking / reasoning 输出
 - `Encoder`
