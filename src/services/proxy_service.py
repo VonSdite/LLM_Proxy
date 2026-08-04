@@ -136,6 +136,8 @@ class ProxyService:
         """代理请求到目标 provider，并处理重试、格式转换与 guard。"""
         target_url = provider.api
         requested_model = request_data["model"]
+        downstream_stream_requested = bool(request_data.get("stream", False))
+        force_nonstream_response = bool(provider.force_upstream_stream and not downstream_stream_requested)
         upstream_model = self._get_upstream_model_name(provider.name, requested_model)
         timeout_seconds = provider.timeout_seconds
         max_retries = provider.max_retries
@@ -184,6 +186,7 @@ class ProxyService:
                 previous_error_type=previous_error_type,
                 auth_group_name=(selected_auth.auth_group_name if selected_auth is not None else provider.auth_group),
                 auth_entry_id=(selected_auth.entry_id if selected_auth is not None else None),
+                force_upstream_stream=force_nonstream_response,
             )
             return (
                 built_request.headers,
@@ -362,7 +365,29 @@ class ProxyService:
                     )
                     return response, opened.status_code, None
 
-                if opened.is_stream:
+                if force_nonstream_response and opened.is_stream:
+                    response = self._response_builder.build_aggregated_nonstream_response(
+                        provider=provider,
+                        source_stream_translator=self._translator_registry.get(
+                            provider.source_format,
+                            "openai_chat",
+                        ),
+                        target_nonstream_translator=self._translator_registry.get(
+                            "openai_chat",
+                            downstream_target_format,
+                        ),
+                        request_ctx=request_ctx,
+                        downstream_target_format=downstream_target_format,
+                        original_request=original_body,
+                        translated_request=translated_body,
+                        opened=opened,
+                        on_complete=on_complete,
+                        finalize_attempt=finalize_attempt,
+                        trace_id=trace_id,
+                        route_name=route_name,
+                        client_ip=client_ip,
+                    )
+                elif opened.is_stream:
                     response = self._response_builder.build_stream_response(
                         provider=provider,
                         translator=translator,

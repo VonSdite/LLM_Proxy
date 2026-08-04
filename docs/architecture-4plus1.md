@@ -54,6 +54,19 @@ downstream request
   -> response outcome finalization
 ```
 
+Provider 开启 `force_upstream_stream=true` 且下游请求未开启流式时，链路在 decoder 之后走聚合分支：
+
+```text
+decoder
+  -> upstream stream translator -> OpenAI Chat chunk accumulator
+  -> target nonstream translator
+  -> response_guard
+  -> JSON encoder
+  -> downstream response
+```
+
+该分支向上游发送 `stream=true`，在代理进程内完成响应聚合，向下游只发送一个非流式 JSON 响应。下游明确发送 `stream=true` 时继续使用标准流式链路。
+
 流式响应以首个非空、已经完成目标协议编码的下游字节为提交边界：
 
 - 普通 Provider 提交前的 transport 异常会关闭当前上游响应，并在 `max_retries` 定义的最大尝试次数范围内重新执行上游请求
@@ -178,11 +191,13 @@ downstream request
 - `ProxyService`
   - 组装整条代理链路
   - 根据当前请求所处接口选择 translator 和 encoder
+  - Provider 开启 `force_upstream_stream` 且下游非流式时，强制上游请求使用流式并选择聚合响应路径
   - 在下游流提交前管理 Provider 上游最大尝试次数
   - 对 `source_format=claude_chat` 的 Provider，在上游 body 已有 Claude Code billing header 时重签 `cch`
   - 在开启 `logging.llm_request_debug_enabled` 时输出独立 trace
 - `ProxyResponseBuilder`
   - 构建非流式响应和流式响应
+  - 将强制上游流式场景的上游事件聚合为完整响应，再编码为非流式 JSON
   - 预取首个非空目标协议字节并建立流提交边界
   - 跟踪协议终止事件、上游 transport 失败和客户端取消
   - 按下游协议编码流内错误事件并结算上游响应资源
@@ -210,6 +225,7 @@ downstream request
   - 将上游流拆成统一事件
 - `TranslatorRegistry`
   - 负责协议适配
+  - 为上游强制流式聚合提供各上游协议到 OpenAI Chat chunk 的归一化入口
   - 维护 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 与 Claude `thinking` 的请求语义映射
   - 将 OpenAI Chat 上游 reasoning 内容转换为下游协议对应的 thinking / reasoning 输出
 - `Encoder`

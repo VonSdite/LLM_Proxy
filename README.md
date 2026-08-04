@@ -54,6 +54,7 @@ providers:
     api: https://api.openai.com/v1/chat/completions
     source_format: openai_chat
     api_key: sk-your-openai-key
+    force_upstream_stream: false
     verify_ssl: false
     model_list:
       - gpt-4.1
@@ -182,6 +183,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `timeout_seconds`：上游请求超时，默认 `1200`
 - `max_retries`：一次 Provider 上游操作允许的最大尝试次数，包含首次尝试；默认 `3`，设为 `1` 时只尝试一次
 - `verify_ssl`：是否校验证书；代码默认值为 `false`，公网 HTTPS 建议显式设为 `true`
+- `force_upstream_stream`：是否在下游非流式请求时强制使用上游流式请求；默认 `false`。启用后代理会聚合上游流式事件，再以非流式响应返回下游
 - `model_list`：当前 Provider 暴露的模型列表
 - `hook`：相对 `hooks/` 目录的 Hook 文件路径，文件中需要导出名为 `Hook` 的类
 
@@ -418,6 +420,7 @@ Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照�
 
 - 按请求里的 `model` 自动选择对应 Provider
 - 支持流式和非流式响应
+- Provider 支持开启上游强制流式：下游非流式请求会由代理聚合上游流式事件后返回完整响应，下游流式请求保持流式输出
 - 自动识别 SSE、NDJSON 等 HTTP 上游返回形态
 - 流式响应以首个非空、已经完成目标协议编码的下游字节为提交边界
 - 普通 Provider 提交前的 transport 异常会在 `max_retries` 定义的最大尝试次数范围内重新执行上游请求；尝试次数耗尽后返回结构化 `502` 错误响应

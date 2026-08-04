@@ -42,6 +42,7 @@ def build_upstream_request(
     previous_error_type: HookErrorType | None,
     auth_group_name: str | None,
     auth_entry_id: str | None,
+    force_upstream_stream: bool = False,
 ) -> BuiltUpstreamRequest:
     """构建经过翻译和 hook 后的上游请求。"""
     initial_stream = bool(request_data.get("stream", False))
@@ -70,6 +71,8 @@ def build_upstream_request(
     )
 
     upstream_body = provider.apply_request_guard(request_ctx, dict(translated_body))
+    if force_upstream_stream and not initial_stream:
+        upstream_body["stream"] = True
     final_upstream_model = _resolve_final_upstream_model(upstream_body, upstream_model)
     if final_upstream_model != request_ctx.upstream_model:
         request_ctx = replace(request_ctx, upstream_model=final_upstream_model)

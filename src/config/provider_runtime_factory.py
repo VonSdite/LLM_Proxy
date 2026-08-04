@@ -115,6 +115,7 @@ class ProviderRuntimeFactory:
             timeout_seconds=spec.timeout_seconds,
             max_retries=spec.max_retries,
             verify_ssl=spec.verify_ssl,
+            force_upstream_stream=spec.force_upstream_stream,
             hook=self._build_hook_proxy(spec.hook),
         )
 

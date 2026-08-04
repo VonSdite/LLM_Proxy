@@ -31,6 +31,7 @@ class LLMProvider:
     timeout_seconds: int = 1200
     max_retries: int = 3
     verify_ssl: bool = False
+    force_upstream_stream: bool = False
     hook: HookModule | None = None
 
     def __post_init__(self) -> None:
