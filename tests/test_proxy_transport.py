@@ -2039,6 +2039,15 @@ process.stdout.write(JSON.stringify([
         self.assertIn('self._app.route("/api/settings/system/client-ip", methods=["PUT"])', web_controller_py)
         self.assertIn('self._app.route("/api/settings/system/oauth", methods=["PUT"])', web_controller_py)
 
+    def test_provider_force_upstream_stream_custom_select_is_initialized(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
+        html = template_path.read_text(encoding="utf-8")
+
+        self.assertIn('id="providerForceUpstreamStream"', html)
+        self.assertIn('<option value="false">关闭</option>', html)
+        self.assertIn('<option value="true">启用</option>', html)
+        self.assertIn("setupCustomSelect('providerForceUpstreamStream');", html)
+
     def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(
         self,
     ) -> None:
