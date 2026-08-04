@@ -27,6 +27,11 @@ from src.translators import (
     OpenAIResponsesTranslator,
     build_default_translator_registry,
 )
+from src.translators.stream_aggregator import (
+    StreamAggregationError,
+    aggregate_stream_to_native_response,
+    aggregate_stream_to_openai_chat,
+)
 
 
 class FakeLogger:
@@ -197,6 +202,782 @@ class StreamDecoderTests(unittest.TestCase):
 
 
 class TranslatorTests(unittest.TestCase):
+    def test_stream_aggregator_does_not_duplicate_repeated_tool_name(self) -> None:
+        translator = OpenAIChatTranslator()
+
+        payload = aggregate_stream_to_openai_chat(
+            translator=translator,
+            model_name="gpt-4.1",
+            original_request={"messages": [], "stream": True},
+            translated_request={"model": "gpt-4.1", "stream": True},
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "id": "chatcmpl-tool",
+                        "created": 123,
+                        "model": "gpt-4.1",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call-1",
+                                            "type": "function",
+                                            "function": {"name": "lookup", "arguments": "{"},
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "id": "chatcmpl-tool",
+                        "created": 123,
+                        "model": "gpt-4.1",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "function": {"name": "lookup", "arguments": '"q":"x"}'},
+                                        }
+                                    ]
+                                },
+                                "finish_reason": "tool_calls",
+                            }
+                        ],
+                    },
+                ),
+                StreamEvent(kind="done", payload="[DONE]"),
+            ],
+        )
+
+        tool_call = payload["choices"][0]["message"]["tool_calls"][0]
+        self.assertEqual("lookup", tool_call["function"]["name"])
+        self.assertEqual('{"q":"x"}', tool_call["function"]["arguments"])
+
+    def test_openai_responses_done_events_preserve_text_and_tool_arguments(self) -> None:
+        translator = OpenAIResponsesTranslator()
+
+        native_payload = aggregate_stream_to_native_response(
+            source_format="openai_responses",
+            model_name="gpt-5-codex",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.created",
+                        "response": {"id": "resp-done", "created_at": 123, "model": "gpt-5-codex"},
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.output_text.done",
+                        "item_id": "msg-1",
+                        "output_index": 0,
+                        "text": "complete text",
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.output_item.added",
+                        "output_index": 1,
+                        "item": {
+                            "id": "fc-1",
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "lookup",
+                        },
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.output_item.done",
+                        "output_index": 1,
+                        "item": {
+                            "id": "fc-1",
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "lookup",
+                            "arguments": '{"q":"x"}',
+                        },
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp-done",
+                            "created_at": 123,
+                            "model": "gpt-5-codex",
+                        },
+                    },
+                ),
+                StreamEvent(kind="done", payload="[DONE]"),
+            ],
+        )
+        payload = translator.translate_nonstream_response(
+            "gpt-5-codex",
+            {"messages": []},
+            {"model": "gpt-5-codex"},
+            native_payload,
+        )
+
+        self.assertEqual("complete text", payload["choices"][0]["message"]["content"])
+        tool_call = payload["choices"][0]["message"]["tool_calls"][0]
+        self.assertEqual("lookup", tool_call["function"]["name"])
+        self.assertEqual('{"q":"x"}', tool_call["function"]["arguments"])
+
+    def test_openai_responses_full_completion_fills_partial_text(self) -> None:
+        translator = OpenAIResponsesTranslator()
+
+        native_payload = aggregate_stream_to_native_response(
+            source_format="openai_responses",
+            model_name="gpt-5-codex",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.created",
+                        "response": {"id": "resp-partial", "created_at": 123, "model": "gpt-5-codex"},
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.output_text.delta",
+                        "item_id": "msg-1",
+                        "output_index": 0,
+                        "delta": "part",
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp-partial",
+                            "created_at": 123,
+                            "model": "gpt-5-codex",
+                            "output": [
+                                {
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": [{"type": "output_text", "text": "partial completion"}],
+                                }
+                            ],
+                        },
+                    },
+                ),
+            ],
+        )
+        payload = translator.translate_nonstream_response(
+            "gpt-5-codex",
+            {"messages": []},
+            {"model": "gpt-5-codex"},
+            native_payload,
+        )
+
+        self.assertEqual("partial completion", payload["choices"][0]["message"]["content"])
+
+    def test_claude_stream_preserves_initial_usage_and_tool_input(self) -> None:
+        translator = ClaudeChatTranslator()
+
+        payload = aggregate_stream_to_openai_chat(
+            translator=translator,
+            model_name="claude-sonnet-4-5",
+            original_request={"messages": [], "stream": True},
+            translated_request={"model": "claude-sonnet-4-5", "stream": True},
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "message_start",
+                        "message": {
+                            "id": "msg-tool",
+                            "model": "claude-sonnet-4-5",
+                            "role": "assistant",
+                            "content": [],
+                            "usage": {"input_tokens": 3},
+                        },
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": "toolu-1",
+                            "name": "lookup",
+                            "input": {"q": "x"},
+                        },
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "tool_use"},
+                        "usage": {"output_tokens": 2},
+                    },
+                ),
+                StreamEvent(kind="json", payload={"type": "content_block_stop", "index": 0}),
+                StreamEvent(kind="json", payload={"type": "message_stop"}),
+            ],
+        )
+
+        message = payload["choices"][0]["message"]
+        self.assertEqual("lookup", message["tool_calls"][0]["function"]["name"])
+        self.assertEqual('{"q": "x"}', message["tool_calls"][0]["function"]["arguments"])
+        self.assertEqual(3, payload["usage"]["prompt_tokens"])
+        self.assertEqual(2, payload["usage"]["completion_tokens"])
+
+    def test_responses_and_claude_targets_preserve_refusal(self) -> None:
+        registry = build_default_translator_registry()
+        chat_payload = {
+            "id": "chatcmpl-refusal",
+            "created": 123,
+            "model": "gpt-4.1",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "refusal": "I cannot help with that.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+
+        responses = registry.get("openai_chat", "openai_responses").translate_nonstream_response(
+            "gpt-4.1", {"input": "hi"}, {"model": "gpt-4.1"}, chat_payload
+        )
+        claude = registry.get("openai_chat", "claude_chat").translate_nonstream_response(
+            "gpt-4.1", {"messages": []}, {"model": "gpt-4.1"}, chat_payload
+        )
+
+        self.assertEqual("I cannot help with that.", responses["output"][0]["content"][0]["refusal"])
+        self.assertEqual("I cannot help with that.", claude["content"][0]["text"])
+
+    def test_responses_eof_without_terminal_event_is_rejected(self) -> None:
+        with self.assertRaisesRegex(StreamAggregationError, "incomplete"):
+            aggregate_stream_to_native_response(
+                source_format="openai_responses",
+                model_name="gpt-5-codex",
+                events=[
+                    StreamEvent(
+                        kind="json",
+                        payload={
+                            "type": "response.created",
+                            "response": {"id": "resp-eof", "created_at": 123, "model": "gpt-5-codex"},
+                        },
+                    ),
+                    StreamEvent(
+                        kind="json",
+                        payload={
+                            "type": "response.output_text.delta",
+                            "item_id": "msg-1",
+                            "output_index": 0,
+                            "delta": "partial",
+                        },
+                    ),
+                ],
+            )
+
+    def test_native_openai_chat_aggregation_preserves_reasoning_and_tools(self) -> None:
+        payload = aggregate_stream_to_native_response(
+            source_format="openai_chat",
+            model_name="gpt-4.1",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "id": "chatcmpl-native",
+                        "created": 123,
+                        "model": "gpt-4.1",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "reasoning_content": "Think first. ",
+                                    "content": "Hello",
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "id": "chatcmpl-native",
+                        "created": 123,
+                        "model": "gpt-4.1",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call-1",
+                                            "type": "function",
+                                            "function": {"name": "lookup", "arguments": '{"q":'},
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "id": "chatcmpl-native",
+                        "created": 123,
+                        "model": "gpt-4.1",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "content": " world",
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "function": {"name": "lookup", "arguments": '"x"}'},
+                                        }
+                                    ],
+                                },
+                                "finish_reason": "tool_calls",
+                            }
+                        ],
+                        "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+                    },
+                ),
+                StreamEvent(kind="done", payload="[DONE]"),
+            ],
+        )
+
+        message = payload["choices"][0]["message"]
+        self.assertEqual("Hello world", message["content"])
+        self.assertEqual("Think first. ", message["reasoning_content"])
+        self.assertEqual("lookup", message["tool_calls"][0]["function"]["name"])
+        self.assertEqual('{"q":"x"}', message["tool_calls"][0]["function"]["arguments"])
+        self.assertEqual(5, payload["usage"]["total_tokens"])
+
+    def test_native_openai_responses_aggregation_preserves_terminal_response_and_output(self) -> None:
+        native_payload = aggregate_stream_to_native_response(
+            source_format="openai_responses",
+            model_name="gpt-5-codex",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.created",
+                        "response": {
+                            "id": "resp-native",
+                            "created_at": 123,
+                            "model": "gpt-5-codex",
+                            "metadata": {"trace": "created"},
+                        },
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.output_text.delta",
+                        "item_id": "msg-native",
+                        "output_index": 0,
+                        "delta": "Hello",
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.output_text.done",
+                        "item_id": "msg-native",
+                        "output_index": 0,
+                        "text": "Hello world",
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.reasoning_summary_text.delta",
+                        "item_id": "reasoning-native",
+                        "output_index": 1,
+                        "summary_index": 0,
+                        "delta": "Need context",
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.reasoning_summary_text.done",
+                        "item_id": "reasoning-native",
+                        "output_index": 1,
+                        "summary_index": 0,
+                        "text": "Need context first",
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.output_item.added",
+                        "output_index": 2,
+                        "item": {
+                            "id": "fc-native",
+                            "type": "function_call",
+                            "call_id": "call-native",
+                            "name": "lookup",
+                        },
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.function_call_arguments.delta",
+                        "item_id": "fc-native",
+                        "output_index": 2,
+                        "delta": '{"q":',
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.function_call_arguments.done",
+                        "item_id": "fc-native",
+                        "output_index": 2,
+                        "arguments": '{"q":"x"}',
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp-native",
+                            "object": "response",
+                            "created_at": 123,
+                            "status": "completed",
+                            "model": "gpt-5-codex",
+                            "metadata": {"trace": "completed"},
+                            "output": [],
+                            "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+                        },
+                    },
+                ),
+            ],
+        )
+
+        self.assertEqual("response", native_payload["object"])
+        self.assertEqual({"trace": "completed"}, native_payload["metadata"])
+        self.assertEqual(3, len(native_payload["output"]))
+        translator = OpenAIResponsesTranslator()
+        chat_payload = translator.translate_nonstream_response(
+            "gpt-5-codex",
+            {"messages": []},
+            {"model": "gpt-5-codex"},
+            native_payload,
+        )
+        self.assertEqual("Hello world", chat_payload["choices"][0]["message"]["content"])
+        self.assertEqual("Need context first", chat_payload["choices"][0]["message"]["reasoning_content"])
+        self.assertEqual('{"q":"x"}', chat_payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"])
+        self.assertEqual(5, chat_payload["usage"]["total_tokens"])
+
+    def test_native_claude_aggregation_preserves_thinking_tools_and_usage(self) -> None:
+        payload = aggregate_stream_to_native_response(
+            source_format="claude_chat",
+            model_name="claude-sonnet-4-5",
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "message_start",
+                        "message": {
+                            "id": "msg-native",
+                            "type": "message",
+                            "role": "assistant",
+                            "model": "claude-sonnet-4-5",
+                            "content": [],
+                            "usage": {"input_tokens": 3},
+                        },
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": "Hello"},
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": " world"},
+                    },
+                ),
+                StreamEvent(kind="json", payload={"type": "content_block_stop", "index": 0}),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_start",
+                        "index": 1,
+                        "content_block": {"type": "thinking", "thinking": "Plan"},
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_delta",
+                        "index": 1,
+                        "delta": {"type": "thinking_delta", "thinking": " carefully"},
+                    },
+                ),
+                StreamEvent(kind="json", payload={"type": "content_block_stop", "index": 1}),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_start",
+                        "index": 2,
+                        "content_block": {"type": "tool_use", "id": "toolu-native", "name": "lookup", "input": {}},
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "content_block_delta",
+                        "index": 2,
+                        "delta": {"type": "input_json_delta", "partial_json": '{"q":"x"}'},
+                    },
+                ),
+                StreamEvent(kind="json", payload={"type": "content_block_stop", "index": 2}),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "tool_use"},
+                        "usage": {"output_tokens": 2},
+                    },
+                ),
+                StreamEvent(kind="json", payload={"type": "message_stop"}),
+            ],
+        )
+
+        self.assertEqual("Hello world", payload["content"][0]["text"])
+        self.assertEqual("Plan carefully", payload["content"][1]["thinking"])
+        self.assertEqual({"q": "x"}, payload["content"][2]["input"])
+        self.assertEqual("tool_use", payload["stop_reason"])
+        self.assertEqual(3, payload["usage"]["input_tokens"])
+        self.assertEqual(2, payload["usage"]["output_tokens"])
+
+    def test_native_response_aggregation_rejects_responses_and_claude_failures(self) -> None:
+        with self.assertRaisesRegex(StreamAggregationError, "quota"):
+            aggregate_stream_to_native_response(
+                source_format="openai_responses",
+                model_name="gpt-5-codex",
+                events=[
+                    StreamEvent(
+                        kind="json",
+                        payload={
+                            "type": "response.failed",
+                            "response": {"error": {"type": "rate_limit_error", "message": "quota exceeded"}},
+                        },
+                    )
+                ],
+            )
+        with self.assertRaisesRegex(StreamAggregationError, "overloaded"):
+            aggregate_stream_to_native_response(
+                source_format="claude_chat",
+                model_name="claude-sonnet-4-5",
+                events=[
+                    StreamEvent(
+                        kind="json",
+                        payload={
+                            "type": "error",
+                            "error": {"type": "overloaded_error", "message": "overloaded"},
+                        },
+                    )
+                ],
+            )
+
+    def test_stream_aggregator_preserves_legacy_function_call(self) -> None:
+        translator = OpenAIChatTranslator()
+
+        payload = aggregate_stream_to_openai_chat(
+            translator=translator,
+            model_name="gpt-4.1",
+            original_request={"messages": [], "stream": True},
+            translated_request={"model": "gpt-4.1", "stream": True},
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "id": "chatcmpl-legacy",
+                        "created": 123,
+                        "model": "gpt-4.1",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"function_call": {"name": "lookup", "arguments": '{"q":'}},
+                                "finish_reason": None,
+                            }
+                        ],
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "id": "chatcmpl-legacy",
+                        "created": 123,
+                        "model": "gpt-4.1",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"function_call": {"arguments": '"x"}'}},
+                                "finish_reason": "function_call",
+                            }
+                        ],
+                    },
+                ),
+                StreamEvent(kind="done", payload="[DONE]"),
+            ],
+        )
+
+        message = payload["choices"][0]["message"]
+        self.assertEqual("lookup", message["function_call"]["name"])
+        self.assertEqual('{"q":"x"}', message["function_call"]["arguments"])
+        self.assertEqual("function_call", payload["choices"][0]["finish_reason"])
+
+    def test_openai_responses_function_call_name_is_emitted_once(self) -> None:
+        translator = OpenAIResponsesTranslator()
+
+        payload = aggregate_stream_to_openai_chat(
+            translator=translator,
+            model_name="gpt-5-codex",
+            original_request={"messages": [], "stream": True},
+            translated_request={"model": "gpt-5-codex", "stream": True},
+            events=[
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.created",
+                        "response": {"id": "resp-1", "created_at": 123, "model": "gpt-5-codex"},
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.output_item.added",
+                        "output_index": 1,
+                        "item": {
+                            "id": "fc-1",
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "lookup",
+                        },
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.function_call_arguments.delta",
+                        "item_id": "fc-1",
+                        "output_index": 1,
+                        "delta": '{"q":',
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.function_call_arguments.delta",
+                        "item_id": "fc-1",
+                        "output_index": 1,
+                        "delta": '"x"}',
+                    },
+                ),
+                StreamEvent(
+                    kind="json",
+                    payload={
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp-1",
+                            "created_at": 123,
+                            "model": "gpt-5-codex",
+                            "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                        },
+                    },
+                ),
+            ],
+        )
+
+        self.assertEqual(1, len(payload["choices"]))
+        self.assertEqual(0, payload["choices"][0]["index"])
+        self.assertEqual(1, len(payload["choices"][0]["message"]["tool_calls"]))
+        tool_call = payload["choices"][0]["message"]["tool_calls"][0]
+        self.assertEqual("lookup", tool_call["function"]["name"])
+        self.assertEqual('{"q":"x"}', tool_call["function"]["arguments"])
+
+    def test_openai_chat_target_converters_preserve_legacy_function_call(self) -> None:
+        registry = build_default_translator_registry()
+        chat_payload = {
+            "id": "chatcmpl-legacy",
+            "created": 123,
+            "model": "gpt-4.1",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "function_call": {"name": "lookup", "arguments": '{"q":"x"}'},
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+        }
+
+        responses = registry.get("openai_chat", "openai_responses").translate_nonstream_response(
+            "gpt-4.1",
+            {"input": "hi"},
+            {"model": "gpt-4.1"},
+            chat_payload,
+        )
+        claude = registry.get("openai_chat", "claude_chat").translate_nonstream_response(
+            "gpt-4.1",
+            {"messages": []},
+            {"model": "gpt-4.1"},
+            chat_payload,
+        )
+
+        responses_call = next(item for item in responses["output"] if item["type"] == "function_call")
+        self.assertEqual("lookup", responses_call["name"])
+        self.assertEqual('{"q":"x"}', responses_call["arguments"])
+        self.assertEqual("lookup", claude["content"][0]["name"])
+        self.assertEqual({"q": "x"}, claude["content"][0]["input"])
+
     def test_openai_responses_translator_maps_chat_request(self) -> None:
         translator = OpenAIResponsesTranslator()
 
@@ -962,6 +1743,284 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual("Hello from Claude", payload["choices"][0]["message"]["content"])
         self.assertEqual(3, payload["usage"]["prompt_tokens"])
         self.assertEqual(2, payload["usage"]["completion_tokens"])
+        self.assertTrue(fake_response.closed)
+
+    def test_force_upstream_stream_preserves_nonstream_target_formats(self) -> None:
+        cases = {
+            "openai_chat": ("Hello", lambda payload: payload["choices"][0]["message"]["content"]),
+            "openai_responses": (
+                "Hello",
+                lambda payload: next(
+                    part["text"]
+                    for item in payload["output"]
+                    if item.get("type") == "message"
+                    for part in item.get("content", [])
+                    if part.get("type") == "output_text"
+                ),
+            ),
+            "claude_chat": (
+                "Hello",
+                lambda payload: next(part["text"] for part in payload["content"] if part.get("type") == "text"),
+            ),
+        }
+
+        for target_format, (expected_text, extract_text) in cases.items():
+            with self.subTest(target_format=target_format):
+                app, service = self._build_service()
+                provider = LLMProvider(
+                    name="chat-upstream",
+                    api="https://example.com/v1/chat/completions",
+                    source_format="openai_chat",
+                    target_formats=(target_format,),
+                    model_list=("gpt-4.1",),
+                    max_retries=1,
+                    force_upstream_stream=True,
+                )
+                fake_response = FakeStreamResponse(
+                    [
+                        b'data: {"id":"chatcmpl-1","created":123,"model":"gpt-4.1",'
+                        b'"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}],'
+                        b'"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}\n\n',
+                        b"data: [DONE]\n\n",
+                    ]
+                )
+                service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+                    response=fake_response,
+                    status_code=200,
+                    content_type="text/event-stream",
+                    is_stream=True,
+                    stream_format="sse_json",
+                )
+
+                with app.test_request_context("/v1/chat/completions"):
+                    response, status_code, failure_info = service.proxy_request(
+                        provider,
+                        {
+                            "model": "chat-upstream/gpt-4.1",
+                            "messages": [{"role": "user", "content": "Hello"}],
+                            "stream": False,
+                        },
+                        {},
+                        resolved_target_format=target_format,
+                    )
+                    response_body = self._collect_response_body(response)
+
+                payload = json.loads(response_body)
+                self.assertIsNone(failure_info)
+                self.assertEqual(200, status_code)
+                self.assertFalse(response.is_streamed)
+                self.assertEqual(expected_text, extract_text(payload))
+                self.assertTrue(fake_response.closed)
+
+    def test_force_upstream_stream_translates_all_native_protocol_pairs(self) -> None:
+        source_cases = {
+            "openai_chat": {
+                "api": "https://example.com/v1/chat/completions",
+                "model": "gpt-4.1",
+                "chunks": [
+                    b'data: {"id":"chatcmpl-matrix","created":123,"model":"gpt-4.1",'
+                    b'"choices":[{"index":0,"delta":{"content":"Hello matrix"},"finish_reason":"stop"}]}'
+                    b"\n\n",
+                    b"data: [DONE]\n\n",
+                ],
+            },
+            "openai_responses": {
+                "api": "https://example.com/v1/responses",
+                "model": "gpt-5-codex",
+                "chunks": [
+                    b'event: response.created\ndata: {"type":"response.created","response":{"id":"resp-matrix","created_at":123,"model":"gpt-5-codex"}}\n\n',
+                    b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","item_id":"msg-matrix","output_index":0,"delta":"Hello matrix"}\n\n',
+                    b'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp-matrix","created_at":123,"model":"gpt-5-codex","output":[],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n',
+                ],
+            },
+            "claude_chat": {
+                "api": "https://example.com/v1/messages",
+                "model": "claude-sonnet-4-5",
+                "chunks": [
+                    b'event: message_start\ndata: {"type":"message_start","message":{"id":"msg-matrix","model":"claude-sonnet-4-5","role":"assistant","content":[]}}\n\n',
+                    b'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+                    b'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello matrix"}}\n\n',
+                    b'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+                    b'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":1,"output_tokens":2}}\n\n',
+                    b'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+                ],
+            },
+        }
+        target_bodies = {
+            "openai_chat": {"messages": [{"role": "user", "content": "Hello"}]},
+            "openai_responses": {"input": "Hello"},
+            "claude_chat": {"max_tokens": 256, "messages": [{"role": "user", "content": "Hello"}]},
+        }
+
+        for source_format, source_case in source_cases.items():
+            for target_format, target_body in target_bodies.items():
+                with self.subTest(source_format=source_format, target_format=target_format):
+                    app, service = self._build_service()
+                    provider = LLMProvider(
+                        name="matrix-upstream",
+                        api=source_case["api"],
+                        source_format=source_format,
+                        target_formats=(target_format,),
+                        model_list=(source_case["model"],),
+                        max_retries=1,
+                        force_upstream_stream=True,
+                    )
+                    fake_response = FakeStreamResponse(source_case["chunks"])
+                    service._open_upstream_response = lambda *args, response=fake_response, **kwargs: (
+                        OpenedUpstreamResponse(  # type: ignore[method-assign]
+                            response=response,
+                            status_code=200,
+                            content_type="text/event-stream",
+                            is_stream=True,
+                            stream_format="sse_json",
+                        )
+                    )
+                    request_data = {
+                        "model": f"matrix-upstream/{source_case['model']}",
+                        **target_body,
+                        "stream": False,
+                    }
+
+                    with app.test_request_context("/v1/chat/completions"):
+                        response, status_code, failure_info = service.proxy_request(
+                            provider,
+                            request_data,
+                            {},
+                            resolved_target_format=target_format,
+                        )
+                        response_body = self._collect_response_body(response)
+
+                    payload = json.loads(response_body)
+                    self.assertIsNone(failure_info)
+                    self.assertEqual(200, status_code)
+                    self.assertFalse(response.is_streamed)
+                    if target_format == "openai_chat":
+                        text = payload["choices"][0]["message"]["content"]
+                    elif target_format == "openai_responses":
+                        text = next(
+                            part["text"]
+                            for item in payload["output"]
+                            if item.get("type") == "message"
+                            for part in item.get("content", [])
+                            if part.get("type") == "output_text"
+                        )
+                    else:
+                        text = next(part["text"] for part in payload["content"] if part.get("type") == "text")
+                    self.assertEqual("Hello matrix", text)
+                    self.assertTrue(fake_response.closed)
+
+    def test_force_upstream_stream_returns_target_formatted_error_event(self) -> None:
+        expected_error_types = {
+            "openai_chat": "rate_limit_error",
+            "openai_responses": "rate_limit_error",
+            "claude_chat": "rate_limit_error",
+        }
+
+        for target_format, expected_error_type in expected_error_types.items():
+            with self.subTest(target_format=target_format):
+                app, service = self._build_service()
+                provider = LLMProvider(
+                    name="chat-upstream",
+                    api="https://example.com/v1/chat/completions",
+                    source_format="openai_chat",
+                    target_formats=(target_format,),
+                    model_list=("gpt-4.1",),
+                    max_retries=1,
+                    force_upstream_stream=True,
+                )
+                fake_response = FakeStreamResponse(
+                    [
+                        b'data: {"error":{"message":"quota exceeded","type":"rate_limit_error",'
+                        b'"code":"rate_limit_exceeded"}}\n\n'
+                    ]
+                )
+                service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+                    response=fake_response,
+                    status_code=200,
+                    content_type="text/event-stream",
+                    is_stream=True,
+                    stream_format="sse_json",
+                )
+                completed: list[dict[str, Any]] = []
+
+                with app.test_request_context("/v1/chat/completions"):
+                    response, status_code, failure_info = service.proxy_request(
+                        provider,
+                        {
+                            "model": "chat-upstream/gpt-4.1",
+                            "messages": [{"role": "user", "content": "Hello"}],
+                            "stream": False,
+                        },
+                        {},
+                        on_complete=completed.append,
+                        resolved_target_format=target_format,
+                    )
+                    response_body = self._collect_response_body(response)
+
+                payload = json.loads(response_body)
+                self.assertIsNone(failure_info)
+                self.assertEqual(502, status_code)
+                self.assertEqual([], completed)
+                if target_format == "claude_chat":
+                    self.assertEqual("error", payload["type"])
+                    self.assertEqual(expected_error_type, payload["error"]["type"])
+                else:
+                    self.assertEqual(expected_error_type, payload["error"]["type"])
+                self.assertEqual("quota exceeded", payload["error"]["message"])
+                self.assertTrue(fake_response.closed)
+
+    def test_force_upstream_stream_handles_response_guard_abort_without_success_callback(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_responses",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            force_upstream_stream=True,
+            hook=AbortOnResponseHook(
+                message="blocked by response guard",
+                status_code=451,
+                error_type="hook_blocked",
+            ),
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl-1","created":123,"model":"gpt-4.1",'
+                b'"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+        service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+            response=fake_response,
+            status_code=200,
+            content_type="text/event-stream",
+            is_stream=True,
+            stream_format="sse_json",
+        )
+        completed: list[dict[str, Any]] = []
+
+        with app.test_request_context("/v1/responses"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "chat-upstream/gpt-4.1",
+                    "input": "Hello",
+                    "stream": False,
+                },
+                {},
+                on_complete=completed.append,
+                resolved_target_format="openai_responses",
+            )
+            response_body = self._collect_response_body(response)
+
+        payload = json.loads(response_body)
+        self.assertIsNone(failure_info)
+        self.assertEqual(451, status_code)
+        self.assertEqual([], completed)
+        self.assertEqual("hook_blocked", payload["error"]["type"])
+        self.assertEqual("blocked by response guard", payload["error"]["message"])
         self.assertTrue(fake_response.closed)
 
     def test_provider_without_api_key_drops_client_authorization_header(self) -> None:

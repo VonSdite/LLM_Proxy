@@ -800,15 +800,20 @@ def convert_openai_chat_response_to_responses(
                 "summary": [{"type": "summary_text", "text": reasoning_content}],
             }
         )
+    refusal = message.get("refusal")
+    if isinstance(refusal, str) and refusal:
+        message_content = [{"type": "refusal", "refusal": refusal}]
+    else:
+        message_content = [
+            {"type": "output_text", "annotations": [], "logprobs": [], "text": str(message.get("content") or "")}
+        ]
     output_items.append(
         {
             "id": f"msg_{response_id}_0",
             "type": "message",
             "status": "completed",
             "role": "assistant",
-            "content": [
-                {"type": "output_text", "annotations": [], "logprobs": [], "text": str(message.get("content") or "")}
-            ],
+            "content": message_content,
         }
     )
     for index, tool_call in enumerate(message.get("tool_calls") or []):
@@ -825,6 +830,18 @@ def convert_openai_chat_response_to_responses(
                 "arguments": str(function.get("arguments") or "{}"),
                 "call_id": str(tool_call.get("id") or ""),
                 "name": str(function.get("name") or ""),
+            }
+        )
+    legacy_function_call = message.get("function_call")
+    if isinstance(legacy_function_call, dict) and legacy_function_call.get("name"):
+        output_items.append(
+            {
+                "id": f"fc_{response_id}_legacy",
+                "type": "function_call",
+                "status": "completed",
+                "arguments": str(legacy_function_call.get("arguments") or "{}"),
+                "call_id": "",
+                "name": str(legacy_function_call.get("name")),
             }
         )
 

@@ -681,6 +681,9 @@ def _convert_openai_message_to_claude_blocks(message: dict[str, Any]) -> list[di
             item_type = str(item.get("type") or "").strip().lower()
             if item_type in {"text", "input_text", "output_text"} and isinstance(item.get("text"), str):
                 content_blocks.append({"type": "text", "text": item.get("text")})
+    refusal = message.get("refusal")
+    if isinstance(refusal, str) and refusal:
+        content_blocks.append({"type": "text", "text": refusal})
 
     for tool_call in message.get("tool_calls") or []:
         if not isinstance(tool_call, dict):
@@ -694,6 +697,16 @@ def _convert_openai_message_to_claude_blocks(message: dict[str, Any]) -> list[di
                 "id": str(tool_call.get("id") or f"toolu_{function.get('name') or 'call'}"),
                 "name": str(function.get("name") or ""),
                 "input": _coerce_tool_input(function.get("arguments")),
+            }
+        )
+    legacy_function_call = message.get("function_call")
+    if isinstance(legacy_function_call, dict) and legacy_function_call.get("name"):
+        content_blocks.append(
+            {
+                "type": "tool_use",
+                "id": f"toolu_{legacy_function_call.get('name')}",
+                "name": str(legacy_function_call.get("name")),
+                "input": _coerce_tool_input(legacy_function_call.get("arguments")),
             }
         )
     return content_blocks
@@ -715,7 +728,7 @@ def _coerce_tool_input(arguments: Any) -> dict[str, Any]:
 
 def _map_openai_finish_reason_to_claude(reason: Any) -> str:
     normalized = str(reason or "").strip().lower()
-    if normalized == "tool_calls":
+    if normalized in {"tool_calls", "function_call"}:
         return "tool_use"
     if normalized == "length":
         return "max_tokens"
