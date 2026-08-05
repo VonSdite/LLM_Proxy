@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260805-4">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-1">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -35,18 +35,18 @@
                 </div>
                 <div class="modal-body pt-0">
                     <div class="mapping-editor-fields">
-                        <label class="mapping-field">
-                            <span>模型 ID</span>
+                        <div class="mapping-field">
+                            <label class="form-label" for="mappingIdInput">模型 ID</label>
                             <input type="text" class="form-control" id="mappingIdInput" maxlength="64" autocomplete="off" spellcheck="false" placeholder="例如 internal_gpt">
-                        </label>
-                        <label class="mapping-field">
-                            <span>429 冷却秒数</span>
+                        </div>
+                        <div class="mapping-field">
+                            <label class="form-label" for="mappingCooldownInput">429 冷却秒数</label>
                             <input type="number" class="form-control" id="mappingCooldownInput" min="0" value="60">
-                        </label>
+                        </div>
                     </div>
-                    <div class="mapping-target-heading">
-                        <h3>
-                            <span>目标模型</span>
+                    <div class="mapping-target-section">
+                        <div class="mapping-target-label">
+                            <label class="form-label">目标模型</label>
                             <button
                                 type="button"
                                 class="mapping-help-button"
@@ -54,16 +54,34 @@
                                 data-tooltip="首次选择最高优先级的可用目标，成功后保持粘滞；429 冷却后切换，其他异常自动禁用目标并切换。"
                             >?</button>
                             <span class="visually-hidden" id="mappingStrategyHelp">首次选择最高优先级的可用目标，成功后保持粘滞；429 冷却后切换，其他异常自动禁用目标并切换。</span>
-                        </h3>
-                        <button type="button" class="btn btn-secondary" id="addTargetBtn">添加目标</button>
-                    </div>
-                    <div class="mapping-target-table" role="table" aria-label="目标模型列表">
-                        <div class="mapping-target-table-header" role="row">
-                            <span role="columnheader">模型 ID</span>
-                            <span role="columnheader">优先级</span>
-                            <span role="columnheader">操作</span>
                         </div>
-                        <div class="mapping-target-list" id="mappingTargetList" role="rowgroup"></div>
+                        <div class="mapping-target-table-shell">
+                            <table class="mapping-target-table" aria-label="目标模型列表">
+                                <colgroup>
+                                    <col class="mapping-target-model-column">
+                                    <col class="mapping-target-priority-column">
+                                    <col class="mapping-target-actions-column">
+                                </colgroup>
+                                <thead>
+                                    <tr class="mapping-target-table-header">
+                                        <th>模型 ID</th>
+                                        <th>优先级</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="mapping-target-list" id="mappingTargetList"></tbody>
+                                <tfoot>
+                                    <tr class="mapping-target-add-row">
+                                        <td colspan="3">
+                                            <button type="button" class="mapping-target-add-button" id="addTargetBtn">
+                                                <span class="mapping-target-add-icon" aria-hidden="true">+</span>
+                                                <span>新增目标模型</span>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer border-top-0">
@@ -137,26 +155,27 @@
         }
 
         function createTargetRow(target = {}) {
-            const row = document.createElement("div");
+            const row = document.createElement("tr");
             const unavailable = target.available_model === false;
             const enabled = target.enabled !== false;
             row.className = `mapping-target-row${unavailable ? " is-unavailable" : ""}`;
             row.dataset.enabled = enabled ? "true" : "false";
             row.dataset.available = unavailable ? "false" : "true";
-            row.setAttribute("role", "row");
             row.innerHTML = `
-                <div class="mapping-target-model-cell" role="cell">
+                <td class="mapping-target-model-cell">
                     <span class="mapping-target-mobile-label">模型 ID</span>
                     <div class="mapping-target-model-control">
                         <div class="mapping-target-combobox"><input type="text" class="form-control target-model-search" value="${escapeHtml(target.model_id || "")}" autocomplete="off" placeholder="搜索并选择模型" aria-label="目标模型 ID" role="combobox" aria-expanded="false" ${unavailable ? "disabled" : ""}><input type="hidden" class="target-model-id" value="${escapeHtml(target.model_id || "")}"><div class="mapping-target-options" role="listbox" hidden></div></div>
                         ${unavailable ? '<span class="mapping-target-unavailable">不可用</span>' : ""}
                     </div>
-                </div>
-                <label class="mapping-target-priority" role="cell"><span class="mapping-target-mobile-label">优先级</span><input type="number" class="form-control target-priority" aria-label="优先级" min="0" value="${Number(target.priority ?? 1)}" ${unavailable ? "disabled" : ""}></label>
-                <div class="mapping-target-actions" role="cell">
-                    <button type="button" class="mapping-target-action mapping-toggle-target"></button>
-                    <button type="button" class="mapping-target-action is-delete mapping-remove-target">删除</button>
-                </div>`;
+                </td>
+                <td class="mapping-target-priority"><span class="mapping-target-mobile-label">优先级</span><input type="number" class="form-control target-priority" aria-label="优先级" min="0" value="${Number(target.priority ?? 1)}" ${unavailable ? "disabled" : ""}></td>
+                <td class="mapping-target-actions">
+                    <div class="mapping-target-action-buttons">
+                        <button type="button" class="mapping-target-action mapping-toggle-target"></button>
+                        <button type="button" class="mapping-target-action is-delete mapping-remove-target">删除</button>
+                    </div>
+                </td>`;
             if (!unavailable) {
                 setupTargetCombobox(row);
             }
@@ -252,7 +271,6 @@
             document.getElementById("mappingIdInput").value = "";
             document.getElementById("mappingCooldownInput").value = "60";
             document.getElementById("mappingTargetList").innerHTML = "";
-            createTargetRow({ priority: 1, enabled: true, status: "available" });
             mappingEditorModal.show();
         }
 
@@ -285,6 +303,10 @@
 
         async function saveMapping() {
             const payload = collectMappingPayload();
+            if (!payload.targets.length) {
+                showMessage("请至少添加一个目标模型", "error");
+                return;
+            }
             if (payload.targets.some(target => !target.model_id)) {
                 showMessage("请选择有效的目标模型 ID", "error");
                 return;
