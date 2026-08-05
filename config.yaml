@@ -38,3 +38,5 @@ oauth:
   proxy_mode: direct
 api_keys:
   enabled: true
+model_mapping:
+  enabled: true
