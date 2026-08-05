@@ -27,17 +27,17 @@ def normalize_model_mapping_id(value: Any) -> str:
     return mapping_id
 
 
-def _parse_positive_int(value: Any, *, default: int, field_label: str) -> int:
+def _parse_non_negative_int(value: Any, *, default: int, field_label: str) -> int:
     if value in (None, ""):
         return default
     if isinstance(value, bool):
-        raise ValueError(f"{field_label}必须是正整数")
+        raise ValueError(f"{field_label}必须是非负整数")
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_label}必须是正整数") from exc
-    if parsed <= 0:
-        raise ValueError(f"{field_label}必须是正整数")
+        raise ValueError(f"{field_label}必须是非负整数") from exc
+    if parsed < 0:
+        raise ValueError(f"{field_label}必须是非负整数")
     return parsed
 
 
@@ -62,7 +62,7 @@ class ModelMappingTargetSchema:
             raise ValueError("目标启用状态必须是布尔值")
         return cls(
             model_id=model_id,
-            priority=_parse_positive_int(
+            priority=_parse_non_negative_int(
                 payload.get("priority"),
                 default=DEFAULT_MODEL_MAPPING_TARGET_PRIORITY,
                 field_label="目标优先级",
@@ -104,7 +104,7 @@ class ModelMappingSchema:
             raise ValueError("同一个模型映射不能重复选择目标模型")
         return cls(
             id=mapping_id,
-            cooldown_seconds_on_429=_parse_positive_int(
+            cooldown_seconds_on_429=_parse_non_negative_int(
                 payload.get("cooldown_seconds_on_429"),
                 default=DEFAULT_MODEL_MAPPING_COOLDOWN_SECONDS_ON_429,
                 field_label="429 冷却时间",

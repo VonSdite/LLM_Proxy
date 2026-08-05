@@ -116,13 +116,48 @@ class ModelMappingSchemaTests(unittest.TestCase):
                 }
             )
 
-    def test_mapping_editor_has_theme_aware_modal_styles(self) -> None:
+    def test_priority_and_cooldown_allow_zero(self) -> None:
+        mapping = ModelMappingSchema.from_mapping(
+            {
+                "id": "public",
+                "cooldown_seconds_on_429": 0,
+                "targets": [{"model_id": "alpha/fast", "priority": 0}],
+            }
+        )
+
+        self.assertEqual(0, mapping.cooldown_seconds_on_429)
+        self.assertEqual(0, mapping.targets[0].priority)
+
+    def test_priority_and_cooldown_reject_negative_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "目标优先级必须是非负整数"):
+            ModelMappingSchema.from_mapping({"id": "public", "targets": [{"model_id": "alpha/fast", "priority": -1}]})
+        with self.assertRaisesRegex(ValueError, "429 冷却时间必须是非负整数"):
+            ModelMappingSchema.from_mapping(
+                {
+                    "id": "public",
+                    "cooldown_seconds_on_429": -1,
+                    "targets": [{"model_id": "alpha/fast"}],
+                }
+            )
+
+    def test_mapping_editor_uses_target_actions_and_unclipped_dropdown(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260805-3", template)
+        self.assertIn("model_mappings.css?v=20260805-4", template)
+        self.assertNotIn("<th>策略</th>", template)
+        self.assertNotIn("<span>策略</span>", template)
+        self.assertNotIn("target-enabled", template)
+        self.assertIn('id="mappingCooldownInput" min="0"', template)
+        self.assertIn('class="form-control target-priority" aria-label="优先级" min="0"', template)
+        self.assertIn("mapping-help-button", template)
+        self.assertIn("mapping-target-unavailable", template)
+        self.assertIn('class="mapping-target-action mapping-toggle-target"', template)
+        self.assertIn('class="mapping-target-action is-delete mapping-remove-target">删除', template)
         self.assertIn(".model-mappings-page .modal-content", stylesheet)
+        self.assertIn("min-height: min(680px, calc(100dvh - 32px));", stylesheet)
+        self.assertIn("overflow: visible;", stylesheet)
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .modal-content', stylesheet)
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .modal .form-control', stylesheet)
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .mapping-toolbar .btn-secondary', stylesheet)
