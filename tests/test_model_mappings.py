@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -11,9 +12,10 @@ from unittest.mock import patch
 from flask import Flask, Response
 from src.application.app_context import AppContext
 from src.config.model_mapping_config import ModelMappingSchema
+from src.presentation.model_mapping_controller import ModelMappingController
 from src.presentation.proxy_controller import ProxyController
 from src.repositories import ApiKeyRepository, ModelMappingRepository, UserRepository
-from src.services import ApiKeyService, ModelCatalogService, UserService
+from src.services import ApiKeyService, AuthenticationService, ModelCatalogService, UserService
 from src.services.model_mapping_service import ModelMappingService
 from src.services.proxy_service import ProxyErrorInfo
 from src.utils.database import create_connection_factory
@@ -46,6 +48,9 @@ class FakeConfigManager:
 
     def is_model_mapping_enabled(self) -> bool:
         return self.enabled
+
+    def is_auth_enabled(self) -> bool:
+        return False
 
     def get_raw_config(self) -> dict:
         return self.config
@@ -130,6 +135,19 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertEqual(0, mapping.cooldown_seconds_on_429)
         self.assertEqual(0, mapping.targets[0].priority)
 
+    def test_mapping_enabled_defaults_true_and_requires_boolean(self) -> None:
+        enabled = ModelMappingSchema.from_mapping({"id": "public", "targets": [{"model_id": "alpha/fast"}]})
+        disabled = ModelMappingSchema.from_mapping(
+            {"id": "private", "enabled": False, "targets": [{"model_id": "alpha/fast"}]}
+        )
+
+        self.assertTrue(enabled.enabled)
+        self.assertFalse(disabled.enabled)
+        with self.assertRaisesRegex(ValueError, "启用状态必须是布尔值"):
+            ModelMappingSchema.from_mapping(
+                {"id": "invalid", "enabled": "false", "targets": [{"model_id": "alpha/fast"}]}
+            )
+
     def test_priority_and_cooldown_reject_negative_values(self) -> None:
         with self.assertRaisesRegex(ValueError, "目标优先级必须是非负整数"):
             ModelMappingSchema.from_mapping({"id": "public", "targets": [{"model_id": "alpha/fast", "priority": -1}]})
@@ -147,7 +165,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260806-6", template)
+        self.assertIn("model_mappings.css?v=20260806-8", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -185,6 +203,20 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn("function handleMappingIdColumnResizeKeydown(event)", template)
         self.assertIn('row.classList.toggle("is-disabled"', template)
         self.assertIn(".mapping-target-row.is-disabled td", stylesheet)
+        self.assertIn('class="mapping-drag-handle mapping-target-drag-handle"', template)
+        self.assertIn("function handleTargetRowDrop", template)
+        self.assertIn("function buildDroppedMappingOrderIds", template)
+        self.assertIn('buildMappingTable("disabled"', template)
+        self.assertIn('data-mapping-group-select="${groupKey}"', template)
+        self.assertIn('data-mapping-export-button="${groupKey}"', template)
+        self.assertIn("body: JSON.stringify({ mapping_ids: mappingIds })", template)
+        self.assertIn('class="btn btn-primary" id="importMappingsBtn"', template)
+        self.assertIn('class="mapping-group-actions"', template)
+        self.assertIn('class="btn btn-toolbar-secondary mapping-group-data-btn"', template)
+        self.assertIn('class="toolbar-pill">${mappings.length} 个</span>', template)
+        self.assertNotIn('id="exportMappingsBtn"', template)
+        self.assertIn(".mapping-target-row.is-disabled .form-control", stylesheet)
+        self.assertIn(".btn-toolbar-secondary", stylesheet)
         create_editor = template[
             template.index("function openCreateMapping()") : template.index("function openEditMapping")
         ]
@@ -215,6 +247,7 @@ const listeners = new Map();
 const cssValues = new Map();
 const ariaValues = [];
 const classNames = new Set();
+const columnWidths = [];
 const resizer = {{
   classList: {{
     add: value => classNames.add(value),
@@ -224,6 +257,7 @@ const resizer = {{
   setPointerCapture: () => {{}},
   hasPointerCapture: () => false,
 }};
+const column = {{ style: {{ set width(value) {{ columnWidths.push(value); }} }} }};
 const sandbox = {{
   console,
   mappingIdColumnResizeState: null,
@@ -241,7 +275,7 @@ const sandbox = {{
       remove: value => classNames.delete(value),
     }} }},
     getElementById: () => ({{ style: {{ setProperty: (name, value) => cssValues.set(name, value) }} }}),
-    querySelectorAll: () => [resizer],
+    querySelectorAll: selector => selector === ".mapping-list-id-column" ? [column] : [resizer],
   }},
   window: {{
     addEventListener: (name, handler) => listeners.set(name, handler),
@@ -271,6 +305,7 @@ process.stdout.write(JSON.stringify({{
   draggedWidth,
   restoredWidth: cssValues.get("--mapping-id-column-width"),
   ariaValues,
+  columnWidths,
   resizeClassActive: classNames.has("is-resizing-mapping-id-column"),
   activeListeners: [...listeners.keys()],
 }}));
@@ -287,8 +322,48 @@ process.stdout.write(JSON.stringify({{
         self.assertEqual("320", payload["draggedWidth"])
         self.assertEqual("480px", payload["restoredWidth"])
         self.assertEqual(["aria-valuenow", "480"], payload["ariaValues"][-1])
+        self.assertEqual("480px", payload["columnWidths"][-1])
         self.assertFalse(payload["resizeClassActive"])
         self.assertEqual([], payload["activeListeners"])
+
+    def test_mapping_drag_order_stays_within_enabled_group(self) -> None:
+        template_path = (
+            Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "model_mappings.html"
+        )
+        html = template_path.read_text(encoding="utf-8")
+        script_start = html.index("function isMappingEnabled")
+        script_end = html.index("function getRowDragPlacement", script_start)
+        script = html[script_start:script_end]
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{
+  modelMappings: [
+    {{ id: "enabled-a", enabled: true }},
+    {{ id: "enabled-b", enabled: true }},
+    {{ id: "disabled-a", enabled: false }},
+    {{ id: "disabled-b", enabled: false }},
+  ],
+  selectedMappingIds: new Set(),
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+process.stdout.write(JSON.stringify({{
+  enabled: sandbox.buildDroppedMappingOrderIds("enabled-b", "enabled-a", false),
+  disabled: sandbox.buildDroppedMappingOrderIds("disabled-a", "disabled-b", true),
+  crossGroup: sandbox.buildDroppedMappingOrderIds("enabled-a", "disabled-a", false),
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual(["enabled-b", "enabled-a", "disabled-a", "disabled-b"], payload["enabled"])
+        self.assertEqual(["enabled-a", "enabled-b", "disabled-b", "disabled-a"], payload["disabled"])
+        self.assertIsNone(payload["crossGroup"])
 
 
 class ModelMappingServiceTests(unittest.TestCase):
@@ -365,6 +440,80 @@ class ModelMappingServiceTests(unittest.TestCase):
 
         self.codex_service.catalog_ids = ("gpt_text",)
         self.assertEqual(("public_model",), self.service.list_mapping_ids())
+
+    def test_mapping_level_disable_and_reorder_persist(self) -> None:
+        self.service.create_mapping(self._mapping_payload("enabled_a"))
+        disabled_payload = self._mapping_payload("disabled_a")
+        disabled_payload["enabled"] = False
+        self.service.create_mapping(disabled_payload)
+        self.service.create_mapping(self._mapping_payload("enabled_b"))
+
+        initial = self.service.list_mappings()
+        self.assertEqual(["enabled_a", "enabled_b", "disabled_a"], [item["id"] for item in initial])
+        self.assertNotIn("disabled_a", self.service.list_mapping_ids())
+        self.assertFalse(self.service.get_mapping("disabled_a")["effective"])
+
+        result = self.service.reorder_mappings(["enabled_b", "enabled_a", "disabled_a"])
+        self.assertEqual(3, result["count"])
+        recreated = self._build_service()
+        self.assertEqual(
+            ["enabled_b", "enabled_a", "disabled_a"],
+            [item["id"] for item in recreated.list_mappings()],
+        )
+        with self.assertRaisesRegex(ValueError, "已启用模型映射必须排在"):
+            self.service.reorder_mappings(["disabled_a", "enabled_b", "enabled_a"])
+
+        enabled = self.service.set_mapping_enabled("disabled_a", enabled=True)
+        self.assertTrue(enabled["effective"])
+        self.assertIn("disabled_a", self.service.list_mapping_ids())
+        disabled = self.service.set_mapping_enabled("enabled_b", enabled=False)
+        self.assertFalse(disabled["effective"])
+        self.assertFalse(self.service.has_mapping("enabled_b"))
+
+    def test_existing_mapping_table_migrates_enabled_and_sort_order(self) -> None:
+        database_path = Path(self.temp_dir.name) / "legacy.db"
+        with sqlite3.connect(database_path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE model_mappings (
+                    id TEXT PRIMARY KEY,
+                    cooldown_seconds_on_429 INTEGER NOT NULL DEFAULT 60,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO model_mappings VALUES ('later', 60, '2026-01-02 00:00:00', '2026-01-02 00:00:00');
+                INSERT INTO model_mappings VALUES ('earlier', 60, '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+                """
+            )
+
+        repository = ModelMappingRepository(create_connection_factory(database_path))
+        mappings = repository.list_mappings()
+
+        self.assertEqual(["earlier", "later"], [mapping["id"] for mapping in mappings])
+        self.assertEqual([True, True], [mapping["enabled"] for mapping in mappings])
+        self.assertEqual([0, 1], [mapping["sort_order"] for mapping in mappings])
+
+    def test_mapping_order_and_status_routes(self) -> None:
+        self.service.create_mapping(self._mapping_payload("first"))
+        self.service.create_mapping(self._mapping_payload("second"))
+        catalog_syncs = []
+        ModelMappingController(
+            self.ctx,
+            self.service,
+            AuthenticationService(self.ctx),
+            model_catalog_changed_callback=lambda: catalog_syncs.append(True),
+        )
+        client = self.ctx.flask_app.test_client()
+
+        reorder_response = client.put("/api/model-mappings/order", json={"ids": ["second", "first"]})
+        disable_response = client.post("/api/model-mappings/second/disable")
+        enable_response = client.post("/api/model-mappings/second/enable")
+
+        self.assertEqual(200, reorder_response.status_code)
+        self.assertEqual(["second", "first"], reorder_response.get_json()["ids"])
+        self.assertFalse(disable_response.get_json()["enabled"])
+        self.assertTrue(enable_response.get_json()["enabled"])
+        self.assertEqual(2, len(catalog_syncs))
 
     def test_image_model_is_available_as_mapping_target(self) -> None:
         self.assertIn("gpt_image", self.service.list_available_target_model_ids())

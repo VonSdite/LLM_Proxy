@@ -85,6 +85,7 @@ class ModelMappingSchema:
     """一个对外模型 ID 及其粘滞故障切换目标。"""
 
     id: str
+    enabled: bool
     cooldown_seconds_on_429: int
     targets: tuple[ModelMappingTargetSchema, ...]
 
@@ -93,6 +94,9 @@ class ModelMappingSchema:
         if not isinstance(payload, Mapping):
             raise ValueError("模型映射必须是对象")
         mapping_id = normalize_model_mapping_id(payload.get("id"))
+        enabled = payload.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError("模型映射启用状态必须是布尔值")
         raw_targets = payload.get("targets")
         if not isinstance(raw_targets, Sequence) or isinstance(raw_targets, (str, bytes)) or not raw_targets:
             raise ValueError("模型映射至少需要一个目标模型")
@@ -104,6 +108,7 @@ class ModelMappingSchema:
             raise ValueError("同一个模型映射不能重复选择目标模型")
         return cls(
             id=mapping_id,
+            enabled=enabled,
             cooldown_seconds_on_429=_parse_non_negative_int(
                 payload.get("cooldown_seconds_on_429"),
                 default=DEFAULT_MODEL_MAPPING_COOLDOWN_SECONDS_ON_429,
@@ -115,6 +120,7 @@ class ModelMappingSchema:
     def to_mapping(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "enabled": self.enabled,
             "strategy": "sticky_failover",
             "cooldown_seconds_on_429": self.cooldown_seconds_on_429,
             "targets": [target.to_mapping() for target in self.targets],

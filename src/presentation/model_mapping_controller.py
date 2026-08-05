@@ -11,7 +11,7 @@ from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..services import AuthenticationService, ModelMappingService
-from .controller_utils import build_value_error_response, get_json_object
+from .controller_utils import build_value_error_response, coerce_string_list, get_json_object
 from .decorators import require_authentication
 
 
@@ -37,12 +37,15 @@ class ModelMappingController:
         auth = require_authentication(self._auth_service)
         self._app.route("/api/model-mappings", methods=["GET"])(auth(self.list_mappings))
         self._app.route("/api/model-mappings", methods=["POST"])(auth(self.create_mapping))
+        self._app.route("/api/model-mappings/order", methods=["PUT"])(auth(self.reorder_mappings))
         self._app.route("/api/model-mappings/targets", methods=["GET"])(auth(self.list_targets))
         self._app.route("/api/model-mappings/export", methods=["POST"])(auth(self.export_mappings))
         self._app.route("/api/model-mappings/import", methods=["POST"])(auth(self.import_mappings))
         self._app.route("/api/model-mappings/<mapping_id>", methods=["GET"])(auth(self.get_mapping))
         self._app.route("/api/model-mappings/<mapping_id>", methods=["PUT"])(auth(self.update_mapping))
         self._app.route("/api/model-mappings/<mapping_id>", methods=["DELETE"])(auth(self.delete_mapping))
+        self._app.route("/api/model-mappings/<mapping_id>/disable", methods=["POST"])(auth(self.disable_mapping))
+        self._app.route("/api/model-mappings/<mapping_id>/enable", methods=["POST"])(auth(self.enable_mapping))
         self._app.route("/api/model-mappings/<mapping_id>/targets/toggle", methods=["POST"])(auth(self.toggle_target))
 
     def list_mappings(self) -> ResponseReturnValue:
@@ -111,6 +114,41 @@ class ModelMappingController:
             return build_value_error_response(exc)
         except Exception as exc:
             self._logger.error("Error deleting model mapping: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def reorder_mappings(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            result = self._service.reorder_mappings(
+                coerce_string_list(
+                    payload.get("ids"),
+                    error_message="模型映射 ID 必须是非空数组",
+                )
+            )
+            self._logger.info("Model mapping order updated: count=%s", result["count"])
+            return jsonify(result)
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error reordering model mappings: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def disable_mapping(self, mapping_id: str) -> ResponseReturnValue:
+        return self._set_mapping_enabled(mapping_id, enabled=False)
+
+    def enable_mapping(self, mapping_id: str) -> ResponseReturnValue:
+        return self._set_mapping_enabled(mapping_id, enabled=True)
+
+    def _set_mapping_enabled(self, mapping_id: str, *, enabled: bool) -> ResponseReturnValue:
+        try:
+            mapping = self._service.set_mapping_enabled(mapping_id, enabled=enabled)
+            self._sync_model_catalog()
+            self._logger.info("Model mapping status updated: id=%s enabled=%s", mapping_id, enabled)
+            return jsonify(mapping)
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error updating model mapping status: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def toggle_target(self, mapping_id: str) -> ResponseReturnValue:
