@@ -291,6 +291,19 @@
     background: #243246;
 }
 
+:root[data-theme="dark"] .model-mappings-page .mapping-toolbar .btn-secondary {
+    border-color: #315d8f;
+    background: linear-gradient(180deg, rgba(20, 29, 42, 0.98), rgba(16, 24, 35, 0.98));
+    color: #9bc7ff;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-toolbar .btn-secondary:hover,
+:root[data-theme="dark"] .model-mappings-page .mapping-toolbar .btn-secondary:focus {
+    border-color: #4a79b6;
+    background: linear-gradient(180deg, rgba(24, 35, 50, 1), rgba(19, 28, 41, 1));
+    color: #c7e0ff;
+}
+
 :root[data-theme="dark"] .model-mappings-page .modal-content,
 :root[data-theme="dark"] .model-mappings-page .modal-header,
 :root[data-theme="dark"] .model-mappings-page .modal-body,
