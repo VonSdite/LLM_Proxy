@@ -1533,6 +1533,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .provider-group-heading {", css)
         self.assertIn(".providers-page .provider-group-batch-btn {", css)
         self.assertIn(".providers-page .provider-group-title {", css)
+        self.assertIn("overflow-x: auto;", css)
         self.assertIn(".providers-page #providersContainer.providers-table-shell {", css)
         self.assertIn(':root[data-theme="dark"] .providers-page .provider-group-card {', css)
         self.assertIn(".providers-page .provider-editor-modal .provider-form-grid {", css)
@@ -1544,6 +1545,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn(".providers-page .provider-modal-tab-btn {", css)
         self.assertNotIn(".providers-page .provider-modal-tab-panel[hidden] {", css)
         self.assertIn(".providers-page .provider-list-table col.provider-select-col {", css)
+        self.assertIn("width: var(--provider-name-column-width, 132px);", css)
+        self.assertIn(".providers-page .provider-name-column-resizer {", css)
+        self.assertIn("body.is-resizing-provider-name-column,", css)
         self.assertIn(".providers-page .drag-handle-button {", css)
         self.assertIn(".providers-page .drag-handle-placeholder {", css)
         self.assertIn(".providers-page .providers-table tbody tr.is-drag-over-before td {", css)
@@ -2633,6 +2637,112 @@ class DashboardTemplateTests(unittest.TestCase):
             "        }",
             providers_html,
         )
+
+    def test_provider_name_column_supports_tooltip_and_persistent_resize(self) -> None:
+        providers_html = (
+            Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'class="provider-name-text" title="${escapeHtml(provider.name)}"',
+            providers_html,
+        )
+        self.assertIn('class="provider-name-column-resizer"', providers_html)
+        self.assertIn('onpointerdown="startProviderNameColumnResize(event)"', providers_html)
+        self.assertIn("function handleProviderNameColumnResize(event)", providers_html)
+        self.assertIn("function handleProviderNameColumnResizeKeydown(event)", providers_html)
+        self.assertIn("if (width === null || width === '') return 132;", providers_html)
+        self.assertIn("localStorage.setItem(providerNameColumnWidthStorageKey", providers_html)
+        self.assertIn("localStorage.getItem(providerNameColumnWidthStorageKey)", providers_html)
+
+    def test_provider_name_column_resize_updates_and_persists_width(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
+        html = template_path.read_text(encoding="utf-8")
+        script_start = html.index("function normalizeProviderNameColumnWidth")
+        script_end = html.index("function renderAuthGroups", script_start)
+        script = html[script_start:script_end]
+
+        node_script = f"""
+const vm = require("vm");
+const savedValues = new Map();
+const listeners = new Map();
+const cssValues = new Map();
+const ariaValues = [];
+const classNames = new Set();
+const resizer = {{
+  classList: {{
+    add: value => classNames.add(value),
+    remove: value => classNames.delete(value),
+  }},
+  setAttribute: (name, value) => ariaValues.push([name, value]),
+  setPointerCapture: () => {{}},
+  hasPointerCapture: () => false,
+}};
+const sandbox = {{
+  console,
+  providerNameColumnResizeState: null,
+  providerNameColumnWidth: 132,
+  providerNameColumnWidthStorageKey: "providers.nameColumnWidth",
+  providerNameColumnMinWidth: 96,
+  providerNameColumnMaxWidth: 480,
+  localStorage: {{
+    getItem: key => savedValues.has(key) ? savedValues.get(key) : null,
+    setItem: (key, value) => savedValues.set(key, value),
+  }},
+  document: {{
+    body: {{ classList: {{
+      add: value => classNames.add(value),
+      remove: value => classNames.delete(value),
+    }} }},
+    getElementById: () => ({{ style: {{ setProperty: (name, value) => cssValues.set(name, value) }} }}),
+    querySelectorAll: () => [resizer, resizer],
+  }},
+  window: {{
+    addEventListener: (name, handler) => listeners.set(name, handler),
+    removeEventListener: name => listeners.delete(name),
+  }},
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+
+const initialWidth = sandbox.normalizeProviderNameColumnWidth(null);
+sandbox.applyProviderNameColumnWidth(240, true);
+sandbox.startProviderNameColumnResize({{
+  button: 0,
+  pointerId: 7,
+  clientX: 100,
+  currentTarget: resizer,
+  preventDefault: () => {{}},
+}});
+listeners.get("pointermove")({{ pointerId: 7, clientX: 180 }});
+listeners.get("pointerup")({{ pointerId: 7 }});
+const draggedWidth = savedValues.get("providers.nameColumnWidth");
+savedValues.set("providers.nameColumnWidth", "999");
+sandbox.loadProviderNameColumnWidth();
+
+process.stdout.write(JSON.stringify({{
+  initialWidth,
+  draggedWidth,
+  restoredWidth: cssValues.get("--provider-name-column-width"),
+  ariaValues,
+  resizeClassActive: classNames.has("is-resizing-provider-name-column"),
+  activeListeners: [...listeners.keys()],
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual(132, payload["initialWidth"])
+        self.assertEqual("320", payload["draggedWidth"])
+        self.assertEqual("480px", payload["restoredWidth"])
+        self.assertEqual(["aria-valuenow", "480"], payload["ariaValues"][-1])
+        self.assertFalse(payload["resizeClassActive"])
+        self.assertEqual([], payload["activeListeners"])
 
     def test_provider_drag_drop_helper_keeps_group_boundary(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
