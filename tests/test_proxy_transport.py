@@ -1969,11 +1969,12 @@ process.stdout.write(JSON.stringify([
         self.assertIn('data-settings-help-topic="real_client_ip"', html)
         self.assertIn("function collectClientIpSettingsPayload()", html)
         self.assertIn("function saveClientIpSettings()", html)
+        self.assertIn("async function fetchSettingsJson(url, options)", html)
+        self.assertIn('fetchSettingsJson("/api/settings/system/client-ip"', html)
         self.assertIn("function syncRealIpFields()", html)
         self.assertIn("real_ip_enabled: document.getElementById", html)
         self.assertIn("real_ip_header: document.getElementById", html)
         self.assertIn("header 缺失或不是合法 IP 时会回退到对端 IP", html)
-        self.assertIn('fetch("/api/settings/system/client-ip"', html)
         self.assertIn('id="oauthEnabled"', html)
         self.assertIn('id="oauthProxyMode"', html)
         self.assertIn('<label class="setting-label" for="oauthProxyMode">模式</label>', html)
@@ -2008,7 +2009,9 @@ process.stdout.write(JSON.stringify([
         self.assertIn("function saveOAuthSettings()", html)
         self.assertIn("preserveSensitiveVisibility", html)
         self.assertIn("fillOAuthSettingsForm(data.settings, { preserveSensitiveVisibility: true });", html)
-        self.assertIn('fetch("/api/settings/system/oauth"', html)
+        self.assertIn('fetchSettingsJson("/api/settings/system/oauth"', html)
+        self.assertIn('fetchSettingsJson("/api/settings/system/model-mapping"', html)
+        self.assertIn("服务端未加载最新版本，请重启服务后重试", html)
         self.assertIn('data-settings-help-topic="oauth_enabled"', html)
         self.assertIn('data-settings-help-topic="oauth_proxy"', html)
         self.assertIn('data-settings-help-topic="oauth_verify_ssl"', html)
@@ -2042,6 +2045,7 @@ process.stdout.write(JSON.stringify([
         self.assertIn("left: var(--popover-arrow-left, 24px);", css)
         self.assertIn('self._app.route("/api/settings/system/client-ip", methods=["PUT"])', web_controller_py)
         self.assertIn('self._app.route("/api/settings/system/oauth", methods=["PUT"])', web_controller_py)
+        self.assertIn('self._app.route("/api/settings/system/model-mapping", methods=["PUT"])', web_controller_py)
 
     def test_provider_force_upstream_stream_custom_select_is_initialized(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
