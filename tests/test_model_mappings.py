@@ -53,11 +53,13 @@ class FakeProviderManager:
     def __init__(self, model_ids: tuple[str, ...] = ("alpha/fast", "alpha/stable")) -> None:
         self.model_ids = model_ids
         self.providers: dict[str, Any] = {}
+        self.lookup_ids: list[str] = []
 
     def list_model_names(self) -> tuple[str, ...]:
         return self.model_ids
 
     def get_provider_for_model(self, model_id: str) -> Any | None:
+        self.lookup_ids.append(model_id)
         return self.providers.get(model_id)
 
 
@@ -424,6 +426,23 @@ class FakeMappedImageProxyService(FakeMappedOAuthProxyService):
 
 
 class ModelMappingProxyControllerTests(ModelMappingServiceTests):
+    def test_model_mapping_route_precedes_provider_lookup(self) -> None:
+        self.service.create_mapping(self._mapping_payload("gpt_text"))
+        self.provider_manager.providers["gpt_text"] = SimpleNamespace(name="shadowed-provider")
+        controller = object.__new__(ProxyController)
+        controller._model_mapping_service = self.service
+        controller._provider_manager = self.provider_manager
+        controller._codex_proxy_service = None
+        controller._claude_proxy_service = None
+
+        provider, is_codex, is_claude, is_mapping = controller._resolve_model_route("gpt_text")
+
+        self.assertIsNone(provider)
+        self.assertFalse(is_codex)
+        self.assertFalse(is_claude)
+        self.assertTrue(is_mapping)
+        self.assertEqual([], self.provider_manager.lookup_ids)
+
     def _build_controller(
         self,
         outcomes: dict[str, Any],

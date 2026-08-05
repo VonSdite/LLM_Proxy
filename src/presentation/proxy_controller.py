@@ -788,26 +788,16 @@ class ProxyController:
                 )
 
             model_name = model_name_value.strip()
-            provider = self._provider_manager.get_provider_for_model(model_name)
-            is_codex_model = False
-            is_claude_model = False
-            is_model_mapping = False
-            if not provider:
-                if self._model_mapping_service is not None and self._model_mapping_service.has_mapping(model_name):
-                    is_model_mapping = True
-                elif self._codex_proxy_service is not None and self._codex_proxy_service.has_model(model_name):
-                    is_codex_model = True
-                elif self._claude_proxy_service is not None and self._claude_proxy_service.has_model(model_name):
-                    is_claude_model = True
-                else:
-                    self._logger.warning("Proxy rejected: unknown model=%r route=%s", model_name, route_name)
-                    return self._error_response(
-                        f"Unknown model: {model_name}",
-                        400,
-                        error_type="invalid_request_error",
-                        code="unknown_model",
-                        error_format=resolved_error_format,
-                    )
+            provider, is_codex_model, is_claude_model, is_model_mapping = self._resolve_model_route(model_name)
+            if provider is None and not (is_codex_model or is_claude_model or is_model_mapping):
+                self._logger.warning("Proxy rejected: unknown model=%r route=%s", model_name, route_name)
+                return self._error_response(
+                    f"Unknown model: {model_name}",
+                    400,
+                    error_type="invalid_request_error",
+                    code="unknown_model",
+                    error_format=resolved_error_format,
+                )
 
             available_model_names = self._list_available_model_names()
             if self._is_whitelist_required() and not self._user_service.can_user_access_model(
@@ -1031,6 +1021,21 @@ class ProxyController:
                 request_model=model_name,
                 target_format=resolved_target_format,
             )
+
+    def _resolve_model_route(self, model_name: str) -> tuple[Any | None, bool, bool, bool]:
+        """按模型映射、Provider、OAuth 的优先级解析请求路由。"""
+        if self._model_mapping_service is not None and self._model_mapping_service.has_mapping(model_name):
+            return None, False, False, True
+
+        provider = self._provider_manager.get_provider_for_model(model_name)
+        if provider is not None:
+            return provider, False, False, False
+
+        if self._codex_proxy_service is not None and self._codex_proxy_service.has_model(model_name):
+            return None, True, False, False
+        if self._claude_proxy_service is not None and self._claude_proxy_service.has_model(model_name):
+            return None, False, True, False
+        return None, False, False, False
 
     def list_models(self) -> ResponseReturnValue:
         try:
