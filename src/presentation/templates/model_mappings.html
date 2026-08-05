@@ -111,7 +111,7 @@
                         const available = mapping.targets.filter(target => target.status === "available").length;
                         const unavailable = mapping.targets.filter(target => target.status === "unavailable").length;
                         const conflict = mapping.conflict_source
-                            ? `<span class="mapping-conflict">与 ${escapeHtml(mapping.conflict_source)} 模型 ID 重复，不生效</span>`
+                            ? `<span class="mapping-conflict">覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型，按自定义映射路由</span>`
                             : "";
                         return `<tr>
                             <td><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>${conflict}</td>
@@ -120,7 +120,7 @@
                             <td><span class="mapping-status">${available} 可用 / ${mapping.targets.length} 总计</span>${unavailable ? `<span class="mapping-unavailable">${unavailable} 不可用</span>` : ""}</td>
                             <td>${Number(mapping.cooldown_seconds_on_429)}s</td>
                             <td><div class="mapping-row-actions">
-                                <button type="button" class="btn btn-sm btn-secondary" onclick="openEditMapping('${encodeURIComponent(mapping.id)}')" ${mapping.conflict_source ? 'disabled title="当前映射与 OAuth 模型 ID 冲突，只能删除"' : ""}>编辑</button>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="openEditMapping('${encodeURIComponent(mapping.id)}')">编辑</button>
                                 <button type="button" class="btn btn-sm btn-danger" onclick="deleteMapping('${encodeURIComponent(mapping.id)}')">删除</button>
                             </div></td>
                         </tr>`;

@@ -99,7 +99,7 @@ decoder
 模型语义：
 
 - 数据平面下游请求中的 `model` 是代理路由 key，格式为 `{provider_name}/{upstream_model_id}`
-- 模型映射 ID 是不带 Provider 前缀的独立路由 key，由英文字母、数字和下划线组成，并以字母或下划线开头
+- 模型映射 ID 是不带 Provider 前缀的独立路由 key，由英文字母、数字、下划线、点号和连字符组成，并以字母或下划线开头
 - 进入上游请求构建前会先解析出真实 `upstream_model_id`
 - `request_guard` 接收的是即将发往上游的请求体，`body["model"]` 为真实上游模型 ID
 - `HookContext.request_model` 保留下游路由 key，`HookContext.upstream_model` 保留当前真实上游模型 ID
@@ -150,14 +150,14 @@ decoder
   - Provider 模型从配置中的 `providers[].model_list` 读取，继续包含已禁用 Provider 的模型
   - OAuth 模型从 Codex / Claude OAuth 服务读取当前可用模型目录，Codex 图片模型同时进入权限目录
   - 生效的模型映射 ID 进入用户与 API Key 权限可选目录
-  - 权限同步使用包含全部已定义映射 ID 的保留目录，关闭总开关或发生 OAuth ID 冲突时不删除已保存权限
+  - 权限同步使用包含全部已定义映射 ID 的保留目录，关闭总开关时不删除已保存权限
   - 供用户模型权限与 API Key 模型权限的选择、保存校验、展示计数和同步清理共用
 - `ModelMappingController`
   - 暴露模型映射 CRUD、目标启停、JSON 导入导出和目标模型目录接口
 - `ModelMappingService`
-  - 校验映射 ID、OAuth 文本和图片模型 ID 冲突以及目标模型范围
+  - 校验映射 ID 和目标模型范围；映射 ID 可以与 OAuth 文本或图片模型 ID 重名
   - 维护固定 `sticky_failover` 策略、优先级、429 冷却、自动禁用和跨重启粘滞目标
-  - 动态 OAuth 同名冲突存在时将映射标记为不生效，OAuth 路由优先；冲突解除后映射自动恢复生效
+  - 自定义映射 ID 的路由优先级高于 Provider、Codex OAuth 和 Claude OAuth；同名 OAuth 模型由自定义映射接管
 - `ModelMappingRepository`
   - 在 SQLite 中事务持久化映射定义、目标配置、目标运行状态和当前粘滞目标
 - `OAuthController`
@@ -329,10 +329,10 @@ OAuth 模型是数据平面的例外路由：
 - Provider 配置模型仍使用 `{provider}/{model}` key
 - Codex / Claude OAuth 模型使用原始模型名，例如 `gpt-5-codex`、`claude-sonnet-4-5`
 - Codex OAuth 图片模型使用原始模型名，例如 `gpt-image-2`
-- 模型映射 ID 使用原始 ID，不增加 Provider 前缀；它可以映射 Provider、Codex OAuth 文本和 Claude OAuth 文本模型，不映射图片模型，也不作用于 Images API
+- 模型映射 ID 使用原始 ID，不增加 Provider 前缀；它可以映射 Provider、Codex OAuth 文本、Codex OAuth 图片和 Claude OAuth 文本模型，并可用于对应的 Chat、Responses、Messages 和 Images API
 - 用户模型权限和 API Key 模型权限的可选目录同时包含 Provider 模型和当前可用 OAuth 模型
 - 权限字段保存显式列表时，Provider 模型保存 `{provider}/{model}`，OAuth 模型保存原始模型名
-- `ProxyController` 先查 Provider 映射，未命中时依次查 Codex OAuth、Claude OAuth 和生效的模型映射目录；OAuth 同名模型优先于模型映射
+- `ProxyController` 先查自定义模型映射目录，再查 Provider、Codex OAuth 和 Claude OAuth；同名 OAuth 模型由自定义映射优先接管
 - `/v1/models` 对 Codex OAuth 暴露普通模型名，`provider_name` 固定为 `codex`
 - `/v1/models` 对 Codex OAuth 图片模型暴露 `target_formats=["openai_images"]` 与 `capabilities=["image_generation"]`
 - `/v1/models` 对 Claude OAuth 暴露普通模型名，`provider_name` 固定为 `claude`
@@ -510,7 +510,7 @@ SQLite 表：
 - `model_mapping_target_runtime` 保存自动禁用、冷却截止时间、最近状态码和错误摘要
 - `model_mapping_runtime` 保存当前粘滞目标
 
-映射 ID 与当前 Codex OAuth 文本、Codex OAuth 图片或 Claude OAuth 文本模型 ID 重复时拒绝创建。已存在映射后续发生动态冲突时，映射保留但不生效，管理页只允许删除；OAuth 模型继续按原路由处理。冲突解除后映射自动恢复生效。底层目标从目录消失时标记为不可用，不能启停或编辑，只能从映射中删除。
+映射 ID 可以与当前 Codex OAuth 文本、Codex OAuth 图片或 Claude OAuth 文本模型 ID 重复；创建和更新都允许使用同名 ID，数据平面按自定义映射路由。`/v1/models` 将同名条目标记为模型映射，并保留映射能力信息。底层目标从目录消失时标记为不可用，不能启停或编辑，只能从映射中删除。
 
 ### 3.4 Provider Runtime Contract
 
