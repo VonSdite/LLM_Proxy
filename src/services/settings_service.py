@@ -19,9 +19,7 @@ from ..utils.net import (
     normalize_real_client_ip_header,
 )
 
-_HTTP_HEADER_NAME_CHARS = frozenset(
-    "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-)
+_HTTP_HEADER_NAME_CHARS = frozenset("!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 
 
 class SettingsService:
@@ -31,9 +29,11 @@ class SettingsService:
         self,
         ctx: AppContext,
         reload_logging_callback: Callable[[], None] | None = None,
+        model_catalog_changed_callback: Callable[[], None] | None = None,
     ):
         self._config_manager = ctx.config_manager
         self._reload_logging_callback = reload_logging_callback
+        self._model_catalog_changed_callback = model_catalog_changed_callback
 
     def get_system_settings(self) -> dict[str, Any]:
         admin_config = self._config_manager.get_admin_config() or {}
@@ -63,6 +63,9 @@ class SettingsService:
             },
             "api_keys": {
                 "enabled": self._config_manager.is_api_key_management_enabled(),
+            },
+            "model_mapping": {
+                "enabled": self._config_manager.is_model_mapping_enabled(),
             },
             "auth_enabled": self._config_manager.is_auth_enabled(),
         }
@@ -245,6 +248,32 @@ class SettingsService:
         api_keys_config["enabled"] = enabled
 
         self._config_manager.write_raw_config(config)
+        return {
+            "settings": self.get_system_settings(),
+        }
+
+    def update_model_mapping_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """更新模型映射总开关并同步权限模型目录。"""
+        if not isinstance(payload, dict):
+            raise ValueError("Request payload must be an object")
+
+        model_mapping_payload = payload.get("model_mapping")
+        if not isinstance(model_mapping_payload, dict):
+            raise ValueError("Config field 'model_mapping' must be an object")
+
+        enabled = parse_optional_bool(
+            model_mapping_payload.get("enabled"),
+            default=self._config_manager.is_model_mapping_enabled(),
+        )
+        if enabled is None:
+            raise ValueError("Model mapping enabled flag is required")
+
+        config = self._config_manager.get_raw_config()
+        model_mapping_config = self._ensure_mapping(config, "model_mapping")
+        model_mapping_config["enabled"] = enabled
+        self._config_manager.write_raw_config(config)
+        if self._model_catalog_changed_callback is not None:
+            self._model_catalog_changed_callback()
         return {
             "settings": self.get_system_settings(),
         }
@@ -449,11 +478,14 @@ class SettingsService:
     def _parse_oauth_proxy(value: Any, *, proxy_mode: str, required: bool) -> str:
         if proxy_mode != PROXY_MODE_CUSTOM:
             return ""
-        return normalize_proxy_url(
-            value,
-            required=required,
-            error_message="OAuth proxy must be a valid absolute URL",
-        ) or ""
+        return (
+            normalize_proxy_url(
+                value,
+                required=required,
+                error_message="OAuth proxy must be a valid absolute URL",
+            )
+            or ""
+        )
 
     @staticmethod
     def _normalize_admin_value(value: Any) -> str:

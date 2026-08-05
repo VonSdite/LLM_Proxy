@@ -48,6 +48,7 @@ class ProxyErrorInfo:
     error_type: str = "upstream_error"
     error_code: str | None = None
     details: dict[str, Any] | None = None
+    response_headers: dict[str, Any] | None = None
 
 
 class ProxyService:
@@ -136,6 +137,7 @@ class ProxyService:
         trace_id: str | None = None,
         route_name: str | None = None,
         client_ip: str | None = None,
+        on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """代理请求到目标 provider，并处理重试、格式转换与 guard。"""
         target_url = provider.api
@@ -400,6 +402,7 @@ class ProxyService:
                         trace_id=trace_id,
                         route_name=route_name,
                         client_ip=client_ip,
+                        on_stream_failure=on_stream_failure,
                     )
                 else:
                     response = self._response_builder.build_nonstream_response(

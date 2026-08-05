@@ -590,7 +590,7 @@ class UserService:
     def sync_model_permissions(self) -> int:
         """同步并清理已删除模型对应的显式授权。"""
         try:
-            available_models = set(self._get_available_model_names())
+            available_models = set(self._model_catalog_service.list_permission_storage_model_names())
             updated_count = 0
             for user in self._repository.list_all():
                 current_raw = str(user.get("model_permissions") or "").strip() or self.MODEL_PERMISSIONS_ALL

@@ -1,0 +1,235 @@
+.model-mappings-page .mapping-toolbar-band,
+.model-mappings-page .mapping-content-band {
+    padding: 20px var(--page-card-inset);
+}
+
+.model-mappings-page .mapping-toolbar-band {
+    padding-bottom: 0;
+}
+
+.mapping-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface, #fff);
+    box-shadow: var(--shadow-card);
+}
+
+.mapping-summary {
+    color: var(--text-secondary);
+}
+
+.mapping-summary strong {
+    color: var(--text-primary);
+}
+
+.mapping-actions,
+.mapping-row-actions,
+.mapping-target-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mapping-table-shell {
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface, #fff);
+    box-shadow: var(--shadow-card);
+}
+
+.mapping-table {
+    width: 100%;
+    min-width: 920px;
+    border-collapse: collapse;
+}
+
+.mapping-table th,
+.mapping-table td {
+    padding: 13px 14px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: middle;
+}
+
+.mapping-table th {
+    background: #f4f8fd;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.mapping-table tr:last-child td {
+    border-bottom: 0;
+}
+
+.mapping-id {
+    display: block;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mapping-conflict,
+.mapping-unavailable {
+    display: block;
+    margin-top: 4px;
+    color: #b42318;
+    font-size: 12px;
+}
+
+.mapping-empty {
+    padding: 44px 20px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.mapping-error {
+    color: #b42318;
+}
+
+.mapping-editor-fields {
+    display: grid;
+    grid-template-columns: minmax(220px, 2fr) minmax(180px, 1fr) minmax(160px, 1fr);
+    gap: 14px;
+}
+
+.mapping-field {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+}
+
+.mapping-field > span {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.mapping-target-heading {
+    justify-content: space-between;
+    margin: 24px 0 10px;
+}
+
+.mapping-target-heading h3 {
+    margin: 0;
+    font-size: 17px;
+}
+
+.mapping-target-list {
+    display: grid;
+    gap: 10px;
+}
+
+.mapping-target-combobox {
+    position: relative;
+}
+
+.mapping-target-options {
+    position: absolute;
+    z-index: 1080;
+    top: calc(100% + 4px);
+    right: 0;
+    left: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface, #fff);
+    box-shadow: var(--shadow-card);
+}
+
+.mapping-target-option {
+    display: block;
+    width: 100%;
+    padding: 9px 11px;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mapping-target-option:hover,
+.mapping-target-option.is-active {
+    background: #eaf2fb;
+}
+
+.mapping-target-option-empty {
+    padding: 11px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.mapping-target-row {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) 120px 110px 40px;
+    align-items: end;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+}
+
+.mapping-target-row.is-unavailable {
+    background: rgba(180, 35, 24, 0.04);
+}
+
+.mapping-target-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 38px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.mapping-remove-target {
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: #b42318;
+    font-size: 24px;
+    line-height: 1;
+}
+
+:root[data-theme="dark"] .mapping-toolbar,
+:root[data-theme="dark"] .mapping-table-shell,
+:root[data-theme="dark"] .mapping-table td {
+    background: #161b22;
+}
+
+:root[data-theme="dark"] .mapping-table th {
+    background: #0f141b;
+}
+
+:root[data-theme="dark"] .mapping-target-options {
+    background: #161b22;
+}
+
+:root[data-theme="dark"] .mapping-target-option:hover,
+:root[data-theme="dark"] .mapping-target-option.is-active {
+    background: #243246;
+}
+
+@media (max-width: 760px) {
+    .mapping-toolbar,
+    .mapping-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .mapping-editor-fields,
+    .mapping-target-row {
+        grid-template-columns: 1fr;
+    }
+}

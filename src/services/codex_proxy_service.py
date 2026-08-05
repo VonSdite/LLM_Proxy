@@ -88,6 +88,7 @@ class CodexProxyService:
         trace_id: str | None = None,
         route_name: str | None = None,
         client_ip: str | None = None,
+        on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """按账号配额顺序代理 Codex 请求。"""
         del trace_id
@@ -141,6 +142,7 @@ class CodexProxyService:
                 target_format=target_format,
                 route_name=route_name,
                 client_ip=client_ip,
+                on_stream_failure=on_stream_failure,
             )
             if failure is not None:
                 if failure.error_code in {
@@ -312,6 +314,7 @@ class CodexProxyService:
         target_format: str,
         route_name: str | None,
         client_ip: str | None,
+        on_stream_failure: Callable[[dict[str, Any]], None] | None,
         allow_auth_refresh_retry: bool = True,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         translator = self._translator_registry.get("openai_responses", target_format)
@@ -425,6 +428,7 @@ class CodexProxyService:
                         target_format=target_format,
                         route_name=route_name,
                         client_ip=client_ip,
+                        on_stream_failure=on_stream_failure,
                         allow_auth_refresh_retry=False,
                     )
                 if refresh_failure is not None:
@@ -450,6 +454,7 @@ class CodexProxyService:
                         status_code=429,
                         error_type="upstream_error",
                         error_code="codex_quota_exhausted",
+                        response_headers={"Retry-After": retry_after} if retry_after is not None else None,
                     ),
                 )
             self._codex_oauth_service.record_auth_file_failure(
@@ -466,6 +471,7 @@ class CodexProxyService:
                     status_code=upstream_response.status_code,
                     error_type="upstream_error",
                     error_code=error_type or "codex_upstream_error",
+                    response_headers=dict(upstream_response.headers),
                 ),
             )
 
@@ -483,6 +489,7 @@ class CodexProxyService:
                     route_name=route_name,
                     client_ip=client_ip,
                     auth_file_name=candidate.name,
+                    on_stream_failure=on_stream_failure,
                 )
             except (requests.exceptions.RequestException, OSError) as exc:
                 return self._build_candidate_transport_failure(
@@ -1071,6 +1078,7 @@ class CodexProxyService:
         route_name: str | None,
         client_ip: str | None,
         auth_file_name: str,
+        on_stream_failure: Callable[[dict[str, Any]], None] | None,
     ) -> Response:
         del route_name, client_ip
         downstream_headers = self._filter_response_headers(response.headers)
@@ -1242,6 +1250,21 @@ class CodexProxyService:
                     )
                 elif completed:
                     self._codex_oauth_service.record_auth_file_success(auth_file_name)
+                if on_stream_failure is not None and downstream_started and not downstream_cancelled:
+                    failure_message = stream_failure_message
+                    if not failure_message and failed_payload is not None:
+                        failure_message = self._extract_stream_failure_message(failed_payload)
+                    if failure_message:
+                        try:
+                            on_stream_failure(
+                                {
+                                    "status_code": 502,
+                                    "error_type": "codex_stream_failed",
+                                    "error_message": failure_message,
+                                }
+                            )
+                        except Exception as exc:
+                            self._logger.error("Error in Codex on_stream_failure callback: %s", exc)
                 if (
                     on_complete is not None
                     and not downstream_cancelled

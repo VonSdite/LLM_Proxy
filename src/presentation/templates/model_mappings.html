@@ -1,0 +1,335 @@
+{% extends "base_admin.html" %}
+
+{% block page_title %}模型映射{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260805-1">{% endblock %}
+{% block body_class %}model-mappings-page{% endblock %}
+{% block header_title %}模型映射{% endblock %}
+{% block header_subtitle %}维护独立模型 ID 与粘滞故障转移目标{% endblock %}
+
+{% block content %}
+    <section class="mapping-toolbar-band">
+        <div class="mapping-toolbar">
+            <div class="mapping-summary">共 <strong id="mappingCount">0</strong> 个映射</div>
+            <div class="mapping-actions">
+                <input type="file" id="mappingImportInput" accept="application/json,.json" hidden>
+                <button type="button" class="btn btn-secondary" id="exportMappingsBtn">导出</button>
+                <button type="button" class="btn btn-secondary" id="importMappingsBtn">导入</button>
+                <button type="button" class="btn btn-primary" id="createMappingBtn">新增映射</button>
+            </div>
+        </div>
+    </section>
+    <section class="mapping-content-band">
+        <div class="mapping-table-shell" id="mappingTableContainer">
+            <div class="mapping-empty">正在加载模型映射...</div>
+        </div>
+    </section>
+{% endblock %}
+
+{% block after_container %}
+    <div class="modal fade" id="mappingEditorModal" tabindex="-1" data-bs-backdrop="static" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header border-bottom-0">
+                    <h2 class="modal-title" id="mappingEditorTitle">新增模型映射</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <div class="mapping-editor-fields">
+                        <label class="mapping-field">
+                            <span>模型 ID</span>
+                            <input type="text" class="form-control" id="mappingIdInput" maxlength="64" autocomplete="off" spellcheck="false" placeholder="例如 internal_gpt">
+                        </label>
+                        <label class="mapping-field">
+                            <span>策略</span>
+                            <input type="text" class="form-control" value="sticky_failover" disabled>
+                        </label>
+                        <label class="mapping-field">
+                            <span>429 冷却秒数</span>
+                            <input type="number" class="form-control" id="mappingCooldownInput" min="1" value="60">
+                        </label>
+                    </div>
+                    <div class="mapping-target-heading">
+                        <h3>目标模型</h3>
+                        <button type="button" class="btn btn-secondary" id="addTargetBtn">添加目标</button>
+                    </div>
+                    <div class="mapping-target-list" id="mappingTargetList"></div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="saveMappingBtn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block page_scripts %}
+    <script src="/static/js/ui-message.js?v=20260630-1"></script>
+    <script>
+        let modelMappings = [];
+        let availableTargets = [];
+        let editingMappingId = null;
+        let mappingEditorModal = null;
+
+        function escapeHtml(value) {
+            const node = document.createElement("div");
+            node.textContent = String(value ?? "");
+            return node.innerHTML;
+        }
+
+        async function requestJson(url, options = {}) {
+            const response = await fetch(url, options);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data?.error || `请求失败 (${response.status})`);
+            }
+            return data;
+        }
+
+        function statusLabel(target) {
+            const labels = {
+                available: "可用",
+                cooldown: "冷却中",
+                disabled: "已禁用",
+                auto_disabled: "异常禁用",
+                unavailable: "不可用"
+            };
+            return labels[target.status] || target.status || "未知";
+        }
+
+        function renderMappings() {
+            document.getElementById("mappingCount").textContent = modelMappings.length;
+            const container = document.getElementById("mappingTableContainer");
+            if (!modelMappings.length) {
+                container.innerHTML = '<div class="mapping-empty">暂无模型映射</div>';
+                return;
+            }
+            container.innerHTML = `
+                <table class="mapping-table">
+                    <thead><tr><th>模型 ID</th><th>策略</th><th>当前目标</th><th>目标状态</th><th>429 冷却</th><th>操作</th></tr></thead>
+                    <tbody>${modelMappings.map(mapping => {
+                        const available = mapping.targets.filter(target => target.status === "available").length;
+                        const unavailable = mapping.targets.filter(target => target.status === "unavailable").length;
+                        const conflict = mapping.conflict_source
+                            ? `<span class="mapping-conflict">与 ${escapeHtml(mapping.conflict_source)} 模型 ID 重复，不生效</span>`
+                            : "";
+                        return `<tr>
+                            <td><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>${conflict}</td>
+                            <td><code>${escapeHtml(mapping.strategy)}</code></td>
+                            <td>${escapeHtml(mapping.current_target_model_id || "-")}</td>
+                            <td><span class="mapping-status">${available} 可用 / ${mapping.targets.length} 总计</span>${unavailable ? `<span class="mapping-unavailable">${unavailable} 不可用</span>` : ""}</td>
+                            <td>${Number(mapping.cooldown_seconds_on_429)}s</td>
+                            <td><div class="mapping-row-actions">
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="openEditMapping('${encodeURIComponent(mapping.id)}')" ${mapping.conflict_source ? 'disabled title="当前映射与 OAuth 模型 ID 冲突，只能删除"' : ""}>编辑</button>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteMapping('${encodeURIComponent(mapping.id)}')">删除</button>
+                            </div></td>
+                        </tr>`;
+                    }).join("")}</tbody>
+                </table>`;
+        }
+
+        async function loadMappings() {
+            try {
+                const data = await requestJson("/api/model-mappings", { cache: "no-store" });
+                modelMappings = Array.isArray(data.model_mappings) ? data.model_mappings : [];
+                availableTargets = Array.isArray(data.available_targets) ? data.available_targets : [];
+                renderMappings();
+            } catch (error) {
+                document.getElementById("mappingTableContainer").innerHTML = `<div class="mapping-empty mapping-error">${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        function createTargetRow(target = {}) {
+            const row = document.createElement("div");
+            const unavailable = target.available_model === false;
+            row.className = `mapping-target-row${unavailable ? " is-unavailable" : ""}`;
+            row.innerHTML = `
+                <label class="mapping-field mapping-target-model"><span>模型 ID</span><div class="mapping-target-combobox"><input type="text" class="form-control target-model-search" value="${escapeHtml(target.model_id || "")}" autocomplete="off" placeholder="搜索并选择模型" role="combobox" aria-expanded="false" ${unavailable ? "disabled" : ""}><input type="hidden" class="target-model-id" value="${escapeHtml(target.model_id || "")}"><div class="mapping-target-options" role="listbox" hidden></div></div></label>
+                <label class="mapping-field mapping-target-priority"><span>优先级</span><input type="number" class="form-control target-priority" min="1" value="${Number(target.priority || 1)}" ${unavailable ? "disabled" : ""}></label>
+                <label class="mapping-target-toggle"><span>${unavailable ? "不可用" : statusLabel(target)}</span><input type="checkbox" class="target-enabled" ${target.enabled !== false ? "checked" : ""} ${unavailable ? "disabled" : ""}></label>
+                <button type="button" class="mapping-remove-target" aria-label="删除目标" title="删除目标">&times;</button>`;
+            if (!unavailable) {
+                setupTargetCombobox(row);
+            }
+            row.querySelector(".mapping-remove-target").addEventListener("click", () => row.remove());
+            document.getElementById("mappingTargetList").appendChild(row);
+        }
+
+        function setupTargetCombobox(row) {
+            const searchInput = row.querySelector(".target-model-search");
+            const valueInput = row.querySelector(".target-model-id");
+            const optionsElement = row.querySelector(".mapping-target-options");
+            let activeIndex = -1;
+
+            function filteredTargets() {
+                const query = searchInput.value.trim().toLowerCase();
+                return availableTargets.filter(modelId => !query || modelId.toLowerCase().includes(query));
+            }
+
+            function renderOptions() {
+                const targets = filteredTargets();
+                activeIndex = targets.length ? Math.min(Math.max(activeIndex, 0), targets.length - 1) : -1;
+                optionsElement.innerHTML = targets.length
+                    ? targets.map((modelId, index) => `<button type="button" class="mapping-target-option${index === activeIndex ? " is-active" : ""}" role="option" data-model-id="${escapeHtml(modelId)}">${escapeHtml(modelId)}</button>`).join("")
+                    : '<div class="mapping-target-option-empty">没有匹配的模型</div>';
+                optionsElement.hidden = false;
+                searchInput.setAttribute("aria-expanded", "true");
+                optionsElement.querySelectorAll(".mapping-target-option").forEach(option => {
+                    option.addEventListener("mousedown", event => event.preventDefault());
+                    option.addEventListener("click", () => selectTarget(option.dataset.modelId || ""));
+                });
+            }
+
+            function closeOptions() {
+                optionsElement.hidden = true;
+                searchInput.setAttribute("aria-expanded", "false");
+                activeIndex = -1;
+            }
+
+            function selectTarget(modelId) {
+                searchInput.value = modelId;
+                valueInput.value = modelId;
+                closeOptions();
+            }
+
+            searchInput.addEventListener("focus", renderOptions);
+            searchInput.addEventListener("input", () => {
+                valueInput.value = availableTargets.includes(searchInput.value.trim()) ? searchInput.value.trim() : "";
+                activeIndex = 0;
+                renderOptions();
+            });
+            searchInput.addEventListener("blur", closeOptions);
+            searchInput.addEventListener("keydown", event => {
+                const targets = filteredTargets();
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    if (!targets.length) return;
+                    const direction = event.key === "ArrowDown" ? 1 : -1;
+                    activeIndex = (activeIndex + direction + targets.length) % targets.length;
+                    renderOptions();
+                    optionsElement.querySelector(".is-active")?.scrollIntoView({ block: "nearest" });
+                } else if (event.key === "Enter" && activeIndex >= 0 && targets[activeIndex]) {
+                    event.preventDefault();
+                    selectTarget(targets[activeIndex]);
+                } else if (event.key === "Escape") {
+                    closeOptions();
+                }
+            });
+        }
+
+        function openCreateMapping() {
+            editingMappingId = null;
+            document.getElementById("mappingEditorTitle").textContent = "新增模型映射";
+            document.getElementById("mappingIdInput").value = "";
+            document.getElementById("mappingCooldownInput").value = "60";
+            document.getElementById("mappingTargetList").innerHTML = "";
+            createTargetRow({ priority: 1, enabled: true, status: "available" });
+            mappingEditorModal.show();
+        }
+
+        function openEditMapping(encodedId) {
+            const mappingId = decodeURIComponent(encodedId);
+            const mapping = modelMappings.find(item => item.id === mappingId);
+            if (!mapping) return;
+            editingMappingId = mappingId;
+            document.getElementById("mappingEditorTitle").textContent = "编辑模型映射";
+            document.getElementById("mappingIdInput").value = mapping.id;
+            document.getElementById("mappingCooldownInput").value = mapping.cooldown_seconds_on_429;
+            document.getElementById("mappingTargetList").innerHTML = "";
+            mapping.targets.forEach(createTargetRow);
+            mappingEditorModal.show();
+        }
+
+        function collectMappingPayload() {
+            const targets = Array.from(document.querySelectorAll(".mapping-target-row")).map(row => ({
+                model_id: row.querySelector(".target-model-id").value.trim(),
+                priority: Number(row.querySelector(".target-priority").value),
+                enabled: row.querySelector(".target-enabled").checked
+            }));
+            return {
+                id: document.getElementById("mappingIdInput").value.trim(),
+                strategy: "sticky_failover",
+                cooldown_seconds_on_429: Number(document.getElementById("mappingCooldownInput").value),
+                targets
+            };
+        }
+
+        async function saveMapping() {
+            const payload = collectMappingPayload();
+            if (payload.targets.some(target => !target.model_id)) {
+                showMessage("请选择有效的目标模型 ID", "error");
+                return;
+            }
+            const url = editingMappingId ? `/api/model-mappings/${encodeURIComponent(editingMappingId)}` : "/api/model-mappings";
+            try {
+                await requestJson(url, {
+                    method: editingMappingId ? "PUT" : "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                mappingEditorModal.hide();
+                showMessage("模型映射已保存", "success");
+                await loadMappings();
+            } catch (error) {
+                showMessage(error.message, "error");
+            }
+        }
+
+        async function deleteMapping(encodedId) {
+            const mappingId = decodeURIComponent(encodedId);
+            if (!window.confirm(`删除模型映射 ${mappingId}？`)) return;
+            try {
+                await requestJson(`/api/model-mappings/${encodeURIComponent(mappingId)}`, { method: "DELETE" });
+                showMessage("模型映射已删除", "success");
+                await loadMappings();
+            } catch (error) {
+                showMessage(error.message, "error");
+            }
+        }
+
+        async function exportMappings() {
+            try {
+                const data = await requestJson("/api/model-mappings/export", {
+                    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+                });
+                const blob = new Blob([JSON.stringify(data, null, 2) + "\n"], { type: "application/json" });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = "model-mappings.json";
+                link.click();
+                URL.revokeObjectURL(link.href);
+            } catch (error) {
+                showMessage(error.message, "error");
+            }
+        }
+
+        async function importMappings(file) {
+            try {
+                const payload = JSON.parse(await file.text());
+                const result = await requestJson("/api/model-mappings/import", {
+                    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+                });
+                showMessage(`已导入 ${result.count} 个模型映射`, "success");
+                await loadMappings();
+            } catch (error) {
+                showMessage(error.message, "error");
+            } finally {
+                document.getElementById("mappingImportInput").value = "";
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            mappingEditorModal = new bootstrap.Modal(document.getElementById("mappingEditorModal"));
+            document.getElementById("createMappingBtn").addEventListener("click", openCreateMapping);
+            document.getElementById("addTargetBtn").addEventListener("click", () => createTargetRow({ priority: 1, enabled: true, status: "available" }));
+            document.getElementById("saveMappingBtn").addEventListener("click", saveMapping);
+            document.getElementById("exportMappingsBtn").addEventListener("click", exportMappings);
+            document.getElementById("importMappingsBtn").addEventListener("click", () => document.getElementById("mappingImportInput").click());
+            document.getElementById("mappingImportInput").addEventListener("change", event => {
+                const file = event.target.files?.[0];
+                if (file) importMappings(file);
+            });
+            loadMappings();
+        });
+    </script>
+{% endblock %}

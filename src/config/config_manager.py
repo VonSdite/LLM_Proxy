@@ -61,9 +61,7 @@ class ConfigManager:
         return self._read_bool("client_ip.real_ip_enabled", default=False)
 
     def get_real_client_ip_header(self) -> str:
-        return normalize_real_client_ip_header(
-            self.get("client_ip.real_ip_header", DEFAULT_REAL_CLIENT_IP_HEADER)
-        )
+        return normalize_real_client_ip_header(self.get("client_ip.real_ip_header", DEFAULT_REAL_CLIENT_IP_HEADER))
 
     def is_llm_request_debug_enabled(self) -> bool:
         return self._read_bool("logging.llm_request_debug_enabled", default=False)
@@ -88,6 +86,9 @@ class ConfigManager:
 
     def is_api_key_management_enabled(self) -> bool:
         return self._read_bool("api_keys.enabled", default=False)
+
+    def is_model_mapping_enabled(self) -> bool:
+        return self._read_bool("model_mapping.enabled", default=False)
 
     def is_oauth_verify_ssl_enabled(self) -> bool:
         return self._read_bool("oauth.verify_ssl", default=False)
@@ -212,9 +213,7 @@ class ConfigManager:
         if isinstance(oauth, dict) and not cls._has_text_value(oauth.get("proxy_mode")):
             normalized_oauth = dict(oauth)
             normalized_oauth["proxy_mode"] = (
-                PROXY_MODE_CUSTOM
-                if cls._has_text_value(normalized_oauth.get("proxy"))
-                else PROXY_MODE_DIRECT
+                PROXY_MODE_CUSTOM if cls._has_text_value(normalized_oauth.get("proxy")) else PROXY_MODE_DIRECT
             )
             normalized["oauth"] = normalized_oauth
             changed = True

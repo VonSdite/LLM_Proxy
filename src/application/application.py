@@ -20,6 +20,7 @@ from ..config import (
 from ..presentation import (
     ApiKeyController,
     AuthenticationController,
+    ModelMappingController,
     OAuthController,
     ProviderController,
     ProxyController,
@@ -27,7 +28,13 @@ from ..presentation import (
     WebController,
     create_flask_app,
 )
-from ..repositories import ApiKeyRepository, AuthGroupRepository, LogRepository, UserRepository
+from ..repositories import (
+    ApiKeyRepository,
+    AuthGroupRepository,
+    LogRepository,
+    ModelMappingRepository,
+    UserRepository,
+)
 from ..services import (
     ApiKeyService,
     AuthenticationService,
@@ -39,6 +46,7 @@ from ..services import (
     LogService,
     ModelCatalogService,
     ModelDiscoveryService,
+    ModelMappingService,
     ProviderModelTestService,
     ProviderService,
     ProxyService,
@@ -247,6 +255,7 @@ class Application:
         self._api_key_repository = ApiKeyRepository(self._db_connection_factory)
         self._log_repository = LogRepository(self._db_connection_factory)
         self._auth_group_repository = AuthGroupRepository(self._db_connection_factory)
+        self._model_mapping_repository = ModelMappingRepository(self._db_connection_factory)
 
     def _setup_provider_manager(self) -> None:
         """加载 provider 配置并注册可用模型。"""
@@ -263,10 +272,19 @@ class Application:
         codex_oauth_service = CodexOAuthService(self._ctx)
         claude_oauth_service = ClaudeOAuthService(self._ctx)
         self._codex_oauth_service = codex_oauth_service
+        model_mapping_service = ModelMappingService(
+            self._ctx,
+            self._model_mapping_repository,
+            provider_manager=self._provider_manager,
+            codex_oauth_service=codex_oauth_service,
+            claude_oauth_service=claude_oauth_service,
+        )
+        self._model_mapping_service = model_mapping_service
         model_catalog_service = ModelCatalogService(
             self._ctx,
             codex_oauth_service=codex_oauth_service,
             claude_oauth_service=claude_oauth_service,
+            model_mapping_service=model_mapping_service,
         )
         user_service = UserService(
             self._ctx,
@@ -300,6 +318,7 @@ class Application:
         settings_service = SettingsService(
             self._ctx,
             reload_logging_callback=self.reload_logging_settings,
+            model_catalog_changed_callback=self._sync_model_permissions,
         )
 
         self._auth_controller = AuthenticationController(self._ctx, auth_service)
@@ -320,6 +339,12 @@ class Application:
             claude_oauth_service,
             auth_service,
         )
+        self._model_mapping_controller = ModelMappingController(
+            self._ctx,
+            model_mapping_service,
+            auth_service,
+            model_catalog_changed_callback=self._sync_model_permissions,
+        )
         self._proxy_controller = ProxyController(
             self._ctx,
             proxy_service,
@@ -329,6 +354,7 @@ class Application:
             codex_proxy_service=codex_proxy_service,
             claude_proxy_service=claude_proxy_service,
             api_key_service=api_key_service,
+            model_mapping_service=model_mapping_service,
         )
         self._web_controller = WebController(
             self._ctx,
@@ -355,6 +381,13 @@ class Application:
         )
         self._auth_group_manager.load_auth_groups(auth_group_schemas)
         self._provider_manager.load_providers(provider_schemas)
+        if hasattr(self, "_user_service"):
+            self._user_service.sync_model_permissions()
+        if hasattr(self, "_api_key_service"):
+            self._api_key_service.sync_model_permissions()
+
+    def _sync_model_permissions(self) -> None:
+        """按当前模型目录同步用户与 API Key 权限。"""
         if hasattr(self, "_user_service"):
             self._user_service.sync_model_permissions()
         if hasattr(self, "_api_key_service"):

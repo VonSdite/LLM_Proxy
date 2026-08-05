@@ -12,6 +12,7 @@ from .codex_proxy_service import CodexProxyService
 from .log_service import LogService
 from .model_catalog_service import ModelCatalogService
 from .model_discovery_service import ModelDiscoveryService
+from .model_mapping_service import ModelMappingService
 from .provider_model_test_service import ProviderModelTestService
 from .provider_service import ProviderService
 from .proxy_service import ProxyService
@@ -30,6 +31,7 @@ __all__ = [
     "LogService",
     "ModelCatalogService",
     "ModelDiscoveryService",
+    "ModelMappingService",
     "ProviderModelTestService",
     "ProxyService",
     "ProviderService",

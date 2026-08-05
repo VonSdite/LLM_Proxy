@@ -314,7 +314,9 @@ class ApiKeyService:
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
-            decorated_keys = [self._decorate_api_key(api_key, available_models=available_models) for api_key in api_keys]
+            decorated_keys = [
+                self._decorate_api_key(api_key, available_models=available_models) for api_key in api_keys
+            ]
             return [api_key for api_key in decorated_keys if api_key is not None]
         except Exception as exc:
             self._logger.error("Failed to get API keys: %s", exc)
@@ -458,7 +460,7 @@ class ApiKeyService:
     def sync_model_permissions(self) -> int:
         """同步并清理已删除模型对应的显式授权。"""
         try:
-            available_models = set(self._get_available_model_names())
+            available_models = set(self._model_catalog_service.list_permission_storage_model_names())
             updated_count = 0
             for api_key in self._repository.list_all():
                 current_raw = str(api_key.get("model_permissions") or "").strip() or self.MODEL_PERMISSIONS_ALL

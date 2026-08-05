@@ -1,0 +1,528 @@
+import tempfile
+import unittest
+from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
+
+from flask import Flask, Response
+from src.application.app_context import AppContext
+from src.config.model_mapping_config import ModelMappingSchema
+from src.presentation.proxy_controller import ProxyController
+from src.repositories import ApiKeyRepository, ModelMappingRepository, UserRepository
+from src.services import ApiKeyService, ModelCatalogService, UserService
+from src.services.model_mapping_service import ModelMappingService
+from src.services.proxy_service import ProxyErrorInfo
+from src.utils.database import create_connection_factory
+from src.utils.local_time import parse_local_datetime
+
+
+class FakeLogger:
+    def info(self, msg: str, *args) -> None:
+        del msg, args
+
+    def warning(self, msg: str, *args) -> None:
+        del msg, args
+
+    def error(self, msg: str, *args) -> None:
+        del msg, args
+
+
+class FakeConfigManager:
+    def __init__(self, *, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.config = {
+            "providers": [
+                {
+                    "name": "alpha",
+                    "enabled": True,
+                    "model_list": ["fast", "stable"],
+                }
+            ]
+        }
+
+    def is_model_mapping_enabled(self) -> bool:
+        return self.enabled
+
+    def get_raw_config(self) -> dict:
+        return self.config
+
+
+class FakeProviderManager:
+    def __init__(self, model_ids: tuple[str, ...] = ("alpha/fast", "alpha/stable")) -> None:
+        self.model_ids = model_ids
+        self.providers: dict[str, Any] = {}
+
+    def list_model_names(self) -> tuple[str, ...]:
+        return self.model_ids
+
+    def get_provider_for_model(self, model_id: str) -> Any | None:
+        return self.providers.get(model_id)
+
+
+class FakeOAuthService:
+    def __init__(
+        self,
+        *,
+        catalog_ids: tuple[str, ...] = (),
+        image_ids: tuple[str, ...] = (),
+        runtime_ids: tuple[str, ...] = (),
+    ) -> None:
+        self.catalog_ids = catalog_ids
+        self.image_ids = image_ids
+        self.runtime_ids = runtime_ids
+
+    def list_models(self) -> dict:
+        return {"models": [{"id": model_id} for model_id in self.catalog_ids]}
+
+    def list_image_models(self) -> dict:
+        return {"models": [{"id": model_id} for model_id in self.image_ids]}
+
+    def list_model_names(self) -> tuple[str, ...]:
+        return self.runtime_ids
+
+
+class ModelMappingSchemaTests(unittest.TestCase):
+    def test_mapping_id_allows_letter_or_underscore_prefix(self) -> None:
+        letter = ModelMappingSchema.from_mapping({"id": "public_v1", "targets": [{"model_id": "alpha/fast"}]})
+        underscore = ModelMappingSchema.from_mapping({"id": "_public2", "targets": [{"model_id": "alpha/fast"}]})
+
+        self.assertEqual("public_v1", letter.id)
+        self.assertEqual("_public2", underscore.id)
+
+    def test_mapping_id_rejects_digit_prefix_and_duplicate_targets(self) -> None:
+        with self.assertRaisesRegex(ValueError, "只能以字母或下划线开头"):
+            ModelMappingSchema.from_mapping({"id": "2public", "targets": [{"model_id": "alpha/fast"}]})
+        with self.assertRaisesRegex(ValueError, "不能重复选择"):
+            ModelMappingSchema.from_mapping(
+                {
+                    "id": "public",
+                    "targets": [
+                        {"model_id": "alpha/fast"},
+                        {"model_id": "alpha/fast"},
+                    ],
+                }
+            )
+
+
+class ModelMappingServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        root_path = Path(self.temp_dir.name)
+        self.config_manager = FakeConfigManager()
+        self.provider_manager = FakeProviderManager()
+        self.codex_service = FakeOAuthService(
+            catalog_ids=("gpt_text",),
+            image_ids=("gpt_image",),
+            runtime_ids=("gpt_text",),
+        )
+        self.claude_service = FakeOAuthService(catalog_ids=("claude_text",), runtime_ids=("claude_text",))
+        self.repository = ModelMappingRepository(create_connection_factory(root_path / "mappings.db"))
+        self.ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=self.config_manager,
+            root_path=root_path,
+            flask_app=Flask(__name__),
+        )
+        self.service = self._build_service()
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _build_service(self) -> ModelMappingService:
+        return ModelMappingService(
+            self.ctx,
+            self.repository,
+            provider_manager=self.provider_manager,
+            codex_oauth_service=self.codex_service,
+            claude_oauth_service=self.claude_service,
+        )
+
+    @staticmethod
+    def _mapping_payload(mapping_id: str = "public_model") -> dict:
+        return {
+            "id": mapping_id,
+            "cooldown_seconds_on_429": 60,
+            "targets": [
+                {"model_id": "alpha/fast", "priority": 10, "enabled": True},
+                {"model_id": "alpha/stable", "priority": 5, "enabled": True},
+            ],
+        }
+
+    def test_create_rejects_all_oauth_catalog_conflicts(self) -> None:
+        for mapping_id, source in (
+            ("gpt_text", "Codex OAuth"),
+            ("gpt_image", "Codex OAuth 图片"),
+            ("claude_text", "Claude OAuth"),
+        ):
+            with self.subTest(mapping_id=mapping_id), self.assertRaisesRegex(ValueError, source):
+                self.service.create_mapping(self._mapping_payload(mapping_id))
+
+    def test_mapping_ids_are_exposed_only_when_enabled_and_without_conflict(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        self.assertEqual(("public_model",), self.service.list_mapping_ids())
+
+        self.config_manager.enabled = False
+        self.assertEqual((), self.service.list_mapping_ids())
+
+        self.config_manager.enabled = True
+        self.codex_service.catalog_ids = ("gpt_text", "public_model")
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+        self.assertFalse(mapping["effective"])
+        self.assertEqual("Codex OAuth", mapping["conflict_source"])
+        self.assertEqual((), self.service.list_mapping_ids())
+
+        self.codex_service.catalog_ids = ("gpt_text",)
+        self.assertEqual(("public_model",), self.service.list_mapping_ids())
+
+    def test_sticky_selection_prefers_priority_and_survives_service_recreation(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        first = self.service.acquire_target("public_model")
+        recreated = self._build_service()
+        second = recreated.acquire_target("public_model")
+
+        self.assertEqual("alpha/fast", first.target_model_id)
+        self.assertEqual("alpha/fast", second.target_model_id)
+
+    def test_same_priority_uses_target_order(self) -> None:
+        payload = self._mapping_payload()
+        payload["targets"][1]["priority"] = 10
+        self.service.create_mapping(payload)
+
+        selected = self.service.acquire_target("public_model")
+
+        self.assertEqual("alpha/fast", selected.target_model_id)
+
+    def test_429_cools_target_then_fails_over_without_auto_disabling(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        selected = self.service.acquire_target("public_model")
+
+        with patch(
+            "src.services.model_mapping_service.now_local_datetime", return_value=datetime(2099, 8, 5, 10, 0, 0)
+        ):
+            self.service.record_failure(
+                selected,
+                status_code=429,
+                error_type="rate_limit_error",
+                error_message="rate limited",
+                response_headers={"Retry-After": "120"},
+            )
+
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+        failed_target = mapping["targets"][0]
+        next_target = self.service.acquire_target("public_model")
+        self.assertFalse(failed_target["auto_disabled"])
+        self.assertEqual("cooldown", failed_target["status"])
+        self.assertEqual(datetime(2099, 8, 5, 10, 2, 0), parse_local_datetime(failed_target["cooldown_until"]))
+        self.assertEqual("alpha/stable", next_target.target_model_id)
+
+    def test_non_429_failure_auto_disables_until_manual_enable(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        selected = self.service.acquire_target("public_model")
+        self.service.record_failure(
+            selected,
+            status_code=500,
+            error_type="upstream_error",
+            error_message="failed",
+        )
+
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+        self.assertEqual("auto_disabled", mapping["targets"][0]["status"])
+        self.assertEqual("alpha/stable", self.service.acquire_target("public_model").target_model_id)
+
+        restored = self.service.set_target_enabled("public_model", "alpha/fast", enabled=True)
+        target = next(item for item in restored["targets"] if item["model_id"] == "alpha/fast")
+        self.assertEqual("available", target["status"])
+
+    def test_unavailable_target_cannot_toggle_but_mapping_can_be_deleted(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        self.provider_manager.model_ids = ("alpha/stable",)
+
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+        self.assertEqual("unavailable", mapping["targets"][0]["status"])
+        with self.assertRaisesRegex(ValueError, "当前不可用"):
+            self.service.set_target_enabled("public_model", "alpha/fast", enabled=False)
+        changed = self._mapping_payload()
+        changed["targets"][0]["priority"] = 99
+        with self.assertRaisesRegex(ValueError, "只能删除"):
+            self.service.update_mapping("public_model", changed)
+
+        self.service.delete_mapping("public_model")
+        self.assertIsNone(self.service.get_mapping("public_model"))
+
+    def test_export_import_excludes_runtime_state_and_rejects_duplicates(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        selected = self.service.acquire_target("public_model")
+        self.service.record_failure(
+            selected,
+            status_code=500,
+            error_type="upstream_error",
+            error_message="failed",
+        )
+        exported = self.service.export_mappings()
+
+        self.assertEqual("llm_proxy.model_mappings", exported["kind"])
+        self.assertNotIn("auto_disabled", exported["model_mappings"][0]["targets"][0])
+        with self.assertRaisesRegex(ValueError, "已存在"):
+            self.service.import_mappings(exported)
+
+        second_repository = ModelMappingRepository(create_connection_factory(Path(self.temp_dir.name) / "imported.db"))
+        imported_service = ModelMappingService(
+            self.ctx,
+            second_repository,
+            provider_manager=self.provider_manager,
+            codex_oauth_service=self.codex_service,
+            claude_oauth_service=self.claude_service,
+        )
+        result = imported_service.import_mappings(exported)
+        imported = imported_service.get_mapping("public_model")
+        assert imported is not None
+        self.assertEqual(1, result["count"])
+        self.assertEqual("available", imported["targets"][0]["status"])
+        self.assertIsNone(imported["current_target_model_id"])
+
+    def test_runtime_failure_state_survives_service_recreation(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        selected = self.service.acquire_target("public_model")
+        self.service.record_failure(
+            selected,
+            status_code=500,
+            error_type="upstream_error",
+            error_message="failed",
+        )
+
+        recreated = self._build_service()
+        mapping = recreated.get_mapping("public_model")
+        assert mapping is not None
+
+        self.assertEqual("auto_disabled", mapping["targets"][0]["status"])
+        self.assertEqual("alpha/stable", recreated.acquire_target("public_model").target_model_id)
+
+    def test_late_callback_after_target_deletion_does_not_recreate_runtime_rows(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        selected = self.service.acquire_target("public_model")
+        self.service.delete_mapping("public_model")
+
+        self.service.record_success(selected)
+        self.service.record_failure(
+            selected,
+            status_code=500,
+            error_type="upstream_error",
+            error_message="late failure",
+        )
+
+        with self.repository._get_connection() as conn:
+            self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM model_mappings").fetchone()[0])
+            self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM model_mapping_targets").fetchone()[0])
+            self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM model_mapping_target_runtime").fetchone()[0])
+            self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM model_mapping_runtime").fetchone()[0])
+
+    def test_disabled_switch_preserves_user_and_api_key_mapping_permissions(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        catalog = ModelCatalogService(self.ctx, model_mapping_service=self.service)
+        user_repository = UserRepository(create_connection_factory(Path(self.temp_dir.name) / "users.db"))
+        api_key_repository = ApiKeyRepository(create_connection_factory(Path(self.temp_dir.name) / "keys.db"))
+        user_service = UserService(self.ctx, user_repository, catalog)
+        api_key_service = ApiKeyService(self.ctx, api_key_repository, catalog)
+        user_id = user_service.create_user("alice", "127.0.0.1")
+        assert user_id is not None
+        user_service.update_user(
+            user_id,
+            model_permissions_provided=True,
+            model_permissions=["public_model"],
+        )
+        api_key = api_key_service.create_api_key("mapping-key", ["public_model"])
+
+        self.config_manager.enabled = False
+        self.assertNotIn("public_model", user_service.get_available_models())
+        self.assertNotIn("public_model", api_key_service.get_available_models())
+        self.assertEqual(0, user_service.sync_model_permissions())
+        self.assertEqual(0, api_key_service.sync_model_permissions())
+        self.assertIn("public_model", str(user_repository.get_by_id(user_id)["model_permissions"]))
+        self.assertIn("public_model", str(api_key_repository.get_by_id(api_key["id"])["model_permissions"]))
+
+        self.config_manager.enabled = True
+        self.assertEqual(["public_model"], user_service.get_user_by_id(user_id)["model_permissions"])
+        self.assertEqual(["public_model"], api_key_service.get_api_key_by_id(api_key["id"])["model_permissions"])
+
+
+class FakeMappedProxyService:
+    def __init__(self, outcomes: dict[str, Any], calls: list[str]) -> None:
+        self._outcomes = outcomes
+        self._calls = calls
+
+    def proxy_request(self, *args: Any, **kwargs: Any) -> tuple[Response | None, int, ProxyErrorInfo | None]:
+        request_data = next(item for item in args if isinstance(item, dict) and "model" in item)
+        model_id = request_data["model"]
+        self._calls.append(model_id)
+        outcome = self._outcomes[model_id]
+        if callable(outcome):
+            return outcome(kwargs)
+        if isinstance(outcome, Exception):
+            raise outcome
+        response, status_code, failure = outcome
+        if response is not None and 200 <= status_code < 300 and kwargs.get("on_complete"):
+            kwargs["on_complete"]({"response_model": model_id})
+        return response, status_code, failure
+
+
+class FakeMappedOAuthProxyService(FakeMappedProxyService):
+    def __init__(self, model_ids: tuple[str, ...], outcomes: dict[str, Any], calls: list[str]) -> None:
+        super().__init__(outcomes, calls)
+        self._model_ids = set(model_ids)
+
+    def has_model(self, model_id: str) -> bool:
+        return model_id in self._model_ids
+
+
+class ModelMappingProxyControllerTests(ModelMappingServiceTests):
+    def _build_controller(
+        self,
+        outcomes: dict[str, Any],
+        calls: list[str],
+    ) -> ProxyController:
+        self.provider_manager.model_ids = ("alpha/fast", "gpt_text", "claude_text")
+        self.provider_manager.providers = {"alpha/fast": SimpleNamespace(name="alpha")}
+        self.codex_service.runtime_ids = ("gpt_text",)
+        self.claude_service.runtime_ids = ("claude_text",)
+        controller = object.__new__(ProxyController)
+        controller._logger = FakeLogger()
+        controller._provider_manager = self.provider_manager
+        controller._model_mapping_service = self.service
+        controller._proxy_service = FakeMappedProxyService(outcomes, calls)
+        controller._codex_proxy_service = FakeMappedOAuthProxyService(("gpt_text",), outcomes, calls)
+        controller._claude_proxy_service = FakeMappedOAuthProxyService(("claude_text",), outcomes, calls)
+        return controller
+
+    def _create_cross_type_mapping(self) -> None:
+        self.service.create_mapping(
+            {
+                "id": "public_model",
+                "targets": [
+                    {"model_id": "alpha/fast", "priority": 30},
+                    {"model_id": "gpt_text", "priority": 20},
+                    {"model_id": "claude_text", "priority": 10},
+                ],
+            }
+        )
+
+    def _proxy(self, controller: ProxyController, completed: list[dict[str, Any]]) -> Response:
+        response, status_code, failure = controller._proxy_model_mapping_request(
+            mapping_id="public_model",
+            request_data={"model": "public_model", "messages": []},
+            request_headers={},
+            on_complete=lambda meta: completed.append(meta),
+            forward_stream_usage=False,
+            resolved_target_format="openai_chat",
+            trace_id="trace",
+            route_name="chat_completions",
+            client_ip="127.0.0.1",
+        )
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        assert response is not None
+        return response
+
+    def test_cross_type_failover_records_429_and_redirect_then_uses_claude(self) -> None:
+        calls: list[str] = []
+        completed: list[dict[str, Any]] = []
+        outcomes = {
+            "alpha/fast": (Response("limited", status=429, headers={"Retry-After": "120"}), 429, None),
+            "gpt_text": (
+                None,
+                502,
+                ProxyErrorInfo(
+                    message="redirect",
+                    status_code=502,
+                    details={"upstream_status": 302},
+                ),
+            ),
+            "claude_text": (Response("ok", status=200), 200, None),
+        }
+        controller = self._build_controller(outcomes, calls)
+        self._create_cross_type_mapping()
+
+        response = self._proxy(controller, completed)
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+        targets = {target["model_id"]: target for target in mapping["targets"]}
+
+        self.assertEqual(["alpha/fast", "gpt_text", "claude_text"], calls)
+        self.assertEqual(b"ok", response.get_data())
+        self.assertEqual("cooldown", targets["alpha/fast"]["status"])
+        self.assertEqual(302, targets["gpt_text"]["last_status_code"])
+        self.assertEqual("auto_disabled", targets["gpt_text"]["status"])
+        self.assertEqual("claude_text", mapping["current_target_model_id"])
+        self.assertEqual("claude_text", completed[0]["response_model"])
+
+    def test_successful_target_does_not_switch(self) -> None:
+        calls: list[str] = []
+        completed: list[dict[str, Any]] = []
+        outcomes = {
+            "alpha/fast": (Response("ok", status=200), 200, None),
+            "gpt_text": (Response("unexpected", status=200), 200, None),
+            "claude_text": (Response("unexpected", status=200), 200, None),
+        }
+        controller = self._build_controller(outcomes, calls)
+        self._create_cross_type_mapping()
+
+        self._proxy(controller, completed)
+
+        self.assertEqual(["alpha/fast"], calls)
+        self.assertEqual("alpha/fast", completed[0]["response_model"])
+
+    def test_target_exception_disables_and_switches(self) -> None:
+        calls: list[str] = []
+        completed: list[dict[str, Any]] = []
+        outcomes = {
+            "alpha/fast": RuntimeError("provider failed"),
+            "gpt_text": (Response("ok", status=200), 200, None),
+            "claude_text": (Response("unexpected", status=200), 200, None),
+        }
+        controller = self._build_controller(outcomes, calls)
+        self._create_cross_type_mapping()
+
+        self._proxy(controller, completed)
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+
+        self.assertEqual(["alpha/fast", "gpt_text"], calls)
+        self.assertEqual("auto_disabled", mapping["targets"][0]["status"])
+
+    def test_stream_failure_after_commit_affects_only_next_request(self) -> None:
+        calls: list[str] = []
+        completed: list[dict[str, Any]] = []
+
+        def committed_stream(kwargs: dict[str, Any]) -> tuple[Response, int, None]:
+            def generate():
+                yield b"data: partial\n\n"
+                kwargs["on_stream_failure"](
+                    {
+                        "status_code": 502,
+                        "error_type": "upstream_stream_error",
+                        "error_message": "stream interrupted",
+                    }
+                )
+
+            return Response(generate(), status=200), 200, None
+
+        outcomes = {
+            "alpha/fast": committed_stream,
+            "gpt_text": (Response("ok", status=200), 200, None),
+            "claude_text": (Response("unexpected", status=200), 200, None),
+        }
+        controller = self._build_controller(outcomes, calls)
+        self._create_cross_type_mapping()
+
+        first_response = self._proxy(controller, completed)
+        self.assertEqual(["alpha/fast"], calls)
+        self.assertIn(b"partial", first_response.get_data())
+        second_response = self._proxy(controller, completed)
+
+        self.assertEqual(["alpha/fast", "gpt_text"], calls)
+        self.assertEqual(b"ok", second_response.get_data())

@@ -222,6 +222,22 @@
                     </div>
                 </section>
 
+                <section class="section-card settings-shell-card">
+                    <div class="section-header settings-shell-header">
+                        <div>
+                            <h2 class="section-title">模型映射</h2>
+                            <p class="section-subtitle">启用后在顶部导航显示模型映射页签。</p>
+                        </div>
+                    </div>
+                    <div class="setting-toggle-inline">
+                        <span class="setting-toggle-title">启用模型映射</span>
+                        <label class="switch" aria-label="切换模型映射">
+                            <input type="checkbox" id="modelMappingEnabled">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </section>
+
                 <section class="section-card settings-shell-card settings-shell-card-oauth">
                     <div class="section-header settings-shell-header">
                         <div>
@@ -401,6 +417,8 @@
         let pendingClientIpSave = false;
         let apiKeySettingsSaving = false;
         let pendingApiKeySave = false;
+        let modelMappingSettingsSaving = false;
+        let pendingModelMappingSave = false;
         let oauthSettingsSaving = false;
         let pendingOAuthSave = false;
         let debugSettingsSaving = false;
@@ -409,6 +427,7 @@
         let currentBasicSettingsSnapshot = "";
         let currentClientIpSettingsSnapshot = "";
         let currentApiKeySettingsSnapshot = "";
+        let currentModelMappingSettingsSnapshot = "";
         let currentOAuthSettingsSnapshot = "";
         let currentDebugSettingsSnapshot = "";
         let activeSettingsHelpTrigger = null;
@@ -665,6 +684,14 @@
             };
         }
 
+        function collectModelMappingSettingsPayload() {
+            return {
+                model_mapping: {
+                    enabled: document.getElementById("modelMappingEnabled").checked
+                }
+            };
+        }
+
         function collectDebugSettingsPayload() {
             return {
                 logging: {
@@ -711,6 +738,13 @@
             currentApiKeySettingsSnapshot = JSON.stringify(collectApiKeySettingsPayload());
         }
 
+        function fillModelMappingSettingsForm(settings) {
+            const enabled = Boolean(settings?.model_mapping?.enabled);
+            document.getElementById("modelMappingEnabled").checked = enabled;
+            syncModelMappingNavLink(enabled);
+            currentModelMappingSettingsSnapshot = JSON.stringify(collectModelMappingSettingsPayload());
+        }
+
         function fillDebugSettingsForm(settings) {
             document.getElementById("logPath").value = settings?.logging?.path || "";
             document.getElementById("logLevel").value = settings?.logging?.level || "INFO";
@@ -741,6 +775,7 @@
             fillBasicSettingsForm(settings);
             fillClientIpSettingsForm(settings);
             fillApiKeySettingsForm(settings);
+            fillModelMappingSettingsForm(settings);
             fillOAuthSettingsForm(settings);
             fillDebugSettingsForm(settings);
         }
@@ -768,6 +803,10 @@
 
         function hasApiKeySettingsChanged() {
             return JSON.stringify(collectApiKeySettingsPayload()) !== currentApiKeySettingsSnapshot;
+        }
+
+        function hasModelMappingSettingsChanged() {
+            return JSON.stringify(collectModelMappingSettingsPayload()) !== currentModelMappingSettingsSnapshot;
         }
 
         function hasDebugSettingsChanged() {
@@ -866,6 +905,29 @@
             nav.insertBefore(apiKeyLink, usersLink || null);
         }
 
+        function syncModelMappingNavLink(enabled) {
+            const nav = document.querySelector(".header-nav");
+            if (!nav) {
+                return;
+            }
+            const existing = nav.querySelector('[data-nav-page="model_mappings"]');
+            if (!enabled) {
+                existing?.remove();
+                return;
+            }
+            if (existing) {
+                return;
+            }
+            const link = document.createElement("a");
+            link.className = "header-nav-link";
+            link.href = "/model-mappings";
+            link.dataset.navPage = "model_mappings";
+            link.textContent = "模型映射";
+            const apiKeyLink = nav.querySelector('[data-nav-page="api_keys"]');
+            const usersLink = nav.querySelector('a[href="/users"]');
+            nav.insertBefore(link, apiKeyLink || usersLink || null);
+        }
+
         function handleOAuthSettingsChanged() {
             const enabled = Boolean(document.getElementById("oauthEnabled")?.checked);
             syncOAuthDetailsVisibility(enabled);
@@ -878,6 +940,12 @@
             const enabled = Boolean(document.getElementById("apiKeyManagementEnabled")?.checked);
             syncApiKeyNavLink(enabled);
             saveApiKeySettings();
+        }
+
+        function handleModelMappingSettingsChanged() {
+            const enabled = Boolean(document.getElementById("modelMappingEnabled")?.checked);
+            syncModelMappingNavLink(enabled);
+            saveModelMappingSettings();
         }
 
         function handleClientIpSettingsChanged() {
@@ -1101,6 +1169,50 @@
                     await saveApiKeySettings();
                 } else {
                     pendingApiKeySave = false;
+                }
+            }
+        }
+
+        async function saveModelMappingSettings() {
+            if (modelMappingSettingsSaving) {
+                pendingModelMappingSave = true;
+                return Promise.resolve();
+            }
+            if (!hasModelMappingSettingsChanged()) {
+                return Promise.resolve();
+            }
+            const payload = collectModelMappingSettingsPayload();
+            const savedPayloadSnapshot = JSON.stringify(payload);
+            modelMappingSettingsSaving = true;
+            try {
+                const response = await fetch("/api/settings/system/model-mapping", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.error || "保存模型映射设置失败");
+                }
+                currentSettings = data.settings;
+                if (JSON.stringify(collectModelMappingSettingsPayload()) === savedPayloadSnapshot) {
+                    fillModelMappingSettingsForm(data.settings);
+                } else {
+                    currentModelMappingSettingsSnapshot = savedPayloadSnapshot;
+                    pendingModelMappingSave = true;
+                }
+            } catch (error) {
+                showActionError("保存模型映射设置", error);
+                if (currentSettings) {
+                    fillModelMappingSettingsForm(currentSettings);
+                }
+            } finally {
+                modelMappingSettingsSaving = false;
+                if (pendingModelMappingSave && hasModelMappingSettingsChanged()) {
+                    pendingModelMappingSave = false;
+                    await saveModelMappingSettings();
+                } else {
+                    pendingModelMappingSave = false;
                 }
             }
         }
@@ -1367,6 +1479,7 @@
             });
 
             document.getElementById("apiKeyManagementEnabled")?.addEventListener("change", handleApiKeySettingsChanged);
+            document.getElementById("modelMappingEnabled")?.addEventListener("change", handleModelMappingSettingsChanged);
 
             document.getElementById("oauthEnabled")?.addEventListener("change", handleOAuthSettingsChanged);
 

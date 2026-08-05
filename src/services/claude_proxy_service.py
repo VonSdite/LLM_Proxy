@@ -80,6 +80,7 @@ class ClaudeProxyService:
         trace_id: str | None = None,
         route_name: str | None = None,
         client_ip: str | None = None,
+        on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """按认证文件顺序代理 Claude OAuth 请求。"""
         del trace_id, forward_stream_usage
@@ -132,6 +133,7 @@ class ClaudeProxyService:
                 target_format=target_format,
                 route_name=route_name,
                 client_ip=client_ip,
+                on_stream_failure=on_stream_failure,
             )
             if failure is not None:
                 if failure.error_code in {
@@ -163,6 +165,7 @@ class ClaudeProxyService:
         target_format: str,
         route_name: str | None,
         client_ip: str | None,
+        on_stream_failure: Callable[[dict[str, Any]], None] | None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         translator = self._translator_registry.get("claude_chat", target_format)
         requested_stream = bool(request_data.get("stream", False))
@@ -257,6 +260,7 @@ class ClaudeProxyService:
                     status_code=upstream_response.status_code,
                     error_type="upstream_error",
                     error_code=error_type or "claude_upstream_error",
+                    response_headers=dict(upstream_response.headers),
                 ),
             )
 
@@ -273,6 +277,7 @@ class ClaudeProxyService:
                     route_name=route_name,
                     client_ip=client_ip,
                     auth_file_name=candidate.name,
+                    on_stream_failure=on_stream_failure,
                 )
             except (requests.exceptions.RequestException, OSError) as exc:
                 return self._build_candidate_transport_failure(
@@ -438,6 +443,7 @@ class ClaudeProxyService:
         route_name: str | None,
         client_ip: str | None,
         auth_file_name: str,
+        on_stream_failure: Callable[[dict[str, Any]], None] | None,
     ) -> Response:
         del route_name, client_ip
         downstream_headers = self._filter_response_headers(response.headers)
@@ -603,6 +609,19 @@ class ClaudeProxyService:
                     )
                 elif completed:
                     self._claude_oauth_service.record_auth_file_success(auth_file_name)
+                if on_stream_failure is not None and downstream_started and not downstream_cancelled:
+                    failure_message = stream_failure_message or upstream_error_message
+                    if failure_message:
+                        try:
+                            on_stream_failure(
+                                {
+                                    "status_code": 502,
+                                    "error_type": "claude_stream_failed",
+                                    "error_message": failure_message,
+                                }
+                            )
+                        except Exception as exc:
+                            self._logger.error("Error in Claude on_stream_failure callback: %s", exc)
                 if (
                     on_complete is not None
                     and not downstream_cancelled

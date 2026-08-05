@@ -45,6 +45,7 @@ class WebController:
         self._app.route("/")(auth(self.home))
         self._app.route("/providers")(auth(self.providers_page))
         self._app.route("/oauth")(auth(self.oauth_page))
+        self._app.route("/model-mappings")(auth(self.model_mappings_page))
         self._app.route("/api-keys")(auth(self.api_keys_page))
         self._app.route("/users")(auth(self.users_page))
         self._app.route("/statistics")(auth(self.statistics_page))
@@ -65,6 +66,7 @@ class WebController:
         self._app.route("/api/settings/system/debug", methods=["PUT"])(auth(self.update_debug_settings))
         self._app.route("/api/settings/system/oauth", methods=["PUT"])(auth(self.update_oauth_settings))
         self._app.route("/api/settings/system/api-keys", methods=["PUT"])(auth(self.update_api_key_settings))
+        self._app.route("/api/settings/system/model-mapping", methods=["PUT"])(auth(self.update_model_mapping_settings))
 
     def home(self) -> str:
         return self.providers_page()
@@ -77,6 +79,7 @@ class WebController:
             auth_enabled=self._auth_service.is_auth_enabled(),
             oauth_enabled=self._is_oauth_enabled(),
             api_key_management_enabled=self._is_api_key_management_enabled(),
+            model_mapping_enabled=self._is_model_mapping_enabled(),
         )
 
     def users_page(self) -> str:
@@ -88,6 +91,7 @@ class WebController:
             auth_enabled=self._auth_service.is_auth_enabled(),
             oauth_enabled=self._is_oauth_enabled(),
             api_key_management_enabled=self._is_api_key_management_enabled(),
+            model_mapping_enabled=self._is_model_mapping_enabled(),
         )
 
     def oauth_page(self) -> str:
@@ -98,6 +102,20 @@ class WebController:
             auth_enabled=self._auth_service.is_auth_enabled(),
             oauth_enabled=self._is_oauth_enabled(),
             api_key_management_enabled=self._is_api_key_management_enabled(),
+            model_mapping_enabled=self._is_model_mapping_enabled(),
+        )
+
+    def model_mappings_page(self) -> ResponseReturnValue:
+        if not self._is_model_mapping_enabled():
+            return redirect("/settings")
+        return render_template(
+            "model_mappings.html",
+            active_page="model_mappings",
+            current_username=self._get_current_username(),
+            auth_enabled=self._auth_service.is_auth_enabled(),
+            oauth_enabled=self._is_oauth_enabled(),
+            api_key_management_enabled=self._is_api_key_management_enabled(),
+            model_mapping_enabled=True,
         )
 
     def api_keys_page(self) -> ResponseReturnValue:
@@ -110,6 +128,7 @@ class WebController:
             auth_enabled=self._auth_service.is_auth_enabled(),
             oauth_enabled=self._is_oauth_enabled(),
             api_key_management_enabled=self._is_api_key_management_enabled(),
+            model_mapping_enabled=self._is_model_mapping_enabled(),
         )
 
     def providers_page(self) -> str:
@@ -121,6 +140,7 @@ class WebController:
             auth_enabled=self._auth_service.is_auth_enabled(),
             oauth_enabled=self._is_oauth_enabled(),
             api_key_management_enabled=self._is_api_key_management_enabled(),
+            model_mapping_enabled=self._is_model_mapping_enabled(),
         )
 
     def settings_page(self) -> str:
@@ -131,6 +151,7 @@ class WebController:
             auth_enabled=self._auth_service.is_auth_enabled(),
             oauth_enabled=self._is_oauth_enabled(),
             api_key_management_enabled=self._is_api_key_management_enabled(),
+            model_mapping_enabled=self._is_model_mapping_enabled(),
         )
 
     def _get_current_username(self) -> str:
@@ -152,6 +173,12 @@ class WebController:
         if read_enabled is None:
             return False
         return bool(read_enabled())
+
+    def _is_model_mapping_enabled(self) -> bool:
+        if self._config_manager is None:
+            return False
+        read_enabled = getattr(self._config_manager, "is_model_mapping_enabled", None)
+        return bool(read_enabled()) if callable(read_enabled) else False
 
     @staticmethod
     def _get_multi_filter_values(name: str) -> list[str]:
@@ -648,4 +675,14 @@ class WebController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error updating API key settings: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def update_model_mapping_settings(self) -> ResponseReturnValue:
+        try:
+            payload = require_json_object()
+            return jsonify(self._settings_service.update_model_mapping_settings(payload))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating model mapping settings: %s", exc)
             return jsonify({"error": str(exc)}), 500
