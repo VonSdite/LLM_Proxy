@@ -37,7 +37,7 @@
 downstream request
   -> data-plane CORS preflight / response headers
   -> controller
-  -> provider / OAuth / model mapping lookup
+  -> model mapping / provider / OAuth route lookup
   -> optional sticky model mapping target selection
   -> resolve route model key to upstream model id
   -> strip downstream Authorization from upstream headers
