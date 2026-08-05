@@ -166,10 +166,56 @@
 }
 
 .mapping-target-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     margin-top: 8px;
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 600;
+}
+
+.mapping-target-count,
+.mapping-target-more {
+    display: inline-flex;
+    min-height: 24px;
+    align-items: center;
+    padding: 0 8px;
+    border: 1px solid rgba(100, 116, 139, 0.18);
+    border-radius: 999px;
+    background: #f6f8fb;
+    color: #334155;
+}
+
+.mapping-inline-button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.mapping-inline-button:hover,
+.mapping-inline-button:focus-visible {
+    color: var(--primary-hover);
+    outline: none;
+    text-decoration: underline;
+}
+
+.mapping-current-target {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-secondary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mapping-cooldown-cell {
+    vertical-align: middle !important;
+    font-family: var(--font-numeric);
 }
 
 .mapping-row-actions .btn-action {
@@ -790,6 +836,13 @@
     border-color: #687383;
     background: rgba(45, 52, 62, 0.78);
     color: #bcc8d8;
+}
+
+:root[data-theme="dark"] .mapping-target-count,
+:root[data-theme="dark"] .mapping-target-more {
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.08);
+    color: #d5dde7;
 }
 
 :root[data-theme="dark"] .mapping-target-table-shell,
