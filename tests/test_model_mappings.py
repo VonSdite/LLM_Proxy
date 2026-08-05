@@ -110,10 +110,11 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260805-2", template)
+        self.assertIn("model_mappings.css?v=20260805-3", template)
         self.assertIn(".model-mappings-page .modal-content", stylesheet)
         self.assertIn(":root[data-theme=\"dark\"] .model-mappings-page .modal-content", stylesheet)
         self.assertIn(":root[data-theme=\"dark\"] .model-mappings-page .modal .form-control", stylesheet)
+        self.assertIn(":root[data-theme=\"dark\"] .model-mappings-page .mapping-toolbar .btn-secondary", stylesheet)
 
 
 class ModelMappingServiceTests(unittest.TestCase):
