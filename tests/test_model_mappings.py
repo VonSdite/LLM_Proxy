@@ -105,6 +105,16 @@ class ModelMappingSchemaTests(unittest.TestCase):
                 }
             )
 
+    def test_mapping_editor_has_theme_aware_modal_styles(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
+        stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
+
+        self.assertIn("model_mappings.css?v=20260805-2", template)
+        self.assertIn(".model-mappings-page .modal-content", stylesheet)
+        self.assertIn(":root[data-theme=\"dark\"] .model-mappings-page .modal-content", stylesheet)
+        self.assertIn(":root[data-theme=\"dark\"] .model-mappings-page .modal .form-control", stylesheet)
+
 
 class ModelMappingServiceTests(unittest.TestCase):
     def setUp(self) -> None:

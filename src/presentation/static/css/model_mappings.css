@@ -202,6 +202,76 @@
     line-height: 1;
 }
 
+.model-mappings-page .modal-dialog {
+    max-width: min(1040px, calc(100vw - 32px));
+}
+
+.model-mappings-page .modal-content {
+    border: 1px solid var(--line) !important;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-soft);
+    color: var(--text-primary);
+    overflow: hidden;
+}
+
+.model-mappings-page .modal-header,
+.model-mappings-page .modal-footer {
+    background: var(--surface);
+}
+
+.model-mappings-page .modal-header {
+    padding: 20px 22px 8px;
+}
+
+.model-mappings-page .modal-title {
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.model-mappings-page .modal-body {
+    padding: 0 22px 22px;
+    background: var(--surface);
+}
+
+.model-mappings-page .modal-footer {
+    padding: 0 22px 22px;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.model-mappings-page .modal-footer .btn {
+    min-width: 92px;
+}
+
+.model-mappings-page .modal .form-control {
+    background: #fff;
+}
+
+.model-mappings-page .modal .btn-secondary {
+    border-color: var(--line-strong);
+    background: rgba(255, 255, 255, 0.88);
+    color: var(--text-secondary);
+    font-weight: 700;
+}
+
+.model-mappings-page .modal .btn-secondary:hover,
+.model-mappings-page .modal .btn-secondary:focus {
+    border-color: var(--primary);
+    background: #fff;
+    color: var(--primary);
+    box-shadow: none;
+}
+
+.model-mappings-page .btn-close {
+    opacity: 0.72;
+}
+
+.model-mappings-page .btn-close:hover {
+    opacity: 1;
+}
+
 :root[data-theme="dark"] .mapping-toolbar,
 :root[data-theme="dark"] .mapping-table-shell,
 :root[data-theme="dark"] .mapping-table td {
@@ -219,6 +289,51 @@
 :root[data-theme="dark"] .mapping-target-option:hover,
 :root[data-theme="dark"] .mapping-target-option.is-active {
     background: #243246;
+}
+
+:root[data-theme="dark"] .model-mappings-page .modal-content,
+:root[data-theme="dark"] .model-mappings-page .modal-header,
+:root[data-theme="dark"] .model-mappings-page .modal-body,
+:root[data-theme="dark"] .model-mappings-page .modal-footer {
+    background: #161b22;
+}
+
+:root[data-theme="dark"] .model-mappings-page .modal-content {
+    border-color: #30363d;
+}
+
+:root[data-theme="dark"] .model-mappings-page .modal .form-control {
+    background: #0d1117;
+}
+
+:root[data-theme="dark"] .model-mappings-page .modal .btn-secondary {
+    border-color: #3b4654;
+    background: linear-gradient(180deg, rgba(28, 36, 49, 0.98), rgba(20, 27, 38, 0.98));
+    color: #bcc8d8;
+}
+
+:root[data-theme="dark"] .model-mappings-page .modal .btn-secondary:hover,
+:root[data-theme="dark"] .model-mappings-page .modal .btn-secondary:focus {
+    border-color: var(--primary);
+    background: #1f6feb;
+    color: #fff;
+}
+
+:root[data-theme="dark"] .model-mappings-page .modal .btn-close {
+    filter: invert(1) grayscale(1);
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row {
+    background: rgba(15, 20, 27, 0.72);
+    border-color: #3b4654;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-target-toggle {
+    color: #bcc8d8;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-remove-target {
+    border-color: #3b4654;
 }
 
 @media (max-width: 760px) {
