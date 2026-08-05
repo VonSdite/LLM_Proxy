@@ -145,6 +145,8 @@ class ProviderManagerLike(Protocol):
 class ModelMappingServiceLike(Protocol):
     def list_mapping_ids(self) -> Iterable[str]: ...
 
+    def list_image_mapping_ids(self) -> Iterable[str]: ...
+
     def has_mapping(self, mapping_id: str) -> bool: ...
 
     def acquire_target(self, mapping_id: str, excluded_target_ids: Iterable[str] = ()) -> Any: ...
@@ -562,7 +564,10 @@ class ProxyController:
                     provider_name=provider_name,
                     target_format=target_format,
                 )
-            if not self._codex_proxy_service.has_image_model(model_name):
+            is_model_mapping = bool(
+                self._model_mapping_service is not None and self._model_mapping_service.has_mapping(model_name)
+            )
+            if not is_model_mapping and not self._codex_proxy_service.has_image_model(model_name):
                 return self._error_response(
                     f"Unknown image model: {model_name}",
                     400,
@@ -618,6 +623,8 @@ class ProxyController:
                 )
 
             trace_id = uuid4().hex
+            if is_model_mapping:
+                provider_name = "model_mapping"
             self._log_downstream_request_trace_safe(
                 trace_id=trace_id,
                 start_line=self._build_request_start_line(request.method, request.full_path),
@@ -648,15 +655,27 @@ class ProxyController:
                     log_kwargs["api_key_id"] = api_key_id
                 self._log_request(**log_kwargs)
 
-            result, status_code, failure_info = self._codex_proxy_service.proxy_image_request(
-                request_data,
-                headers,
-                action=action,
-                on_complete=on_proxy_complete,
-                trace_id=trace_id,
-                route_name=route_name,
-                client_ip=client_ip,
-            )
+            if is_model_mapping:
+                result, status_code, failure_info = self._proxy_model_mapping_image_request(
+                    mapping_id=model_name,
+                    request_data=request_data,
+                    request_headers=headers,
+                    action=action,
+                    on_complete=on_proxy_complete,
+                    trace_id=trace_id,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                )
+            else:
+                result, status_code, failure_info = self._codex_proxy_service.proxy_image_request(
+                    request_data,
+                    headers,
+                    action=action,
+                    on_complete=on_proxy_complete,
+                    trace_id=trace_id,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                )
             if result is None:
                 failure_info = failure_info or ProxyErrorInfo(
                     message="Upstream image request failed after retries",
@@ -774,12 +793,12 @@ class ProxyController:
             is_claude_model = False
             is_model_mapping = False
             if not provider:
-                if self._codex_proxy_service is not None and self._codex_proxy_service.has_model(model_name):
+                if self._model_mapping_service is not None and self._model_mapping_service.has_mapping(model_name):
+                    is_model_mapping = True
+                elif self._codex_proxy_service is not None and self._codex_proxy_service.has_model(model_name):
                     is_codex_model = True
                 elif self._claude_proxy_service is not None and self._claude_proxy_service.has_model(model_name):
                     is_claude_model = True
-                elif self._model_mapping_service is not None and self._model_mapping_service.has_mapping(model_name):
-                    is_model_mapping = True
                 else:
                     self._logger.warning("Proxy rejected: unknown model=%r route=%s", model_name, route_name)
                     return self._error_response(
@@ -1062,13 +1081,24 @@ class ProxyController:
                 except Exception as exc:
                     self._logger.warning("Claude model list skipped: error=%s", exc)
             mapping_model_names = set()
+            image_mapping_model_names = set()
             if self._model_mapping_service is not None:
                 try:
                     mapping_model_names = set(self._model_mapping_service.list_mapping_ids())
+                    list_image_mapping_ids = getattr(self._model_mapping_service, "list_image_mapping_ids", None)
+                    if callable(list_image_mapping_ids):
+                        image_mapping_model_names = set(list_image_mapping_ids())
                 except Exception as exc:
                     self._logger.warning("Model mapping list skipped: error=%s", exc)
             for model_key in model_names:
                 if model_key in mapping_model_names:
+                    target_formats = [
+                        "openai_chat",
+                        "openai_responses",
+                        "claude_chat",
+                    ]
+                    if model_key in image_mapping_model_names:
+                        target_formats.append("openai_images")
                     data.append(
                         {
                             "id": model_key,
@@ -1076,11 +1106,7 @@ class ProxyController:
                             "owned_by": "model_mapping",
                             "provider_name": "model_mapping",
                             "source_format": "model_mapping",
-                            "target_formats": [
-                                "openai_chat",
-                                "openai_responses",
-                                "claude_chat",
-                            ],
+                            "target_formats": target_formats,
                         }
                     )
                     continue
@@ -1156,6 +1182,112 @@ class ProxyController:
                 error_type="server_error",
                 code="internal_error",
             )
+
+    def _proxy_model_mapping_image_request(
+        self,
+        *,
+        mapping_id: str,
+        request_data: dict[str, Any],
+        request_headers: dict[str, str],
+        action: str,
+        on_complete: Any,
+        trace_id: str,
+        route_name: str,
+        client_ip: str,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
+        """调用映射中的 Codex 图片目标，并在失败后执行粘滞切换。"""
+        if self._model_mapping_service is None:
+            failure = ProxyErrorInfo(
+                message="Model mapping service is not configured",
+                status_code=503,
+                error_type="upstream_error",
+                error_code="model_mapping_unavailable",
+            )
+            return None, failure.status_code, failure
+
+        excluded_targets: set[str] = set()
+        last_failure: ProxyErrorInfo | None = None
+        while True:
+            try:
+                selection = self._model_mapping_service.acquire_target(mapping_id, excluded_targets)
+            except ValueError as exc:
+                if last_failure is not None:
+                    return None, last_failure.status_code, last_failure
+                failure = ProxyErrorInfo(
+                    message=str(exc),
+                    status_code=503,
+                    error_type="upstream_error",
+                    error_code="model_mapping_targets_unavailable",
+                )
+                return None, failure.status_code, failure
+
+            target_model_id = selection.target_model_id
+            excluded_targets.add(target_model_id)
+            target_request_data = dict(request_data)
+            target_request_data["model"] = target_model_id
+
+            def complete_mapped_image_request(meta: dict[str, Any]) -> None:
+                self._model_mapping_service.record_success(selection)
+                actual_meta = dict(meta)
+                actual_meta["response_model"] = target_model_id
+                on_complete(actual_meta)
+
+            try:
+                if self._codex_proxy_service is not None and self._codex_proxy_service.has_image_model(target_model_id):
+                    result, status_code, failure_info = self._codex_proxy_service.proxy_image_request(
+                        target_request_data,
+                        request_headers,
+                        action=action,
+                        on_complete=complete_mapped_image_request,
+                        trace_id=trace_id,
+                        route_name=route_name,
+                        client_ip=client_ip,
+                    )
+                else:
+                    failure = ProxyErrorInfo(
+                        message=f"Mapped image target is unavailable: {target_model_id}",
+                        status_code=503,
+                        error_type="upstream_error",
+                        error_code="model_mapping_image_target_unavailable",
+                    )
+                    result, status_code, failure_info = None, failure.status_code, failure
+            except Exception as exc:
+                self._logger.error("Mapped image target raised an exception: model=%s error=%s", target_model_id, exc)
+                result = None
+                status_code = 502
+                failure_info = ProxyErrorInfo(
+                    message=str(exc) or f"Mapped image target failed: {target_model_id}",
+                    status_code=502,
+                    error_type="upstream_error",
+                    error_code="model_mapping_image_target_exception",
+                )
+
+            if result is not None and 200 <= status_code < 300:
+                return result, status_code, failure_info
+
+            response_headers = dict(result.headers) if result is not None else None
+            if failure_info is not None and failure_info.response_headers:
+                response_headers = failure_info.response_headers
+            failure = failure_info or ProxyErrorInfo(
+                message=f"Mapped image target returned HTTP {status_code}: {target_model_id}",
+                status_code=status_code,
+                error_type="upstream_error",
+                error_code=f"http_{status_code}",
+                response_headers=response_headers,
+            )
+            recorded_status_code = self._coerce_optional_int(
+                (failure.details or {}).get("upstream_status") if failure.details else None
+            )
+            self._model_mapping_service.record_failure(
+                selection,
+                status_code=recorded_status_code if recorded_status_code is not None else status_code,
+                error_type=failure.error_type,
+                error_message=failure.message,
+                response_headers=response_headers,
+            )
+            if result is not None:
+                result.close()
+            last_failure = failure
 
     def _proxy_model_mapping_request(
         self,

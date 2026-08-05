@@ -68,10 +68,12 @@ class FakeOAuthService:
         catalog_ids: tuple[str, ...] = (),
         image_ids: tuple[str, ...] = (),
         runtime_ids: tuple[str, ...] = (),
+        image_runtime_ids: tuple[str, ...] = (),
     ) -> None:
         self.catalog_ids = catalog_ids
         self.image_ids = image_ids
         self.runtime_ids = runtime_ids
+        self.image_runtime_ids = image_runtime_ids
 
     def list_models(self) -> dict:
         return {"models": [{"id": model_id} for model_id in self.catalog_ids]}
@@ -82,14 +84,21 @@ class FakeOAuthService:
     def list_model_names(self) -> tuple[str, ...]:
         return self.runtime_ids
 
+    def list_image_model_names(self) -> tuple[str, ...]:
+        return self.image_runtime_ids
+
 
 class ModelMappingSchemaTests(unittest.TestCase):
     def test_mapping_id_allows_letter_or_underscore_prefix(self) -> None:
         letter = ModelMappingSchema.from_mapping({"id": "public_v1", "targets": [{"model_id": "alpha/fast"}]})
         underscore = ModelMappingSchema.from_mapping({"id": "_public2", "targets": [{"model_id": "alpha/fast"}]})
+        hyphen = ModelMappingSchema.from_mapping({"id": "gpt-image-2", "targets": [{"model_id": "alpha/fast"}]})
+        dot = ModelMappingSchema.from_mapping({"id": "gpt.image.v2", "targets": [{"model_id": "alpha/fast"}]})
 
         self.assertEqual("public_v1", letter.id)
         self.assertEqual("_public2", underscore.id)
+        self.assertEqual("gpt-image-2", hyphen.id)
+        self.assertEqual("gpt.image.v2", dot.id)
 
     def test_mapping_id_rejects_digit_prefix_and_duplicate_targets(self) -> None:
         with self.assertRaisesRegex(ValueError, "只能以字母或下划线开头"):
@@ -112,9 +121,9 @@ class ModelMappingSchemaTests(unittest.TestCase):
 
         self.assertIn("model_mappings.css?v=20260805-3", template)
         self.assertIn(".model-mappings-page .modal-content", stylesheet)
-        self.assertIn(":root[data-theme=\"dark\"] .model-mappings-page .modal-content", stylesheet)
-        self.assertIn(":root[data-theme=\"dark\"] .model-mappings-page .modal .form-control", stylesheet)
-        self.assertIn(":root[data-theme=\"dark\"] .model-mappings-page .mapping-toolbar .btn-secondary", stylesheet)
+        self.assertIn(':root[data-theme="dark"] .model-mappings-page .modal-content', stylesheet)
+        self.assertIn(':root[data-theme="dark"] .model-mappings-page .modal .form-control', stylesheet)
+        self.assertIn(':root[data-theme="dark"] .model-mappings-page .mapping-toolbar .btn-secondary', stylesheet)
 
 
 class ModelMappingServiceTests(unittest.TestCase):
@@ -127,6 +136,7 @@ class ModelMappingServiceTests(unittest.TestCase):
             catalog_ids=("gpt_text",),
             image_ids=("gpt_image",),
             runtime_ids=("gpt_text",),
+            image_runtime_ids=("gpt_image",),
         )
         self.claude_service = FakeOAuthService(catalog_ids=("claude_text",), runtime_ids=("claude_text",))
         self.repository = ModelMappingRepository(create_connection_factory(root_path / "mappings.db"))
@@ -161,16 +171,19 @@ class ModelMappingServiceTests(unittest.TestCase):
             ],
         }
 
-    def test_create_rejects_all_oauth_catalog_conflicts(self) -> None:
+    def test_create_allows_oauth_catalog_conflicts_and_marks_shadowed(self) -> None:
         for mapping_id, source in (
             ("gpt_text", "Codex OAuth"),
             ("gpt_image", "Codex OAuth 图片"),
             ("claude_text", "Claude OAuth"),
         ):
-            with self.subTest(mapping_id=mapping_id), self.assertRaisesRegex(ValueError, source):
-                self.service.create_mapping(self._mapping_payload(mapping_id))
+            with self.subTest(mapping_id=mapping_id):
+                mapping = self.service.create_mapping(self._mapping_payload(mapping_id))
+                self.assertTrue(mapping["effective"])
+                self.assertEqual(source, mapping["conflict_source"])
+                self.assertIn(mapping_id, self.service.list_mapping_ids())
 
-    def test_mapping_ids_are_exposed_only_when_enabled_and_without_conflict(self) -> None:
+    def test_mapping_ids_are_exposed_when_enabled_and_shadow_oauth_conflicts(self) -> None:
         self.service.create_mapping(self._mapping_payload())
         self.assertEqual(("public_model",), self.service.list_mapping_ids())
 
@@ -181,12 +194,23 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.codex_service.catalog_ids = ("gpt_text", "public_model")
         mapping = self.service.get_mapping("public_model")
         assert mapping is not None
-        self.assertFalse(mapping["effective"])
+        self.assertTrue(mapping["effective"])
         self.assertEqual("Codex OAuth", mapping["conflict_source"])
-        self.assertEqual((), self.service.list_mapping_ids())
+        self.assertEqual(("public_model",), self.service.list_mapping_ids())
 
         self.codex_service.catalog_ids = ("gpt_text",)
         self.assertEqual(("public_model",), self.service.list_mapping_ids())
+
+    def test_image_model_is_available_as_mapping_target(self) -> None:
+        self.assertIn("gpt_image", self.service.list_available_target_model_ids())
+        mapping = self.service.create_mapping(
+            {
+                "id": "gpt-image-2",
+                "targets": [{"model_id": "gpt_image"}],
+            }
+        )
+        self.assertTrue(mapping["effective"])
+        self.assertEqual("available", mapping["targets"][0]["status"])
 
     def test_sticky_selection_prefers_priority_and_survives_service_recreation(self) -> None:
         self.service.create_mapping(self._mapping_payload())
@@ -391,6 +415,14 @@ class FakeMappedOAuthProxyService(FakeMappedProxyService):
         return model_id in self._model_ids
 
 
+class FakeMappedImageProxyService(FakeMappedOAuthProxyService):
+    def has_image_model(self, model_id: str) -> bool:
+        return model_id in self._model_ids
+
+    def proxy_image_request(self, *args: Any, **kwargs: Any) -> tuple[Response | None, int, ProxyErrorInfo | None]:
+        return self.proxy_request(*args, **kwargs)
+
+
 class ModelMappingProxyControllerTests(ModelMappingServiceTests):
     def _build_controller(
         self,
@@ -470,6 +502,42 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self.assertEqual("auto_disabled", targets["gpt_text"]["status"])
         self.assertEqual("claude_text", mapping["current_target_model_id"])
         self.assertEqual("claude_text", completed[0]["response_model"])
+
+    def test_image_mapping_uses_codex_image_target(self) -> None:
+        calls: list[str] = []
+        completed: list[dict[str, Any]] = []
+        self.service.create_mapping(
+            {
+                "id": "gpt-image-2",
+                "targets": [{"model_id": "gpt_image"}],
+            }
+        )
+        controller = object.__new__(ProxyController)
+        controller._logger = FakeLogger()
+        controller._model_mapping_service = self.service
+        controller._codex_proxy_service = FakeMappedImageProxyService(
+            ("gpt_image",),
+            {"gpt_image": (Response("ok", status=200), 200, None)},
+            calls,
+        )
+
+        response, status_code, failure = controller._proxy_model_mapping_image_request(
+            mapping_id="gpt-image-2",
+            request_data={"model": "gpt-image-2", "prompt": "draw"},
+            request_headers={},
+            action="generate",
+            on_complete=completed.append,
+            trace_id="trace",
+            route_name="images_generations",
+            client_ip="127.0.0.1",
+        )
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        assert response is not None
+        self.assertEqual(b"ok", response.get_data())
+        self.assertEqual(["gpt_image"], calls)
+        self.assertEqual("gpt_image", completed[0]["response_model"])
 
     def test_successful_target_does_not_switch(self) -> None:
         calls: list[str] = []

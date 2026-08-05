@@ -58,13 +58,10 @@ class ModelMappingService:
         return bool(read_enabled()) if callable(read_enabled) else False
 
     def list_mapping_ids(self) -> tuple[str, ...]:
-        """返回当前生效且没有 OAuth ID 冲突的映射 ID。"""
+        """返回当前生效的映射 ID；映射 ID 可以覆盖同名 OAuth 模型。"""
         if not self.is_enabled():
             return ()
-        conflicts = self._list_oauth_catalog_conflicts()
-        return tuple(
-            sorted(mapping["id"] for mapping in self._repository.list_mappings() if mapping["id"] not in conflicts)
-        )
+        return tuple(sorted(mapping["id"] for mapping in self._repository.list_mappings()))
 
     def list_defined_mapping_ids(self) -> tuple[str, ...]:
         """返回全部已定义映射 ID，供权限持久化目录使用。"""
@@ -74,17 +71,31 @@ class ModelMappingService:
         """按模型目录协议返回当前生效映射 ID。"""
         return self.list_mapping_ids()
 
+    def list_image_mapping_ids(self) -> tuple[str, ...]:
+        """返回包含 Codex 图片目标的当前生效映射 ID。"""
+        if not self.is_enabled():
+            return ()
+        image_model_ids = set(self._read_oauth_catalog_ids(self._codex_oauth_service, "list_image_models"))
+        return tuple(
+            sorted(
+                mapping["id"]
+                for mapping in self._repository.list_mappings()
+                if any(target["model_id"] in image_model_ids for target in mapping["targets"])
+            )
+        )
+
     def has_mapping(self, mapping_id: str) -> bool:
         """判断映射 ID 是否可用于路由。"""
         normalized_id = str(mapping_id or "").strip()
         return normalized_id in set(self.list_mapping_ids())
 
     def list_available_target_model_ids(self) -> tuple[str, ...]:
-        """返回可在编辑器中选择的 Provider 与 OAuth 文本模型。"""
+        """返回可在编辑器中选择的 Provider、OAuth 文本模型与图片模型。"""
         provider_models = self._list_configured_provider_model_ids()
         codex_models = self._read_oauth_catalog_ids(self._codex_oauth_service, "list_models")
+        codex_image_models = self._read_oauth_catalog_ids(self._codex_oauth_service, "list_image_models")
         claude_models = self._read_oauth_catalog_ids(self._claude_oauth_service, "list_models")
-        return tuple(sorted(dict.fromkeys([*provider_models, *codex_models, *claude_models])))
+        return tuple(sorted(dict.fromkeys([*provider_models, *codex_models, *codex_image_models, *claude_models])))
 
     def list_mappings(self) -> list[dict[str, Any]]:
         """返回包含运行状态的模型映射列表。"""
@@ -102,7 +113,6 @@ class ModelMappingService:
     def create_mapping(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """创建模型映射。"""
         mapping = self._build_mapping(payload)
-        self._validate_mapping_id_conflict(mapping.id)
         self._validate_target_ids(mapping)
         self._repository.create_mapping(mapping)
         return self.get_mapping(mapping.id) or mapping.to_mapping()
@@ -115,10 +125,6 @@ class ModelMappingService:
             raise ValueError(f"模型映射不存在: {normalized_current_id}")
         mapping = self._build_mapping(payload)
         self._validate_unavailable_target_changes(current_mapping, mapping)
-        if mapping.id != normalized_current_id:
-            self._validate_mapping_id_conflict(mapping.id)
-        elif normalized_current_id in self._list_oauth_catalog_conflicts():
-            raise ValueError(f"模型映射当前与 OAuth 模型 ID 冲突，只能删除: {normalized_current_id}")
         self._validate_target_ids(
             mapping,
             additionally_allowed={target["model_id"] for target in current_mapping["targets"]},
@@ -136,8 +142,6 @@ class ModelMappingService:
         mapping = self._repository.get_mapping(normalized_mapping_id)
         if mapping is None:
             raise ValueError(f"模型映射不存在: {mapping_id}")
-        if mapping["id"] in self._list_oauth_catalog_conflicts():
-            raise ValueError(f"模型映射当前与 OAuth 模型 ID 冲突，只能删除: {mapping['id']}")
         target = next((item for item in mapping["targets"] if item["model_id"] == target_model_id), None)
         if target is None:
             raise ValueError(f"模型映射目标不存在: {target_model_id}")
@@ -181,7 +185,6 @@ class ModelMappingService:
         if len(mapping_ids) != len(set(mapping_ids)):
             raise ValueError("模型映射导入内容包含重复 ID")
         for mapping in mappings:
-            self._validate_mapping_id_conflict(mapping.id)
             self._validate_target_ids(mapping)
         self._repository.import_mappings(mappings)
         return {"count": len(mappings), "ids": mapping_ids}
@@ -261,11 +264,6 @@ class ModelMappingService:
     def _build_mapping(self, payload: Mapping[str, Any]) -> ModelMappingSchema:
         return ModelMappingSchema.from_mapping(payload)
 
-    def _validate_mapping_id_conflict(self, mapping_id: str) -> None:
-        conflict_source = self._list_oauth_catalog_conflicts().get(mapping_id)
-        if conflict_source:
-            raise ValueError(f"模型映射 ID 不能与 {conflict_source} 模型 ID {mapping_id} 重复")
-
     def _validate_target_ids(
         self,
         mapping: ModelMappingSchema,
@@ -334,7 +332,7 @@ class ModelMappingService:
         conflict_source = conflicts.get(mapping["id"])
         return {
             **mapping,
-            "effective": self.is_enabled() and conflict_source is None,
+            "effective": self.is_enabled(),
             "conflict_source": conflict_source,
             "current_target_model_id": current_target_id,
             "targets": targets,
@@ -350,8 +348,9 @@ class ModelMappingService:
     def _list_runtime_target_model_ids(self) -> tuple[str, ...]:
         provider_ids = tuple(self._provider_manager.list_model_names())
         codex_ids = self._safe_list_runtime_ids(self._codex_oauth_service, "list_model_names")
+        codex_image_ids = self._safe_list_runtime_ids(self._codex_oauth_service, "list_image_model_names")
         claude_ids = self._safe_list_runtime_ids(self._claude_oauth_service, "list_model_names")
-        return tuple(sorted(dict.fromkeys([*provider_ids, *codex_ids, *claude_ids])))
+        return tuple(sorted(dict.fromkeys([*provider_ids, *codex_ids, *codex_image_ids, *claude_ids])))
 
     def _list_configured_provider_model_ids(self) -> tuple[str, ...]:
         config = self._config_manager.get_raw_config()

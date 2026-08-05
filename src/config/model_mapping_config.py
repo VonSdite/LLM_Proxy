@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 MODEL_MAPPING_ID_MAX_LENGTH = 64
-MODEL_MAPPING_ID_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+MODEL_MAPPING_ID_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 DEFAULT_MODEL_MAPPING_COOLDOWN_SECONDS_ON_429 = 60
 DEFAULT_MODEL_MAPPING_TARGET_PRIORITY = 1
 
@@ -23,7 +23,7 @@ def normalize_model_mapping_id(value: Any) -> str:
     if len(mapping_id) > MODEL_MAPPING_ID_MAX_LENGTH:
         raise ValueError(f"模型映射 ID 最多 {MODEL_MAPPING_ID_MAX_LENGTH} 个字符")
     if not MODEL_MAPPING_ID_PATTERN.fullmatch(mapping_id):
-        raise ValueError("模型映射 ID 只能由英文字母、数字和下划线组成，且只能以字母或下划线开头")
+        raise ValueError("模型映射 ID 只能由英文字母、数字、下划线、点号和连字符组成，且只能以字母或下划线开头")
     return mapping_id
 
 
