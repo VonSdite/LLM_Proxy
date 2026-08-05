@@ -45,10 +45,7 @@ def convert_claude_request_to_openai_chat_request(
     stop_sequences = body.get("stop_sequences")
     if isinstance(stop_sequences, list):
         stops = [str(item) for item in stop_sequences if str(item).strip()]
-        if len(stops) == 1:
-            translated["stop"] = stops[0]
-        elif stops:
-            translated["stop"] = stops
+        translated["stop"] = stops
 
     thinking = body.get("thinking")
     reasoning_effort = openai_reasoning_effort_from_claude_thinking(thinking)
