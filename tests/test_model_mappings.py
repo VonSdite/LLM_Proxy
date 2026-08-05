@@ -145,7 +145,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260806-4", template)
+        self.assertIn("model_mappings.css?v=20260806-5", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -174,6 +174,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn(".filter(target => target.model_id)", template)
         self.assertNotIn("payload.targets.some(target => !target.model_id)", template)
         self.assertIn(".mapping-cooldown-cell", stylesheet)
+        self.assertIn(".mapping-target-label .form-label", stylesheet)
         create_editor = template[
             template.index("function openCreateMapping()") : template.index("function openEditMapping")
         ]

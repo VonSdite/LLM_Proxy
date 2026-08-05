@@ -314,6 +314,10 @@
     margin-bottom: 8px;
 }
 
+.model-mappings-page .modal .mapping-target-label .form-label {
+    align-self: center;
+}
+
 .mapping-help-button {
     position: relative;
     display: inline-flex;
