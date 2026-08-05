@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-5">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-6">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -117,6 +117,11 @@
         let pendingDeleteMappingId = null;
         let deletingMappingId = null;
         let pendingDeleteTargetRow = null;
+        let mappingIdColumnResizeState = null;
+        let mappingIdColumnWidth = 220;
+        const mappingIdColumnWidthStorageKey = "modelMappings.idColumnWidth";
+        const mappingIdColumnMinWidth = 96;
+        const mappingIdColumnMaxWidth = 480;
 
         function escapeHtml(value) {
             const node = document.createElement("div");
@@ -143,6 +148,91 @@
             };
         }
 
+        function normalizeMappingIdColumnWidth(width) {
+            if (width === null || width === "") return 220;
+            const numericWidth = Number(width);
+            if (!Number.isFinite(numericWidth)) return 220;
+            return Math.min(mappingIdColumnMaxWidth, Math.max(mappingIdColumnMinWidth, Math.round(numericWidth)));
+        }
+
+        function saveMappingIdColumnWidth() {
+            try {
+                localStorage.setItem(mappingIdColumnWidthStorageKey, String(mappingIdColumnWidth));
+            } catch (error) {
+                console.warn("Unable to save model mapping ID column width:", error);
+            }
+        }
+
+        function applyMappingIdColumnWidth(width, shouldSave = false) {
+            mappingIdColumnWidth = normalizeMappingIdColumnWidth(width);
+            document.getElementById("mappingTableContainer")?.style.setProperty(
+                "--mapping-id-column-width",
+                `${mappingIdColumnWidth}px`
+            );
+            document.querySelectorAll("[data-mapping-id-column-resizer]").forEach(resizer => {
+                resizer.setAttribute("aria-valuenow", String(mappingIdColumnWidth));
+            });
+            if (shouldSave) saveMappingIdColumnWidth();
+        }
+
+        function loadMappingIdColumnWidth() {
+            try {
+                applyMappingIdColumnWidth(localStorage.getItem(mappingIdColumnWidthStorageKey));
+            } catch (error) {
+                console.warn("Unable to load model mapping ID column width:", error);
+                applyMappingIdColumnWidth(mappingIdColumnWidth);
+            }
+        }
+
+        function finishMappingIdColumnResize(event) {
+            if (!mappingIdColumnResizeState) return;
+            const { pointerId, resizer } = mappingIdColumnResizeState;
+            if (event?.pointerId !== undefined && event.pointerId !== pointerId) return;
+            if (resizer.hasPointerCapture?.(pointerId)) {
+                resizer.releasePointerCapture(pointerId);
+            }
+            resizer.classList.remove("is-resizing");
+            document.body.classList.remove("is-resizing-mapping-id-column");
+            mappingIdColumnResizeState = null;
+            window.removeEventListener("pointermove", handleMappingIdColumnResize);
+            window.removeEventListener("pointerup", finishMappingIdColumnResize);
+            window.removeEventListener("pointercancel", finishMappingIdColumnResize);
+            saveMappingIdColumnWidth();
+        }
+
+        function handleMappingIdColumnResize(event) {
+            if (!mappingIdColumnResizeState || event.pointerId !== mappingIdColumnResizeState.pointerId) return;
+            applyMappingIdColumnWidth(
+                mappingIdColumnResizeState.startWidth + event.clientX - mappingIdColumnResizeState.startX
+            );
+        }
+
+        function startMappingIdColumnResize(event) {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            finishMappingIdColumnResize();
+            const resizer = event.currentTarget;
+            mappingIdColumnResizeState = {
+                pointerId: event.pointerId,
+                resizer,
+                startWidth: mappingIdColumnWidth,
+                startX: event.clientX,
+            };
+            resizer.setPointerCapture?.(event.pointerId);
+            resizer.classList.add("is-resizing");
+            document.body.classList.add("is-resizing-mapping-id-column");
+            window.addEventListener("pointermove", handleMappingIdColumnResize);
+            window.addEventListener("pointerup", finishMappingIdColumnResize);
+            window.addEventListener("pointercancel", finishMappingIdColumnResize);
+        }
+
+        function handleMappingIdColumnResizeKeydown(event) {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowLeft" ? -1 : 1;
+            applyMappingIdColumnWidth(mappingIdColumnWidth + direction * 16, true);
+        }
+
         function renderMappings() {
             document.getElementById("mappingCount").textContent = modelMappings.length;
             const container = document.getElementById("mappingTableContainer");
@@ -158,7 +248,26 @@
                         <col class="mapping-list-cooldown-column">
                         <col class="mapping-list-actions-column">
                     </colgroup>
-                    <thead><tr><th>模型 ID</th><th>目标模型</th><th>429 冷却</th><th>操作</th></tr></thead>
+                    <thead><tr>
+                        <th class="mapping-id-column">
+                            模型 ID
+                            <span
+                                class="mapping-id-column-resizer"
+                                data-mapping-id-column-resizer
+                                role="separator"
+                                tabindex="0"
+                                aria-label="调整模型 ID 列宽度"
+                                aria-orientation="vertical"
+                                aria-valuemin="${mappingIdColumnMinWidth}"
+                                aria-valuemax="${mappingIdColumnMaxWidth}"
+                                aria-valuenow="${mappingIdColumnWidth}"
+                                title="拖动调整模型 ID 列宽度"
+                                onpointerdown="startMappingIdColumnResize(event)"
+                                onkeydown="handleMappingIdColumnResizeKeydown(event)"
+                            ></span>
+                        </th>
+                        <th>目标模型</th><th>429 冷却</th><th>操作</th>
+                    </tr></thead>
                     <tbody>${modelMappings.map(mapping => {
                         const conflict = mapping.conflict_source
                             ? `<span class="mapping-conflict">覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型，按自定义映射路由</span>`
@@ -196,6 +305,7 @@
                         </tr>`;
                     }).join("")}</tbody>
                 </table>`;
+            applyMappingIdColumnWidth(mappingIdColumnWidth);
         }
 
         async function loadMappings() {
@@ -244,11 +354,12 @@
 
         function syncTargetRowActions(row) {
             const toggleButton = row.querySelector(".mapping-toggle-target");
+            const enabled = row.dataset.enabled !== "false";
+            row.classList.toggle("is-disabled", row.dataset.available !== "false" && !enabled);
             if (row.dataset.available === "false") {
                 toggleButton.hidden = true;
                 return;
             }
-            const enabled = row.dataset.enabled !== "false";
             toggleButton.hidden = false;
             toggleButton.textContent = enabled ? "禁用" : "启用";
             toggleButton.classList.toggle("is-delete", enabled);
@@ -611,6 +722,7 @@
         }
 
         document.addEventListener("DOMContentLoaded", () => {
+            loadMappingIdColumnWidth();
             mappingEditorModal = new bootstrap.Modal(document.getElementById("mappingEditorModal"));
             document.getElementById("createMappingBtn").addEventListener("click", openCreateMapping);
             document.getElementById("addTargetBtn").addEventListener("click", () => createTargetRow({ priority: 1, enabled: true, status: "available" }));

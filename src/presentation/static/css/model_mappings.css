@@ -52,7 +52,7 @@
 }
 
 .mapping-list-id-column {
-    width: 22%;
+    width: var(--mapping-id-column-width, 220px);
 }
 
 .mapping-list-target-column {
@@ -84,6 +84,49 @@
     text-transform: uppercase;
 }
 
+.mapping-table th.mapping-id-column {
+    position: relative;
+}
+
+.mapping-id-column-resizer {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    right: -5px;
+    bottom: 0;
+    width: 10px;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.mapping-id-column-resizer::after {
+    position: absolute;
+    top: 7px;
+    right: 4px;
+    bottom: 7px;
+    width: 2px;
+    border-radius: 1px;
+    background: transparent;
+    content: "";
+    transition: background-color var(--transition);
+}
+
+.mapping-id-column-resizer:hover::after,
+.mapping-id-column-resizer:focus-visible::after,
+.mapping-id-column-resizer.is-resizing::after {
+    background: var(--primary);
+}
+
+.mapping-id-column-resizer:focus-visible {
+    outline: none;
+}
+
+body.is-resizing-mapping-id-column,
+body.is-resizing-mapping-id-column * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
 .mapping-table td {
     padding: 13px 14px;
     background: #fff;
@@ -104,7 +147,7 @@
 
 .mapping-id {
     display: block;
-    max-width: 240px;
+    max-width: 100%;
     overflow: hidden;
     color: var(--text-primary);
     font-size: 14px;
@@ -114,6 +157,7 @@
 }
 
 .mapping-id-cell {
+    overflow: hidden;
     vertical-align: middle !important;
 }
 
@@ -482,6 +526,7 @@
     line-height: 1.45;
 }
 
+.mapping-target-row.is-disabled td,
 .mapping-target-row.is-unavailable td {
     background: rgba(90, 102, 120, 0.08);
 }
@@ -1003,6 +1048,7 @@
     color: #fff;
 }
 
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled td,
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
     background: rgba(45, 52, 62, 0.78);
 }
@@ -1099,15 +1145,19 @@
         margin-top: 10px;
     }
 
+    .mapping-target-row.is-disabled,
     .mapping-target-row.is-unavailable {
         background: rgba(90, 102, 120, 0.08);
     }
 
+    .mapping-target-row.is-disabled td,
     .mapping-target-row.is-unavailable td,
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled td,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
         background: transparent;
     }
 
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable {
         background: rgba(45, 52, 62, 0.78);
     }

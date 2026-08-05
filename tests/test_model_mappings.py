@@ -1,3 +1,5 @@
+import json
+import subprocess
 import tempfile
 import unittest
 from datetime import datetime
@@ -145,7 +147,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260806-5", template)
+        self.assertIn("model_mappings.css?v=20260806-6", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -157,14 +159,16 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('class="mapping-target-add-button" id="addTargetBtn"', template)
         self.assertIn("<span>新增目标模型</span>", template)
         self.assertIn('class="mapping-target-action mapping-toggle-target"', template)
-        self.assertIn('class="mapping-target-action is-delete mapping-target-delete-trigger mapping-remove-target">删除', template)
+        self.assertIn(
+            'class="mapping-target-action is-delete mapping-target-delete-trigger mapping-remove-target">删除', template
+        )
         self.assertIn('class="mapping-targets-cell"', template)
         self.assertIn("const targets = Array.isArray(mapping.targets)", template)
         self.assertIn("function getTargetPreview(targets, limit = 5)", template)
         self.assertIn("preview.hiddenCount", template)
         self.assertIn("<th>目标模型</th>", template)
         self.assertNotIn('mapping.current_target_model_id || "-"', template)
-        self.assertIn('data-mapping-delete-trigger=', template)
+        self.assertIn("data-mapping-delete-trigger=", template)
         self.assertIn("mappingDeletePopover", template)
         self.assertIn("mappingTargetDeletePopover", template)
         self.assertIn("toggleDeleteTargetConfirm", template)
@@ -175,6 +179,12 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertNotIn("payload.targets.some(target => !target.model_id)", template)
         self.assertIn(".mapping-cooldown-cell", stylesheet)
         self.assertIn(".mapping-target-label .form-label", stylesheet)
+        self.assertIn('class="mapping-id" title="${escapeHtml(mapping.id)}"', template)
+        self.assertIn('class="mapping-id-column-resizer"', template)
+        self.assertIn('onpointerdown="startMappingIdColumnResize(event)"', template)
+        self.assertIn("function handleMappingIdColumnResizeKeydown(event)", template)
+        self.assertIn('row.classList.toggle("is-disabled"', template)
+        self.assertIn(".mapping-target-row.is-disabled td", stylesheet)
         create_editor = template[
             template.index("function openCreateMapping()") : template.index("function openEditMapping")
         ]
@@ -188,6 +198,97 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .modal-content', stylesheet)
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .modal .form-control', stylesheet)
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .mapping-toolbar .btn-secondary', stylesheet)
+
+    def test_mapping_id_column_resize_updates_and_persists_width(self) -> None:
+        template_path = (
+            Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "model_mappings.html"
+        )
+        html = template_path.read_text(encoding="utf-8")
+        script_start = html.index("function normalizeMappingIdColumnWidth")
+        script_end = html.index("function renderMappings", script_start)
+        script = html[script_start:script_end]
+
+        node_script = f"""
+const vm = require("vm");
+const savedValues = new Map();
+const listeners = new Map();
+const cssValues = new Map();
+const ariaValues = [];
+const classNames = new Set();
+const resizer = {{
+  classList: {{
+    add: value => classNames.add(value),
+    remove: value => classNames.delete(value),
+  }},
+  setAttribute: (name, value) => ariaValues.push([name, value]),
+  setPointerCapture: () => {{}},
+  hasPointerCapture: () => false,
+}};
+const sandbox = {{
+  console,
+  mappingIdColumnResizeState: null,
+  mappingIdColumnWidth: 220,
+  mappingIdColumnWidthStorageKey: "modelMappings.idColumnWidth",
+  mappingIdColumnMinWidth: 96,
+  mappingIdColumnMaxWidth: 480,
+  localStorage: {{
+    getItem: key => savedValues.has(key) ? savedValues.get(key) : null,
+    setItem: (key, value) => savedValues.set(key, value),
+  }},
+  document: {{
+    body: {{ classList: {{
+      add: value => classNames.add(value),
+      remove: value => classNames.delete(value),
+    }} }},
+    getElementById: () => ({{ style: {{ setProperty: (name, value) => cssValues.set(name, value) }} }}),
+    querySelectorAll: () => [resizer],
+  }},
+  window: {{
+    addEventListener: (name, handler) => listeners.set(name, handler),
+    removeEventListener: name => listeners.delete(name),
+  }},
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+
+const initialWidth = sandbox.normalizeMappingIdColumnWidth(null);
+sandbox.applyMappingIdColumnWidth(240, true);
+sandbox.startMappingIdColumnResize({{
+  button: 0,
+  pointerId: 7,
+  clientX: 100,
+  currentTarget: resizer,
+  preventDefault: () => {{}},
+}});
+listeners.get("pointermove")({{ pointerId: 7, clientX: 180 }});
+listeners.get("pointerup")({{ pointerId: 7 }});
+const draggedWidth = savedValues.get("modelMappings.idColumnWidth");
+savedValues.set("modelMappings.idColumnWidth", "999");
+sandbox.loadMappingIdColumnWidth();
+
+process.stdout.write(JSON.stringify({{
+  initialWidth,
+  draggedWidth,
+  restoredWidth: cssValues.get("--mapping-id-column-width"),
+  ariaValues,
+  resizeClassActive: classNames.has("is-resizing-mapping-id-column"),
+  activeListeners: [...listeners.keys()],
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual(220, payload["initialWidth"])
+        self.assertEqual("320", payload["draggedWidth"])
+        self.assertEqual("480px", payload["restoredWidth"])
+        self.assertEqual(["aria-valuenow", "480"], payload["ariaValues"][-1])
+        self.assertFalse(payload["resizeClassActive"])
+        self.assertEqual([], payload["activeListeners"])
 
 
 class ModelMappingServiceTests(unittest.TestCase):
