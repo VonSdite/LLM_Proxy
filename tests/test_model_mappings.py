@@ -145,7 +145,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260806-3", template)
+        self.assertIn("model_mappings.css?v=20260806-4", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -160,6 +160,8 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('class="mapping-target-action is-delete mapping-target-delete-trigger mapping-remove-target">删除', template)
         self.assertIn('class="mapping-targets-cell"', template)
         self.assertIn("const targets = Array.isArray(mapping.targets)", template)
+        self.assertIn("function getTargetPreview(targets, limit = 5)", template)
+        self.assertIn("preview.hiddenCount", template)
         self.assertIn("<th>目标模型</th>", template)
         self.assertNotIn('mapping.current_target_model_id || "-"', template)
         self.assertIn('data-mapping-delete-trigger=', template)
@@ -167,6 +169,11 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn("mappingTargetDeletePopover", template)
         self.assertIn("toggleDeleteTargetConfirm", template)
         self.assertNotIn("window.confirm", template)
+        self.assertIn("function selectedTargetIds()", template)
+        self.assertIn("!selectedIds.has(modelId)", template)
+        self.assertIn(".filter(target => target.model_id)", template)
+        self.assertNotIn("payload.targets.some(target => !target.model_id)", template)
+        self.assertIn(".mapping-cooldown-cell", stylesheet)
         create_editor = template[
             template.index("function openCreateMapping()") : template.index("function openEditMapping")
         ]

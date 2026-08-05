@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-4">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -133,6 +133,16 @@
             return data;
         }
 
+        function getTargetPreview(targets, limit = 5) {
+            const items = Array.isArray(targets) ? targets : [];
+            const visible = items.slice(0, limit);
+            return {
+                visible,
+                hiddenCount: Math.max(items.length - visible.length, 0),
+                total: items.length
+            };
+        }
+
         function renderMappings() {
             document.getElementById("mappingCount").textContent = modelMappings.length;
             const container = document.getElementById("mappingTableContainer");
@@ -154,22 +164,28 @@
                             ? `<span class="mapping-conflict">覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型，按自定义映射路由</span>`
                             : "";
                         const targets = Array.isArray(mapping.targets) ? mapping.targets : [];
-                        const targetTags = targets.length
-                            ? targets.map(target => {
+                        const preview = getTargetPreview(targets);
+                        const targetTags = preview.visible.length
+                            ? preview.visible.map(target => {
                                 const targetId = String(target.model_id || "").trim();
                                 const isCurrent = mapping.current_target_model_id === targetId;
                                 const isUnavailable = target.available_model === false;
                                 return `<span class="mapping-model-tag${isCurrent ? " is-current" : ""}${isUnavailable ? " is-unavailable" : ""}" title="${escapeHtml(targetId)}">${escapeHtml(targetId)}</span>`;
                             }).join("")
                             : '<span class="muted-text">未配置</span>';
-                        const currentTarget = mapping.current_target_model_id
-                            ? `<div class="mapping-target-summary">当前：${escapeHtml(mapping.current_target_model_id)}</div>`
-                            : (targets.length ? `<div class="mapping-target-summary">共 ${targets.length} 个目标</div>` : "");
+                        const targetSummary = preview.total
+                            ? `<div class="mapping-target-summary">
+                                <span class="mapping-target-count">共 ${preview.total} 个</span>
+                                ${preview.hiddenCount ? `<span class="mapping-target-more">+${preview.hiddenCount}</span>` : ""}
+                                ${preview.hiddenCount ? `<button class="mapping-inline-button" type="button" onclick="openEditMapping('${encodeURIComponent(mapping.id)}')">查看全部</button>` : ""}
+                                ${mapping.current_target_model_id ? `<span class="mapping-current-target">当前：${escapeHtml(mapping.current_target_model_id)}</span>` : ""}
+                            </div>`
+                            : "";
                         const isDeletePending = pendingDeleteMappingId === mapping.id;
                         const isDeleteInFlight = deletingMappingId === mapping.id;
                         return `<tr>
                             <td class="mapping-id-cell"><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>${conflict}</td>
-                            <td class="mapping-targets-cell"><div class="mapping-model-tags">${targetTags}</div>${currentTarget}</td>
+                            <td class="mapping-targets-cell"><div class="mapping-model-tags">${targetTags}</div>${targetSummary}</td>
                             <td class="mapping-cooldown-cell">${Number(mapping.cooldown_seconds_on_429)}s</td>
                             <td class="mapping-actions-cell"><div class="mapping-row-actions">
                                 <button type="button" class="btn-action btn-edit" onclick="openEditMapping('${encodeURIComponent(mapping.id)}')">编辑</button>
@@ -250,9 +266,18 @@
             const optionsElement = row.querySelector(".mapping-target-options");
             let activeIndex = -1;
 
+            function selectedTargetIds() {
+                return new Set(
+                    Array.from(document.querySelectorAll(".mapping-target-row .target-model-id"))
+                        .map(input => input.value.trim())
+                        .filter(Boolean)
+                );
+            }
+
             function filteredTargets() {
                 const query = searchInput.value.trim().toLowerCase();
-                return availableTargets.filter(modelId => !query || modelId.toLowerCase().includes(query));
+                const selectedIds = selectedTargetIds();
+                return availableTargets.filter(modelId => !selectedIds.has(modelId) && (!query || modelId.toLowerCase().includes(query)));
             }
 
             function renderOptions() {
@@ -276,6 +301,10 @@
             }
 
             function selectTarget(modelId) {
+                if (selectedTargetIds().has(modelId)) {
+                    renderOptions();
+                    return;
+                }
                 searchInput.value = modelId;
                 valueInput.value = modelId;
                 closeOptions();
@@ -283,7 +312,11 @@
 
             searchInput.addEventListener("focus", renderOptions);
             searchInput.addEventListener("input", () => {
-                valueInput.value = availableTargets.includes(searchInput.value.trim()) ? searchInput.value.trim() : "";
+                const candidate = searchInput.value.trim();
+                valueInput.value = "";
+                if (availableTargets.includes(candidate) && !selectedTargetIds().has(candidate)) {
+                    valueInput.value = candidate;
+                }
                 activeIndex = 0;
                 renderOptions();
             });
@@ -331,11 +364,13 @@
         }
 
         function collectMappingPayload() {
-            const targets = Array.from(document.querySelectorAll(".mapping-target-row")).map(row => ({
-                model_id: row.querySelector(".target-model-id").value.trim(),
-                priority: Number(row.querySelector(".target-priority").value),
-                enabled: row.dataset.enabled !== "false"
-            }));
+            const targets = Array.from(document.querySelectorAll(".mapping-target-row"))
+                .map(row => ({
+                    model_id: row.querySelector(".target-model-id").value.trim(),
+                    priority: Number(row.querySelector(".target-priority").value),
+                    enabled: row.dataset.enabled !== "false"
+                }))
+                .filter(target => target.model_id);
             return {
                 id: document.getElementById("mappingIdInput").value.trim(),
                 strategy: "sticky_failover",
@@ -348,10 +383,6 @@
             const payload = collectMappingPayload();
             if (!payload.targets.length) {
                 showMessage("请至少添加一个目标模型", "error");
-                return;
-            }
-            if (payload.targets.some(target => !target.model_id)) {
-                showMessage("请选择有效的目标模型 ID", "error");
                 return;
             }
             const url = editingMappingId ? `/api/model-mappings/${encodeURIComponent(editingMappingId)}` : "/api/model-mappings";
