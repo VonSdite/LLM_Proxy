@@ -31,7 +31,7 @@
 .mapping-row-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .mapping-table-shell {
@@ -45,21 +45,57 @@
 .mapping-table {
     width: 100%;
     min-width: 720px;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    font-size: 14px;
+}
+
+.mapping-list-id-column {
+    width: 22%;
+}
+
+.mapping-list-target-column {
+    width: auto;
+}
+
+.mapping-list-cooldown-column {
+    width: 132px;
+}
+
+.mapping-list-actions-column {
+    width: 170px;
 }
 
 .mapping-table th,
 .mapping-table td {
-    padding: 13px 14px;
     border-bottom: 1px solid var(--line);
-    text-align: left;
-    vertical-align: middle;
+    vertical-align: top;
 }
 
 .mapping-table th {
+    padding: 12px 14px;
     background: #f4f8fd;
     color: var(--text-secondary);
     font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-align: left;
+    text-transform: uppercase;
+}
+
+.mapping-table td {
+    padding: 13px 14px;
+    background: #fff;
+    color: var(--text-primary);
+    line-height: 1.45;
+}
+
+.mapping-table th:last-child,
+.mapping-table td.mapping-actions-cell {
+    width: 1%;
+    white-space: nowrap;
+    vertical-align: middle;
 }
 
 .mapping-table tr:last-child td {
@@ -70,8 +106,15 @@
     display: block;
     max-width: 240px;
     overflow: hidden;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.mapping-id-cell {
+    vertical-align: middle !important;
 }
 
 .mapping-conflict {
@@ -79,6 +122,102 @@
     margin-top: 4px;
     color: #b42318;
     font-size: 12px;
+}
+
+.mapping-targets-cell {
+    vertical-align: middle !important;
+}
+
+.mapping-model-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 220px;
+}
+
+.mapping-model-tag {
+    display: inline-flex;
+    max-width: 100%;
+    min-height: 26px;
+    align-items: center;
+    overflow: hidden;
+    padding: 0 10px;
+    border: 1px solid rgba(100, 116, 139, 0.18);
+    border-radius: 999px;
+    background: #f6f8fb;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mapping-model-tag.is-current {
+    border-color: rgba(58, 127, 237, 0.28);
+    background: rgba(58, 127, 237, 0.1);
+    color: var(--primary-active);
+}
+
+.mapping-model-tag.is-unavailable {
+    border-color: #9ca3af;
+    background: rgba(90, 102, 120, 0.08);
+    color: #667085;
+}
+
+.mapping-target-summary {
+    margin-top: 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.mapping-row-actions .btn-action {
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.mapping-row-actions .btn-edit {
+    border-color: #d6e4f1;
+    background: #edf4fc;
+    color: var(--primary);
+}
+
+.mapping-row-actions .btn-edit:hover,
+.mapping-row-actions .btn-edit:focus-visible {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+    outline: none;
+}
+
+.mapping-row-actions .btn-delete {
+    border-color: #f3d7dc;
+    background: #fdf2f3;
+    color: var(--danger);
+}
+
+.mapping-row-actions .btn-delete:hover,
+.mapping-row-actions .btn-delete:focus-visible,
+.mapping-row-actions .btn-delete.is-active {
+    border-color: var(--danger-hover);
+    background: var(--danger-hover);
+    color: #fff;
+    outline: none;
+}
+
+.mapping-row-actions .btn-action:disabled {
+    cursor: wait;
+    opacity: 0.72;
 }
 
 .mapping-empty {
@@ -364,6 +503,127 @@
     transition: background-color var(--transition), border-color var(--transition), color var(--transition);
 }
 
+.model-mappings-page .inline-confirm-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.model-mappings-page .mapping-confirm-popover {
+    position: fixed;
+    z-index: 1080;
+    width: max-content;
+    max-width: min(220px, calc(100vw - 24px));
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: var(--shadow-soft);
+}
+
+.model-mappings-page .mapping-confirm-popover[hidden] {
+    display: none !important;
+}
+
+.model-mappings-page .mapping-confirm-popover::after,
+.model-mappings-page .mapping-confirm-popover::before {
+    position: absolute;
+    left: var(--popover-arrow-left, 50%);
+    border-style: solid;
+    content: "";
+    transform: translateX(-50%);
+}
+
+.model-mappings-page .mapping-confirm-popover[data-placement="top"]::after {
+    top: 100%;
+    border-width: 6px 6px 0;
+    border-color: var(--line) transparent transparent;
+}
+
+.model-mappings-page .mapping-confirm-popover[data-placement="top"]::before {
+    z-index: 1;
+    top: 100%;
+    margin-top: -1px;
+    border-width: 5px 5px 0;
+    border-color: #fff transparent transparent;
+}
+
+.model-mappings-page .mapping-confirm-popover[data-placement="bottom"]::after {
+    bottom: 100%;
+    border-width: 0 6px 6px;
+    border-color: transparent transparent var(--line);
+}
+
+.model-mappings-page .mapping-confirm-popover[data-placement="bottom"]::before {
+    z-index: 1;
+    bottom: 100%;
+    margin-bottom: -1px;
+    border-width: 0 5px 5px;
+    border-color: transparent transparent #fff;
+}
+
+.model-mappings-page .inline-confirm-text {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+}
+
+.model-mappings-page .inline-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.model-mappings-page .inline-confirm-action {
+    min-width: 54px;
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.model-mappings-page .mapping-confirm-popover .btn-edit {
+    border-color: #d6e4f1;
+    background: #edf4fc;
+    color: var(--primary);
+}
+
+.model-mappings-page .mapping-confirm-popover .btn-edit:hover,
+.model-mappings-page .mapping-confirm-popover .btn-edit:focus-visible {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+    outline: none;
+}
+
+.model-mappings-page .mapping-confirm-popover .btn-delete {
+    border-color: #f3d7dc;
+    background: #fdf2f3;
+    color: var(--danger);
+}
+
+.model-mappings-page .mapping-confirm-popover .btn-delete:hover,
+.model-mappings-page .mapping-confirm-popover .btn-delete:focus-visible {
+    border-color: var(--danger-hover);
+    background: var(--danger-hover);
+    color: #fff;
+    outline: none;
+}
+
+.model-mappings-page .inline-confirm-action:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
 .mapping-target-action.is-primary {
     border-color: #d6e4f1;
     background: #edf4fc;
@@ -514,6 +774,24 @@
     background: #0f141b;
 }
 
+:root[data-theme="dark"] .mapping-model-tag {
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.08);
+    color: #d5dde7;
+}
+
+:root[data-theme="dark"] .mapping-model-tag.is-current {
+    border-color: rgba(88, 166, 255, 0.28);
+    background: rgba(88, 166, 255, 0.12);
+    color: #9bc7ff;
+}
+
+:root[data-theme="dark"] .mapping-model-tag.is-unavailable {
+    border-color: #687383;
+    background: rgba(45, 52, 62, 0.78);
+    color: #bcc8d8;
+}
+
 :root[data-theme="dark"] .mapping-target-table-shell,
 :root[data-theme="dark"] .mapping-target-table td {
     background: #161b22;
@@ -594,6 +872,80 @@
     filter: invert(1) grayscale(1);
 }
 
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover {
+    border-color: #30363d;
+    background: #161b22;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover[data-placement="top"]::before {
+    border-color: #161b22 transparent transparent;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover[data-placement="bottom"]::before {
+    border-color: transparent transparent #161b22;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover .inline-confirm-action {
+    background: #0d1117;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover .btn-edit {
+    border-color: #30363d;
+    background: #1b2230;
+    color: var(--primary);
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover .btn-edit:hover,
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover .btn-edit:focus-visible {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover .btn-delete {
+    border-color: #6e2f37;
+    background: #3a1f24;
+    color: var(--danger-hover);
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover .btn-delete:hover,
+:root[data-theme="dark"] .model-mappings-page .mapping-confirm-popover .btn-delete:focus-visible {
+    border-color: var(--danger-hover);
+    background: var(--danger-hover);
+    color: #fff;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-row-actions .btn-action {
+    background: #0d1117;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-row-actions .btn-edit {
+    border-color: #30363d;
+    background: #1b2230;
+    color: var(--primary);
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-row-actions .btn-edit:hover,
+:root[data-theme="dark"] .model-mappings-page .mapping-row-actions .btn-edit:focus-visible {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-row-actions .btn-delete {
+    border-color: #6e2f37;
+    background: #3a1f24;
+    color: var(--danger-hover);
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-row-actions .btn-delete:hover,
+:root[data-theme="dark"] .model-mappings-page .mapping-row-actions .btn-delete:focus-visible,
+:root[data-theme="dark"] .model-mappings-page .mapping-row-actions .btn-delete.is-active {
+    border-color: var(--danger-hover);
+    background: var(--danger-hover);
+    color: #fff;
+}
+
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
     background: rgba(45, 52, 62, 0.78);
 }
@@ -625,7 +977,8 @@
     color: var(--danger-hover);
 }
 
-:root[data-theme="dark"] .model-mappings-page .mapping-target-action.is-delete:hover {
+:root[data-theme="dark"] .model-mappings-page .mapping-target-action.is-delete:hover,
+:root[data-theme="dark"] .model-mappings-page .mapping-target-action.is-delete.is-active {
     border-color: var(--danger-hover);
     background: var(--danger-hover);
     color: #fff;
