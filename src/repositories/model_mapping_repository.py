@@ -26,6 +26,8 @@ class ModelMappingRepository:
                 """
                 CREATE TABLE IF NOT EXISTS model_mappings (
                     id TEXT PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
                     cooldown_seconds_on_429 INTEGER NOT NULL DEFAULT 60,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -67,14 +69,27 @@ class ModelMappingRepository:
                     ON model_mapping_target_runtime(mapping_id);
                 """
             )
+            mapping_columns = {row["name"] for row in conn.execute("PRAGMA table_info(model_mappings)").fetchall()}
+            if "enabled" not in mapping_columns:
+                conn.execute("ALTER TABLE model_mappings ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+            if "sort_order" not in mapping_columns:
+                conn.execute("ALTER TABLE model_mappings ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+                existing_rows = conn.execute("SELECT id FROM model_mappings ORDER BY created_at, id").fetchall()
+                conn.executemany(
+                    "UPDATE model_mappings SET sort_order = ? WHERE id = ?",
+                    [(index, row["id"]) for index, row in enumerate(existing_rows)],
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_model_mappings_order ON model_mappings(sort_order, created_at)"
+            )
 
     def list_mappings(self) -> list[dict[str, Any]]:
         with self._get_connection() as conn:
             mappings = conn.execute(
                 """
-                SELECT id, cooldown_seconds_on_429, created_at, updated_at
+                SELECT id, enabled, sort_order, cooldown_seconds_on_429, created_at, updated_at
                 FROM model_mappings
-                ORDER BY created_at, id
+                ORDER BY sort_order, created_at, id
                 """
             ).fetchall()
             targets = conn.execute(
@@ -99,6 +114,8 @@ class ModelMappingRepository:
         return [
             {
                 "id": row["id"],
+                "enabled": bool(row["enabled"]),
+                "sort_order": int(row["sort_order"]),
                 "strategy": "sticky_failover",
                 "cooldown_seconds_on_429": int(row["cooldown_seconds_on_429"]),
                 "targets": targets_by_mapping.get(row["id"], []),
@@ -116,12 +133,14 @@ class ModelMappingRepository:
         with self._get_connection() as conn:
             if conn.execute("SELECT 1 FROM model_mappings WHERE id = ?", (mapping.id,)).fetchone():
                 raise ValueError(f"模型映射已存在: {mapping.id}")
-            self._insert_mapping(conn, mapping, now_text)
+            self._insert_mapping(conn, mapping, now_text, sort_order=self._next_mapping_sort_order(conn))
 
     def update_mapping(self, current_id: str, mapping: ModelMappingSchema) -> None:
         now_text = now_local_datetime_text()
         with self._get_connection() as conn:
-            current = conn.execute("SELECT created_at FROM model_mappings WHERE id = ?", (current_id,)).fetchone()
+            current = conn.execute(
+                "SELECT created_at, sort_order FROM model_mappings WHERE id = ?", (current_id,)
+            ).fetchone()
             if current is None:
                 raise ValueError(f"模型映射不存在: {current_id}")
             if (
@@ -130,13 +149,51 @@ class ModelMappingRepository:
             ):
                 raise ValueError(f"模型映射已存在: {mapping.id}")
             self._delete_mapping_rows(conn, current_id)
-            self._insert_mapping(conn, mapping, now_text, created_at=current["created_at"])
+            self._insert_mapping(
+                conn,
+                mapping,
+                now_text,
+                created_at=current["created_at"],
+                sort_order=int(current["sort_order"]),
+            )
 
     def delete_mapping(self, mapping_id: str) -> None:
         with self._get_connection() as conn:
             if not conn.execute("SELECT 1 FROM model_mappings WHERE id = ?", (mapping_id,)).fetchone():
                 raise ValueError(f"模型映射不存在: {mapping_id}")
             self._delete_mapping_rows(conn, mapping_id)
+
+    def set_mapping_enabled(self, mapping_id: str, *, enabled: bool) -> None:
+        """更新一个映射的启用状态。"""
+        now_text = now_local_datetime_text()
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE model_mappings SET enabled = ?, updated_at = ? WHERE id = ?",
+                (1 if enabled else 0, now_text, mapping_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"模型映射不存在: {mapping_id}")
+            if not enabled:
+                conn.execute(
+                    """
+                    UPDATE model_mapping_runtime
+                    SET current_target_model_id = NULL, updated_at = ?
+                    WHERE mapping_id = ?
+                    """,
+                    (now_text, mapping_id),
+                )
+
+    def reorder_mappings(self, mapping_ids: Sequence[str]) -> None:
+        """按给定完整 ID 列表更新映射顺序。"""
+        with self._get_connection() as conn:
+            current_ids = [row["id"] for row in conn.execute("SELECT id FROM model_mappings").fetchall()]
+            if len(mapping_ids) != len(current_ids) or set(mapping_ids) != set(current_ids):
+                raise ValueError("模型映射顺序必须完整包含每个映射 ID")
+            now_text = now_local_datetime_text()
+            conn.executemany(
+                "UPDATE model_mappings SET sort_order = ?, updated_at = ? WHERE id = ?",
+                [(index, now_text, mapping_id) for index, mapping_id in enumerate(mapping_ids)],
+            )
 
     def set_target_enabled(self, mapping_id: str, target_model_id: str, *, enabled: bool) -> None:
         """只更新一个目标的配置启用状态。"""
@@ -172,8 +229,9 @@ class ModelMappingRepository:
             }
             if existing_ids:
                 raise ValueError(f"导入包含已存在的模型映射: {', '.join(sorted(existing_ids))}")
-            for mapping in mappings:
-                self._insert_mapping(conn, mapping, now_text)
+            next_sort_order = self._next_mapping_sort_order(conn)
+            for offset, mapping in enumerate(mappings):
+                self._insert_mapping(conn, mapping, now_text, sort_order=next_sort_order + offset)
 
     def list_target_runtime_states(self, mapping_id: str) -> dict[str, dict[str, Any]]:
         with self._get_connection() as conn:
@@ -275,11 +333,27 @@ class ModelMappingRepository:
 
     @staticmethod
     def _insert_mapping(
-        conn: Any, mapping: ModelMappingSchema, now_text: str, *, created_at: str | None = None
+        conn: Any,
+        mapping: ModelMappingSchema,
+        now_text: str,
+        *,
+        created_at: str | None = None,
+        sort_order: int,
     ) -> None:
         conn.execute(
-            "INSERT INTO model_mappings (id, cooldown_seconds_on_429, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (mapping.id, mapping.cooldown_seconds_on_429, created_at or now_text, now_text),
+            """
+            INSERT INTO model_mappings (
+                id, enabled, sort_order, cooldown_seconds_on_429, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                mapping.id,
+                1 if mapping.enabled else 0,
+                sort_order,
+                mapping.cooldown_seconds_on_429,
+                created_at or now_text,
+                now_text,
+            ),
         )
         conn.executemany(
             """
@@ -300,6 +374,11 @@ class ModelMappingRepository:
                 for target in mapping.targets
             ],
         )
+
+    @staticmethod
+    def _next_mapping_sort_order(conn: Any) -> int:
+        row = conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM model_mappings").fetchone()
+        return int(row["next_order"])
 
     @staticmethod
     def _delete_mapping_rows(conn: Any, mapping_id: str) -> None:

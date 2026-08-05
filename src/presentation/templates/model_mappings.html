@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-6">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-8">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -12,14 +12,13 @@
             <div class="mapping-summary">共 <strong id="mappingCount">0</strong> 个映射</div>
             <div class="mapping-actions">
                 <input type="file" id="mappingImportInput" accept="application/json,.json" hidden>
-                <button type="button" class="btn btn-secondary" id="exportMappingsBtn">导出</button>
-                <button type="button" class="btn btn-secondary" id="importMappingsBtn">导入</button>
+                <button type="button" class="btn btn-primary" id="importMappingsBtn">导入</button>
                 <button type="button" class="btn btn-primary" id="createMappingBtn">新增映射</button>
             </div>
         </div>
     </section>
     <section class="mapping-content-band">
-        <div class="mapping-table-shell" id="mappingTableContainer">
+        <div class="mapping-group-list" id="mappingTableContainer">
             <div class="mapping-empty">正在加载模型映射...</div>
         </div>
     </section>
@@ -58,12 +57,14 @@
                         <div class="mapping-target-table-shell">
                             <table class="mapping-target-table" aria-label="目标模型列表">
                                 <colgroup>
+                                    <col class="mapping-target-drag-column">
                                     <col class="mapping-target-model-column">
                                     <col class="mapping-target-priority-column">
                                     <col class="mapping-target-actions-column">
                                 </colgroup>
                                 <thead>
                                     <tr class="mapping-target-table-header">
+                                        <th aria-label="排序"></th>
                                         <th>模型 ID</th>
                                         <th>优先级</th>
                                         <th>操作</th>
@@ -72,7 +73,7 @@
                                 <tbody class="mapping-target-list" id="mappingTargetList"></tbody>
                                 <tfoot>
                                     <tr class="mapping-target-add-row">
-                                        <td colspan="3">
+                                        <td colspan="4">
                                             <button type="button" class="mapping-target-add-button" id="addTargetBtn">
                                                 <span class="mapping-target-add-icon" aria-hidden="true">+</span>
                                                 <span>新增目标模型</span>
@@ -111,6 +112,7 @@
     <script src="/static/js/ui-message.js?v=20260630-1"></script>
     <script>
         let modelMappings = [];
+        let selectedMappingIds = new Set();
         let availableTargets = [];
         let editingMappingId = null;
         let mappingEditorModal = null;
@@ -118,6 +120,10 @@
         let deletingMappingId = null;
         let pendingDeleteTargetRow = null;
         let mappingIdColumnResizeState = null;
+        let mappingDragState = null;
+        let targetDragRow = null;
+        let mappingOrderActionInFlight = false;
+        const togglingMappingIds = new Set();
         let mappingIdColumnWidth = 220;
         const mappingIdColumnWidthStorageKey = "modelMappings.idColumnWidth";
         const mappingIdColumnMinWidth = 96;
@@ -169,6 +175,9 @@
                 "--mapping-id-column-width",
                 `${mappingIdColumnWidth}px`
             );
+            document.querySelectorAll(".mapping-list-id-column").forEach(column => {
+                column.style.width = `${mappingIdColumnWidth}px`;
+            });
             document.querySelectorAll("[data-mapping-id-column-resizer]").forEach(resizer => {
                 resizer.setAttribute("aria-valuenow", String(mappingIdColumnWidth));
             });
@@ -233,6 +242,296 @@
             applyMappingIdColumnWidth(mappingIdColumnWidth + direction * 16, true);
         }
 
+        function isMappingEnabled(mapping) {
+            return mapping?.enabled !== false;
+        }
+
+        function getGroupedMappingOrderIds() {
+            const enabled = [];
+            const disabled = [];
+            modelMappings.forEach(mapping => {
+                const mappingId = String(mapping?.id || "").trim();
+                if (!mappingId) return;
+                (isMappingEnabled(mapping) ? enabled : disabled).push(mappingId);
+            });
+            return { enabled, disabled, all: enabled.concat(disabled) };
+        }
+
+        function getNormalizedSelectedMappingIds() {
+            const availableIds = new Set(modelMappings.map(mapping => String(mapping?.id || "").trim()).filter(Boolean));
+            selectedMappingIds = new Set(Array.from(selectedMappingIds).filter(mappingId => availableIds.has(mappingId)));
+            return modelMappings
+                .map(mapping => String(mapping?.id || "").trim())
+                .filter(mappingId => mappingId && selectedMappingIds.has(mappingId));
+        }
+
+        function getMappingGroupIds(groupKey) {
+            return modelMappings
+                .filter(mapping => groupKey === "disabled" ? !isMappingEnabled(mapping) : isMappingEnabled(mapping))
+                .map(mapping => mapping.id);
+        }
+
+        function getSelectedMappingIdsForGroup(groupKey) {
+            const groupIds = new Set(getMappingGroupIds(groupKey));
+            return getNormalizedSelectedMappingIds().filter(mappingId => groupIds.has(mappingId));
+        }
+
+        function toggleMappingSelection(encodedId, checked) {
+            const mappingId = decodeURIComponent(encodedId);
+            if (checked) selectedMappingIds.add(mappingId);
+            else selectedMappingIds.delete(mappingId);
+            updateMappingSelectionUi();
+        }
+
+        function toggleMappingGroupSelection(groupKey, checked) {
+            getMappingGroupIds(groupKey).forEach(mappingId => {
+                if (checked) selectedMappingIds.add(mappingId);
+                else selectedMappingIds.delete(mappingId);
+            });
+            renderMappings();
+        }
+
+        function updateMappingSelectionUi() {
+            const interactionLocked = mappingOrderActionInFlight || togglingMappingIds.size > 0 || deletingMappingId !== null;
+            document.querySelectorAll("[data-mapping-group-select]").forEach(checkbox => {
+                const groupKey = checkbox.dataset.mappingGroupSelect;
+                const groupIds = getMappingGroupIds(groupKey);
+                const selectedIds = getSelectedMappingIdsForGroup(groupKey);
+                checkbox.checked = groupIds.length > 0 && selectedIds.length === groupIds.length;
+                checkbox.indeterminate = selectedIds.length > 0 && selectedIds.length < groupIds.length;
+                checkbox.disabled = interactionLocked || groupIds.length === 0;
+            });
+            document.querySelectorAll("[data-mapping-export-button]").forEach(button => {
+                button.disabled = interactionLocked || getSelectedMappingIdsForGroup(button.dataset.mappingExportButton).length === 0;
+            });
+        }
+
+        function buildDroppedMappingOrderIds(mappingId, targetId, placeAfter) {
+            const mapping = modelMappings.find(item => item.id === mappingId);
+            const target = modelMappings.find(item => item.id === targetId);
+            if (!mapping || !target || mappingId === targetId || isMappingEnabled(mapping) !== isMappingEnabled(target)) {
+                return null;
+            }
+            const groupedIds = getGroupedMappingOrderIds();
+            const groupIds = (isMappingEnabled(mapping) ? groupedIds.enabled : groupedIds.disabled).slice();
+            const currentIndex = groupIds.indexOf(mappingId);
+            if (currentIndex < 0 || !groupIds.includes(targetId)) return null;
+            const [movedId] = groupIds.splice(currentIndex, 1);
+            const targetIndex = groupIds.indexOf(targetId);
+            groupIds.splice(placeAfter ? targetIndex + 1 : targetIndex, 0, movedId);
+            return isMappingEnabled(mapping)
+                ? groupIds.concat(groupedIds.disabled)
+                : groupedIds.enabled.concat(groupIds);
+        }
+
+        function getRowDragPlacement(row, event) {
+            if (!(row instanceof HTMLElement)) return "before";
+            const rect = row.getBoundingClientRect();
+            return Number(event?.clientY || 0) - rect.top > rect.height / 2 ? "after" : "before";
+        }
+
+        function clearMappingDragIndicator() {
+            document.querySelectorAll(".mapping-table tr.is-drag-over-before, .mapping-table tr.is-drag-over-after")
+                .forEach(row => row.classList.remove("is-drag-over-before", "is-drag-over-after"));
+        }
+
+        function handleMappingRowDragStart(encodedId, groupKey, event) {
+            if (mappingOrderActionInFlight || togglingMappingIds.size || deletingMappingId !== null) {
+                event.preventDefault();
+                return;
+            }
+            const mappingId = decodeURIComponent(encodedId);
+            mappingDragState = { mappingId, groupKey };
+            event.dataTransfer?.setData("text/plain", mappingId);
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+            event.currentTarget.closest("tr")?.classList.add("is-dragging");
+        }
+
+        function handleMappingRowDragOver(encodedId, groupKey, event) {
+            const targetId = decodeURIComponent(encodedId);
+            if (!mappingDragState || mappingDragState.groupKey !== groupKey || mappingDragState.mappingId === targetId) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            clearMappingDragIndicator();
+            const row = event.currentTarget;
+            row.classList.add(getRowDragPlacement(row, event) === "after" ? "is-drag-over-after" : "is-drag-over-before");
+        }
+
+        async function handleMappingRowDrop(encodedId, groupKey, event) {
+            if (!mappingDragState || mappingDragState.groupKey !== groupKey) return;
+            event.preventDefault();
+            const targetId = decodeURIComponent(encodedId);
+            const placeAfter = getRowDragPlacement(event.currentTarget, event) === "after";
+            const nextIds = buildDroppedMappingOrderIds(mappingDragState.mappingId, targetId, placeAfter);
+            clearMappingDragIndicator();
+            if (nextIds) await saveMappingOrder(nextIds);
+        }
+
+        function handleMappingRowDragEnd(event) {
+            clearMappingDragIndicator();
+            mappingDragState = null;
+            event.currentTarget.closest("tr")?.classList.remove("is-dragging");
+        }
+
+        async function saveMappingOrder(ids) {
+            mappingOrderActionInFlight = true;
+            renderMappings();
+            try {
+                await requestJson("/api/model-mappings/order", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ids })
+                });
+                await loadMappings();
+            } catch (error) {
+                showMessage(error.message, "error");
+            } finally {
+                mappingOrderActionInFlight = false;
+                renderMappings();
+            }
+        }
+
+        async function setMappingEnabled(encodedId, enabled) {
+            const mappingId = decodeURIComponent(encodedId);
+            if (mappingOrderActionInFlight || togglingMappingIds.has(mappingId)) return;
+            togglingMappingIds.add(mappingId);
+            renderMappings();
+            try {
+                await requestJson(`/api/model-mappings/${encodeURIComponent(mappingId)}/${enabled ? "enable" : "disable"}`, {
+                    method: "POST"
+                });
+                showMessage(`模型映射已${enabled ? "启用" : "禁用"}`, "success");
+                await loadMappings();
+            } catch (error) {
+                showMessage(error.message, "error");
+            } finally {
+                togglingMappingIds.delete(mappingId);
+                renderMappings();
+            }
+        }
+
+        function buildMappingTable(groupKey, title, mappings, emptyText) {
+            let html = `
+                <section class="mapping-group-card">
+                    <div class="mapping-group-header">
+                        <div class="mapping-group-heading">
+                            <h4 class="mapping-group-title">${escapeHtml(title)}</h4>
+                            <div class="mapping-group-actions">
+                                <button type="button" class="btn btn-toolbar-secondary mapping-group-data-btn"
+                                    data-mapping-export-button="${groupKey}" onclick="exportMappings('${groupKey}')" disabled>导出</button>
+                            </div>
+                        </div>
+                        <span class="toolbar-pill">${mappings.length} 个</span>
+                    </div>`;
+            if (!mappings.length) {
+                return `${html}<div class="mapping-empty">${escapeHtml(emptyText)}</div></section>`;
+            }
+            html += `
+                <div class="mapping-group-table-wrap">
+                    <table class="mapping-table">
+                        <colgroup>
+                            <col class="mapping-list-drag-column">
+                            <col class="mapping-list-id-column">
+                            <col class="mapping-list-target-column">
+                            <col class="mapping-list-cooldown-column">
+                            <col class="mapping-list-actions-column">
+                        </colgroup>
+                        <thead><tr>
+                            <th class="mapping-select-column">
+                                <div class="mapping-list-leading">
+                                    <span class="mapping-drag-placeholder" aria-hidden="true"></span>
+                                    <input type="checkbox" class="mapping-table-checkbox" data-mapping-group-select="${groupKey}"
+                                        aria-label="选择${escapeHtml(title)}模型映射" onchange="toggleMappingGroupSelection('${groupKey}', this.checked)">
+                                </div>
+                            </th>
+                            <th class="mapping-id-column">
+                                模型 ID
+                                <span
+                                    class="mapping-id-column-resizer"
+                                    data-mapping-id-column-resizer
+                                    role="separator"
+                                    tabindex="0"
+                                    aria-label="调整模型 ID 列宽度"
+                                    aria-orientation="vertical"
+                                    aria-valuemin="${mappingIdColumnMinWidth}"
+                                    aria-valuemax="${mappingIdColumnMaxWidth}"
+                                    aria-valuenow="${mappingIdColumnWidth}"
+                                    title="拖动调整模型 ID 列宽度"
+                                    onpointerdown="startMappingIdColumnResize(event)"
+                                    onkeydown="handleMappingIdColumnResizeKeydown(event)"
+                                ></span>
+                            </th>
+                            <th>目标模型</th><th>429 冷却</th><th>操作</th>
+                        </tr></thead>
+                        <tbody>${mappings.map(mapping => {
+                            const encodedId = encodeURIComponent(mapping.id);
+                            const conflict = mapping.conflict_source
+                                ? `<span class="mapping-conflict">覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型，按自定义映射路由</span>`
+                                : "";
+                            const targets = Array.isArray(mapping.targets) ? mapping.targets : [];
+                            const preview = getTargetPreview(targets);
+                            const targetTags = preview.visible.length
+                                ? preview.visible.map(target => {
+                                    const targetId = String(target.model_id || "").trim();
+                                    const isCurrent = mapping.current_target_model_id === targetId;
+                                    const isUnavailable = target.available_model === false;
+                                    const isDisabled = target.enabled === false;
+                                    return `<span class="mapping-model-tag${isCurrent ? " is-current" : ""}${isDisabled ? " is-disabled" : ""}${isUnavailable ? " is-unavailable" : ""}" title="${escapeHtml(targetId)}">${escapeHtml(targetId)}</span>`;
+                                }).join("")
+                                : '<span class="muted-text">未配置</span>';
+                            const targetSummary = preview.total
+                                ? `<div class="mapping-target-summary">
+                                    <span class="mapping-target-count">共 ${preview.total} 个</span>
+                                    ${preview.hiddenCount ? `<span class="mapping-target-more">+${preview.hiddenCount}</span>` : ""}
+                                    ${preview.hiddenCount ? `<button class="mapping-inline-button" type="button" onclick="openEditMapping('${encodedId}')">查看全部</button>` : ""}
+                                    ${mapping.current_target_model_id ? `<span class="mapping-current-target">当前：${escapeHtml(mapping.current_target_model_id)}</span>` : ""}
+                                </div>`
+                                : "";
+                            const isDeletePending = pendingDeleteMappingId === mapping.id;
+                            const isDeleteInFlight = deletingMappingId === mapping.id;
+                            const isTogglePending = togglingMappingIds.has(mapping.id);
+                            const actionLocked = mappingOrderActionInFlight || isDeleteInFlight || isTogglePending;
+                            const enabled = isMappingEnabled(mapping);
+                            return `<tr
+                                data-mapping-row-id="${encodedId}"
+                                ondragover="handleMappingRowDragOver('${encodedId}', '${groupKey}', event)"
+                                ondrop="handleMappingRowDrop('${encodedId}', '${groupKey}', event)"
+                            >
+                                <td class="mapping-order-cell">
+                                    <div class="mapping-list-leading">
+                                        <button type="button" class="mapping-drag-handle" draggable="${actionLocked ? "false" : "true"}"
+                                            aria-label="拖动调整模型映射顺序" title="拖动调整顺序"
+                                            ondragstart="handleMappingRowDragStart('${encodedId}', '${groupKey}', event)"
+                                            ondragend="handleMappingRowDragEnd(event)"${actionLocked ? " disabled" : ""}>
+                                            <svg class="mapping-drag-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                                                <circle cx="7" cy="5" r="1.25"></circle><circle cx="13" cy="5" r="1.25"></circle>
+                                                <circle cx="7" cy="10" r="1.25"></circle><circle cx="13" cy="10" r="1.25"></circle>
+                                                <circle cx="7" cy="15" r="1.25"></circle><circle cx="13" cy="15" r="1.25"></circle>
+                                            </svg>
+                                        </button>
+                                        <input type="checkbox" class="mapping-table-checkbox" aria-label="选择模型映射 ${escapeHtml(mapping.id)}"
+                                            ${selectedMappingIds.has(mapping.id) ? "checked" : ""}
+                                            onchange="toggleMappingSelection('${encodedId}', this.checked)"${actionLocked ? " disabled" : ""}>
+                                    </div>
+                                </td>
+                                <td class="mapping-id-cell"><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>${conflict}</td>
+                                <td class="mapping-targets-cell"><div class="mapping-model-tags">${targetTags}</div>${targetSummary}</td>
+                                <td class="mapping-cooldown-cell">${Number(mapping.cooldown_seconds_on_429)}s</td>
+                                <td class="mapping-actions-cell"><div class="mapping-row-actions">
+                                    <button type="button" class="btn-action btn-edit" onclick="openEditMapping('${encodedId}')"${actionLocked ? " disabled" : ""}>编辑</button>
+                                    <button type="button" class="btn-action ${enabled ? "btn-delete" : "btn-edit"}" onclick="setMappingEnabled('${encodedId}', ${enabled ? "false" : "true"})"${actionLocked ? " disabled" : ""}>${isTogglePending ? "处理中..." : (enabled ? "禁用" : "启用")}</button>
+                                    <div class="inline-confirm-wrap">
+                                        <button type="button" class="btn-action btn-delete${isDeletePending ? " is-active" : ""}" data-mapping-delete-trigger="${encodedId}" onclick="toggleDeleteMappingConfirm('${encodedId}', event)"${actionLocked ? " disabled" : ""}>删除</button>
+                                    </div>
+                                </div></td>
+                            </tr>`;
+                        }).join("")}</tbody>
+                    </table>
+                </div>
+            </section>`;
+            return html;
+        }
+
         function renderMappings() {
             document.getElementById("mappingCount").textContent = modelMappings.length;
             const container = document.getElementById("mappingTableContainer");
@@ -240,72 +539,23 @@
                 container.innerHTML = '<div class="mapping-empty">暂无模型映射</div>';
                 return;
             }
-            container.innerHTML = `
-                <table class="mapping-table">
-                    <colgroup>
-                        <col class="mapping-list-id-column">
-                        <col class="mapping-list-target-column">
-                        <col class="mapping-list-cooldown-column">
-                        <col class="mapping-list-actions-column">
-                    </colgroup>
-                    <thead><tr>
-                        <th class="mapping-id-column">
-                            模型 ID
-                            <span
-                                class="mapping-id-column-resizer"
-                                data-mapping-id-column-resizer
-                                role="separator"
-                                tabindex="0"
-                                aria-label="调整模型 ID 列宽度"
-                                aria-orientation="vertical"
-                                aria-valuemin="${mappingIdColumnMinWidth}"
-                                aria-valuemax="${mappingIdColumnMaxWidth}"
-                                aria-valuenow="${mappingIdColumnWidth}"
-                                title="拖动调整模型 ID 列宽度"
-                                onpointerdown="startMappingIdColumnResize(event)"
-                                onkeydown="handleMappingIdColumnResizeKeydown(event)"
-                            ></span>
-                        </th>
-                        <th>目标模型</th><th>429 冷却</th><th>操作</th>
-                    </tr></thead>
-                    <tbody>${modelMappings.map(mapping => {
-                        const conflict = mapping.conflict_source
-                            ? `<span class="mapping-conflict">覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型，按自定义映射路由</span>`
-                            : "";
-                        const targets = Array.isArray(mapping.targets) ? mapping.targets : [];
-                        const preview = getTargetPreview(targets);
-                        const targetTags = preview.visible.length
-                            ? preview.visible.map(target => {
-                                const targetId = String(target.model_id || "").trim();
-                                const isCurrent = mapping.current_target_model_id === targetId;
-                                const isUnavailable = target.available_model === false;
-                                return `<span class="mapping-model-tag${isCurrent ? " is-current" : ""}${isUnavailable ? " is-unavailable" : ""}" title="${escapeHtml(targetId)}">${escapeHtml(targetId)}</span>`;
-                            }).join("")
-                            : '<span class="muted-text">未配置</span>';
-                        const targetSummary = preview.total
-                            ? `<div class="mapping-target-summary">
-                                <span class="mapping-target-count">共 ${preview.total} 个</span>
-                                ${preview.hiddenCount ? `<span class="mapping-target-more">+${preview.hiddenCount}</span>` : ""}
-                                ${preview.hiddenCount ? `<button class="mapping-inline-button" type="button" onclick="openEditMapping('${encodeURIComponent(mapping.id)}')">查看全部</button>` : ""}
-                                ${mapping.current_target_model_id ? `<span class="mapping-current-target">当前：${escapeHtml(mapping.current_target_model_id)}</span>` : ""}
-                            </div>`
-                            : "";
-                        const isDeletePending = pendingDeleteMappingId === mapping.id;
-                        const isDeleteInFlight = deletingMappingId === mapping.id;
-                        return `<tr>
-                            <td class="mapping-id-cell"><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>${conflict}</td>
-                            <td class="mapping-targets-cell"><div class="mapping-model-tags">${targetTags}</div>${targetSummary}</td>
-                            <td class="mapping-cooldown-cell">${Number(mapping.cooldown_seconds_on_429)}s</td>
-                            <td class="mapping-actions-cell"><div class="mapping-row-actions">
-                                <button type="button" class="btn-action btn-edit" onclick="openEditMapping('${encodeURIComponent(mapping.id)}')">编辑</button>
-                                <div class="inline-confirm-wrap">
-                                    <button type="button" class="btn-action btn-delete${isDeletePending ? " is-active" : ""}" data-mapping-delete-trigger="${encodeURIComponent(mapping.id)}" onclick="toggleDeleteMappingConfirm('${encodeURIComponent(mapping.id)}', event)"${isDeleteInFlight ? " disabled" : ""}>删除</button>
-                                </div>
-                            </div></td>
-                        </tr>`;
-                    }).join("")}</tbody>
-                </table>`;
+            const enabledMappings = modelMappings.filter(isMappingEnabled);
+            const disabledMappings = modelMappings.filter(mapping => !isMappingEnabled(mapping));
+            const groups = [
+                buildMappingTable(
+                    "enabled",
+                    "已启用",
+                    enabledMappings,
+                    modelMappings.length ? "当前没有已启用模型映射" : "当前没有模型映射"
+                )
+            ];
+            if (disabledMappings.length) {
+                groups.push(buildMappingTable("disabled", "已禁用", disabledMappings, "当前没有已禁用模型映射"));
+            }
+            container.innerHTML = groups.join("");
             applyMappingIdColumnWidth(mappingIdColumnWidth);
+            updateMappingSelectionUi();
+            syncMappingDeletePopover();
         }
 
         async function loadMappings() {
@@ -313,10 +563,49 @@
                 const data = await requestJson("/api/model-mappings", { cache: "no-store" });
                 modelMappings = Array.isArray(data.model_mappings) ? data.model_mappings : [];
                 availableTargets = Array.isArray(data.available_targets) ? data.available_targets : [];
+                getNormalizedSelectedMappingIds();
                 renderMappings();
             } catch (error) {
                 document.getElementById("mappingTableContainer").innerHTML = `<div class="mapping-empty mapping-error">${escapeHtml(error.message)}</div>`;
             }
+        }
+
+        function clearTargetDragIndicator() {
+            document.querySelectorAll(".mapping-target-row.is-drag-over-before, .mapping-target-row.is-drag-over-after")
+                .forEach(row => row.classList.remove("is-drag-over-before", "is-drag-over-after"));
+        }
+
+        function handleTargetRowDragStart(row, event) {
+            closeDeleteTargetConfirm();
+            targetDragRow = row;
+            event.dataTransfer?.setData("text/plain", row.querySelector(".target-model-id")?.value || "");
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+            row.classList.add("is-dragging");
+        }
+
+        function handleTargetRowDragOver(row, event) {
+            if (!targetDragRow || targetDragRow === row) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            clearTargetDragIndicator();
+            row.classList.add(getRowDragPlacement(row, event) === "after" ? "is-drag-over-after" : "is-drag-over-before");
+        }
+
+        function handleTargetRowDrop(row, event) {
+            if (!targetDragRow || targetDragRow === row) return;
+            event.preventDefault();
+            if (getRowDragPlacement(row, event) === "after") {
+                row.after(targetDragRow);
+            } else {
+                row.before(targetDragRow);
+            }
+            clearTargetDragIndicator();
+        }
+
+        function handleTargetRowDragEnd() {
+            clearTargetDragIndicator();
+            targetDragRow?.classList.remove("is-dragging");
+            targetDragRow = null;
         }
 
         function createTargetRow(target = {}) {
@@ -327,6 +616,15 @@
             row.dataset.enabled = enabled ? "true" : "false";
             row.dataset.available = unavailable ? "false" : "true";
             row.innerHTML = `
+                <td class="mapping-target-drag-cell">
+                    <button type="button" class="mapping-drag-handle mapping-target-drag-handle" draggable="true" aria-label="拖动调整目标模型顺序" title="拖动调整顺序">
+                        <svg class="mapping-drag-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                            <circle cx="7" cy="5" r="1.25"></circle><circle cx="13" cy="5" r="1.25"></circle>
+                            <circle cx="7" cy="10" r="1.25"></circle><circle cx="13" cy="10" r="1.25"></circle>
+                            <circle cx="7" cy="15" r="1.25"></circle><circle cx="13" cy="15" r="1.25"></circle>
+                        </svg>
+                    </button>
+                </td>
                 <td class="mapping-target-model-cell">
                     <span class="mapping-target-mobile-label">模型 ID</span>
                     <div class="mapping-target-model-control">
@@ -347,6 +645,11 @@
                 setupTargetCombobox(row);
             }
             syncTargetRowActions(row);
+            const dragHandle = row.querySelector(".mapping-target-drag-handle");
+            dragHandle.addEventListener("dragstart", event => handleTargetRowDragStart(row, event));
+            dragHandle.addEventListener("dragend", handleTargetRowDragEnd);
+            row.addEventListener("dragover", event => handleTargetRowDragOver(row, event));
+            row.addEventListener("drop", event => handleTargetRowDrop(row, event));
             row.querySelector(".mapping-toggle-target").addEventListener("click", () => toggleTargetRow(row));
             row.querySelector(".mapping-remove-target").addEventListener("click", event => toggleDeleteTargetConfirm(row, event));
             document.getElementById("mappingTargetList").appendChild(row);
@@ -690,10 +993,17 @@
             row.remove();
         }
 
-        async function exportMappings() {
+        async function exportMappings(groupKey) {
+            const mappingIds = getSelectedMappingIdsForGroup(groupKey);
+            if (!mappingIds.length) {
+                showMessage("请先选择需要导出的模型映射", "error");
+                return;
+            }
             try {
                 const data = await requestJson("/api/model-mappings/export", {
-                    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mapping_ids: mappingIds })
                 });
                 const blob = new Blob([JSON.stringify(data, null, 2) + "\n"], { type: "application/json" });
                 const link = document.createElement("a");
@@ -727,7 +1037,6 @@
             document.getElementById("createMappingBtn").addEventListener("click", openCreateMapping);
             document.getElementById("addTargetBtn").addEventListener("click", () => createTargetRow({ priority: 1, enabled: true, status: "available" }));
             document.getElementById("saveMappingBtn").addEventListener("click", saveMapping);
-            document.getElementById("exportMappingsBtn").addEventListener("click", exportMappings);
             document.getElementById("importMappingsBtn").addEventListener("click", () => document.getElementById("mappingImportInput").click());
             document.getElementById("mappingImportInput").addEventListener("change", event => {
                 const file = event.target.files?.[0];

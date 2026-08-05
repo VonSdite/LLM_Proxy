@@ -61,7 +61,7 @@ class ModelMappingService:
         """返回当前生效的映射 ID；映射 ID 可以覆盖同名 OAuth 模型。"""
         if not self.is_enabled():
             return ()
-        return tuple(sorted(mapping["id"] for mapping in self._repository.list_mappings()))
+        return tuple(sorted(mapping["id"] for mapping in self._repository.list_mappings() if mapping["enabled"]))
 
     def list_defined_mapping_ids(self) -> tuple[str, ...]:
         """返回全部已定义映射 ID，供权限持久化目录使用。"""
@@ -80,7 +80,7 @@ class ModelMappingService:
             sorted(
                 mapping["id"]
                 for mapping in self._repository.list_mappings()
-                if any(target["model_id"] in image_model_ids for target in mapping["targets"])
+                if mapping["enabled"] and any(target["model_id"] in image_model_ids for target in mapping["targets"])
             )
         )
 
@@ -115,6 +115,7 @@ class ModelMappingService:
         mapping = self._build_mapping(payload)
         self._validate_target_ids(mapping)
         self._repository.create_mapping(mapping)
+        self._group_mapping_order()
         return self.get_mapping(mapping.id) or mapping.to_mapping()
 
     def update_mapping(self, current_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -123,7 +124,9 @@ class ModelMappingService:
         current_mapping = self._repository.get_mapping(normalized_current_id)
         if current_mapping is None:
             raise ValueError(f"模型映射不存在: {normalized_current_id}")
-        mapping = self._build_mapping(payload)
+        normalized_payload = dict(payload)
+        normalized_payload.setdefault("enabled", bool(current_mapping["enabled"]))
+        mapping = self._build_mapping(normalized_payload)
         self._validate_unavailable_target_changes(current_mapping, mapping)
         self._validate_target_ids(
             mapping,
@@ -135,6 +138,37 @@ class ModelMappingService:
     def delete_mapping(self, mapping_id: str) -> None:
         """删除模型映射及其运行状态。"""
         self._repository.delete_mapping(normalize_model_mapping_id(mapping_id))
+
+    def set_mapping_enabled(self, mapping_id: str, *, enabled: bool) -> dict[str, Any]:
+        """更新映射级启用状态。"""
+        normalized_mapping_id = normalize_model_mapping_id(mapping_id)
+        if self._repository.get_mapping(normalized_mapping_id) is None:
+            raise ValueError(f"模型映射不存在: {normalized_mapping_id}")
+        self._repository.set_mapping_enabled(normalized_mapping_id, enabled=enabled)
+        self._group_mapping_order()
+        mapping = self.get_mapping(normalized_mapping_id)
+        if mapping is None:
+            raise ValueError(f"模型映射不存在: {normalized_mapping_id}")
+        return mapping
+
+    def reorder_mappings(self, mapping_ids: list[str]) -> dict[str, Any]:
+        """更新映射顺序，并保持已启用映射位于已禁用映射之前。"""
+        normalized_ids = [normalize_model_mapping_id(mapping_id) for mapping_id in mapping_ids]
+        if len(normalized_ids) != len(set(normalized_ids)):
+            raise ValueError("模型映射顺序不能包含重复 ID")
+        mappings = self._repository.list_mappings()
+        mapping_by_id = {mapping["id"]: mapping for mapping in mappings}
+        if len(normalized_ids) != len(mappings) or set(normalized_ids) != set(mapping_by_id):
+            raise ValueError("模型映射顺序必须完整包含每个映射 ID")
+        seen_disabled = False
+        for mapping_id in normalized_ids:
+            if mapping_by_id[mapping_id]["enabled"]:
+                if seen_disabled:
+                    raise ValueError("已启用模型映射必须排在已禁用模型映射之前")
+            else:
+                seen_disabled = True
+        self._repository.reorder_mappings(normalized_ids)
+        return {"count": len(normalized_ids), "ids": normalized_ids}
 
     def set_target_enabled(self, mapping_id: str, target_model_id: str, *, enabled: bool) -> dict[str, Any]:
         """更新目标配置启用状态；启用时同步清除运行故障状态。"""
@@ -187,6 +221,7 @@ class ModelMappingService:
         for mapping in mappings:
             self._validate_target_ids(mapping)
         self._repository.import_mappings(mappings)
+        self._group_mapping_order()
         return {"count": len(mappings), "ids": mapping_ids}
 
     def acquire_target(self, mapping_id: str, excluded_target_ids: Iterable[str] = ()) -> SelectedModelMappingTarget:
@@ -264,6 +299,12 @@ class ModelMappingService:
     def _build_mapping(self, payload: Mapping[str, Any]) -> ModelMappingSchema:
         return ModelMappingSchema.from_mapping(payload)
 
+    def _group_mapping_order(self) -> None:
+        mappings = self._repository.list_mappings()
+        grouped_ids = [mapping["id"] for mapping in mappings if mapping["enabled"]]
+        grouped_ids.extend(mapping["id"] for mapping in mappings if not mapping["enabled"])
+        self._repository.reorder_mappings(grouped_ids)
+
     def _validate_target_ids(
         self,
         mapping: ModelMappingSchema,
@@ -332,7 +373,7 @@ class ModelMappingService:
         conflict_source = conflicts.get(mapping["id"])
         return {
             **mapping,
-            "effective": self.is_enabled(),
+            "effective": self.is_enabled() and bool(mapping["enabled"]),
             "conflict_source": conflict_source,
             "current_target_model_id": current_target_id,
             "targets": targets,

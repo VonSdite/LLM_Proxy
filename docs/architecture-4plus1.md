@@ -488,29 +488,32 @@ OAuth 模型是数据平面的例外路由：
 
 ### 3.3 Control-Plane Model Mapping Management
 
-模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面使用弹窗维护映射 ID、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态或删除。
+模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、勾选导出和映射级启停。弹窗维护映射 ID、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。
 
 页面与 API：
 
 - `GET /model-mappings`
 - `GET /api/model-mappings`
 - `POST /api/model-mappings`
+- `PUT /api/model-mappings/order`
 - `GET /api/model-mappings/targets`
 - `GET /api/model-mappings/<mapping_id>`
 - `PUT /api/model-mappings/<mapping_id>`
 - `DELETE /api/model-mappings/<mapping_id>`
+- `POST /api/model-mappings/<mapping_id>/enable`
+- `POST /api/model-mappings/<mapping_id>/disable`
 - `POST /api/model-mappings/<mapping_id>/targets/toggle`
 - `POST /api/model-mappings/export`
 - `POST /api/model-mappings/import`
 
 SQLite 表：
 
-- `model_mappings` 保存映射 ID 和 429 默认冷却秒数
+- `model_mappings` 保存映射 ID、映射级启用状态、显示顺序和 429 默认冷却秒数
 - `model_mapping_targets` 保存目标模型、优先级、人工启用状态和同优先级顺序
 - `model_mapping_target_runtime` 保存自动禁用、冷却截止时间、最近状态码和错误摘要
 - `model_mapping_runtime` 保存当前粘滞目标
 
-映射 ID 可以与当前 Codex OAuth 文本、Codex OAuth 图片或 Claude OAuth 文本模型 ID 重复；创建和更新都允许使用同名 ID，数据平面按自定义映射路由。`/v1/models` 将同名条目标记为模型映射，并保留映射能力信息。底层目标从目录消失时标记为不可用，不能启停或编辑，只能从映射中删除。
+已启用的映射 ID 可以与当前 Codex OAuth 文本、Codex OAuth 图片或 Claude OAuth 文本模型 ID 重复；创建和更新都允许使用同名 ID，数据平面按自定义映射路由。已禁用映射保留定义、目标顺序和模型权限记录，不参与路由或可用模型目录。`/v1/models` 将生效的同名条目标记为模型映射，并保留映射能力信息。底层目标从目录消失时标记为不可用，不能启停或编辑，只能从映射中删除。
 
 ### 3.4 Provider Runtime Contract
 
@@ -935,9 +938,9 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - [src/services/model_catalog_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_catalog_service.py)
   - 汇总 Provider 配置模型、Codex / Claude OAuth 可用模型、Codex 图片模型与模型映射 ID，供用户和 API Key 模型权限共用
 - [src/services/model_mapping_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_mapping_service.py)
-  - 模型映射校验、目标选择、429 冷却、自动禁用和粘滞状态编排
+  - 模型映射校验、映射级启停与排序、目标选择、429 冷却、自动禁用和粘滞状态编排
 - [src/repositories/model_mapping_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/model_mapping_repository.py)
-  - 模型映射定义、目标配置和运行状态 SQLite 持久化
+  - 模型映射定义、启用状态、显示顺序、目标配置和运行状态 SQLite 持久化
 - [src/presentation/model_mapping_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/model_mapping_controller.py)
   - 模型映射管理 API
 - [src/presentation/templates/model_mappings.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/model_mappings.html)
