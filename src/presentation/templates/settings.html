@@ -780,10 +780,32 @@
             fillDebugSettingsForm(settings);
         }
 
+        async function fetchSettingsJson(url, options) {
+            const response = await fetch(url, options);
+            const responseUrl = new URL(response.url || url, window.location.href);
+            if (response.status === 401 || (response.redirected && responseUrl.pathname === "/login")) {
+                redirectToLogin();
+                throw new Error("登录状态已失效，请重新登录");
+            }
+
+            const rawBody = await response.text();
+            let data = {};
+            if (rawBody.trim()) {
+                try {
+                    data = JSON.parse(rawBody);
+                } catch (error) {
+                    if (response.status === 404 || response.status === 405) {
+                        throw new Error("服务端未加载最新版本，请重启服务后重试");
+                    }
+                    throw new Error(`服务端返回了非 JSON 响应（HTTP ${response.status}）`);
+                }
+            }
+            return { response, data };
+        }
+
         async function loadSystemSettings() {
             try {
-                const response = await fetch("/api/settings/system");
-                const data = await response.json();
+                const { response, data } = await fetchSettingsJson("/api/settings/system");
                 if (!response.ok) {
                     throw new Error(data?.error || "加载系统设置失败");
                 }
@@ -962,14 +984,13 @@
             updateBasicSettingsSaveButtonState();
 
             try {
-                const response = await fetch("/api/settings/system/basic", {
+                const { response, data } = await fetchSettingsJson("/api/settings/system/basic", {
                     method: "PUT",
                     headers: {
                         "Content-Type": "application/json"
                     },
                     body: JSON.stringify(collectBasicSettingsPayload())
                 });
-                const data = await response.json();
                 if (!response.ok) {
                     if (response.status === 401) {
                         window.location.href = "/login";
@@ -1033,14 +1054,13 @@
             clientIpSettingsSaving = true;
 
             try {
-                const response = await fetch("/api/settings/system/client-ip", {
+                const { response, data } = await fetchSettingsJson("/api/settings/system/client-ip", {
                     method: "PUT",
                     headers: {
                         "Content-Type": "application/json"
                     },
                     body: JSON.stringify(payload)
                 });
-                const data = await response.json();
                 if (!response.ok) {
                     if (response.status === 401) {
                         window.location.href = "/login";
@@ -1083,14 +1103,13 @@
             oauthSettingsSaving = true;
 
             try {
-                const response = await fetch("/api/settings/system/oauth", {
+                const { response, data } = await fetchSettingsJson("/api/settings/system/oauth", {
                     method: "PUT",
                     headers: {
                         "Content-Type": "application/json"
                     },
                     body: JSON.stringify(payload)
                 });
-                const data = await response.json();
                 if (!response.ok) {
                     if (response.status === 401) {
                         window.location.href = "/login";
@@ -1133,14 +1152,13 @@
             apiKeySettingsSaving = true;
 
             try {
-                const response = await fetch("/api/settings/system/api-keys", {
+                const { response, data } = await fetchSettingsJson("/api/settings/system/api-keys", {
                     method: "PUT",
                     headers: {
                         "Content-Type": "application/json"
                     },
                     body: JSON.stringify(payload)
                 });
-                const data = await response.json();
                 if (!response.ok) {
                     if (response.status === 401) {
                         window.location.href = "/login";
@@ -1185,12 +1203,11 @@
             const savedPayloadSnapshot = JSON.stringify(payload);
             modelMappingSettingsSaving = true;
             try {
-                const response = await fetch("/api/settings/system/model-mapping", {
+                const { response, data } = await fetchSettingsJson("/api/settings/system/model-mapping", {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload)
                 });
-                const data = await response.json();
                 if (!response.ok) {
                     throw new Error(data?.error || "保存模型映射设置失败");
                 }
@@ -1230,14 +1247,13 @@
             debugSettingsSaving = true;
 
             try {
-                const response = await fetch("/api/settings/system/debug", {
+                const { response, data } = await fetchSettingsJson("/api/settings/system/debug", {
                     method: "PUT",
                     headers: {
                         "Content-Type": "application/json"
                     },
                     body: JSON.stringify(collectDebugSettingsPayload())
                 });
-                const data = await response.json();
                 if (!response.ok) {
                     if (response.status === 401) {
                         window.location.href = "/login";
