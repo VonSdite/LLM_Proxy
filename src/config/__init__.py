@@ -5,6 +5,7 @@
 from typing import TYPE_CHECKING
 
 from .config_manager import ConfigManager
+from .model_mapping_config import ModelMappingSchema, ModelMappingTargetSchema
 from .provider_config import (
     AuthEntrySchema,
     AuthGroupSchema,
@@ -24,6 +25,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ConfigManager",
+    "ModelMappingSchema",
+    "ModelMappingTargetSchema",
     "AuthEntrySchema",
     "AuthGroupSchema",
     "ProviderConfigSchema",

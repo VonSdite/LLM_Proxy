@@ -5,6 +5,7 @@
 from .api_key_controller import ApiKeyController
 from .app_factory import create_flask_app
 from .auth_controller import AuthenticationController
+from .model_mapping_controller import ModelMappingController
 from .oauth_controller import OAuthController
 from .provider_controller import ProviderController
 from .proxy_controller import ProxyController
@@ -16,6 +17,7 @@ __all__ = [
     "ApiKeyController",
     "AuthenticationController",
     "OAuthController",
+    "ModelMappingController",
     "ProviderController",
     "ProxyController",
     "UserController",

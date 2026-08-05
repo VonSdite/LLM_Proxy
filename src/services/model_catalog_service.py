@@ -26,11 +26,13 @@ class ModelCatalogService:
         *,
         codex_oauth_service: ModelListProvider | None = None,
         claude_oauth_service: ModelListProvider | None = None,
+        model_mapping_service: ModelListProvider | None = None,
     ) -> None:
         self._logger = ctx.logger
         self._config_manager = getattr(ctx, "config_manager", None)
         self._codex_oauth_service = codex_oauth_service
         self._claude_oauth_service = claude_oauth_service
+        self._model_mapping_service = model_mapping_service
 
     def list_permission_model_names(self) -> tuple[str, ...]:
         """返回模型权限可选择的 Provider 与 OAuth 模型。"""
@@ -42,10 +44,30 @@ class ModelCatalogService:
                         *self._list_oauth_model_names("Codex", self._codex_oauth_service),
                         *self._list_oauth_image_model_names("Codex", self._codex_oauth_service),
                         *self._list_oauth_model_names("Claude", self._claude_oauth_service),
+                        *self._list_oauth_model_names("Model mapping", self._model_mapping_service),
                     ]
                 )
             )
         )
+
+    def list_permission_storage_model_names(self) -> tuple[str, ...]:
+        """返回权限存储可保留目录，包含暂未生效的已定义映射。"""
+        current_names = self.list_permission_model_names()
+        defined_mapping_names = self._list_defined_model_mapping_names()
+        return tuple(sorted(dict.fromkeys([*current_names, *defined_mapping_names])))
+
+    def _list_defined_model_mapping_names(self) -> tuple[str, ...]:
+        """读取全部已定义映射。"""
+        if self._model_mapping_service is None:
+            return ()
+        list_defined = getattr(self._model_mapping_service, "list_defined_mapping_ids", None)
+        if not callable(list_defined):
+            return ()
+        try:
+            return tuple(str(item).strip() for item in list_defined() if str(item).strip())
+        except Exception as exc:
+            self._logger.warning("Model mapping catalog skipped: error=%s", exc)
+            return ()
 
     def _list_provider_model_names(self) -> tuple[str, ...]:
         """读取配置中声明的 Provider 模型，包含已禁用 Provider。"""

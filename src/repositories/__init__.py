@@ -5,6 +5,7 @@
 from .api_key_repository import ApiKeyRepository
 from .auth_group_repository import AuthGroupRepository
 from .log_repository import LogRepository
+from .model_mapping_repository import ModelMappingRepository
 from .user_repository import UserRepository
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "UserRepository",
     "AuthGroupRepository",
     "LogRepository",
+    "ModelMappingRepository",
 ]

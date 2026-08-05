@@ -25,6 +25,7 @@
 
 - 在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成、查看、启停、导入、导出和归档删除 CLI/OAuth 类本地认证文件
 - 在启用 `api_keys.enabled` 后提供 API Key 管理入口，用于创建下游访问 key、设置模型权限、设置总 token 上限并查看 key 级用量
+- 在启用 `model_mapping.enabled` 后提供模型映射入口，用于维护独立对外模型 ID 和跨 Provider / OAuth 文本模型的粘滞故障切换目标
 
 ## 2. Logical View
 
@@ -36,7 +37,8 @@
 downstream request
   -> data-plane CORS preflight / response headers
   -> controller
-  -> provider lookup
+  -> provider / OAuth / model mapping lookup
+  -> optional sticky model mapping target selection
   -> resolve route model key to upstream model id
   -> strip downstream Authorization from upstream headers
   -> auth header resolve (api_key or auth_group + auth_entry)
@@ -80,6 +82,15 @@ decoder
 - 目标协议终止事件已经发出时，后续 HTTP framing 异常保持当前流的逻辑完成状态
 - 客户端取消会关闭上游响应并释放请求占用的运行时资源，不触发成功完成统计
 
+模型映射在进入具体 Provider 或 OAuth 代理前增加一层 `sticky_failover` 选择：
+
+- 每个映射 ID 对应一个或多个 Provider、Codex OAuth 文本或 Claude OAuth 文本目标
+- 目标按优先级从高到低选择，同优先级按配置顺序选择；成功目标写入 SQLite 粘滞游标，后续请求保持使用该目标
+- 目标自身的 Provider 最大尝试次数、Auth Group Auth Entry 或 OAuth 认证文件候选先耗尽，映射层才切换到下一个目标
+- `429` 目标进入冷却，优先采用 `Retry-After`，否则采用映射配置的冷却秒数；其他非 2xx 状态或异常自动禁用目标
+- 流提交前失败可以在当前请求内切换目标；流提交后失败不改写当前响应，只更新运行状态供后续请求避开
+- 客户端取消不改变映射目标状态
+
 补充：hook 在 retry 场景下还可以读取上一轮失败摘要，用于做轻量级重试决策：
 
 - `last_status_code`
@@ -88,6 +99,7 @@ decoder
 模型语义：
 
 - 数据平面下游请求中的 `model` 是代理路由 key，格式为 `{provider_name}/{upstream_model_id}`
+- 模型映射 ID 是不带 Provider 前缀的独立路由 key，由英文字母、数字和下划线组成，并以字母或下划线开头
 - 进入上游请求构建前会先解析出真实 `upstream_model_id`
 - `request_guard` 接收的是即将发往上游的请求体，`body["model"]` 为真实上游模型 ID
 - `HookContext.request_model` 保留下游路由 key，`HookContext.upstream_model` 保留当前真实上游模型 ID
@@ -100,6 +112,7 @@ decoder
   - 在 `api_keys.enabled=true` 时校验下游 API Key，并按 key 模型权限与总 token 上限收窄可访问模型和请求
   - 同时启用 Chat 白名单和 API Key 管理时，最终模型权限为用户权限与 key 权限的交集
   - 处理 `/v1/images/generations` 与 `/v1/images/edits`，图片模型使用 Codex OAuth 图片模型目录和默认图片模型
+  - 对模型映射 ID 执行粘滞目标选择，并在目标自身候选耗尽后切换 Provider、Codex OAuth 或 Claude OAuth 文本目标
   - 构造标准错误体
 - `DataPlaneCors`
   - 只为 `/v1/*` 数据平面添加 CORS 响应头
@@ -109,6 +122,7 @@ decoder
   - 暴露统计汇总、用户用量汇总、请求明细、当前页签 Excel 导出与统计迁移 JSON 导入导出接口
   - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
   - 在 `api_keys.enabled=true` 时显示 API Key 管理顶层导航入口
+  - 在 `model_mapping.enabled=true` 时显示模型映射顶层导航入口
   - 暴露系统设置读取与保存接口
 - `ProviderService`
   - 维护 Provider 配置的创建、复制、编辑、删除、启停、排序和批量删除
@@ -135,7 +149,17 @@ decoder
   - 汇总模型权限控制平面的可选模型目录
   - Provider 模型从配置中的 `providers[].model_list` 读取，继续包含已禁用 Provider 的模型
   - OAuth 模型从 Codex / Claude OAuth 服务读取当前可用模型目录，Codex 图片模型同时进入权限目录
+  - 生效的模型映射 ID 进入用户与 API Key 权限可选目录
+  - 权限同步使用包含全部已定义映射 ID 的保留目录，关闭总开关或发生 OAuth ID 冲突时不删除已保存权限
   - 供用户模型权限与 API Key 模型权限的选择、保存校验、展示计数和同步清理共用
+- `ModelMappingController`
+  - 暴露模型映射 CRUD、目标启停、JSON 导入导出和目标模型目录接口
+- `ModelMappingService`
+  - 校验映射 ID、OAuth 文本和图片模型 ID 冲突以及目标模型范围
+  - 维护固定 `sticky_failover` 策略、优先级、429 冷却、自动禁用和跨重启粘滞目标
+  - 动态 OAuth 同名冲突存在时将映射标记为不生效，OAuth 路由优先；冲突解除后映射自动恢复生效
+- `ModelMappingRepository`
+  - 在 SQLite 中事务持久化映射定义、目标配置、目标运行状态和当前粘滞目标
 - `OAuthController`
   - 暴露 Codex / Claude OAuth 登录、回调提交、认证文件列表、启停、JSON/ZIP 导入、ZIP 导出、归档删除与 Codex 配额刷新接口
   - 暴露 Codex 文本模型、图片模型、默认图片模型和添加内置模型目录接口
@@ -218,7 +242,7 @@ decoder
   - Hook 实现 `fetch_models` 时使用 Hook 返回的模型列表或模型 payload
   - Hook 返回 `None` 时使用 `/v1/models` 与 `/models` 候选端点探测
 - `SettingsService`
-  - 维护 `server`、`admin`、`oauth`、`api_keys` 与 `logging`
+  - 维护 `server`、`admin`、`oauth`、`api_keys`、`model_mapping` 与 `logging`
   - 管理立即生效项与重启生效项的边界
 - `ProviderRuntimeFactory`
   - 负责临时 / 正式 Provider 运行时对象构建
@@ -305,9 +329,10 @@ OAuth 模型是数据平面的例外路由：
 - Provider 配置模型仍使用 `{provider}/{model}` key
 - Codex / Claude OAuth 模型使用原始模型名，例如 `gpt-5-codex`、`claude-sonnet-4-5`
 - Codex OAuth 图片模型使用原始模型名，例如 `gpt-image-2`
+- 模型映射 ID 使用原始 ID，不增加 Provider 前缀；它可以映射 Provider、Codex OAuth 文本和 Claude OAuth 文本模型，不映射图片模型，也不作用于 Images API
 - 用户模型权限和 API Key 模型权限的可选目录同时包含 Provider 模型和当前可用 OAuth 模型
 - 权限字段保存显式列表时，Provider 模型保存 `{provider}/{model}`，OAuth 模型保存原始模型名
-- `ProxyController` 先查 Provider 映射，未命中时再查 Codex OAuth 模型目录，最后查 Claude OAuth 模型目录
+- `ProxyController` 先查 Provider 映射，未命中时依次查 Codex OAuth、Claude OAuth 和生效的模型映射目录；OAuth 同名模型优先于模型映射
 - `/v1/models` 对 Codex OAuth 暴露普通模型名，`provider_name` 固定为 `codex`
 - `/v1/models` 对 Codex OAuth 图片模型暴露 `target_formats=["openai_images"]` 与 `capabilities=["image_generation"]`
 - `/v1/models` 对 Claude OAuth 暴露普通模型名，`provider_name` 固定为 `claude`
@@ -329,6 +354,7 @@ OAuth 模型是数据平面的例外路由：
   - `PUT /api/settings/system/client-ip`
   - `PUT /api/settings/system/oauth`
   - `PUT /api/settings/system/api-keys`
+  - `PUT /api/settings/system/model-mapping`
   - `PUT /api/settings/system/debug`
   - `PUT /api/settings/system`
 
@@ -348,6 +374,7 @@ OAuth 模型是数据平面的例外路由：
 - `oauth.proxy`
 - `oauth.verify_ssl`
 - `api_keys.enabled`
+- `model_mapping.enabled`
 
 行为约束：
 
@@ -411,6 +438,12 @@ OAuth 模型是数据平面的例外路由：
   - 保存后立即影响后台顶部 API Key 管理页签是否显示
   - 保存后立即影响数据平面 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 是否要求下游携带 API Key
   - 默认值为 `false`
+- `model_mapping.enabled`
+  - 归类为“模型映射”
+  - 页面修改后自动生效
+  - 保存后立即影响后台顶部模型映射页签、数据平面模型目录和路由
+  - 映射定义与权限数据继续保存在 SQLite，关闭开关不会删除定义、运行状态或已有用户/API Key 权限
+  - 默认值为 `false`
 
 运行时内存状态补充：
 
@@ -420,6 +453,7 @@ OAuth 模型是数据平面的例外路由：
 - `WebController`
   - 渲染后台页面时读取当前 `oauth.enabled`，用于决定是否输出 OAuth 顶层导航项
   - 渲染后台页面时读取当前 `api_keys.enabled`，用于决定是否输出 API Key 管理顶层导航项
+  - 渲染后台页面时读取当前 `model_mapping.enabled`，用于决定是否输出模型映射顶层导航项
 - `ProxyController`
   - 每次数据面请求读取当前 `client_ip.*` 配置解析客户端 IP
   - 解析结果用于白名单、模型权限、请求统计、访问日志关联和 LLM trace
@@ -431,6 +465,10 @@ OAuth 模型是数据平面的例外路由：
   - 每次用户 / API Key 权限管理读取当前 Provider 配置模型和 Codex / Claude OAuth 可用模型
   - Codex OAuth 图片模型和普通 OAuth 模型使用同一显式权限列表语义
   - 不缓存模型目录，OAuth 模型变化后管理端重新加载即可出现在权限选择列表
+- `ModelMappingService`
+  - 每次路由和管理查询读取当前 Provider / OAuth 文本模型目录，不缓存目标可用性
+  - 映射定义、目标人工启用状态、429 冷却、自动禁用错误和当前粘滞目标保存在 SQLite
+  - 高优先级目标恢复后不抢回流量；当前粘滞目标不可用时才重新按优先级选择
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet
@@ -448,7 +486,33 @@ OAuth 模型是数据平面的例外路由：
 - `ClaudeProxyService`
   - 每次 Claude 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
 
-### 3.3 Provider Runtime Contract
+### 3.3 Control-Plane Model Mapping Management
+
+模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面使用弹窗维护映射 ID、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态或删除。
+
+页面与 API：
+
+- `GET /model-mappings`
+- `GET /api/model-mappings`
+- `POST /api/model-mappings`
+- `GET /api/model-mappings/targets`
+- `GET /api/model-mappings/<mapping_id>`
+- `PUT /api/model-mappings/<mapping_id>`
+- `DELETE /api/model-mappings/<mapping_id>`
+- `POST /api/model-mappings/<mapping_id>/targets/toggle`
+- `POST /api/model-mappings/export`
+- `POST /api/model-mappings/import`
+
+SQLite 表：
+
+- `model_mappings` 保存映射 ID 和 429 默认冷却秒数
+- `model_mapping_targets` 保存目标模型、优先级、人工启用状态和同优先级顺序
+- `model_mapping_target_runtime` 保存自动禁用、冷却截止时间、最近状态码和错误摘要
+- `model_mapping_runtime` 保存当前粘滞目标
+
+映射 ID 与当前 Codex OAuth 文本、Codex OAuth 图片或 Claude OAuth 文本模型 ID 重复时拒绝创建。已存在映射后续发生动态冲突时，映射保留但不生效，管理页只允许删除；OAuth 模型继续按原路由处理。冲突解除后映射自动恢复生效。底层目标从目录消失时标记为不可用，不能启停或编辑，只能从映射中删除。
+
+### 3.4 Provider Runtime Contract
 
 Provider 公共配置字段只有：
 
@@ -503,7 +567,7 @@ Hook 运行时上下文还会暴露最小重试状态：
 - `CONNECTION_ERROR`
 - `TRANSPORT_ERROR`
 
-### 3.4 Internal Stream Detection
+### 3.5 Internal Stream Detection
 
 流式识别完全是内部实现细节：
 
@@ -534,7 +598,7 @@ Hook 运行时上下文还会暴露最小重试状态：
 
 Codex / Claude OAuth 流分别以 `response.completed` / `response.done` 和 `message_stop` 作为成功终止事件。缺少这些事件的 EOF 按未完成流处理：提交前进入下一认证文件候选，提交后发送下游协议错误事件并记录当前认证文件失败。普通 Provider 保持现有协议兼容收尾行为。
 
-### 3.5 Runtime Trace Logging
+### 3.6 Runtime Trace Logging
 
 当 `logging.llm_request_debug_enabled = true` 时：
 
@@ -545,7 +609,7 @@ Codex / Claude OAuth 流分别以 `response.completed` / `response.done` 和 `me
   - `maxBytes = 10 MiB`
   - `backupCount = 3`
 
-### 3.6 Control-Plane Model Fetching And Testing
+### 3.7 Control-Plane Model Fetching And Testing
 
 Provider 编辑页包含两条控制平面上游探测链路：
 
@@ -613,7 +677,7 @@ provider editor form snapshot
 - 数据平面主代理链路独立于 Provider 编辑页联通性测试链路
 - Provider 编辑页提供控制平面的上游模型拉取与性能测试能力
 
-### 3.7 Control-Plane OAuth Management
+### 3.8 Control-Plane OAuth Management
 
 OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并在页面内提供 `Codex` 与 `Claude` 子 tab。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
 
@@ -749,7 +813,7 @@ OAuth Claude tab
 - Codex / Claude 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
 - Codex 图片生成和图片编辑接口属于 `/v1/*` 数据平面，使用 Codex OAuth 认证文件和图片模型目录，不进入 Provider 路由或 Auth Group 选择流程
 
-### 3.8 Control-Plane API Key Management
+### 3.9 Control-Plane API Key Management
 
 API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` 导航项。`api_keys.enabled` 默认关闭，因此新配置默认不会展示 API Key 页签，也不会要求下游请求携带 key。
 
@@ -869,7 +933,15 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - [src/services/api_key_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/api_key_service.py)
   - API Key 生成、hash 鉴权、模型权限、token 上限和 key 级用量管理
 - [src/services/model_catalog_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_catalog_service.py)
-  - 汇总 Provider 配置模型、Codex / Claude OAuth 可用模型与 Codex 图片模型，供用户和 API Key 模型权限共用
+  - 汇总 Provider 配置模型、Codex / Claude OAuth 可用模型、Codex 图片模型与模型映射 ID，供用户和 API Key 模型权限共用
+- [src/services/model_mapping_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_mapping_service.py)
+  - 模型映射校验、目标选择、429 冷却、自动禁用和粘滞状态编排
+- [src/repositories/model_mapping_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/model_mapping_repository.py)
+  - 模型映射定义、目标配置和运行状态 SQLite 持久化
+- [src/presentation/model_mapping_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/model_mapping_controller.py)
+  - 模型映射管理 API
+- [src/presentation/templates/model_mappings.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/model_mappings.html)
+  - 模型映射列表、可搜索目标选择、编辑和 JSON 导入导出页面
 - [src/repositories/api_key_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/api_key_repository.py)
   - API Key 持久化、列表排序和累计用量字段
 - [src/services/codex_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/codex_oauth_service.py)
@@ -913,7 +985,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 
 - 一个 Flask 应用
 - 一个配置文件
-- 一个 SQLite 数据库，保存用户、请求日志、日聚合统计与 API Key
+- 一个 SQLite 数据库，保存用户、请求日志、日聚合统计、API Key、模型映射定义和映射运行状态
 - 一组滚动日志文件
 - 一个 Codex 配额后台刷新 greenlet
 - 一组本地 OAuth 认证文件
@@ -1122,6 +1194,43 @@ sequenceDiagram
             Client-->>Service: close downstream connection
             Service->>Executor: close upstream response
         end
+    end
+```
+
+### 6.5 Model Mapping Sticky Failover
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Controller
+    participant Mapping
+    participant TargetA
+    participant TargetB
+    participant SQLite
+
+    Client->>Controller: request model=public_model
+    Controller->>Mapping: acquire_target(public_model)
+    Mapping->>SQLite: read sticky target and runtime states
+    Mapping-->>Controller: TargetA
+    Controller->>TargetA: exhaust provider/auth/OAuth candidates
+    alt TargetA returns 429 before stream commit
+        TargetA-->>Controller: 429 + Retry-After
+        Controller->>Mapping: record_failure(429)
+        Mapping->>SQLite: persist cooldown and clear sticky target
+        Controller->>Mapping: acquire_target(exclude TargetA)
+        Mapping-->>Controller: TargetB
+        Controller->>TargetB: proxy request
+        TargetB-->>Controller: 2xx response
+        Controller->>Mapping: record_success(TargetB)
+        Mapping->>SQLite: persist sticky TargetB
+        Controller-->>Client: TargetB response
+    else TargetA fails after stream commit
+        TargetA-->>Client: protocol error in current stream
+        Controller->>Mapping: record_failure(TargetA)
+        Mapping->>SQLite: auto-disable TargetA for later requests
+    else client cancels
+        Client-->>Controller: close downstream connection
+        Note over Controller,SQLite: mapping runtime state remains unchanged
     end
 ```
 

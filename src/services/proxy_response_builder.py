@@ -142,6 +142,7 @@ class ProxyResponseBuilder:
         trace_id: str | None = None,
         route_name: str | None = None,
         client_ip: str | None = None,
+        on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
     ) -> Response:
         response = opened.response
         meta = self._create_empty_meta()
@@ -197,6 +198,24 @@ class ProxyResponseBuilder:
                         finalize_attempt()
                 except Exception as exc:
                     self._logger.error("Error finalizing upstream stream attempt: %s", exc)
+            if (
+                on_stream_failure
+                and downstream_started
+                and outcome in {"upstream_error", "processing_error", "hook_abort"}
+            ):
+                try:
+                    failure_type = hook_abort.error_type if hook_abort is not None else None
+                    if failure_type is None and error_type is not None:
+                        failure_type = error_type.value
+                    on_stream_failure(
+                        {
+                            "status_code": hook_abort.status_code if hook_abort is not None else 502,
+                            "error_type": failure_type or "upstream_stream_error",
+                            "error_message": error_message,
+                        }
+                    )
+                except Exception as exc:
+                    self._logger.error("Error in on_stream_failure callback: %s", exc)
             if on_complete and (outcome == "success" or hook_abort is not None):
                 try:
                     on_complete(meta)

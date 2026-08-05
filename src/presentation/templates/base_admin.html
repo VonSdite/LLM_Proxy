@@ -25,6 +25,9 @@
                         {% if oauth_enabled %}
                         <a class="header-nav-link{% if active_page == 'oauth' %} active{% endif %}" href="/oauth" data-nav-page="oauth">OAuth</a>
                         {% endif %}
+                        {% if model_mapping_enabled %}
+                        <a class="header-nav-link{% if active_page == 'model_mappings' %} active{% endif %}" href="/model-mappings" data-nav-page="model_mappings">模型映射</a>
+                        {% endif %}
                         {% if api_key_management_enabled %}
                         <a class="header-nav-link{% if active_page == 'api_keys' %} active{% endif %}" href="/api-keys" data-nav-page="api_keys">API Key</a>
                         {% endif %}
