@@ -1,10 +1,10 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260805-3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260805-4">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
-{% block header_subtitle %}维护独立模型 ID 与粘滞故障转移目标{% endblock %}
+{% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
 
 {% block content %}
     <section class="mapping-toolbar-band">
@@ -40,19 +40,31 @@
                             <input type="text" class="form-control" id="mappingIdInput" maxlength="64" autocomplete="off" spellcheck="false" placeholder="例如 internal_gpt">
                         </label>
                         <label class="mapping-field">
-                            <span>策略</span>
-                            <input type="text" class="form-control" value="sticky_failover" disabled>
-                        </label>
-                        <label class="mapping-field">
                             <span>429 冷却秒数</span>
-                            <input type="number" class="form-control" id="mappingCooldownInput" min="1" value="60">
+                            <input type="number" class="form-control" id="mappingCooldownInput" min="0" value="60">
                         </label>
                     </div>
                     <div class="mapping-target-heading">
-                        <h3>目标模型</h3>
+                        <h3>
+                            <span>目标模型</span>
+                            <button
+                                type="button"
+                                class="mapping-help-button"
+                                aria-describedby="mappingStrategyHelp"
+                                data-tooltip="首次选择最高优先级的可用目标，成功后保持粘滞；429 冷却后切换，其他异常自动禁用目标并切换。"
+                            >?</button>
+                            <span class="visually-hidden" id="mappingStrategyHelp">首次选择最高优先级的可用目标，成功后保持粘滞；429 冷却后切换，其他异常自动禁用目标并切换。</span>
+                        </h3>
                         <button type="button" class="btn btn-secondary" id="addTargetBtn">添加目标</button>
                     </div>
-                    <div class="mapping-target-list" id="mappingTargetList"></div>
+                    <div class="mapping-target-table" role="table" aria-label="目标模型列表">
+                        <div class="mapping-target-table-header" role="row">
+                            <span role="columnheader">模型 ID</span>
+                            <span role="columnheader">优先级</span>
+                            <span role="columnheader">操作</span>
+                        </div>
+                        <div class="mapping-target-list" id="mappingTargetList" role="rowgroup"></div>
+                    </div>
                 </div>
                 <div class="modal-footer border-top-0">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -86,17 +98,6 @@
             return data;
         }
 
-        function statusLabel(target) {
-            const labels = {
-                available: "可用",
-                cooldown: "冷却中",
-                disabled: "已禁用",
-                auto_disabled: "异常禁用",
-                unavailable: "不可用"
-            };
-            return labels[target.status] || target.status || "未知";
-        }
-
         function renderMappings() {
             document.getElementById("mappingCount").textContent = modelMappings.length;
             const container = document.getElementById("mappingTableContainer");
@@ -106,18 +107,14 @@
             }
             container.innerHTML = `
                 <table class="mapping-table">
-                    <thead><tr><th>模型 ID</th><th>策略</th><th>当前目标</th><th>目标状态</th><th>429 冷却</th><th>操作</th></tr></thead>
+                    <thead><tr><th>模型 ID</th><th>当前目标</th><th>429 冷却</th><th>操作</th></tr></thead>
                     <tbody>${modelMappings.map(mapping => {
-                        const available = mapping.targets.filter(target => target.status === "available").length;
-                        const unavailable = mapping.targets.filter(target => target.status === "unavailable").length;
                         const conflict = mapping.conflict_source
                             ? `<span class="mapping-conflict">覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型，按自定义映射路由</span>`
                             : "";
                         return `<tr>
                             <td><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>${conflict}</td>
-                            <td><code>${escapeHtml(mapping.strategy)}</code></td>
                             <td>${escapeHtml(mapping.current_target_model_id || "-")}</td>
-                            <td><span class="mapping-status">${available} 可用 / ${mapping.targets.length} 总计</span>${unavailable ? `<span class="mapping-unavailable">${unavailable} 不可用</span>` : ""}</td>
                             <td>${Number(mapping.cooldown_seconds_on_429)}s</td>
                             <td><div class="mapping-row-actions">
                                 <button type="button" class="btn btn-sm btn-secondary" onclick="openEditMapping('${encodeURIComponent(mapping.id)}')">编辑</button>
@@ -142,17 +139,49 @@
         function createTargetRow(target = {}) {
             const row = document.createElement("div");
             const unavailable = target.available_model === false;
+            const enabled = target.enabled !== false;
             row.className = `mapping-target-row${unavailable ? " is-unavailable" : ""}`;
+            row.dataset.enabled = enabled ? "true" : "false";
+            row.dataset.available = unavailable ? "false" : "true";
+            row.setAttribute("role", "row");
             row.innerHTML = `
-                <label class="mapping-field mapping-target-model"><span>模型 ID</span><div class="mapping-target-combobox"><input type="text" class="form-control target-model-search" value="${escapeHtml(target.model_id || "")}" autocomplete="off" placeholder="搜索并选择模型" role="combobox" aria-expanded="false" ${unavailable ? "disabled" : ""}><input type="hidden" class="target-model-id" value="${escapeHtml(target.model_id || "")}"><div class="mapping-target-options" role="listbox" hidden></div></div></label>
-                <label class="mapping-field mapping-target-priority"><span>优先级</span><input type="number" class="form-control target-priority" min="1" value="${Number(target.priority || 1)}" ${unavailable ? "disabled" : ""}></label>
-                <label class="mapping-target-toggle"><span>${unavailable ? "不可用" : statusLabel(target)}</span><input type="checkbox" class="target-enabled" ${target.enabled !== false ? "checked" : ""} ${unavailable ? "disabled" : ""}></label>
-                <button type="button" class="mapping-remove-target" aria-label="删除目标" title="删除目标">&times;</button>`;
+                <div class="mapping-target-model-cell" role="cell">
+                    <span class="mapping-target-mobile-label">模型 ID</span>
+                    <div class="mapping-target-model-control">
+                        <div class="mapping-target-combobox"><input type="text" class="form-control target-model-search" value="${escapeHtml(target.model_id || "")}" autocomplete="off" placeholder="搜索并选择模型" aria-label="目标模型 ID" role="combobox" aria-expanded="false" ${unavailable ? "disabled" : ""}><input type="hidden" class="target-model-id" value="${escapeHtml(target.model_id || "")}"><div class="mapping-target-options" role="listbox" hidden></div></div>
+                        ${unavailable ? '<span class="mapping-target-unavailable">不可用</span>' : ""}
+                    </div>
+                </div>
+                <label class="mapping-target-priority" role="cell"><span class="mapping-target-mobile-label">优先级</span><input type="number" class="form-control target-priority" aria-label="优先级" min="0" value="${Number(target.priority ?? 1)}" ${unavailable ? "disabled" : ""}></label>
+                <div class="mapping-target-actions" role="cell">
+                    <button type="button" class="mapping-target-action mapping-toggle-target"></button>
+                    <button type="button" class="mapping-target-action is-delete mapping-remove-target">删除</button>
+                </div>`;
             if (!unavailable) {
                 setupTargetCombobox(row);
             }
+            syncTargetRowActions(row);
+            row.querySelector(".mapping-toggle-target").addEventListener("click", () => toggleTargetRow(row));
             row.querySelector(".mapping-remove-target").addEventListener("click", () => row.remove());
             document.getElementById("mappingTargetList").appendChild(row);
+        }
+
+        function syncTargetRowActions(row) {
+            const toggleButton = row.querySelector(".mapping-toggle-target");
+            if (row.dataset.available === "false") {
+                toggleButton.hidden = true;
+                return;
+            }
+            const enabled = row.dataset.enabled !== "false";
+            toggleButton.hidden = false;
+            toggleButton.textContent = enabled ? "禁用" : "启用";
+            toggleButton.classList.toggle("is-delete", enabled);
+            toggleButton.classList.toggle("is-primary", !enabled);
+        }
+
+        function toggleTargetRow(row) {
+            row.dataset.enabled = row.dataset.enabled === "false" ? "true" : "false";
+            syncTargetRowActions(row);
         }
 
         function setupTargetCombobox(row) {
@@ -244,7 +273,7 @@
             const targets = Array.from(document.querySelectorAll(".mapping-target-row")).map(row => ({
                 model_id: row.querySelector(".target-model-id").value.trim(),
                 priority: Number(row.querySelector(".target-priority").value),
-                enabled: row.querySelector(".target-enabled").checked
+                enabled: row.dataset.enabled !== "false"
             }));
             return {
                 id: document.getElementById("mappingIdInput").value.trim(),
