@@ -628,7 +628,7 @@ body.is-resizing-mapping-id-column * {
 }
 
 .mapping-target-table col.mapping-target-priority-column {
-    width: 132px;
+    width: 184px;
 }
 
 .mapping-target-table col.mapping-target-actions-column {
@@ -734,6 +734,8 @@ body.is-resizing-mapping-id-column * {
 }
 
 .target-priority {
+    width: 72px;
+    flex: 0 0 72px;
     font-family: var(--font-numeric);
     letter-spacing: 0;
 }
@@ -751,6 +753,13 @@ body.is-resizing-mapping-id-column * {
 
 .mapping-target-model-control .mapping-target-combobox {
     flex: 1 1 auto;
+    min-width: 0;
+}
+
+.mapping-target-priority-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
 }
 

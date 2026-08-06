@@ -165,7 +165,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260806-9", template)
+        self.assertIn("model_mappings.css?v=20260806-10", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -173,6 +173,8 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('class="form-control target-priority" aria-label="优先级" min="0"', template)
         self.assertIn("mapping-help-button", template)
         self.assertIn("mapping-target-unavailable", template)
+        self.assertIn('class="mapping-target-priority-control"', template)
+        self.assertIn("width: 72px", stylesheet)
         self.assertIn('<table class="mapping-target-table"', template)
         self.assertIn('class="mapping-target-add-button" id="addTargetBtn"', template)
         self.assertIn("<span>新增目标模型</span>", template)
