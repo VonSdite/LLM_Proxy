@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-9">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-10">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -628,10 +628,15 @@
                     <span class="mapping-target-mobile-label">模型 ID</span>
                     <div class="mapping-target-model-control">
                         <div class="mapping-target-combobox"><input type="text" class="form-control target-model-search" value="${escapeHtml(target.model_id || "")}" autocomplete="off" placeholder="搜索并选择模型" aria-label="目标模型 ID" role="combobox" aria-expanded="false" ${unavailable ? "disabled" : ""}><input type="hidden" class="target-model-id" value="${escapeHtml(target.model_id || "")}"><div class="mapping-target-options" role="listbox" hidden></div></div>
+                    </div>
+                </td>
+                <td class="mapping-target-priority">
+                    <span class="mapping-target-mobile-label">优先级</span>
+                    <div class="mapping-target-priority-control">
+                        <input type="number" class="form-control target-priority" aria-label="优先级" min="0" value="${Number(target.priority ?? 1)}" ${unavailable ? "disabled" : ""}>
                         ${unavailable ? '<span class="mapping-target-unavailable">不可用</span>' : ""}
                     </div>
                 </td>
-                <td class="mapping-target-priority"><span class="mapping-target-mobile-label">优先级</span><input type="number" class="form-control target-priority" aria-label="优先级" min="0" value="${Number(target.priority ?? 1)}" ${unavailable ? "disabled" : ""}></td>
                 <td class="mapping-target-actions">
                     <div class="mapping-target-action-buttons">
                         <button type="button" class="mapping-target-action mapping-toggle-target"></button>
