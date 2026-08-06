@@ -165,7 +165,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260806-8", template)
+        self.assertIn("model_mappings.css?v=20260806-9", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -213,10 +213,12 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('class="btn btn-primary" id="importMappingsBtn"', template)
         self.assertIn('class="mapping-group-actions"', template)
         self.assertIn('class="btn btn-toolbar-secondary mapping-group-data-btn"', template)
-        self.assertIn('class="toolbar-pill">${mappings.length} 个</span>', template)
+        self.assertNotIn('class="toolbar-pill">${mappings.length} 个</span>', template)
         self.assertNotIn('id="exportMappingsBtn"', template)
         self.assertIn(".mapping-target-row.is-disabled .form-control", stylesheet)
         self.assertIn(".btn-toolbar-secondary", stylesheet)
+        self.assertIn(".mapping-group-table-wrap .mapping-table th", stylesheet)
+        self.assertIn("background: transparent", stylesheet)
         create_editor = template[
             template.index("function openCreateMapping()") : template.index("function openEditMapping")
         ]

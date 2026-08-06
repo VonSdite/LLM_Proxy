@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-8">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-9">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -421,7 +421,6 @@
                                     data-mapping-export-button="${groupKey}" onclick="exportMappings('${groupKey}')" disabled>导出</button>
                             </div>
                         </div>
-                        <span class="toolbar-pill">${mappings.length} 个</span>
                     </div>`;
             if (!mappings.length) {
                 return `${html}<div class="mapping-empty">${escapeHtml(emptyText)}</div></section>`;

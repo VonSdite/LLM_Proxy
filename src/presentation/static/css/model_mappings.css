@@ -123,6 +123,13 @@
     box-shadow: none;
 }
 
+.mapping-group-table-wrap .mapping-table th {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    vertical-align: middle;
+    line-height: 1.1;
+}
+
 .mapping-table {
     width: 100%;
     min-width: 840px;
@@ -177,9 +184,9 @@
     position: absolute;
     z-index: 1;
     top: 0;
-    right: 0;
+    right: -5px;
     bottom: 0;
-    width: 14px;
+    width: 10px;
     cursor: col-resize;
     touch-action: none;
 }
@@ -187,11 +194,11 @@
 .mapping-id-column-resizer::after {
     position: absolute;
     top: 7px;
-    right: 5px;
+    right: 4px;
     bottom: 7px;
     width: 2px;
     border-radius: 1px;
-    background: rgba(100, 116, 139, 0.34);
+    background: transparent;
     content: "";
     transition: background-color var(--transition);
 }
