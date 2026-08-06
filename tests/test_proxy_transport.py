@@ -349,6 +349,22 @@ class ProviderTransportTests(unittest.TestCase):
         runtime = RuntimeProviderSpec.from_schema(schema)
         self.assertTrue(runtime.enabled)
 
+    def test_provider_hidden_model_list_keeps_only_configured_models(self) -> None:
+        schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "demo",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "model_list": ["visible", "hidden"],
+                "hidden_model_list": ["hidden", "missing", "hidden"],
+            }
+        )
+
+        self.assertEqual(("visible", "hidden"), schema.model_list)
+        self.assertEqual(("hidden",), schema.hidden_model_list)
+        self.assertEqual(["hidden"], schema.to_mapping()["hidden_model_list"])
+        self.assertEqual(("hidden",), RuntimeProviderSpec.from_schema(schema).hidden_model_list)
+
     def test_provider_force_upstream_stream_defaults_to_false_and_accepts_true(self) -> None:
         default_schema = ProviderConfigSchema.from_mapping(
             {
@@ -674,6 +690,36 @@ class ProviderTransportTests(unittest.TestCase):
 
 
 class ProviderManagerEnabledTests(unittest.TestCase):
+    def test_hidden_model_remains_routable_but_is_not_visible(self) -> None:
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=None,  # type: ignore[arg-type]
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=Flask(__name__),
+        )
+        manager = ProviderManager(ctx)
+        manager.load_providers(
+            (
+                ProviderConfigSchema.from_mapping(
+                    {
+                        "name": "demo",
+                        "api": "https://example.com/v1/chat/completions",
+                        "api_key": "demo-key",
+                        "model_list": ["visible", "hidden"],
+                        "hidden_model_list": ["hidden"],
+                    }
+                ),
+            )
+        )
+
+        self.assertEqual(("demo/hidden", "demo/visible"), manager.list_model_names())
+        self.assertEqual(("demo/visible",), manager.list_visible_model_names())
+        self.assertIsNotNone(manager.get_provider_for_model("demo/hidden"))
+        provider_view = manager.get_provider_view("demo")
+        self.assertIsNotNone(provider_view)
+        assert provider_view is not None
+        self.assertEqual(("hidden",), provider_view.hidden_model_list)
+
     def test_disabled_provider_is_not_registered_at_runtime(self) -> None:
         logger = FakeLogger()
         ctx = AppContext(
@@ -1249,6 +1295,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         )
         self.assertIn('class="provider-form-grid"', html)
         self.assertIn('class="mb-3 provider-model-list-section"', html)
+        self.assertIn("function toggleModelTestRowVisibility(rowId)", html)
+        self.assertIn("function toggleAllModelTestRowsVisibility()", html)
+        self.assertIn('class="model-visibility-toggle model-visibility-header-toggle', html)
+        self.assertIn('class="model-visibility-toggle model-visibility-row-toggle', html)
+        self.assertIn("hidden_model_list: getHiddenModelListItemsFromRows()", html)
         self.assertNotIn('id="providerModalTabBtn_basic"', html)
         self.assertNotIn('id="providerModalTabBtn_models"', html)
         self.assertNotIn('id="providerModalTabPanel_basic"', html)
@@ -1527,6 +1578,13 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".providers-page .model-test-toolbar {", css)
         self.assertIn(".providers-page .model-test-table {", css)
         self.assertIn(".providers-page .model-test-status-badge {", css)
+        self.assertIn(".providers-page .model-test-model-control {", css)
+        self.assertIn(".providers-page .model-visibility-toggle {", css)
+        self.assertIn("width: 100%;\n    justify-content: space-between;", css)
+        self.assertIn("border: 0;", css)
+        self.assertIn("background: transparent;", css)
+        self.assertNotIn(".providers-page .model-visibility-header-toggle {\n    width: 26px;", css)
+        self.assertIn(':root[data-theme="dark"] .providers-page .model-visibility-toggle {', css)
         self.assertIn(".providers-page .provider-group-list {", css)
         self.assertIn(".providers-page .provider-group-card {", css)
         self.assertIn(".providers-page .provider-group-header {", css)
@@ -2133,19 +2191,30 @@ vm.runInContext({json.dumps(script)}, sandbox);
 sandbox.renderCustomSelectOptions = () => {{}};
 sandbox.syncCustomSelectValue = () => {{}};
 
-sandbox.setModelTestRowsFromModels(" beta \\nAlpha\\nalpha\\nBeta\\nbeta\\n");
+sandbox.setModelTestRowsFromModels(
+  " beta \\nAlpha\\nalpha\\nBeta\\nbeta\\n",
+  {{ hiddenModels: ["beta", "Beta"] }},
+);
 const collectedBefore = sandbox.collectFormData();
 sandbox.tidyModelList();
 const collectedAfter = sandbox.collectFormData();
+sandbox.toggleAllModelTestRowsVisibility();
+const allVisibleAfterShow = sandbox.modelTestRows.every(row => row.visible !== false);
+sandbox.toggleAllModelTestRowsVisibility();
+const allHiddenAfterHide = sandbox.modelTestRows.every(row => row.visible === false);
 
 process.stdout.write(JSON.stringify({{
   beforeModelList: collectedBefore.model_list,
+  beforeHiddenModelList: collectedBefore.hidden_model_list,
   beforeAuthGroup: collectedBefore.auth_group,
   beforeApiKey: collectedBefore.api_key,
   afterRows: sandbox.modelTestRows.map(row => row.model),
   afterModelList: collectedAfter.model_list,
+  afterHiddenModelList: collectedAfter.hidden_model_list,
   afterAuthGroup: collectedAfter.auth_group,
   afterApiKey: collectedAfter.api_key,
+  allVisibleAfterShow,
+  allHiddenAfterHide,
   countText: sandbox.document.elements.modelTestSummary.textContent,
   message: sandbox.messages[0]?.message || "",
 }}));
@@ -2159,12 +2228,16 @@ process.stdout.write(JSON.stringify({{
         payload = json.loads(completed.stdout.decode("utf-8"))
 
         self.assertEqual("beta\nAlpha\nalpha\nBeta", payload["beforeModelList"])
+        self.assertEqual(["beta", "Beta"], payload["beforeHiddenModelList"])
         self.assertEqual("shared-pool", payload["beforeAuthGroup"])
         self.assertEqual("", payload["beforeApiKey"])
         self.assertEqual(["Alpha", "Beta", "alpha", "beta"], payload["afterRows"])
         self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterModelList"])
+        self.assertEqual(["Beta", "beta"], payload["afterHiddenModelList"])
         self.assertEqual("shared-pool", payload["afterAuthGroup"])
         self.assertEqual("", payload["afterApiKey"])
+        self.assertTrue(payload["allVisibleAfterShow"])
+        self.assertTrue(payload["allHiddenAfterHide"])
         self.assertIn("4", payload["countText"])
         self.assertTrue(payload["message"])
 

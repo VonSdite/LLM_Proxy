@@ -59,6 +59,8 @@ providers:
     model_list:
       - gpt-4.1
       - gpt-4.1-mini
+    hidden_model_list:
+      - gpt-4.1-mini
 ```
 
 也可以直接从 [config.sample.yaml](config.sample.yaml) 开始裁剪。
@@ -184,7 +186,8 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `max_retries`：一次 Provider 上游操作允许的最大尝试次数，包含首次尝试；默认 `3`，设为 `1` 时只尝试一次
 - `verify_ssl`：是否校验证书；代码默认值为 `false`，公网 HTTPS 建议显式设为 `true`
 - `force_upstream_stream`：是否在下游非流式请求时强制使用上游流式请求；默认 `false`。启用后代理会聚合上游流式事件，再以非流式响应返回下游
-- `model_list`：当前 Provider 暴露的模型列表
+- `model_list`：当前 Provider 可路由的模型列表
+- `hidden_model_list`：不出现在下游 `GET /v1/models` 的模型列表；模型路由、测试和权限配置保持可用
 - `hook`：相对 `hooks/` 目录的 Hook 文件路径，文件中需要导出名为 `Hook` 的类
 
 旧配置中如果残留 `transport` 字段，启动加载配置时会自动删除并写回配置文件；上游传输固定由内部 HTTP executor 处理。
@@ -431,7 +434,7 @@ Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照�
 - 客户端取消会关闭上游响应，不触发成功完成统计
 - 内置 translator 会在 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 和 Claude `thinking` 之间转换思考意图；无法精确映射的档位会使用 `xhigh`
 - OpenAI Chat 上游响应里的 `reasoning_content` 和 `reasoning_details` 会按下游协议转换为 Claude thinking 或 OpenAI Responses reasoning 输出
-- `GET /v1/models` 会返回当前已启用 Provider 和 Codex / Claude OAuth 模型列表，以及 `provider_name`、`source_format` 等元信息
+- `GET /v1/models` 会返回当前已启用 Provider 中允许公开的模型和 Codex / Claude OAuth 模型列表，以及 `provider_name`、`source_format` 等元信息
 
 ### 2. Provider 与 Auth Group 管理
 
@@ -442,7 +445,7 @@ Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照�
 - 支持导入 Provider JSON；同名 Provider 和 Auth Group 会追加数字后缀，Provider 的 `auth_group` 引用会同步使用导入后的 Auth Group 名称
 - Provider JSON 导入会按 Auth Group 重命名结果同步写入 Auth Entry 运行态和用量桶表项；相同主键使用导入值更新
 - 拉取上游模型列表并辅助填充 `model_list`
-- Provider 表单使用表格方式维护 `model_list`，支持底部 `+` 行新增模型
+- Provider 表单使用表格方式维护 `model_list`，支持底部 `+` 行新增模型，并通过行内和表头眼睛按钮控制模型在下游 `GET /v1/models` 中的可见性
 - Provider 表单支持单个或多个模型测试可用性、首字延迟与 TPS
 - Auth Group 增删改查
 - YAML 批量导入 Auth Entries

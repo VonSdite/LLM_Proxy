@@ -318,7 +318,7 @@ route family 直接决定当前请求的下游接口协议：
 
 当 `api_keys.enabled=true` 时，`GET /v1/models` 与模型请求接口一样必须携带有效 API Key。返回模型列表会按以下顺序收窄：
 
-1. 当前运行时可用模型
+1. 当前运行时模型，其中 Provider 模型按 `hidden_model_list` 过滤公开可见项
 2. 如果启用 Chat 白名单，取当前客户端 IP 对应用户可访问模型
 3. 如果启用 API Key 管理，再取当前 key 可访问模型
 
@@ -488,7 +488,7 @@ OAuth 模型是数据平面的例外路由：
 
 ### 3.3 Control-Plane Model Mapping Management
 
-模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、勾选导出和映射级启停。弹窗维护映射 ID、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。
+模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出和映射级启停。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。
 
 页面与 API：
 
@@ -500,6 +500,7 @@ OAuth 模型是数据平面的例外路由：
 - `GET /api/model-mappings/<mapping_id>`
 - `PUT /api/model-mappings/<mapping_id>`
 - `DELETE /api/model-mappings/<mapping_id>`
+- `POST /api/model-mappings/<mapping_id>/copy`
 - `POST /api/model-mappings/<mapping_id>/enable`
 - `POST /api/model-mappings/<mapping_id>/disable`
 - `POST /api/model-mappings/<mapping_id>/targets/toggle`
@@ -530,6 +531,7 @@ Provider 公共配置字段只有：
 - `max_retries`
 - `verify_ssl`
 - `model_list`
+- `hidden_model_list`
 - `hook`
 
 其中：
@@ -656,6 +658,7 @@ provider editor form snapshot
 - 测试模型列表中的模型值按真实上游模型 ID 处理，不执行 `{provider_name}/` 路由前缀裁剪
 - 两条链路都会使用 Provider 表单快照中的 `proxy_mode`、`proxy` 和 `verify_ssl`
 - Provider 编辑页的 `model_list` 采用表格编辑，并以当前前端行状态作为唯一数据源
+- Provider 编辑页通过行内和表头可见性按钮维护 `hidden_model_list`；该字段只收窄下游 `GET /v1/models`，不改变运行时模型注册、请求路由、模型测试、权限目录或模型映射候选
 - 拉取模型只应用 `fetch_models`；Hook 返回 `None` 时使用内置端点探测
 - 测试模型只应用 request-side hook：
   - `header_hook`

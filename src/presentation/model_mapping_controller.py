@@ -16,7 +16,7 @@ from .decorators import require_authentication
 
 
 class ModelMappingController:
-    """提供模型映射 CRUD、目标启停和导入导出接口。"""
+    """提供模型映射 CRUD、复制、目标启停和导入导出接口。"""
 
     def __init__(
         self,
@@ -44,6 +44,7 @@ class ModelMappingController:
         self._app.route("/api/model-mappings/<mapping_id>", methods=["GET"])(auth(self.get_mapping))
         self._app.route("/api/model-mappings/<mapping_id>", methods=["PUT"])(auth(self.update_mapping))
         self._app.route("/api/model-mappings/<mapping_id>", methods=["DELETE"])(auth(self.delete_mapping))
+        self._app.route("/api/model-mappings/<mapping_id>/copy", methods=["POST"])(auth(self.copy_mapping))
         self._app.route("/api/model-mappings/<mapping_id>/disable", methods=["POST"])(auth(self.disable_mapping))
         self._app.route("/api/model-mappings/<mapping_id>/enable", methods=["POST"])(auth(self.enable_mapping))
         self._app.route("/api/model-mappings/<mapping_id>/targets/toggle", methods=["POST"])(auth(self.toggle_target))
@@ -114,6 +115,18 @@ class ModelMappingController:
             return build_value_error_response(exc)
         except Exception as exc:
             self._logger.error("Error deleting model mapping: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def copy_mapping(self, mapping_id: str) -> ResponseReturnValue:
+        try:
+            mapping = self._service.copy_mapping(mapping_id)
+            self._sync_model_catalog()
+            self._logger.info("Model mapping copied: %s -> %s", mapping_id, mapping["id"])
+            return jsonify(mapping), 201
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error copying model mapping: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def reorder_mappings(self) -> ResponseReturnValue:

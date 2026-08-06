@@ -457,8 +457,13 @@ class ProxyController:
             fallback_kwargs.pop("api_key_id", None)
             return self._log_service.log_request(**fallback_kwargs)
 
-    def _list_available_model_names(self) -> tuple[str, ...]:
-        provider_models = list(self._provider_manager.list_model_names())
+    def _list_available_model_names(self, *, visible_provider_models_only: bool = False) -> tuple[str, ...]:
+        provider_list_method = self._provider_manager.list_model_names
+        if visible_provider_models_only:
+            visible_list_method = getattr(self._provider_manager, "list_visible_model_names", None)
+            if callable(visible_list_method):
+                provider_list_method = visible_list_method
+        provider_models = list(provider_list_method())
         codex_models: list[str] = []
         if self._codex_proxy_service is not None:
             try:
@@ -1052,7 +1057,7 @@ class ProxyController:
             if denial_response is not None:
                 return denial_response
 
-            model_names = list(self._list_available_model_names())
+            model_names = list(self._list_available_model_names(visible_provider_models_only=True))
             if self._is_whitelist_required():
                 allowed_models = set(
                     self._user_service.get_accessible_models_for_user(

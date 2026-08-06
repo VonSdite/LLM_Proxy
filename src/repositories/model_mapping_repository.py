@@ -135,6 +135,22 @@ class ModelMappingRepository:
                 raise ValueError(f"模型映射已存在: {mapping.id}")
             self._insert_mapping(conn, mapping, now_text, sort_order=self._next_mapping_sort_order(conn))
 
+    def create_mapping_after(self, source_id: str, mapping: ModelMappingSchema) -> None:
+        """创建模型映射，并插入到源映射下方。"""
+        now_text = now_local_datetime_text()
+        with self._get_connection() as conn:
+            source = conn.execute("SELECT sort_order FROM model_mappings WHERE id = ?", (source_id,)).fetchone()
+            if source is None:
+                raise ValueError(f"模型映射不存在: {source_id}")
+            if conn.execute("SELECT 1 FROM model_mappings WHERE id = ?", (mapping.id,)).fetchone():
+                raise ValueError(f"模型映射已存在: {mapping.id}")
+            source_order = int(source["sort_order"])
+            conn.execute(
+                "UPDATE model_mappings SET sort_order = sort_order + 1, updated_at = ? WHERE sort_order > ?",
+                (now_text, source_order),
+            )
+            self._insert_mapping(conn, mapping, now_text, sort_order=source_order + 1)
+
     def update_mapping(self, current_id: str, mapping: ModelMappingSchema) -> None:
         now_text = now_local_datetime_text()
         with self._get_connection() as conn:

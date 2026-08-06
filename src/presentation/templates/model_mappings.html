@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-17">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260807-1">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -123,6 +123,7 @@
         let mappingDragState = null;
         let targetDragRow = null;
         let mappingOrderActionInFlight = false;
+        let mappingCopyActionInFlight = false;
         const togglingMappingIds = new Set();
         let mappingIdColumnWidth = 220;
         const mappingIdColumnWidthStorageKey = "modelMappings.idColumnWidth";
@@ -292,7 +293,8 @@
         }
 
         function updateMappingSelectionUi() {
-            const interactionLocked = mappingOrderActionInFlight || togglingMappingIds.size > 0 || deletingMappingId !== null;
+            const interactionLocked = mappingOrderActionInFlight || mappingCopyActionInFlight
+                || togglingMappingIds.size > 0 || deletingMappingId !== null;
             document.querySelectorAll("[data-mapping-group-select]").forEach(checkbox => {
                 const groupKey = checkbox.dataset.mappingGroupSelect;
                 const groupIds = getMappingGroupIds(groupKey);
@@ -336,7 +338,7 @@
         }
 
         function handleMappingRowDragStart(encodedId, groupKey, event) {
-            if (mappingOrderActionInFlight || togglingMappingIds.size || deletingMappingId !== null) {
+            if (mappingOrderActionInFlight || mappingCopyActionInFlight || togglingMappingIds.size || deletingMappingId !== null) {
                 event.preventDefault();
                 return;
             }
@@ -393,7 +395,7 @@
 
         async function setMappingEnabled(encodedId, enabled) {
             const mappingId = decodeURIComponent(encodedId);
-            if (mappingOrderActionInFlight || togglingMappingIds.has(mappingId)) return;
+            if (mappingOrderActionInFlight || mappingCopyActionInFlight || togglingMappingIds.has(mappingId)) return;
             togglingMappingIds.add(mappingId);
             renderMappings();
             try {
@@ -483,7 +485,8 @@
                             const isDeletePending = pendingDeleteMappingId === mapping.id;
                             const isDeleteInFlight = deletingMappingId === mapping.id;
                             const isTogglePending = togglingMappingIds.has(mapping.id);
-                            const actionLocked = mappingOrderActionInFlight || isDeleteInFlight || isTogglePending;
+                            const actionLocked = mappingOrderActionInFlight || mappingCopyActionInFlight
+                                || isDeleteInFlight || isTogglePending;
                             const enabled = isMappingEnabled(mapping);
                             return `<tr
                                 data-mapping-row-id="${encodedId}"
@@ -512,6 +515,7 @@
                                 <td class="mapping-cooldown-cell">${Number(mapping.cooldown_seconds_on_429)}s</td>
                                 <td class="mapping-actions-cell"><div class="mapping-row-actions">
                                     <button type="button" class="btn-action btn-edit" onclick="openEditMapping('${encodedId}')"${actionLocked ? " disabled" : ""}>编辑</button>
+                                    <button type="button" class="btn-action btn-edit" onclick="copyMapping('${encodedId}')"${actionLocked ? " disabled" : ""}>复制</button>
                                     <button type="button" class="btn-action ${enabled ? "btn-delete" : "btn-edit"}" onclick="setMappingEnabled('${encodedId}', ${enabled ? "false" : "true"})"${actionLocked ? " disabled" : ""}>${isTogglePending ? "处理中..." : (enabled ? "禁用" : "启用")}</button>
                                     <div class="inline-confirm-wrap">
                                         <button type="button" class="btn-action btn-delete${isDeletePending ? " is-active" : ""}" data-mapping-delete-trigger="${encodedId}" onclick="toggleDeleteMappingConfirm('${encodedId}', event)"${actionLocked ? " disabled" : ""}>删除</button>
@@ -776,6 +780,25 @@
             document.getElementById("mappingTargetList").innerHTML = "";
             mapping.targets.forEach(createTargetRow);
             mappingEditorModal.show();
+        }
+
+        async function copyMapping(encodedId) {
+            const mappingId = decodeURIComponent(encodedId);
+            if (!mappingId || mappingCopyActionInFlight) return;
+            mappingCopyActionInFlight = true;
+            renderMappings();
+            try {
+                const copied = await requestJson(`/api/model-mappings/${encodeURIComponent(mappingId)}/copy`, {
+                    method: "POST"
+                });
+                showMessage(`模型映射已复制为 ${copied.id}`, "success");
+                await loadMappings();
+            } catch (error) {
+                showMessage(error.message, "error");
+            } finally {
+                mappingCopyActionInFlight = false;
+                renderMappings();
+            }
         }
 
         function collectMappingPayload() {

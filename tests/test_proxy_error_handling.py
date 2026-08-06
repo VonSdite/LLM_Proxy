@@ -144,16 +144,24 @@ class FakeLogService:
 
 
 class FakeProviderManager:
-    def __init__(self, provider: LLMProvider) -> None:
+    def __init__(self, provider: LLMProvider, *, hidden_models: tuple[str, ...] = ()) -> None:
         self._provider = provider
+        self._hidden_models = set(hidden_models)
 
     def get_provider_for_model(self, model_name: str):
-        if model_name in {f"{self._provider.name}/{self._provider.model_list[0]}", self._provider.model_list[0]}:
+        model_names = set(self._provider.model_list)
+        prefixed_model_names = {f"{self._provider.name}/{model}" for model in model_names}
+        if model_name in model_names | prefixed_model_names:
             return self._provider
         return None
 
     def list_model_names(self) -> tuple[str, ...]:
         return tuple(f"{self._provider.name}/{model}" for model in self._provider.model_list)
+
+    def list_visible_model_names(self) -> tuple[str, ...]:
+        return tuple(
+            f"{self._provider.name}/{model}" for model in self._provider.model_list if model not in self._hidden_models
+        )
 
     def get_provider_view(self, provider_name: str):
         if provider_name != self._provider.name:
@@ -336,6 +344,34 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             },
             response.get_json(),
         )
+
+    def test_list_models_hides_provider_model_without_disabling_route(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("visible", "hidden"),
+        )
+        provider_manager = FakeProviderManager(provider, hidden_models=("hidden",))
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            provider_manager,
+        )
+
+        response = app.test_client().get("/v1/models")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(["demo/visible"], [item["id"] for item in response.get_json()["data"]])
+        self.assertIs(provider, provider_manager.get_provider_for_model("demo/hidden"))
 
     def test_list_models_includes_codex_models_without_provider_prefix(self) -> None:
         provider = LLMProvider(
