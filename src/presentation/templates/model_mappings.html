@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-14">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-15">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -472,10 +472,7 @@
                             const targetTags = preview.visible.length
                                 ? preview.visible.map(target => {
                                     const targetId = String(target.model_id || "").trim();
-                                    const isCurrent = mapping.current_target_model_id === targetId;
-                                    const isUnavailable = target.available_model === false;
-                                    const isDisabled = target.enabled === false;
-                                    return `<span class="mapping-model-tag${isCurrent ? " is-current" : ""}${isDisabled ? " is-disabled" : ""}${isUnavailable ? " is-unavailable" : ""}" title="${escapeHtml(targetId)}">${escapeHtml(targetId)}</span>`;
+                                    return `<span class="mapping-model-tag" title="${escapeHtml(targetId)}">${escapeHtml(targetId)}</span>`;
                                 }).join("")
                                 : '<span class="muted-text">未配置</span>';
                             const targetSummary = preview.total
