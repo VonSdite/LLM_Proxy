@@ -357,7 +357,7 @@ body.is-resizing-mapping-id-column * {
 .mapping-model-tag {
     display: inline-flex;
     max-width: 100%;
-    min-height: 30px;
+    min-height: 26px;
     align-items: center;
     overflow: hidden;
     padding: 0 10px;
@@ -365,18 +365,13 @@ body.is-resizing-mapping-id-column * {
     border-radius: 999px;
     background: #f6f8fb;
     color: #334155;
+    font-family: var(--font-sans);
     font-size: 12px;
     font-weight: 600;
     line-height: 1;
     box-shadow: none;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.mapping-model-tag.is-current {
-    border-color: rgba(58, 127, 237, 0.28);
-    background: rgba(58, 127, 237, 0.1);
-    color: var(--primary-active);
 }
 
 .mapping-model-tag.is-unavailable {
@@ -396,7 +391,7 @@ body.is-resizing-mapping-id-column * {
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 8px;
+    margin-top: 10px;
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 600;
@@ -1124,12 +1119,6 @@ body.is-resizing-mapping-id-column * {
     border-color: rgba(148, 163, 184, 0.22);
     background: rgba(148, 163, 184, 0.08);
     color: #d5dde7;
-}
-
-:root[data-theme="dark"] .mapping-model-tag.is-current {
-    border-color: rgba(88, 166, 255, 0.28);
-    background: rgba(88, 166, 255, 0.12);
-    color: #9bc7ff;
 }
 
 :root[data-theme="dark"] .mapping-model-tag.is-unavailable {
