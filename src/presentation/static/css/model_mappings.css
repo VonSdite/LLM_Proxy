@@ -156,7 +156,7 @@
 }
 
 .mapping-list-actions-column {
-    width: 170px;
+    width: 200px;
 }
 
 .mapping-table th,
@@ -334,13 +334,6 @@ body.is-resizing-mapping-id-column * {
 .mapping-id-cell {
     overflow: hidden;
     vertical-align: middle !important;
-}
-
-.mapping-conflict {
-    display: block;
-    margin-top: 4px;
-    color: #b42318;
-    font-size: 12px;
 }
 
 .mapping-targets-cell {
