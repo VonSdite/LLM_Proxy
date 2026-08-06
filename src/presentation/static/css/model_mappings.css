@@ -374,18 +374,6 @@ body.is-resizing-mapping-id-column * {
     white-space: nowrap;
 }
 
-.mapping-model-tag.is-unavailable {
-    border-color: #9ca3af;
-    background: rgba(90, 102, 120, 0.08);
-    color: #667085;
-}
-
-.mapping-model-tag.is-disabled:not(.is-unavailable) {
-    border-color: #aeb6c2;
-    background: rgba(90, 102, 120, 0.08);
-    color: #667085;
-}
-
 .mapping-target-summary {
     display: flex;
     align-items: center;
@@ -1119,18 +1107,6 @@ body.is-resizing-mapping-id-column * {
     border-color: rgba(148, 163, 184, 0.22);
     background: rgba(148, 163, 184, 0.08);
     color: #d5dde7;
-}
-
-:root[data-theme="dark"] .mapping-model-tag.is-unavailable {
-    border-color: #687383;
-    background: rgba(45, 52, 62, 0.78);
-    color: #bcc8d8;
-}
-
-:root[data-theme="dark"] .mapping-model-tag.is-disabled:not(.is-unavailable) {
-    border-color: #596574;
-    background: rgba(45, 52, 62, 0.78);
-    color: #a9b4c3;
 }
 
 :root[data-theme="dark"] .mapping-target-count,
