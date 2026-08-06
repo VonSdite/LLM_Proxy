@@ -357,7 +357,7 @@ body.is-resizing-mapping-id-column * {
 .mapping-model-tag {
     display: inline-flex;
     max-width: 100%;
-    min-height: 26px;
+    min-height: 30px;
     align-items: center;
     overflow: hidden;
     padding: 0 10px;
@@ -368,6 +368,7 @@ body.is-resizing-mapping-id-column * {
     font-size: 12px;
     font-weight: 600;
     line-height: 1;
+    box-shadow: none;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
