@@ -759,7 +759,7 @@ body.is-resizing-mapping-id-column * {
 .mapping-target-priority-control {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
 }
 
@@ -767,11 +767,23 @@ body.is-resizing-mapping-id-column * {
     flex: 0 0 auto;
     padding: 3px 7px;
     border: 1px solid #9ca3af;
-    border-radius: 6px;
+    border-radius: 999px;
     color: #667085;
     font-size: 12px;
     font-weight: 700;
     line-height: 1.2;
+}
+
+.model-mappings-page .mapping-target-unavailable-help {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    font-size: 11px;
+}
+
+.model-mappings-page .mapping-target-unavailable-help::after {
+    right: 0;
+    left: auto;
 }
 
 .mapping-target-mobile-label {

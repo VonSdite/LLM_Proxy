@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-10">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-11">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -634,7 +634,10 @@
                     <span class="mapping-target-mobile-label">优先级</span>
                     <div class="mapping-target-priority-control">
                         <input type="number" class="form-control target-priority" aria-label="优先级" min="0" value="${Number(target.priority ?? 1)}" ${unavailable ? "disabled" : ""}>
-                        ${unavailable ? '<span class="mapping-target-unavailable">不可用</span>' : ""}
+                        ${unavailable ? `<span class="mapping-target-unavailable">不可用</span>
+                            <button type="button" class="mapping-help-button mapping-target-unavailable-help"
+                                aria-label="目标模型不可用：该模型已不在当前可用模型目录中，不能编辑或启停，只能删除"
+                                data-tooltip="该目标模型已不在当前可用模型目录中，不能编辑或启停，只能删除。">?</button>` : ""}
                     </div>
                 </td>
                 <td class="mapping-target-actions">
