@@ -11,7 +11,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
 from ..application.app_context import AppContext
-from ..config.model_mapping_config import ModelMappingSchema, normalize_model_mapping_id
+from ..config.model_mapping_config import MODEL_MAPPING_ID_MAX_LENGTH, ModelMappingSchema, normalize_model_mapping_id
 from ..repositories.model_mapping_repository import ModelMappingRepository
 from ..utils.local_time import format_local_datetime, now_local_datetime, parse_local_datetime
 
@@ -138,6 +138,29 @@ class ModelMappingService:
     def delete_mapping(self, mapping_id: str) -> None:
         """删除模型映射及其运行状态。"""
         self._repository.delete_mapping(normalize_model_mapping_id(mapping_id))
+
+    def copy_mapping(self, mapping_id: str) -> dict[str, Any]:
+        """复制模型映射定义，并把副本插入到源映射下方。"""
+        normalized_mapping_id = normalize_model_mapping_id(mapping_id)
+        source = self._repository.get_mapping(normalized_mapping_id)
+        if source is None:
+            raise ValueError(f"模型映射不存在: {normalized_mapping_id}")
+        existing_ids = {mapping["id"] for mapping in self._repository.list_mappings()}
+        copied_id = self._build_unique_mapping_id(normalized_mapping_id, existing_ids)
+        copied = self._build_mapping(
+            {
+                "id": copied_id,
+                "enabled": bool(source["enabled"]),
+                "cooldown_seconds_on_429": source["cooldown_seconds_on_429"],
+                "targets": source["targets"],
+            }
+        )
+        self._validate_target_ids(
+            copied,
+            additionally_allowed={target["model_id"] for target in source["targets"]},
+        )
+        self._repository.create_mapping_after(normalized_mapping_id, copied)
+        return self.get_mapping(copied_id) or copied.to_mapping()
 
     def set_mapping_enabled(self, mapping_id: str, *, enabled: bool) -> dict[str, Any]:
         """更新映射级启用状态。"""
@@ -298,6 +321,16 @@ class ModelMappingService:
 
     def _build_mapping(self, payload: Mapping[str, Any]) -> ModelMappingSchema:
         return ModelMappingSchema.from_mapping(payload)
+
+    @staticmethod
+    def _build_unique_mapping_id(base_id: str, existing_ids: set[str]) -> str:
+        for index in range(1, 10_000):
+            suffix = f"_{index}"
+            prefix = base_id[: MODEL_MAPPING_ID_MAX_LENGTH - len(suffix)]
+            candidate = f"{prefix}{suffix}"
+            if candidate not in existing_ids:
+                return candidate
+        raise ValueError("无法生成唯一的模型映射 ID")
 
     def _group_mapping_order(self) -> None:
         mappings = self._repository.list_mappings()

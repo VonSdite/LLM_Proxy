@@ -2146,6 +2146,11 @@ body.is-resizing-provider-name-column * {
     white-space: nowrap;
 }
 
+.providers-page .model-test-visibility-header-label {
+    width: 100%;
+    justify-content: space-between;
+}
+
 .providers-page .model-test-header-help {
     display: inline-flex;
     align-items: center;
@@ -2176,10 +2181,61 @@ body.is-resizing-provider-name-column * {
 }
 
 .providers-page .model-test-model-input {
+    flex: 1 1 auto;
     width: 100%;
     min-width: 0;
     font-family: "JetBrains Mono", "Consolas", monospace;
     font-size: 13px;
+}
+
+.providers-page .model-test-model-control {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+}
+
+.providers-page .model-visibility-toggle {
+    display: inline-flex;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color var(--transition), color var(--transition);
+}
+
+.providers-page .model-visibility-toggle.is-hidden {
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.providers-page .model-visibility-toggle:hover,
+.providers-page .model-visibility-toggle:focus-visible {
+    background: rgba(100, 116, 139, 0.14);
+    color: var(--text-primary);
+    outline: none;
+}
+
+.providers-page .model-visibility-toggle:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
+.providers-page .model-visibility-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.providers-page .model-visibility-header-toggle {
+    margin-left: auto;
 }
 
 .providers-page .model-test-row-meta {
@@ -2581,6 +2637,22 @@ body.is-resizing-provider-name-column * {
 :root[data-theme="dark"] .providers-page .model-test-header-help:focus-visible {
     border-color: #5f8fbe;
     color: #d9e7f7;
+}
+
+:root[data-theme="dark"] .providers-page .model-visibility-toggle {
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+:root[data-theme="dark"] .providers-page .model-visibility-toggle.is-hidden {
+    background: transparent;
+    color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .providers-page .model-visibility-toggle:hover,
+:root[data-theme="dark"] .providers-page .model-visibility-toggle:focus-visible {
+    background: rgba(148, 163, 184, 0.14);
+    color: var(--text-primary);
 }
 
 :root[data-theme="dark"] .providers-page .custom-select-trigger-chip {

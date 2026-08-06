@@ -55,6 +55,7 @@ SUPPORTED_PROVIDER_FIELDS = {
     "verify_ssl",
     "force_upstream_stream",
     "model_list",
+    "hidden_model_list",
     "hook",
 }
 SUPPORTED_AUTH_GROUP_FIELDS = {
@@ -445,6 +446,7 @@ class ProviderConfigSchema:
     verify_ssl: bool | None = None
     force_upstream_stream: bool = DEFAULT_PROVIDER_FORCE_UPSTREAM_STREAM
     model_list: tuple[str, ...] = ()
+    hidden_model_list: tuple[str, ...] = ()
     hook: str | None = None
 
     @classmethod
@@ -489,6 +491,11 @@ class ProviderConfigSchema:
             if proxy_mode == PROXY_MODE_CUSTOM
             else None
         )
+        model_list = tuple(normalize_model_list(config.get("model_list")))
+        model_set = set(model_list)
+        hidden_model_list = tuple(
+            model for model in normalize_model_list(config.get("hidden_model_list")) if model in model_set
+        )
 
         return cls(
             name=name,
@@ -520,7 +527,8 @@ class ProviderConfigSchema:
                     error_message="Provider force_upstream_stream must be a boolean value",
                 )
             ),
-            model_list=tuple(normalize_model_list(config.get("model_list"))),
+            model_list=model_list,
+            hidden_model_list=hidden_model_list,
             hook=clean_optional_string(config.get("hook")),
         )
 
@@ -558,6 +566,8 @@ class ProviderConfigSchema:
             config["verify_ssl"] = self.verify_ssl
         if self.model_list:
             config["model_list"] = list(self.model_list)
+        if self.hidden_model_list:
+            config["hidden_model_list"] = list(self.hidden_model_list)
         if self.hook is not None:
             config["hook"] = self.hook
 
@@ -580,6 +590,7 @@ class RuntimeProviderSpec:
     api_key: str
     auth_group: str | None
     model_list: tuple[str, ...]
+    hidden_model_list: tuple[str, ...]
     proxy: str | None
     proxy_mode: str
     timeout_seconds: int
@@ -604,6 +615,7 @@ class RuntimeProviderSpec:
             api_key=config.api_key or "",
             auth_group=config.auth_group,
             model_list=config.model_list,
+            hidden_model_list=config.hidden_model_list,
             proxy=config.proxy,
             proxy_mode=config.proxy_mode,
             timeout_seconds=config.timeout_seconds or DEFAULT_PROVIDER_TIMEOUT_SECONDS,
@@ -631,6 +643,7 @@ class ProviderRuntimeView:
     auth_group: str | None
     legacy_api_key: bool
     model_list: tuple[str, ...]
+    hidden_model_list: tuple[str, ...]
     proxy: str | None
     proxy_mode: str
     timeout_seconds: int
@@ -651,6 +664,7 @@ class ProviderRuntimeView:
             auth_group=spec.auth_group,
             legacy_api_key=legacy_api_key,
             model_list=spec.model_list,
+            hidden_model_list=spec.hidden_model_list,
             proxy=spec.proxy,
             proxy_mode=spec.proxy_mode,
             timeout_seconds=spec.timeout_seconds,

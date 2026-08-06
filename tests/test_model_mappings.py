@@ -165,7 +165,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260806-17", template)
+        self.assertIn("model_mappings.css?v=20260807-1", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -201,7 +201,10 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn(".filter(target => target.model_id)", template)
         self.assertNotIn("payload.targets.some(target => !target.model_id)", template)
         self.assertIn(".mapping-cooldown-cell", stylesheet)
-        self.assertIn(".mapping-list-actions-column {\n    width: 200px;\n}", stylesheet)
+        self.assertIn(".mapping-list-actions-column {\n    width: 248px;\n}", stylesheet)
+        self.assertIn("function copyMapping(encodedId)", template)
+        self.assertIn("/api/model-mappings/${encodeURIComponent(mappingId)}/copy", template)
+        self.assertIn("onclick=\"copyMapping('${encodedId}')\"", template)
         self.assertIn(".mapping-target-label .form-label", stylesheet)
         self.assertIn('class="mapping-id" title="${escapeHtml(mapping.id)}"', template)
         self.assertNotIn("mapping-conflict", template)
@@ -488,6 +491,29 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.assertFalse(disabled["effective"])
         self.assertFalse(self.service.has_mapping("enabled_b"))
 
+    def test_copy_mapping_inserts_definition_below_source_without_runtime_state(self) -> None:
+        self.service.create_mapping(self._mapping_payload("enabled_a"))
+        self.service.create_mapping(self._mapping_payload("enabled_b"))
+        selected = self.service.acquire_target("enabled_a")
+        self.service.record_failure(
+            selected,
+            status_code=500,
+            error_type="upstream_error",
+            error_message="failed",
+        )
+
+        copied = self.service.copy_mapping("enabled_a")
+
+        self.assertEqual("enabled_a_1", copied["id"])
+        self.assertEqual(
+            ["enabled_a", "enabled_a_1", "enabled_b"],
+            [mapping["id"] for mapping in self.service.list_mappings()],
+        )
+        self.assertEqual(60, copied["cooldown_seconds_on_429"])
+        self.assertEqual(["alpha/fast", "alpha/stable"], [target["model_id"] for target in copied["targets"]])
+        self.assertTrue(all(target["status"] == "available" for target in copied["targets"]))
+        self.assertIsNone(copied["current_target_model_id"])
+
     def test_existing_mapping_table_migrates_enabled_and_sort_order(self) -> None:
         database_path = Path(self.temp_dir.name) / "legacy.db"
         with sqlite3.connect(database_path) as conn:
@@ -526,12 +552,15 @@ class ModelMappingServiceTests(unittest.TestCase):
         reorder_response = client.put("/api/model-mappings/order", json={"ids": ["second", "first"]})
         disable_response = client.post("/api/model-mappings/second/disable")
         enable_response = client.post("/api/model-mappings/second/enable")
+        copy_response = client.post("/api/model-mappings/second/copy")
 
         self.assertEqual(200, reorder_response.status_code)
         self.assertEqual(["second", "first"], reorder_response.get_json()["ids"])
         self.assertFalse(disable_response.get_json()["enabled"])
         self.assertTrue(enable_response.get_json()["enabled"])
-        self.assertEqual(2, len(catalog_syncs))
+        self.assertEqual(201, copy_response.status_code)
+        self.assertEqual("second_1", copy_response.get_json()["id"])
+        self.assertEqual(3, len(catalog_syncs))
 
     def test_image_model_is_available_as_mapping_target(self) -> None:
         self.assertIn("gpt_image", self.service.list_available_target_model_ids())

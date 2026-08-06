@@ -275,6 +275,21 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("target_format", current_config["providers"][0])
         self.assertNotIn("target_formats", current_config["providers"][0])
 
+    def test_create_provider_persists_hidden_model_list(self) -> None:
+        created = self.service.create_provider(
+            {
+                "name": "demo",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "sk-demo",
+                "model_list": ["visible", "hidden"],
+                "hidden_model_list": ["hidden", "missing"],
+            }
+        )
+
+        self.assertEqual(["hidden"], created["hidden_model_list"])
+        stored = self.config_manager.get_raw_config()["providers"][0]
+        self.assertEqual(["hidden"], stored["hidden_model_list"])
+
     def test_set_provider_enabled_updates_config(self) -> None:
         self._seed_providers(
             [

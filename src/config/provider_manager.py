@@ -21,12 +21,14 @@ class ProviderManager:
         self._provider_by_model: dict[str, LLMProvider] = {}
         self._provider_by_name: dict[str, LLMProvider] = {}
         self._provider_views_by_name: dict[str, ProviderRuntimeView] = {}
+        self._visible_model_names: set[str] = set()
 
     def load_providers(self, providers_config: Sequence[ProviderConfigSchema]) -> None:
         """重载 provider 配置。"""
         self._provider_by_model.clear()
         self._provider_by_name.clear()
         self._provider_views_by_name.clear()
+        self._visible_model_names.clear()
         self._runtime_factory.clear_cache()
 
         for provider_cfg in providers_config:
@@ -39,6 +41,10 @@ class ProviderManager:
     def list_model_names(self) -> tuple[str, ...]:
         """返回当前已注册的模型 key 列表。"""
         return tuple(sorted(self._provider_by_model.keys()))
+
+    def list_visible_model_names(self) -> tuple[str, ...]:
+        """返回允许通过下游模型目录公开的模型 key 列表。"""
+        return tuple(sorted(self._visible_model_names))
 
     def get_provider_view(self, provider_name: str) -> ProviderRuntimeView | None:
         """按 provider 名称返回只读运行时视图。"""
@@ -76,11 +82,14 @@ class ProviderManager:
             legacy_api_key=bool(spec.api_key) and runtime_spec.auth_group is None,
         )
 
+        hidden_models = set(runtime_spec.hidden_model_list)
         for model in runtime_spec.model_list:
             model_key = f"{runtime_spec.name}/{model}"
             if model_key in self._provider_by_model:
                 raise ValueError(f"Duplicate provider model mapping detected: {model_key}")
             self._provider_by_model[model_key] = provider
+            if model not in hidden_models:
+                self._visible_model_names.add(model_key)
 
         self._logger.info(
             "Loaded provider: %s, models: %s, auth_group=%s",

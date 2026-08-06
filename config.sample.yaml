@@ -81,6 +81,9 @@ providers:
     model_list:
       - gpt-4.1
       - gpt-4.1-mini
+    # hidden_model_list 中的模型仍可路由，只不出现在下游 GET /v1/models。
+    hidden_model_list:
+      - gpt-4.1-mini
     hook: example_hook.py
 
   - name: responses-upstream
