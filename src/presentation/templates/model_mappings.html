@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-15">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260806-17">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -464,9 +464,6 @@
                         </tr></thead>
                         <tbody>${mappings.map(mapping => {
                             const encodedId = encodeURIComponent(mapping.id);
-                            const conflict = mapping.conflict_source
-                                ? `<span class="mapping-conflict">覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型，按自定义映射路由</span>`
-                                : "";
                             const targets = Array.isArray(mapping.targets) ? mapping.targets : [];
                             const preview = getTargetPreview(targets);
                             const targetTags = preview.visible.length
@@ -510,7 +507,7 @@
                                             onchange="toggleMappingSelection('${encodedId}', this.checked)"${actionLocked ? " disabled" : ""}>
                                     </div>
                                 </td>
-                                <td class="mapping-id-cell"><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>${conflict}</td>
+                                <td class="mapping-id-cell"><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong></td>
                                 <td class="mapping-targets-cell"><div class="mapping-model-tags">${targetTags}</div>${targetSummary}</td>
                                 <td class="mapping-cooldown-cell">${Number(mapping.cooldown_seconds_on_429)}s</td>
                                 <td class="mapping-actions-cell"><div class="mapping-row-actions">

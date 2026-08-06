@@ -91,7 +91,7 @@ class ModelMappingService:
 
     def list_available_target_model_ids(self) -> tuple[str, ...]:
         """返回可在编辑器中选择的 Provider、OAuth 文本模型与图片模型。"""
-        provider_models = self._list_configured_provider_model_ids()
+        provider_models = tuple(self._provider_manager.list_model_names())
         codex_models = self._read_oauth_catalog_ids(self._codex_oauth_service, "list_models")
         codex_image_models = self._read_oauth_catalog_ids(self._codex_oauth_service, "list_image_models")
         claude_models = self._read_oauth_catalog_ids(self._claude_oauth_service, "list_models")
@@ -392,19 +392,6 @@ class ModelMappingService:
         codex_image_ids = self._safe_list_runtime_ids(self._codex_oauth_service, "list_image_model_names")
         claude_ids = self._safe_list_runtime_ids(self._claude_oauth_service, "list_model_names")
         return tuple(sorted(dict.fromkeys([*provider_ids, *codex_ids, *codex_image_ids, *claude_ids])))
-
-    def _list_configured_provider_model_ids(self) -> tuple[str, ...]:
-        config = self._config_manager.get_raw_config()
-        model_ids: list[str] = []
-        for provider in config.get("providers", []) or []:
-            if not isinstance(provider, dict):
-                continue
-            provider_name = str(provider.get("name") or "").strip()
-            raw_models = provider.get("model_list")
-            if not provider_name or not isinstance(raw_models, list):
-                continue
-            model_ids.extend(f"{provider_name}/{str(model).strip()}" for model in raw_models if str(model).strip())
-        return tuple(model_ids)
 
     def _list_oauth_catalog_conflicts(self) -> dict[str, str]:
         conflicts: dict[str, str] = {}

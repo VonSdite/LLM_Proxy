@@ -165,7 +165,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260806-15", template)
+        self.assertIn("model_mappings.css?v=20260806-17", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -201,8 +201,12 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn(".filter(target => target.model_id)", template)
         self.assertNotIn("payload.targets.some(target => !target.model_id)", template)
         self.assertIn(".mapping-cooldown-cell", stylesheet)
+        self.assertIn(".mapping-list-actions-column {\n    width: 200px;\n}", stylesheet)
         self.assertIn(".mapping-target-label .form-label", stylesheet)
         self.assertIn('class="mapping-id" title="${escapeHtml(mapping.id)}"', template)
+        self.assertNotIn("mapping-conflict", template)
+        self.assertNotIn("mapping-conflict", stylesheet)
+        self.assertNotIn("覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型", template)
         self.assertIn('class="mapping-id-column-resizer"', template)
         self.assertIn('onpointerdown="startMappingIdColumnResize(event)"', template)
         self.assertIn("function handleMappingIdColumnResizeKeydown(event)", template)
@@ -539,6 +543,23 @@ class ModelMappingServiceTests(unittest.TestCase):
         )
         self.assertTrue(mapping["effective"])
         self.assertEqual("available", mapping["targets"][0]["status"])
+
+    def test_target_catalog_excludes_disabled_provider_and_includes_oauth_models(self) -> None:
+        self.config_manager.config["providers"].append(
+            {
+                "name": "disabled",
+                "enabled": False,
+                "model_list": ["hidden"],
+            }
+        )
+
+        targets = self.service.list_available_target_model_ids()
+
+        self.assertIn("alpha/fast", targets)
+        self.assertNotIn("disabled/hidden", targets)
+        self.assertIn("gpt_text", targets)
+        self.assertIn("gpt_image", targets)
+        self.assertIn("claude_text", targets)
 
     def test_sticky_selection_prefers_priority_and_survives_service_recreation(self) -> None:
         self.service.create_mapping(self._mapping_payload())
