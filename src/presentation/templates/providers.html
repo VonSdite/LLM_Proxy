@@ -409,8 +409,8 @@
                                 >?</button>
                             </label>
                             <select class="form-control" id="authGroupStrategy" data-custom-select="true">
-                                <option value="least_inflight">least_inflight</option>
-                                <option value="sticky_failover">sticky_failover</option>
+                                <option value="least_inflight">最少占用</option>
+                                <option value="sticky_failover">粘滞故障切换</option>
                             </select>
                         </div>
                         <div class="mb-3">
@@ -686,15 +686,15 @@
                 title: '策略怎么选',
                 html: `
                     <ul>
-                        <li><strong>least_inflight</strong>：优先选择当前进行中请求数最少的 entry。</li>
+                        <li><strong>最少占用</strong>：优先选择当前进行中请求数最少的 entry。</li>
                         <li>
-                            <strong>sticky_failover</strong>：持续使用当前 entry；当它冷却、禁用、配额耗尽或并发饱和时，
+                            <strong>粘滞故障切换</strong>：持续使用当前 entry；当它冷却、禁用、配额耗尽或并发饱和时，
                             再按顺序切到下一个可用 entry。
                         </li>
                     </ul>
                     <p>
-                        <code>least_inflight</code> 适合长流式请求和均匀分摊；
-                        <code>sticky_failover</code> 适合优先消耗固定凭证、失效后再切换的场景。
+                        <strong>最少占用</strong>适合长流式请求和均匀分摊；
+                        <strong>粘滞故障切换</strong>适合优先消耗固定凭证、失效后再切换的场景。
                     </p>
                 `,
             },
@@ -3715,6 +3715,7 @@
                 const entryCount = Number(summary.entry_count || entries.length || 0);
                 const encodedGroupName = encodeURIComponent(group.name);
                 const isDeletePending = pendingDeleteAuthGroupName === group.name;
+                const strategyLabel = group.strategy === 'sticky_failover' ? '粘滞故障切换' : '最少占用';
                 html += `
                     <tr>
                         <td class="provider-name-cell">
@@ -3722,7 +3723,7 @@
                         </td>
                         <td class="provider-api-cell">
                             <div class="provider-meta-line">
-                                <span class="provider-chip">${escapeHtml(group.strategy || 'least_inflight')}</span>
+                                <span class="provider-chip">${strategyLabel}</span>
                                 <span class="provider-chip provider-chip-target">429 ${escapeHtml(group.cooldown_seconds_on_429 ?? '')}s</span>
                             </div>
                         </td>

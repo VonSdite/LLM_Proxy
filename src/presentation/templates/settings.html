@@ -10,7 +10,7 @@
             visibility: hidden;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/settings.css?v=20260528-1" id="settingsPageStyles">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260807-1" id="settingsPageStyles">
     <script>
         (function () {
             const root = document.documentElement;
@@ -224,9 +224,15 @@
 
                 <section class="section-card settings-shell-card">
                     <div class="section-header settings-shell-header">
-                        <div>
+                        <div class="section-title-with-help">
                             <h2 class="section-title">模型映射</h2>
-                            <p class="section-subtitle">启用后在顶部导航显示模型映射页签。</p>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-settings-help-topic="model_mapping"
+                                onclick="toggleSettingsHelp('model_mapping', event)"
+                                aria-label="查看模型映射说明"
+                            >?</button>
                         </div>
                     </div>
                     <div class="setting-toggle-inline">
@@ -479,6 +485,16 @@
                     <p>支持 <code>Authorization: Bearer sk-...</code> 或 <code>X-API-Key</code>。</p>
                     <p>每个 API Key 可以单独设置模型权限和总 token 使用上限。</p>
                     <p>如果同时开启 Chat 白名单，最终可访问模型会取用户模型权限和 API Key 模型权限的交集。</p>
+                `
+            },
+            model_mapping: {
+                title: "模型映射",
+                html: `
+                    <p>模型映射提供固定的下游模型 ID，并把请求路由到一个或多个上游模型 ID。</p>
+                    <p><strong>典型场景：</strong>下游客户端始终请求同一个模型 ID。上游 Provider 或模型 ID 变化时，只需更新映射，无需修改下游配置。</p>
+                    <p><code>最高优先级</code>策略会在每个新请求中重新选择正常目标；更高优先级目标恢复后自动切回。<code>粘滞故障切换</code>策略会继续使用当前成功目标，直到该目标不可用。</p>
+                    <p>只有一个目标，或者全部目标处于手动禁用、自动禁用或冷却状态时，系统仍会使用运行时存在的最高优先级目标兜底。兜底目标返回错误时结束当前请求，下一个下游请求会再次选择该目标。</p>
+                    <p>目标已经不在运行时模型目录中时，系统无法将请求路由到该目标。</p>
                 `
             },
             llm_trace: {

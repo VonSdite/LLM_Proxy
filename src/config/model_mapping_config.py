@@ -13,6 +13,15 @@ MODEL_MAPPING_ID_MAX_LENGTH = 64
 MODEL_MAPPING_ID_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 DEFAULT_MODEL_MAPPING_COOLDOWN_SECONDS_ON_429 = 60
 DEFAULT_MODEL_MAPPING_TARGET_PRIORITY = 1
+MODEL_MAPPING_STRATEGY_HIGHEST_PRIORITY = "highest_priority"
+MODEL_MAPPING_STRATEGY_STICKY_FAILOVER = "sticky_failover"
+SUPPORTED_MODEL_MAPPING_STRATEGIES = frozenset(
+    {
+        MODEL_MAPPING_STRATEGY_HIGHEST_PRIORITY,
+        MODEL_MAPPING_STRATEGY_STICKY_FAILOVER,
+    }
+)
+DEFAULT_MODEL_MAPPING_STRATEGY = MODEL_MAPPING_STRATEGY_HIGHEST_PRIORITY
 
 
 def normalize_model_mapping_id(value: Any) -> str:
@@ -25,6 +34,15 @@ def normalize_model_mapping_id(value: Any) -> str:
     if not MODEL_MAPPING_ID_PATTERN.fullmatch(mapping_id):
         raise ValueError("模型映射 ID 只能由英文字母、数字、下划线、点号和连字符组成，且只能以字母或下划线开头")
     return mapping_id
+
+
+def resolve_model_mapping_strategy(value: Any) -> str:
+    """规范化并校验模型映射策略。"""
+    strategy = str(value or "").strip() or DEFAULT_MODEL_MAPPING_STRATEGY
+    if strategy not in SUPPORTED_MODEL_MAPPING_STRATEGIES:
+        supported = ", ".join(sorted(SUPPORTED_MODEL_MAPPING_STRATEGIES))
+        raise ValueError(f"模型映射策略必须是以下值之一: {supported}")
+    return strategy
 
 
 def _parse_non_negative_int(value: Any, *, default: int, field_label: str) -> int:
@@ -82,10 +100,11 @@ class ModelMappingTargetSchema:
 
 @dataclass(frozen=True)
 class ModelMappingSchema:
-    """一个对外模型 ID 及其粘滞故障切换目标。"""
+    """一个对外模型 ID 及其目标选择策略。"""
 
     id: str
     enabled: bool
+    strategy: str
     cooldown_seconds_on_429: int
     targets: tuple[ModelMappingTargetSchema, ...]
 
@@ -109,6 +128,7 @@ class ModelMappingSchema:
         return cls(
             id=mapping_id,
             enabled=enabled,
+            strategy=resolve_model_mapping_strategy(payload.get("strategy")),
             cooldown_seconds_on_429=_parse_non_negative_int(
                 payload.get("cooldown_seconds_on_429"),
                 default=DEFAULT_MODEL_MAPPING_COOLDOWN_SECONDS_ON_429,
@@ -121,7 +141,7 @@ class ModelMappingSchema:
         return {
             "id": self.id,
             "enabled": self.enabled,
-            "strategy": "sticky_failover",
+            "strategy": self.strategy,
             "cooldown_seconds_on_429": self.cooldown_seconds_on_429,
             "targets": [target.to_mapping() for target in self.targets],
         }

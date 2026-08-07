@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""模型映射管理与粘滞故障切换服务。"""
+"""模型映射管理与目标故障切换服务。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,12 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
 from ..application.app_context import AppContext
-from ..config.model_mapping_config import MODEL_MAPPING_ID_MAX_LENGTH, ModelMappingSchema, normalize_model_mapping_id
+from ..config.model_mapping_config import (
+    MODEL_MAPPING_ID_MAX_LENGTH,
+    MODEL_MAPPING_STRATEGY_STICKY_FAILOVER,
+    ModelMappingSchema,
+    normalize_model_mapping_id,
+)
 from ..repositories.model_mapping_repository import ModelMappingRepository
 from ..utils.local_time import format_local_datetime, now_local_datetime, parse_local_datetime
 
@@ -28,6 +33,7 @@ class SelectedModelMappingTarget:
 
     mapping_id: str
     target_model_id: str
+    is_fallback: bool = False
 
 
 class ModelMappingService:
@@ -119,7 +125,7 @@ class ModelMappingService:
         return self.get_mapping(mapping.id) or mapping.to_mapping()
 
     def update_mapping(self, current_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        """更新模型映射并重置粘滞选择。"""
+        """更新模型映射并重置当前目标。"""
         normalized_current_id = normalize_model_mapping_id(current_id)
         current_mapping = self._repository.get_mapping(normalized_current_id)
         if current_mapping is None:
@@ -151,6 +157,7 @@ class ModelMappingService:
             {
                 "id": copied_id,
                 "enabled": bool(source["enabled"]),
+                "strategy": source["strategy"],
                 "cooldown_seconds_on_429": source["cooldown_seconds_on_429"],
                 "targets": source["targets"],
             }
@@ -248,7 +255,7 @@ class ModelMappingService:
         return {"count": len(mappings), "ids": mapping_ids}
 
     def acquire_target(self, mapping_id: str, excluded_target_ids: Iterable[str] = ()) -> SelectedModelMappingTarget:
-        """按粘滞优先级选择当前可用目标。"""
+        """按映射策略选择目标，正常候选为空时始终选择最高优先级运行时目标。"""
         normalized_id = normalize_model_mapping_id(mapping_id)
         if not self.has_mapping(normalized_id):
             raise ValueError(f"模型映射不可用: {normalized_id}")
@@ -259,24 +266,33 @@ class ModelMappingService:
         available_runtime_ids = set(self._list_runtime_target_model_ids())
         runtime_states = self._repository.list_target_runtime_states(normalized_id)
         now = now_local_datetime()
-        candidates = [
+        eligible_targets = [
             target
             for target in mapping["targets"]
-            if target["model_id"] not in excluded
-            and target["model_id"] in available_runtime_ids
-            and self._is_target_available(target, runtime_states.get(target["model_id"], {}), now)
+            if target["model_id"] not in excluded and target["model_id"] in available_runtime_ids
         ]
+        candidates = [
+            target
+            for target in eligible_targets
+            if self._is_target_available(target, runtime_states.get(target["model_id"], {}), now)
+        ]
+        using_failure_fallback = not candidates
+        if using_failure_fallback:
+            candidates = [target for target in mapping["targets"] if target["model_id"] in available_runtime_ids]
         if not candidates:
             raise ValueError(f"模型映射没有可用目标: {normalized_id}")
         current_target_id = self._repository.get_current_target(normalized_id)
-        selected = next((target for target in candidates if target["model_id"] == current_target_id), None)
+        selected = None
+        if mapping["strategy"] == MODEL_MAPPING_STRATEGY_STICKY_FAILOVER and not using_failure_fallback:
+            selected = next((target for target in candidates if target["model_id"] == current_target_id), None)
         if selected is None:
             selected = min(candidates, key=lambda item: (-int(item["priority"]), int(item["sort_order"])))
+        if selected["model_id"] != current_target_id:
             self._repository.set_current_target(normalized_id, selected["model_id"])
-        return SelectedModelMappingTarget(normalized_id, selected["model_id"])
+        return SelectedModelMappingTarget(normalized_id, selected["model_id"], is_fallback=using_failure_fallback)
 
     def record_success(self, selection: SelectedModelMappingTarget) -> None:
-        """清理成功目标的运行故障状态并保持粘滞目标。"""
+        """清理成功目标的运行故障状态并记录当前目标。"""
         mapping = self._repository.get_mapping(selection.mapping_id)
         if mapping is None or not any(target["model_id"] == selection.target_model_id for target in mapping["targets"]):
             return

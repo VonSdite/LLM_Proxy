@@ -177,6 +177,25 @@ class DashboardFilterApiTests(unittest.TestCase):
             {(item["username"], item["request_model"]) for item in payload},
         )
 
+    def test_statistics_api_supports_all_time_filter(self) -> None:
+        response = self.client.get("/api/statistics?all_time=true")
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(4, sum(item["request_count"] for item in payload))
+        self.assertEqual({"model-a", "model-b", "model-c"}, {item["request_model"] for item in payload})
+
+    def test_request_logs_api_supports_all_time_filter(self) -> None:
+        response = self.client.get(
+            "/api/request-logs",
+            query_string={"all_time": "true", "page": "1", "page_size": "2"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(4, payload["total"])
+        self.assertEqual(2, len(payload["logs"]))
+
     def test_user_usage_summary_api_groups_by_username(self) -> None:
         self._log_request("model-a", "resp-extra", 5, "10.0.0.1", datetime(2026, 4, 9, 9, 0, 0))
 

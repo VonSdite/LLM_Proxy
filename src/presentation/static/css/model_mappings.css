@@ -293,6 +293,14 @@
     vertical-align: middle !important;
 }
 
+.mapping-strategy-label {
+    display: block;
+    margin-top: 5px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
 .mapping-targets-cell {
     vertical-align: middle !important;
 }
@@ -437,7 +445,7 @@
 
 .mapping-editor-fields {
     display: grid;
-    grid-template-columns: minmax(240px, 1fr) 190px;
+    grid-template-columns: minmax(240px, 1fr) minmax(250px, 0.8fr) 160px;
     gap: 16px;
 }
 
@@ -445,6 +453,14 @@
     display: grid;
     gap: 8px;
     min-width: 0;
+}
+
+.mapping-field-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 22px;
+    justify-self: start;
 }
 
 .model-mappings-page .modal .form-label {
@@ -740,7 +756,8 @@
 .model-mappings-page .mapping-target-auto-disabled-help::after {
     right: auto;
     left: 50%;
-    width: min(300px, calc(100vw - 48px));
+    width: max-content;
+    max-width: min(300px, calc(100vw - 48px));
     transform: translateX(-50%);
 }
 
@@ -1009,7 +1026,29 @@
 }
 
 .model-mappings-page .modal .form-control {
+    background-color: #fff;
+}
+
+.model-mappings-page .modal .form-select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 38px;
+    background-color: #fff;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+        linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position:
+        calc(100% - 18px) calc(50% - 2px),
+        calc(100% - 12px) calc(50% - 2px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+    cursor: pointer;
+}
+
+.model-mappings-page .modal .form-select option {
     background: #fff;
+    color: var(--text-primary);
 }
 
 .model-mappings-page .modal .btn-secondary {
@@ -1134,7 +1173,27 @@
 }
 
 :root[data-theme="dark"] .model-mappings-page .modal .form-control {
+    background-color: #0d1117;
+    color: var(--text-primary);
+}
+
+:root[data-theme="dark"] .model-mappings-page .modal .form-select {
+    background-color: #0d1117;
+    background-image:
+        linear-gradient(45deg, transparent 50%, #7d8590 50%),
+        linear-gradient(135deg, #7d8590 50%, transparent 50%);
+    background-position:
+        calc(100% - 18px) calc(50% - 2px),
+        calc(100% - 12px) calc(50% - 2px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+    color: var(--text-primary);
+    color-scheme: dark;
+}
+
+:root[data-theme="dark"] .model-mappings-page .modal .form-select option {
     background: #0d1117;
+    color: #e6edf3;
 }
 
 :root[data-theme="dark"] .model-mappings-page .modal .form-label {
@@ -1315,6 +1374,21 @@
 }
 
 @media (max-width: 760px) {
+    .model-mappings-page .header-content {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .model-mappings-page .header-actions,
+    .model-mappings-page .header-nav {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .model-mappings-page .header-nav {
+        overflow-x: auto;
+    }
+
     .mapping-toolbar,
     .mapping-actions {
         align-items: stretch;

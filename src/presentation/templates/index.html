@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260807-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260807-2">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}监控 API 请求和 Token 消耗{% endblock %}
@@ -23,6 +23,7 @@
                         <button type="button" class="date-preset-btn" data-date-preset="today" onclick="applyDatePreset('today')">今天</button>
                         <button type="button" class="date-preset-btn" data-date-preset="last7" onclick="applyDatePreset('last7')">近7天</button>
                         <button type="button" class="date-preset-btn" data-date-preset="last30" onclick="applyDatePreset('last30')">近30天</button>
+                        <button type="button" class="date-preset-btn" data-date-preset="all" onclick="applyDatePreset('all')">全部时间</button>
                     </div>
                 </div>
                 <div class="filter-group filter-group-select">
@@ -316,6 +317,13 @@
         }
 
         function buildDatePresetRange(preset) {
+            if (preset === 'all') {
+                return {
+                    startDate: '',
+                    endDate: ''
+                };
+            }
+
             const end = new Date();
             const start = new Date(end);
 
@@ -332,6 +340,10 @@
         }
 
         function detectDatePreset(startDate, endDate) {
+            if (!startDate && !endDate) {
+                return 'all';
+            }
+
             const today = buildDatePresetRange('today');
             if (startDate === today.startDate && endDate === today.endDate) {
                 return 'today';
@@ -399,7 +411,11 @@
             }
         }
 
-        function validateDateRangeForQuery(startDateValue, endDateValue) {
+        function validateDateRangeForQuery(startDateValue, endDateValue, allTime = false) {
+            if (allTime) {
+                return true;
+            }
+
             if (!startDateValue || !endDateValue) {
                 showMessage('请选择开始日期和结束日期', 'warning');
                 return false;
@@ -1382,18 +1398,23 @@
         function applyFilters() {
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
+            const allTime = !startDate && !endDate;
             const usernames = getSelectedOptionValues(document.getElementById('username'));
             const requestModels = getSelectedOptionValues(document.getElementById('requestModel'));
 
             syncDateRangeInputLimits();
             updateDatePresetUi();
-            if (!validateDateRangeForQuery(startDate, endDate)) {
+            if (!validateDateRangeForQuery(startDate, endDate, allTime)) {
                 return;
             }
 
             currentFilters = {};
-            currentFilters.start_date = startDate;
-            currentFilters.end_date = endDate;
+            if (allTime) {
+                currentFilters.all_time = 'true';
+            } else {
+                currentFilters.start_date = startDate;
+                currentFilters.end_date = endDate;
+            }
             if (usernames.length) currentFilters.username = usernames;
             if (requestModels.length) currentFilters.request_model = requestModels;
 
@@ -1454,7 +1475,8 @@
         function exportActiveDashboardTab() {
             const startDate = currentFilters.start_date || '';
             const endDate = currentFilters.end_date || '';
-            if (!validateDateRangeForQuery(startDate, endDate)) {
+            const allTime = currentFilters.all_time === 'true';
+            if (!validateDateRangeForQuery(startDate, endDate, allTime)) {
                 return;
             }
 
@@ -1471,7 +1493,8 @@
             try {
                 const startDate = currentFilters.start_date || '';
                 const endDate = currentFilters.end_date || '';
-                if (!validateDateRangeForQuery(startDate, endDate)) {
+                const allTime = currentFilters.all_time === 'true';
+                if (!validateDateRangeForQuery(startDate, endDate, allTime)) {
                     return;
                 }
 

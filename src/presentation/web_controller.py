@@ -196,13 +196,23 @@ class WebController:
         except ValueError as exc:
             raise ValueError(f"{field_name} must use YYYY-MM-DD") from exc
 
+    @staticmethod
+    def _is_all_time_filter() -> bool:
+        """读取统计页的全部时间筛选开关。"""
+        return str(request.args.get("all_time") or "").strip().lower() in {"1", "true", "yes"}
+
     @classmethod
     def _validate_dashboard_date_range(
         cls,
         start_date: str | None,
         end_date: str | None,
+        *,
+        all_time: bool = False,
     ) -> None:
         """校验统计查询日期范围，避免无边界或超大范围查询。"""
+        if all_time:
+            return
+
         start = cls._parse_dashboard_date(start_date, "start_date")
         end = cls._parse_dashboard_date(end_date, "end_date")
 
@@ -333,9 +343,11 @@ class WebController:
 
     def get_statistics(self) -> ResponseReturnValue:
         try:
+            all_time = self._is_all_time_filter()
             self._validate_dashboard_date_range(
                 request.args.get("start_date"),
                 request.args.get("end_date"),
+                all_time=all_time,
             )
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
@@ -363,9 +375,11 @@ class WebController:
 
     def get_user_usage_summary(self) -> ResponseReturnValue:
         try:
+            all_time = self._is_all_time_filter()
             self._validate_dashboard_date_range(
                 request.args.get("start_date"),
                 request.args.get("end_date"),
+                all_time=all_time,
             )
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
@@ -393,9 +407,11 @@ class WebController:
 
     def export_statistics(self) -> ResponseReturnValue:
         try:
+            all_time = self._is_all_time_filter()
             self._validate_dashboard_date_range(
                 request.args.get("start_date"),
                 request.args.get("end_date"),
+                all_time=all_time,
             )
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
@@ -505,7 +521,7 @@ class WebController:
         try:
             start_date = request.args.get("start_date")
             end_date = request.args.get("end_date")
-            self._validate_dashboard_date_range(start_date, end_date)
+            self._validate_dashboard_date_range(start_date, end_date, all_time=self._is_all_time_filter())
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
             result = self._log_service.export_daily_stats(
@@ -556,9 +572,11 @@ class WebController:
         try:
             usernames = self._get_multi_filter_values("username")
             request_models = self._get_multi_filter_values("request_model")
+            all_time = self._is_all_time_filter()
             self._validate_dashboard_date_range(
                 request.args.get("start_date"),
                 request.args.get("end_date"),
+                all_time=all_time,
             )
             self._logger.debug("Request logs queried: page=%s, page_size=%s", page, page_size)
 

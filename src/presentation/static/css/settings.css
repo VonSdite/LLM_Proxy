@@ -582,6 +582,21 @@
 }
 
 @media (max-width: 900px) {
+    .settings-page .header-content {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .settings-page .header-actions,
+    .settings-page .header-nav {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .settings-page .header-nav {
+        overflow-x: auto;
+    }
+
     .settings-page .section-header {
         flex-direction: column;
         align-items: stretch;

@@ -1232,6 +1232,16 @@ class ProxyController:
                 return None, failure.status_code, failure
 
             target_model_id = selection.target_model_id
+            if getattr(selection, "is_fallback", False) and target_model_id in excluded_targets:
+                if last_failure is not None:
+                    return None, last_failure.status_code, last_failure
+                failure = ProxyErrorInfo(
+                    message=f"Mapped fallback target was already attempted: {target_model_id}",
+                    status_code=503,
+                    error_type="upstream_error",
+                    error_code="model_mapping_targets_unavailable",
+                )
+                return None, failure.status_code, failure
             excluded_targets.add(target_model_id)
             target_request_data = dict(request_data)
             target_request_data["model"] = target_model_id
@@ -1340,6 +1350,16 @@ class ProxyController:
                 return None, failure.status_code, failure
 
             target_model_id = selection.target_model_id
+            if getattr(selection, "is_fallback", False) and target_model_id in excluded_targets:
+                if last_failure is not None:
+                    return None, last_failure.status_code, last_failure
+                failure = ProxyErrorInfo(
+                    message=f"Mapped fallback target was already attempted: {target_model_id}",
+                    status_code=503,
+                    error_type="upstream_error",
+                    error_code="model_mapping_targets_unavailable",
+                )
+                return None, failure.status_code, failure
             excluded_targets.add(target_model_id)
             target_request_data = dict(request_data)
             target_request_data["model"] = target_model_id

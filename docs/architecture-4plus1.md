@@ -25,7 +25,7 @@
 
 - 在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成、查看、启停、导入、导出和归档删除 CLI/OAuth 类本地认证文件
 - 在启用 `api_keys.enabled` 后提供 API Key 管理入口，用于创建下游访问 key、设置模型权限、设置总 token 上限并查看 key 级用量
-- 在启用 `model_mapping.enabled` 后提供模型映射入口，用于维护独立对外模型 ID 和跨 Provider / OAuth 文本模型的粘滞故障切换目标
+- 在启用 `model_mapping.enabled` 后提供模型映射入口，用于维护独立对外模型 ID，以及跨 Provider / OAuth 模型的最高优先级或粘滞故障切换目标
 
 ## 2. Logical View
 
@@ -38,7 +38,7 @@ downstream request
   -> data-plane CORS preflight / response headers
   -> controller
   -> model mapping / provider / OAuth route lookup
-  -> optional sticky model mapping target selection
+  -> optional model mapping strategy target selection
   -> resolve route model key to upstream model id
   -> strip downstream Authorization from upstream headers
   -> auth header resolve (api_key or auth_group + auth_entry)
@@ -82,13 +82,17 @@ decoder
 - 目标协议终止事件已经发出时，后续 HTTP framing 异常保持当前流的逻辑完成状态
 - 客户端取消会关闭上游响应并释放请求占用的运行时资源，不触发成功完成统计
 
-模型映射在进入具体 Provider 或 OAuth 代理前增加一层 `sticky_failover` 选择：
+模型映射在进入具体 Provider 或 OAuth 代理前增加一层目标策略选择：
 
-- 每个映射 ID 对应一个或多个 Provider、Codex OAuth 文本或 Claude OAuth 文本目标
-- 目标按优先级从高到低选择，同优先级按配置顺序选择；成功目标写入 SQLite 粘滞游标，后续请求保持使用该目标
+- 每个映射 ID 对应一个或多个 Provider、Codex OAuth 文本或图片、Claude OAuth 文本目标
+- `highest_priority` 是缺省策略；每次请求都选择当前正常候选中优先级最高的目标，高优先级目标恢复后自动切回
+- `sticky_failover` 保存当前成功目标；该目标保持正常候选状态时，后续请求继续使用它
+- 目标按优先级从高到低选择，同优先级按配置顺序选择；未提供策略或策略为空时使用 `highest_priority`
 - 目标自身的 Provider 最大尝试次数、Auth Group Auth Entry 或 OAuth 认证文件候选先耗尽，映射层才切换到下一个目标
 - `429` 目标进入冷却，优先采用 `Retry-After`，否则采用映射配置的冷却秒数；其他非 2xx 状态或异常自动禁用目标
-- 流提交前失败可以在当前请求内切换目标；流提交后失败不改写当前响应，只更新运行状态供后续请求避开
+- 正常候选为空时，人工禁用、自动禁用和冷却不阻止兜底选择；系统始终从当前运行时仍存在的全部目标中选择最高优先级目标
+- 正常故障切换在同一个下游请求内每个目标最多尝试一次；进入兜底态后固定最高优先级目标，该目标失败时结束本次请求；新请求重新选择目标，单目标或全部目标禁用时仍会再次映射到该目标
+- 流提交前失败可以在当前请求内切换目标；流提交后失败不改写当前响应，只更新运行状态供后续选择
 - 客户端取消不改变映射目标状态
 
 补充：hook 在 retry 场景下还可以读取上一轮失败摘要，用于做轻量级重试决策：
@@ -112,7 +116,7 @@ decoder
   - 在 `api_keys.enabled=true` 时校验下游 API Key，并按 key 模型权限与总 token 上限收窄可访问模型和请求
   - 同时启用 Chat 白名单和 API Key 管理时，最终模型权限为用户权限与 key 权限的交集
   - 处理 `/v1/images/generations` 与 `/v1/images/edits`，图片模型使用 Codex OAuth 图片模型目录和默认图片模型
-  - 对模型映射 ID 执行粘滞目标选择，并在目标自身候选耗尽后切换 Provider、Codex OAuth 或 Claude OAuth 文本目标
+  - 对模型映射 ID 执行配置的目标选择策略，并在目标自身候选耗尽后切换 Provider、Codex OAuth 或 Claude OAuth 文本目标
   - 构造标准错误体
 - `DataPlaneCors`
   - 只为 `/v1/*` 数据平面添加 CORS 响应头
@@ -156,10 +160,10 @@ decoder
   - 暴露模型映射 CRUD、目标启停、JSON 导入导出和目标模型目录接口
 - `ModelMappingService`
   - 校验映射 ID 和目标模型范围；映射 ID 可以与 OAuth 文本或图片模型 ID 重名
-  - 维护固定 `sticky_failover` 策略、优先级、429 冷却、自动禁用和跨重启粘滞目标
+  - 维护缺省 `highest_priority` 与可选 `sticky_failover` 策略、优先级、429 冷却、自动禁用、故障兜底和跨重启当前目标
   - 自定义映射 ID 的路由优先级高于 Provider、Codex OAuth 和 Claude OAuth；同名 OAuth 模型由自定义映射接管
 - `ModelMappingRepository`
-  - 在 SQLite 中事务持久化映射定义、目标配置、目标运行状态和当前粘滞目标
+  - 在 SQLite 中事务持久化映射定义、选择策略、目标配置、目标运行状态和当前目标
 - `OAuthController`
   - 暴露 Codex / Claude OAuth 登录、回调提交、认证文件列表、启停、JSON/ZIP 导入、ZIP 导出、归档删除与 Codex 配额刷新接口
   - 暴露 Codex 文本模型、图片模型、默认图片模型和添加内置模型目录接口
@@ -467,8 +471,10 @@ OAuth 模型是数据平面的例外路由：
   - 不缓存模型目录，OAuth 模型变化后管理端重新加载即可出现在权限选择列表
 - `ModelMappingService`
   - 每次路由和管理查询读取当前 Provider / OAuth 文本模型目录，不缓存目标可用性
-  - 映射定义、目标人工启用状态、429 冷却、自动禁用错误和当前粘滞目标保存在 SQLite
-  - 高优先级目标恢复后不抢回流量；当前粘滞目标不可用时才重新按优先级选择
+  - 映射策略、目标人工启用状态、429 冷却、自动禁用错误和当前目标保存在 SQLite
+  - `highest_priority` 在每次请求中重新比较正常候选，高优先级目标恢复后立即参与选择
+  - `sticky_failover` 在当前目标仍正常可用时保持流量，当前目标不可用时重新按优先级选择
+  - 正常候选为空时忽略目标的人工禁用、自动禁用和冷却状态，按最高优先级选择运行时目标；兜底目标在当前请求失败后不重复调用
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet
@@ -488,7 +494,7 @@ OAuth 模型是数据平面的例外路由：
 
 ### 3.3 Control-Plane Model Mapping Management
 
-模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出和映射级启停。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。自动禁用目标显示“禁用”标签，提示中展示最近一次失败的状态码和错误内容；重新启用并保存映射会清除该目标的运行故障状态。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。
+模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出和映射级启停。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、目标选择策略、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。人工禁用和自动禁用目标都显示“禁用”标签；人工禁用提示显示“手动禁用”，自动禁用提示展示最近一次失败的状态码和错误内容。重新启用并保存映射会清除该目标的运行故障状态。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。
 
 页面与 API：
 
@@ -509,10 +515,10 @@ OAuth 模型是数据平面的例外路由：
 
 SQLite 表：
 
-- `model_mappings` 保存映射 ID、映射级启用状态、显示顺序和 429 默认冷却秒数
+- `model_mappings` 保存映射 ID、映射级启用状态、显示顺序、目标选择策略和 429 默认冷却秒数
 - `model_mapping_targets` 保存目标模型、优先级、人工启用状态和同优先级顺序
 - `model_mapping_target_runtime` 保存自动禁用、冷却截止时间、最近状态码和错误摘要
-- `model_mapping_runtime` 保存当前粘滞目标
+- `model_mapping_runtime` 保存当前目标；`sticky_failover` 使用该值保持目标，`highest_priority` 使用该值展示最近选择
 
 已启用的映射 ID 可以与当前 Codex OAuth 文本、Codex OAuth 图片或 Claude OAuth 文本模型 ID 重复；创建和更新都允许使用同名 ID，数据平面按自定义映射路由。已禁用映射保留定义、目标顺序和模型权限记录，不参与路由或可用模型目录。`/v1/models` 将生效的同名条目标记为模型映射，并保留映射能力信息。底层目标从目录消失时标记为不可用，不能启停或编辑，只能从映射中删除。
 
@@ -943,7 +949,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - [src/services/model_catalog_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_catalog_service.py)
   - 汇总 Provider 配置模型、Codex / Claude OAuth 可用模型、Codex 图片模型与模型映射 ID，供用户和 API Key 模型权限共用
 - [src/services/model_mapping_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_mapping_service.py)
-  - 模型映射校验、映射级启停与排序、目标选择、429 冷却、自动禁用和粘滞状态编排
+  - 模型映射校验、映射级启停与排序、目标选择策略、429 冷却、自动禁用、故障兜底和当前目标编排
 - [src/repositories/model_mapping_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/model_mapping_repository.py)
   - 模型映射定义、启用状态、显示顺序、目标配置和运行状态 SQLite 持久化
 - [src/presentation/model_mapping_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/model_mapping_controller.py)
@@ -1207,7 +1213,7 @@ sequenceDiagram
     end
 ```
 
-### 6.5 Model Mapping Sticky Failover
+### 6.5 Model Mapping Strategy and Failover
 
 ```mermaid
 sequenceDiagram
@@ -1220,19 +1226,19 @@ sequenceDiagram
 
     Client->>Controller: request model=public_model
     Controller->>Mapping: acquire_target(public_model)
-    Mapping->>SQLite: read sticky target and runtime states
+    Mapping->>SQLite: read strategy, current target and runtime states
     Mapping-->>Controller: TargetA
     Controller->>TargetA: exhaust provider/auth/OAuth candidates
     alt TargetA returns 429 before stream commit
         TargetA-->>Controller: 429 + Retry-After
         Controller->>Mapping: record_failure(429)
-        Mapping->>SQLite: persist cooldown and clear sticky target
+        Mapping->>SQLite: persist cooldown and clear current target
         Controller->>Mapping: acquire_target(exclude TargetA)
         Mapping-->>Controller: TargetB
         Controller->>TargetB: proxy request
         TargetB-->>Controller: 2xx response
         Controller->>Mapping: record_success(TargetB)
-        Mapping->>SQLite: persist sticky TargetB
+        Mapping->>SQLite: persist current TargetB
         Controller-->>Client: TargetB response
     else TargetA fails after stream commit
         TargetA-->>Client: protocol error in current stream
@@ -1242,6 +1248,9 @@ sequenceDiagram
         Client-->>Controller: close downstream connection
         Note over Controller,SQLite: mapping runtime state remains unchanged
     end
+    Note over Mapping,SQLite: highest_priority re-ranks normal candidates on every request
+    Note over Mapping,SQLite: sticky_failover keeps the current normal candidate
+    Note over Mapping,SQLite: if no normal candidate remains, choose the highest-priority runtime target and stop fallback retry after one failure
 ```
 
 ## 7. Runtime Boundaries
