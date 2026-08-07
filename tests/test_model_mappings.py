@@ -346,6 +346,59 @@ process.stdout.write(JSON.stringify({{
         self.assertEqual(["enabled-a", "enabled-b", "disabled-b", "disabled-a"], payload["disabled"])
         self.assertIsNone(payload["crossGroup"])
 
+    def test_target_combobox_keeps_current_row_model_in_filtered_options(self) -> None:
+        template_path = (
+            Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "model_mappings.html"
+        )
+        html = template_path.read_text(encoding="utf-8")
+        script_start = html.index("function setupTargetCombobox")
+        script_end = html.index("function openCreateMapping", script_start)
+        script = html[script_start:script_end]
+        node_script = f"""
+const vm = require("vm");
+const searchInput = {{
+  value: "alpha/fast",
+  listeners: {{}},
+  setAttribute() {{}},
+  addEventListener(type, callback) {{ this.listeners[type] = callback; }},
+}};
+const valueInput = {{ value: "alpha/fast" }};
+const otherValueInput = {{ value: "alpha/stable" }};
+const optionsElement = {{
+  hidden: true,
+  innerHTML: "",
+  querySelectorAll() {{ return []; }},
+}};
+const row = {{
+  querySelector(selector) {{
+    if (selector === ".target-model-search") return searchInput;
+    if (selector === ".target-model-id") return valueInput;
+    if (selector === ".mapping-target-options") return optionsElement;
+    return null;
+  }},
+}};
+const sandbox = {{
+  availableTargets: ["alpha/fast", "alpha/stable"],
+  document: {{ querySelectorAll() {{ return [valueInput, otherValueInput]; }} }},
+  escapeHtml(value) {{ return String(value); }},
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+sandbox.setupTargetCombobox(row);
+searchInput.listeners.focus();
+process.stdout.write(optionsElement.innerHTML);
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        options_html = completed.stdout.decode("utf-8")
+
+        self.assertIn('data-model-id="alpha/fast"', options_html)
+        self.assertNotIn("没有匹配的模型", options_html)
+
 
 class ModelMappingServiceTests(unittest.TestCase):
     def setUp(self) -> None:
