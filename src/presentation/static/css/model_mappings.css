@@ -293,12 +293,19 @@
     vertical-align: middle !important;
 }
 
-.mapping-strategy-label {
-    display: block;
-    margin-top: 5px;
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
+.mapping-strategy-badge {
+    display: inline-flex;
+    min-height: 24px;
+    align-items: center;
+    margin-top: 6px;
+    padding: 0 8px;
+    border: 1px solid rgba(58, 127, 237, 0.2);
+    border-radius: 999px;
+    background: rgba(58, 127, 237, 0.08);
+    color: #245082;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0;
 }
 
 .mapping-targets-cell {
@@ -1114,6 +1121,12 @@
 
 :root[data-theme="dark"] .mapping-table th {
     background: #0f141b;
+}
+
+:root[data-theme="dark"] .mapping-strategy-badge {
+    border-color: rgba(86, 150, 232, 0.34);
+    background: rgba(56, 104, 168, 0.18);
+    color: #bcdcff;
 }
 
 :root[data-theme="dark"] .mapping-model-tag {
