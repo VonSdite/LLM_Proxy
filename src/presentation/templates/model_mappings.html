@@ -637,6 +637,7 @@
             function selectedTargetIds() {
                 return new Set(
                     Array.from(document.querySelectorAll(".mapping-target-row .target-model-id"))
+                        .filter(input => input !== valueInput)
                         .map(input => input.value.trim())
                         .filter(Boolean)
                 );
