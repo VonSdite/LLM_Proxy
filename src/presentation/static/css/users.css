@@ -1192,24 +1192,6 @@
     color: #d5dde7;
 }
 
-.users-page .btn-model {
-    color: #0c6aac;
-    background: #eef8ff;
-    border-color: #cfe6f7;
-}
-
-.users-page .btn-model:hover {
-    color: #fff;
-    background: #0c6aac;
-    border-color: #0c6aac;
-}
-
-:root[data-theme="dark"] .users-page .btn-model {
-    background: #152230;
-    border-color: #29415b;
-    color: #9bc7ff;
-}
-
 .users-page .permission-mode-card {
     display: flex;
     align-items: flex-start;
