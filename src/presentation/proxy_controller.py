@@ -1279,7 +1279,8 @@ class ProxyController:
             if failure_info is not None and failure_info.response_headers:
                 response_headers = failure_info.response_headers
             failure = failure_info or ProxyErrorInfo(
-                message=f"Mapped image target returned HTTP {status_code}: {target_model_id}",
+                message=self._extract_response_error_message(result)
+                or f"Mapped image target returned HTTP {status_code}: {target_model_id}",
                 status_code=status_code,
                 error_type="upstream_error",
                 error_code=f"http_{status_code}",
@@ -1392,7 +1393,8 @@ class ProxyController:
             if failure_info is not None and failure_info.response_headers:
                 response_headers = failure_info.response_headers
             failure = failure_info or ProxyErrorInfo(
-                message=f"Mapped target returned HTTP {status_code}: {target_model_id}",
+                message=self._extract_response_error_message(result)
+                or f"Mapped target returned HTTP {status_code}: {target_model_id}",
                 status_code=status_code,
                 error_type="upstream_error",
                 error_code=f"http_{status_code}",
@@ -1456,6 +1458,23 @@ class ProxyController:
             return int(value) if value is not None else None
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _extract_response_error_message(response: Response | None) -> str | None:
+        """从映射目标的失败响应中提取可展示的错误内容。"""
+        if response is None:
+            return None
+        payload = response.get_json(force=True, silent=True)
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict) and error.get("message") not in (None, ""):
+                return str(error["message"]).strip()[:1000]
+            if error not in (None, "") and not isinstance(error, dict):
+                return str(error).strip()[:1000]
+            if payload.get("message") not in (None, ""):
+                return str(payload["message"]).strip()[:1000]
+        body = response.get_data(as_text=True).strip()
+        return body[:1000] or None
 
     def _read_image_request_data(self, action: str) -> dict[str, Any]:
         """读取 OpenAI Images JSON 或 multipart 请求。"""

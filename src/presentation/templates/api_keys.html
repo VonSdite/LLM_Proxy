@@ -2,8 +2,8 @@
 
 {% block page_title %}API Key 管理{% endblock %}
 {% block page_css %}
-    <link rel="stylesheet" href="/static/css/users.css?v=20260403-19">
-    <link rel="stylesheet" href="/static/css/api_keys.css?v=20260608-3">
+    <link rel="stylesheet" href="/static/css/users.css?v=20260807-1">
+    <link rel="stylesheet" href="/static/css/api_keys.css?v=20260807-1">
 {% endblock %}
 {% block body_class %}users-page api-keys-page{% endblock %}
 {% block header_title %}API Key 管理{% endblock %}
@@ -418,7 +418,7 @@
             }
 
             let html = `
-                <table class="users-table api-keys-table">
+                <table class="users-table api-keys-table" data-resizable-columns="api-keys">
                     <thead>
                         <tr>
                             <th class="sortable-th name-col" aria-sort="${getAriaSort(apiKeysSortState.key, apiKeysSortState.direction, "name")}">

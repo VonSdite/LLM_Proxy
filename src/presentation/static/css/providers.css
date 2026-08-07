@@ -232,7 +232,7 @@
 }
 
 .providers-page .provider-list-table col.provider-name-col {
-    width: var(--provider-name-column-width, 132px);
+    width: 132px;
 }
 
 .providers-page .provider-list-table col.provider-api-col {
@@ -260,49 +260,6 @@
     letter-spacing: 0.02em;
     white-space: normal;
     overflow-wrap: anywhere;
-}
-
-.providers-page .provider-list-table th.provider-name-column {
-    position: relative;
-}
-
-.providers-page .provider-name-column-resizer {
-    position: absolute;
-    z-index: 1;
-    top: 0;
-    right: -5px;
-    bottom: 0;
-    width: 10px;
-    cursor: col-resize;
-    touch-action: none;
-}
-
-.providers-page .provider-name-column-resizer::after {
-    position: absolute;
-    top: 7px;
-    right: 4px;
-    bottom: 7px;
-    width: 2px;
-    border-radius: 1px;
-    background: transparent;
-    content: "";
-    transition: background-color var(--transition);
-}
-
-.providers-page .provider-name-column-resizer:hover::after,
-.providers-page .provider-name-column-resizer:focus-visible::after,
-.providers-page .provider-name-column-resizer.is-resizing::after {
-    background: var(--primary);
-}
-
-.providers-page .provider-name-column-resizer:focus-visible {
-    outline: none;
-}
-
-body.is-resizing-provider-name-column,
-body.is-resizing-provider-name-column * {
-    cursor: col-resize !important;
-    user-select: none !important;
 }
 
 :root[data-theme="dark"] .providers-page .providers-table th {
@@ -427,7 +384,6 @@ body.is-resizing-provider-name-column * {
 .providers-page .providers-table th.provider-select-column,
 .providers-page .providers-table td.provider-select-cell {
     width: 72px;
-    min-width: 72px;
     text-align: center;
     vertical-align: middle;
 }

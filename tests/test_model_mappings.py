@@ -165,7 +165,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         template = (project_root / "src/presentation/templates/model_mappings.html").read_text(encoding="utf-8")
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260807-1", template)
+        self.assertIn("model_mappings.css?v=20260807-3", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
@@ -176,6 +176,9 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('class="mapping-target-priority-control"', template)
         self.assertIn("mapping-target-unavailable-help", template)
         self.assertIn("该目标模型已不在当前可用模型目录中", template)
+        self.assertIn("mapping-target-auto-disabled", template)
+        self.assertIn("mapping-target-auto-disabled-help", template)
+        self.assertIn("最后一次调用失败", template)
         self.assertIn("width: 72px", stylesheet)
         self.assertIn("border-radius: 999px", stylesheet)
         self.assertIn('<table class="mapping-target-table"', template)
@@ -210,9 +213,9 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertNotIn("mapping-conflict", template)
         self.assertNotIn("mapping-conflict", stylesheet)
         self.assertNotIn("覆盖 ${escapeHtml(mapping.conflict_source)} 同名模型", template)
-        self.assertIn('class="mapping-id-column-resizer"', template)
-        self.assertIn('onpointerdown="startMappingIdColumnResize(event)"', template)
-        self.assertIn("function handleMappingIdColumnResizeKeydown(event)", template)
+        self.assertIn('class="mapping-table" data-resizable-columns="model-mappings"', template)
+        self.assertNotIn("mappingIdColumnWidthStorageKey", template)
+        self.assertNotIn('data-resizable-columns="model-mapping-targets"', template)
         self.assertIn('row.classList.toggle("is-disabled"', template)
         self.assertIn(".mapping-target-row.is-disabled td", stylesheet)
         self.assertIn('class="mapping-drag-handle mapping-target-drag-handle"', template)
@@ -251,101 +254,6 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .modal-content', stylesheet)
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .modal .form-control', stylesheet)
         self.assertIn(':root[data-theme="dark"] .model-mappings-page .mapping-toolbar .btn-secondary', stylesheet)
-
-    def test_mapping_id_column_resize_updates_and_persists_width(self) -> None:
-        template_path = (
-            Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "model_mappings.html"
-        )
-        html = template_path.read_text(encoding="utf-8")
-        script_start = html.index("function normalizeMappingIdColumnWidth")
-        script_end = html.index("function renderMappings", script_start)
-        script = html[script_start:script_end]
-
-        node_script = f"""
-const vm = require("vm");
-const savedValues = new Map();
-const listeners = new Map();
-const cssValues = new Map();
-const ariaValues = [];
-const classNames = new Set();
-const columnWidths = [];
-const resizer = {{
-  classList: {{
-    add: value => classNames.add(value),
-    remove: value => classNames.delete(value),
-  }},
-  setAttribute: (name, value) => ariaValues.push([name, value]),
-  setPointerCapture: () => {{}},
-  hasPointerCapture: () => false,
-}};
-const column = {{ style: {{ set width(value) {{ columnWidths.push(value); }} }} }};
-const sandbox = {{
-  console,
-  mappingIdColumnResizeState: null,
-  mappingIdColumnWidth: 220,
-  mappingIdColumnWidthStorageKey: "modelMappings.idColumnWidth",
-  mappingIdColumnMinWidth: 96,
-  mappingIdColumnMaxWidth: 480,
-  localStorage: {{
-    getItem: key => savedValues.has(key) ? savedValues.get(key) : null,
-    setItem: (key, value) => savedValues.set(key, value),
-  }},
-  document: {{
-    body: {{ classList: {{
-      add: value => classNames.add(value),
-      remove: value => classNames.delete(value),
-    }} }},
-    getElementById: () => ({{ style: {{ setProperty: (name, value) => cssValues.set(name, value) }} }}),
-    querySelectorAll: selector => selector === ".mapping-list-id-column" ? [column] : [resizer],
-  }},
-  window: {{
-    addEventListener: (name, handler) => listeners.set(name, handler),
-    removeEventListener: name => listeners.delete(name),
-  }},
-}};
-vm.createContext(sandbox);
-vm.runInContext({json.dumps(script)}, sandbox);
-
-const initialWidth = sandbox.normalizeMappingIdColumnWidth(null);
-sandbox.applyMappingIdColumnWidth(240, true);
-sandbox.startMappingIdColumnResize({{
-  button: 0,
-  pointerId: 7,
-  clientX: 100,
-  currentTarget: resizer,
-  preventDefault: () => {{}},
-}});
-listeners.get("pointermove")({{ pointerId: 7, clientX: 180 }});
-listeners.get("pointerup")({{ pointerId: 7 }});
-const draggedWidth = savedValues.get("modelMappings.idColumnWidth");
-savedValues.set("modelMappings.idColumnWidth", "999");
-sandbox.loadMappingIdColumnWidth();
-
-process.stdout.write(JSON.stringify({{
-  initialWidth,
-  draggedWidth,
-  restoredWidth: cssValues.get("--mapping-id-column-width"),
-  ariaValues,
-  columnWidths,
-  resizeClassActive: classNames.has("is-resizing-mapping-id-column"),
-  activeListeners: [...listeners.keys()],
-}}));
-"""
-        completed = subprocess.run(
-            ["node", "-e", node_script],
-            cwd=Path(__file__).resolve().parents[1],
-            check=True,
-            capture_output=True,
-        )
-        payload = json.loads(completed.stdout.decode("utf-8"))
-
-        self.assertEqual(220, payload["initialWidth"])
-        self.assertEqual("320", payload["draggedWidth"])
-        self.assertEqual("480px", payload["restoredWidth"])
-        self.assertEqual(["aria-valuenow", "480"], payload["ariaValues"][-1])
-        self.assertEqual("480px", payload["columnWidths"][-1])
-        self.assertFalse(payload["resizeClassActive"])
-        self.assertEqual([], payload["activeListeners"])
 
     def test_mapping_drag_order_stays_within_enabled_group(self) -> None:
         template_path = (
@@ -897,6 +805,37 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self.assertEqual("auto_disabled", targets["gpt_text"]["status"])
         self.assertEqual("claude_text", mapping["current_target_model_id"])
         self.assertEqual("claude_text", completed[0]["response_model"])
+
+    def test_provider_403_disables_target_records_response_message_and_switches(self) -> None:
+        calls: list[str] = []
+        completed: list[dict[str, Any]] = []
+        outcomes = {
+            "alpha/fast": (
+                Response(
+                    json.dumps({"error": {"message": "API key has no model access"}}),
+                    status=403,
+                    content_type="application/json",
+                ),
+                403,
+                None,
+            ),
+            "gpt_text": (Response("ok", status=200), 200, None),
+            "claude_text": (Response("unexpected", status=200), 200, None),
+        }
+        controller = self._build_controller(outcomes, calls)
+        self._create_cross_type_mapping()
+
+        response = self._proxy(controller, completed)
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+        targets = {target["model_id"]: target for target in mapping["targets"]}
+
+        self.assertEqual(["alpha/fast", "gpt_text"], calls)
+        self.assertEqual(b"ok", response.get_data())
+        self.assertEqual("auto_disabled", targets["alpha/fast"]["status"])
+        self.assertEqual(403, targets["alpha/fast"]["last_status_code"])
+        self.assertEqual("API key has no model access", targets["alpha/fast"]["last_error_message"])
+        self.assertEqual("gpt_text", mapping["current_target_model_id"])
 
     def test_image_mapping_uses_codex_image_target(self) -> None:
         calls: list[str] = []

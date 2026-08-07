@@ -1603,9 +1603,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn(".providers-page .provider-modal-tab-btn {", css)
         self.assertNotIn(".providers-page .provider-modal-tab-panel[hidden] {", css)
         self.assertIn(".providers-page .provider-list-table col.provider-select-col {", css)
-        self.assertIn("width: var(--provider-name-column-width, 132px);", css)
-        self.assertIn(".providers-page .provider-name-column-resizer {", css)
-        self.assertIn("body.is-resizing-provider-name-column,", css)
+        self.assertIn(".providers-page .provider-list-table col.provider-name-col {\n    width: 132px;", css)
+        self.assertNotIn(".providers-page .provider-name-column-resizer {", css)
+        self.assertNotIn("body.is-resizing-provider-name-column,", css)
         self.assertIn(".providers-page .drag-handle-button {", css)
         self.assertIn(".providers-page .drag-handle-placeholder {", css)
         self.assertIn(".providers-page .providers-table tbody tr.is-drag-over-before td {", css)
@@ -2539,8 +2539,9 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn("/static/js/ui-message.js?v=20260630-1", login_html)
         self.assertIn("/static/js/ui-message.js?v=20260630-1", users_html)
         self.assertIn("/static/js/ui-message.js?v=20260630-1", index_html)
-        self.assertIn("/static/css/admin-base.css?v=20260603-4", base_page_html)
+        self.assertIn("/static/css/admin-base.css?v=20260807-1", base_page_html)
         self.assertIn("/static/js/theme.js?v=20260319-1", base_page_html)
+        self.assertIn("/static/js/table-column-resize.js?v=20260807-2", base_page_html)
         self.assertIn("showActionError('登录'", login_html)
         self.assertIn("showActionError('创建用户'", users_html)
         self.assertIn("showActionError('更新用户'", users_html)
@@ -2613,6 +2614,189 @@ process.stdout.write(output);
 
         self.assertIn("https://example.com/v1/models returned 401", stdout)
 
+    def test_shared_table_column_resize_is_transient_and_synchronizes_group_tables(self) -> None:
+        presentation_root = Path(__file__).resolve().parents[1] / "src" / "presentation"
+        script_path = presentation_root / "static" / "js" / "table-column-resize.js"
+        source = script_path.read_text(encoding="utf-8")
+        admin_css = (presentation_root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
+        api_keys_html = (presentation_root / "templates" / "api_keys.html").read_text(encoding="utf-8")
+        users_html = (presentation_root / "templates" / "users.html").read_text(encoding="utf-8")
+        api_keys_css = (presentation_root / "static" / "css" / "api_keys.css").read_text(encoding="utf-8")
+        users_css = (presentation_root / "static" / "css" / "users.css").read_text(encoding="utf-8")
+
+        self.assertNotIn("localStorage", source)
+        self.assertIn(".table-column-resize-handle", admin_css)
+        self.assertEqual(1, api_keys_html.count('data-resizable-columns="api-keys"'))
+        self.assertEqual(1, users_html.count('data-resizable-columns="users"'))
+        self.assertIn("/static/css/api_keys.css?v=20260807-1", api_keys_html)
+        self.assertIn("/static/css/users.css?v=20260807-1", users_html)
+        self.assertNotIn("max-width: 180px;", api_keys_css)
+        self.assertNotIn("max-width: 320px;", users_css)
+
+        node_script = r"""
+const fs = require("fs");
+const vm = require("vm");
+const source = fs.readFileSync(__SCRIPT_PATH__, "utf8");
+
+function makeClassList() {
+  const values = new Set();
+  return {
+    add: value => values.add(value),
+    remove: value => values.delete(value),
+    contains: value => values.has(value),
+  };
+}
+
+function makeNode(tagName) {
+  const node = {
+    tagName,
+    children: [],
+    dataset: {},
+    style: {},
+    className: "",
+    classList: makeClassList(),
+    attributes: {},
+    listeners: {},
+    textContent: "",
+    appendChild(child) {
+      this.children.push(child);
+      child.parentNode = this;
+      child.tableRef = this.tableRef;
+      return child;
+    },
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+    },
+    addEventListener(name, handler) {
+      this.listeners[name] = handler;
+    },
+    querySelector(selector) {
+      const className = selector.startsWith(".") ? selector.slice(1) : "";
+      return this.children.find(child => String(child.className).split(/\s+/).includes(className)) || null;
+    },
+    closest() {
+      return this.tableRef || null;
+    },
+    setPointerCapture() {},
+    hasPointerCapture() { return false; },
+    releasePointerCapture() {},
+  };
+  return node;
+}
+
+function makeTable(widths, groupKey) {
+  const table = makeNode("TABLE");
+  table.tableRef = table;
+  table.dataset.resizableColumns = groupKey;
+  table.getBoundingClientRect = () => ({ width: widths.reduce((total, width) => total + width, 0) });
+  table.insertBefore = function (child) {
+    this.children.unshift(child);
+    this.firstChild = this.children[0];
+    child.parentNode = this;
+    child.tableRef = this;
+  };
+  const headers = widths.map((width, index) => {
+    const header = makeNode("TH");
+    header.tableRef = table;
+    header.colSpan = 1;
+    header.textContent = `列${index + 1}`;
+    header.getBoundingClientRect = () => ({ width });
+    return header;
+  });
+  table.tHead = { rows: [{ cells: headers }] };
+  table.headers = headers;
+  return table;
+}
+
+const tables = [makeTable([120, 180, 200], "shared"), makeTable([120, 180, 200], "shared")];
+const windowListeners = new Map();
+const document = {
+  readyState: "complete",
+  body: { classList: makeClassList() },
+  createElement: tagName => makeNode(String(tagName).toUpperCase()),
+  querySelectorAll: selector => selector === "table[data-resizable-columns]" ? tables : [],
+};
+const window = {
+  addEventListener: (name, handler) => windowListeners.set(name, handler),
+  removeEventListener: name => windowListeners.delete(name),
+};
+class MutationObserver {
+  observe() {}
+}
+const sandbox = { console, document, window, MutationObserver };
+vm.createContext(sandbox);
+vm.runInContext(source, sandbox);
+
+const firstHandle = tables[0].headers[0].children[0];
+firstHandle.listeners.pointerdown({
+  button: 0,
+  pointerId: 7,
+  clientX: 100,
+  currentTarget: firstHandle,
+  preventDefault() {},
+  stopPropagation() {},
+});
+windowListeners.get("pointermove")({ pointerId: 7, clientX: 160 });
+windowListeners.get("pointerup")({ pointerId: 7 });
+const afterFirstDrag = columnWidths(tables[0]);
+
+firstHandle.listeners.pointerdown({
+  button: 0,
+  pointerId: 8,
+  clientX: 200,
+  currentTarget: firstHandle,
+  preventDefault() {},
+  stopPropagation() {},
+});
+windowListeners.get("pointermove")({ pointerId: 8, clientX: 160 });
+windowListeners.get("pointerup")({ pointerId: 8 });
+const afterSecondDrag = columnWidths(tables[0]);
+
+const secondHandle = tables[0].headers[1].children[0];
+secondHandle.listeners.keydown({
+  key: "ArrowLeft",
+  currentTarget: secondHandle,
+  preventDefault() {},
+  stopPropagation() {},
+});
+
+function columnWidths(table) {
+  return table.children[0].children.map(column => column.style.width);
+}
+
+process.stdout.write(JSON.stringify({
+  handleCounts: tables.map(table => table.headers.map(header => header.children.length)),
+  afterFirstDrag,
+  afterSecondDrag,
+  firstWidths: columnWidths(tables[0]),
+  secondWidths: columnWidths(tables[1]),
+  tableWidths: tables.map(table => table.style.width),
+  tableMinWidths: tables.map(table => table.style.minWidth),
+  ariaNow: secondHandle.attributes["aria-valuenow"],
+  resizeClassActive: document.body.classList.contains("is-resizing-table-column"),
+  activeListeners: [...windowListeners.keys()],
+}));
+""".replace("__SCRIPT_PATH__", json.dumps(str(script_path)))
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual([[1, 1, 0], [1, 1, 0]], payload["handleCounts"])
+        self.assertEqual(["180px", "120px", "200px"], payload["afterFirstDrag"])
+        self.assertEqual(["140px", "160px", "200px"], payload["afterSecondDrag"])
+        self.assertEqual(["140px", "144px", "216px"], payload["firstWidths"])
+        self.assertEqual(payload["firstWidths"], payload["secondWidths"])
+        self.assertEqual(500, sum(int(width.removesuffix("px")) for width in payload["firstWidths"]))
+        self.assertEqual(["min(100%, 500px)", "min(100%, 500px)"], payload["tableWidths"])
+        self.assertEqual(["0", "0"], payload["tableMinWidths"])
+        self.assertEqual("144", payload["ariaNow"])
+        self.assertFalse(payload["resizeClassActive"])
+        self.assertEqual([], payload["activeListeners"])
+
 
 class DashboardTemplateTests(unittest.TestCase):
     def test_index_template_uses_lazy_loaded_tabs(self) -> None:
@@ -2621,7 +2805,7 @@ class DashboardTemplateTests(unittest.TestCase):
         index_css = (root / "static" / "css" / "index.css").read_text(encoding="utf-8")
         admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
 
-        self.assertIn("/static/css/index.css?v=20260409-6", index_html)
+        self.assertIn("/static/css/index.css?v=20260807-1", index_html)
         self.assertIn("dashboard-tabs-section", index_html)
         self.assertIn('id="dashboardTabBtn_stats"', index_html)
         self.assertIn('id="dashboardTabBtn_userUsage"', index_html)
@@ -2631,6 +2815,10 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertNotIn("用户用量汇总</button>", index_html)
         self.assertNotIn("userUsageSortIndicator_request_model", index_html)
         self.assertIn('id="userUsageTable"', index_html)
+        self.assertEqual(3, index_html.count("data-resizable-columns="))
+        self.assertIn('data-resizable-columns="statistics-summary"', index_html)
+        self.assertIn('data-resizable-columns="statistics-user-usage"', index_html)
+        self.assertIn('data-resizable-columns="statistics-logs"', index_html)
         self.assertIn("function loadUserUsageSummary()", index_html)
         self.assertIn("function renderUserUsageSummary()", index_html)
         self.assertIn("function toggleUserUsageSort(", index_html)
@@ -2715,7 +2903,7 @@ class DashboardTemplateTests(unittest.TestCase):
             providers_html,
         )
 
-    def test_provider_name_column_supports_tooltip_and_persistent_resize(self) -> None:
+    def test_provider_table_uses_shared_transient_column_resize(self) -> None:
         providers_html = (
             Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
         ).read_text(encoding="utf-8")
@@ -2724,102 +2912,9 @@ class DashboardTemplateTests(unittest.TestCase):
             'class="provider-name-text" title="${escapeHtml(provider.name)}"',
             providers_html,
         )
-        self.assertIn('class="provider-name-column-resizer"', providers_html)
-        self.assertIn('onpointerdown="startProviderNameColumnResize(event)"', providers_html)
-        self.assertIn("function handleProviderNameColumnResize(event)", providers_html)
-        self.assertIn("function handleProviderNameColumnResizeKeydown(event)", providers_html)
-        self.assertIn("if (width === null || width === '') return 132;", providers_html)
-        self.assertIn("localStorage.setItem(providerNameColumnWidthStorageKey", providers_html)
-        self.assertIn("localStorage.getItem(providerNameColumnWidthStorageKey)", providers_html)
-
-    def test_provider_name_column_resize_updates_and_persists_width(self) -> None:
-        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"
-        html = template_path.read_text(encoding="utf-8")
-        script_start = html.index("function normalizeProviderNameColumnWidth")
-        script_end = html.index("function renderAuthGroups", script_start)
-        script = html[script_start:script_end]
-
-        node_script = f"""
-const vm = require("vm");
-const savedValues = new Map();
-const listeners = new Map();
-const cssValues = new Map();
-const ariaValues = [];
-const classNames = new Set();
-const resizer = {{
-  classList: {{
-    add: value => classNames.add(value),
-    remove: value => classNames.delete(value),
-  }},
-  setAttribute: (name, value) => ariaValues.push([name, value]),
-  setPointerCapture: () => {{}},
-  hasPointerCapture: () => false,
-}};
-const sandbox = {{
-  console,
-  providerNameColumnResizeState: null,
-  providerNameColumnWidth: 132,
-  providerNameColumnWidthStorageKey: "providers.nameColumnWidth",
-  providerNameColumnMinWidth: 96,
-  providerNameColumnMaxWidth: 480,
-  localStorage: {{
-    getItem: key => savedValues.has(key) ? savedValues.get(key) : null,
-    setItem: (key, value) => savedValues.set(key, value),
-  }},
-  document: {{
-    body: {{ classList: {{
-      add: value => classNames.add(value),
-      remove: value => classNames.delete(value),
-    }} }},
-    getElementById: () => ({{ style: {{ setProperty: (name, value) => cssValues.set(name, value) }} }}),
-    querySelectorAll: () => [resizer, resizer],
-  }},
-  window: {{
-    addEventListener: (name, handler) => listeners.set(name, handler),
-    removeEventListener: name => listeners.delete(name),
-  }},
-}};
-vm.createContext(sandbox);
-vm.runInContext({json.dumps(script)}, sandbox);
-
-const initialWidth = sandbox.normalizeProviderNameColumnWidth(null);
-sandbox.applyProviderNameColumnWidth(240, true);
-sandbox.startProviderNameColumnResize({{
-  button: 0,
-  pointerId: 7,
-  clientX: 100,
-  currentTarget: resizer,
-  preventDefault: () => {{}},
-}});
-listeners.get("pointermove")({{ pointerId: 7, clientX: 180 }});
-listeners.get("pointerup")({{ pointerId: 7 }});
-const draggedWidth = savedValues.get("providers.nameColumnWidth");
-savedValues.set("providers.nameColumnWidth", "999");
-sandbox.loadProviderNameColumnWidth();
-
-process.stdout.write(JSON.stringify({{
-  initialWidth,
-  draggedWidth,
-  restoredWidth: cssValues.get("--provider-name-column-width"),
-  ariaValues,
-  resizeClassActive: classNames.has("is-resizing-provider-name-column"),
-  activeListeners: [...listeners.keys()],
-}}));
-"""
-        completed = subprocess.run(
-            ["node", "-e", node_script],
-            cwd=Path(__file__).resolve().parents[1],
-            check=True,
-            capture_output=True,
-        )
-        payload = json.loads(completed.stdout.decode("utf-8"))
-
-        self.assertEqual(132, payload["initialWidth"])
-        self.assertEqual("320", payload["draggedWidth"])
-        self.assertEqual("480px", payload["restoredWidth"])
-        self.assertEqual(["aria-valuenow", "480"], payload["ariaValues"][-1])
-        self.assertFalse(payload["resizeClassActive"])
-        self.assertEqual([], payload["activeListeners"])
+        self.assertIn('data-resizable-columns="providers"', providers_html)
+        self.assertNotIn("providerNameColumnWidthStorageKey", providers_html)
+        self.assertNotIn('data-resizable-columns="provider-models"', providers_html)
 
     def test_provider_drag_drop_helper_keeps_group_boundary(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "providers.html"

@@ -21,13 +21,11 @@
 
 .api-keys-page .api-keys-table .name-col {
     width: 180px;
-    min-width: 150px;
-    max-width: 180px;
 }
 
 .api-keys-page .api-key-name-text {
     display: block;
-    max-width: 180px;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -35,20 +33,18 @@
 
 .api-keys-page .api-keys-table .permission-col {
     width: 160px;
-    min-width: 130px;
-    max-width: 160px;
 }
 
 .api-keys-page .api-keys-table .model-permission-summary {
-    max-width: 160px;
+    max-width: 100%;
 }
 
 .api-keys-page .api-keys-table .permission-chip {
-    max-width: 110px;
+    max-width: 100%;
 }
 
 .api-keys-page .token-limit-col {
-    min-width: 118px;
+    width: 118px;
 }
 
 .api-keys-page .api-key-cell {

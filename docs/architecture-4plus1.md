@@ -488,7 +488,7 @@ OAuth 模型是数据平面的例外路由：
 
 ### 3.3 Control-Plane Model Mapping Management
 
-模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出和映射级启停。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。
+模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出和映射级启停。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。自动禁用目标显示“禁用”标签，提示中展示最近一次失败的状态码和错误内容；重新启用并保存映射会清除该目标的运行故障状态。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。
 
 页面与 API：
 
@@ -515,6 +515,8 @@ SQLite 表：
 - `model_mapping_runtime` 保存当前粘滞目标
 
 已启用的映射 ID 可以与当前 Codex OAuth 文本、Codex OAuth 图片或 Claude OAuth 文本模型 ID 重复；创建和更新都允许使用同名 ID，数据平面按自定义映射路由。已禁用映射保留定义、目标顺序和模型权限记录，不参与路由或可用模型目录。`/v1/models` 将生效的同名条目标记为模型映射，并保留映射能力信息。底层目标从目录消失时标记为不可用，不能启停或编辑，只能从映射中删除。
+
+Provider、模型映射、API Key、用户管理主表和统计概览的三张表使用共享列宽拖动组件。组件在首次拖动时读取当前渲染宽度，在相邻两列之间重新分配宽度并保持表格总宽度不变，只在当前页面生命周期内同步同组表格的列宽；刷新页面后按各表 CSS 默认宽度重新布局。Provider 与模型映射弹窗内的模型列表不启用列宽拖动。
 
 ### 3.4 Provider Runtime Contract
 
@@ -948,6 +950,8 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 模型映射管理 API
 - [src/presentation/templates/model_mappings.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/model_mappings.html)
   - 模型映射列表、可搜索目标选择、编辑和 JSON 导入导出页面
+- [src/presentation/static/js/table-column-resize.js](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/static/js/table-column-resize.js)
+  - 后台主表列宽拖动、同组表格同步和页面内临时状态管理
 - [src/repositories/api_key_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/api_key_repository.py)
   - API Key 持久化、列表排序和累计用量字段
 - [src/services/codex_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/codex_oauth_service.py)
