@@ -2816,7 +2816,7 @@ class DashboardTemplateTests(unittest.TestCase):
         index_css = (root / "static" / "css" / "index.css").read_text(encoding="utf-8")
         admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
 
-        self.assertIn("/static/css/index.css?v=20260807-2", index_html)
+        self.assertIn("/static/css/index.css?v=20260807-3", index_html)
         self.assertIn("dashboard-tabs-section", index_html)
         self.assertIn('id="dashboardTabBtn_stats"', index_html)
         self.assertIn('id="dashboardTabBtn_userUsage"', index_html)

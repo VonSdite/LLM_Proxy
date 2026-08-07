@@ -44,7 +44,7 @@
 }
 
 .dashboard-page .filters .btn {
-    width: 100px;
+    width: 110px;
     min-height: var(--dashboard-control-height);
     height: var(--dashboard-control-height);
     display: inline-flex;
@@ -137,7 +137,7 @@
 }
 
 .dashboard-page .filter-group.filter-group-presets {
-    min-width: 258px;
+    min-width: 220px;
 }
 
 .dashboard-page .filter-group label {
@@ -158,16 +158,16 @@
 .dashboard-page .date-preset-group {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     min-height: var(--dashboard-control-height);
     flex-wrap: wrap;
 }
 
 .dashboard-page .date-preset-btn {
-    min-width: 60px;
+    min-width: 68px;
     min-height: var(--dashboard-control-height);
     height: var(--dashboard-control-height);
-    padding: 0 8px;
+    padding: 0 14px;
     border: 1px solid var(--line-strong);
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.88);
@@ -891,4 +891,3 @@
         padding: 0;
     }
 }
-
