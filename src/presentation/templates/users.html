@@ -1423,7 +1423,7 @@
                         <td class="actions-col">
                             <div class="action-buttons">
                                 <button class="btn-action btn-edit" onclick="openEditModal(${Number(user.id)})">编辑</button>
-                                ${showPermissionControls ? `<button class="btn-action btn-model" onclick="openPermissionModalForUser(${Number(user.id)})">模型权限</button>` : ''}
+                                ${showPermissionControls ? `<button class="btn-action btn-edit" onclick="openPermissionModalForUser(${Number(user.id)})">模型权限</button>` : ''}
                                 <div class="inline-confirm-wrap">
                                     <button
                                         type="button"

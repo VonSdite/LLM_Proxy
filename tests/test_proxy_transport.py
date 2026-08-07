@@ -1228,6 +1228,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         html = template_path.read_text(encoding="utf-8")
         users_template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "users.html"
         users_html = users_template_path.read_text(encoding="utf-8")
+        users_css_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "css" / "users.css"
+        users_css = users_css_path.read_text(encoding="utf-8")
         css_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "css" / "providers.css"
         css = css_path.read_text(encoding="utf-8")
 
@@ -1642,6 +1644,12 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("formatDateTime(user.created_at)", users_html)
         self.assertIn("/api/users/export", users_html)
         self.assertIn("/api/users/import", users_html)
+        self.assertIn(
+            '<button class="btn-action btn-edit" onclick="openPermissionModalForUser(${Number(user.id)})">模型权限</button>',
+            users_html,
+        )
+        self.assertNotIn("btn-model", users_html)
+        self.assertNotIn(".users-page .btn-model", users_css)
         self.assertIn(
             '<button type="button" class="btn btn-toolbar-secondary" id="exportUsersBtn" onclick="exportUsers()" disabled>导出</button>',
             users_html,
