@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260807-3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260807-6">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -39,6 +39,22 @@
                             <input type="text" class="form-control" id="mappingIdInput" maxlength="64" autocomplete="off" spellcheck="false" placeholder="例如 internal_gpt">
                         </div>
                         <div class="mapping-field">
+                            <div class="mapping-field-label">
+                                <label class="form-label" for="mappingStrategySelect">选择策略</label>
+                                <button
+                                    type="button"
+                                    class="mapping-help-button"
+                                    aria-describedby="mappingStrategyHelp"
+                                    data-tooltip="最高优先级：每个新请求都选择正常候选中优先级最高的目标，高优先级目标恢复后自动切回。粘滞故障切换：继续使用当前成功目标，直到该目标不可用。未设置策略时默认使用最高优先级。"
+                                >?</button>
+                                <span class="visually-hidden" id="mappingStrategyHelp">最高优先级策略会在每个新请求中选择正常候选中优先级最高的目标，高优先级目标恢复后自动切回。粘滞故障切换策略会继续使用当前成功目标，直到该目标不可用。未设置策略时默认使用最高优先级。</span>
+                            </div>
+                            <select class="form-select" id="mappingStrategySelect">
+                                <option value="highest_priority">最高优先级</option>
+                                <option value="sticky_failover">粘滞故障切换</option>
+                            </select>
+                        </div>
+                        <div class="mapping-field">
                             <label class="form-label" for="mappingCooldownInput">429 冷却秒数</label>
                             <input type="number" class="form-control" id="mappingCooldownInput" min="0" value="60">
                         </div>
@@ -49,10 +65,10 @@
                             <button
                                 type="button"
                                 class="mapping-help-button"
-                                aria-describedby="mappingStrategyHelp"
-                                data-tooltip="首次选择最高优先级的可用目标，成功后保持粘滞；429 冷却后切换，其他异常自动禁用目标并切换。"
+                                aria-describedby="mappingTargetHelp"
+                                data-tooltip="优先级数字越大越先使用，同优先级按列表顺序选择。单目标或正常候选全部不可用时，仍按最高优先级尝试一个运行时目标。429 进入冷却，其他异常自动禁用。"
                             >?</button>
-                            <span class="visually-hidden" id="mappingStrategyHelp">首次选择最高优先级的可用目标，成功后保持粘滞；429 冷却后切换，其他异常自动禁用目标并切换。</span>
+                            <span class="visually-hidden" id="mappingTargetHelp">优先级数字越大越先使用，同优先级按列表顺序选择。单目标或正常候选全部不可用时，仍按最高优先级尝试一个运行时目标。429 进入冷却，其他异常自动禁用。</span>
                         </div>
                         <div class="mapping-target-table-shell">
                             <table class="mapping-target-table" aria-label="目标模型列表">
@@ -396,6 +412,7 @@
                             const actionLocked = mappingOrderActionInFlight || mappingCopyActionInFlight
                                 || isDeleteInFlight || isTogglePending;
                             const enabled = isMappingEnabled(mapping);
+                            const strategyLabel = mapping.strategy === "sticky_failover" ? "粘滞故障切换" : "最高优先级";
                             return `<tr
                                 data-mapping-row-id="${encodedId}"
                                 ondragover="handleMappingRowDragOver('${encodedId}', '${groupKey}', event)"
@@ -418,7 +435,10 @@
                                             onchange="toggleMappingSelection('${encodedId}', this.checked)"${actionLocked ? " disabled" : ""}>
                                     </div>
                                 </td>
-                                <td class="mapping-id-cell"><strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong></td>
+                                <td class="mapping-id-cell">
+                                    <strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>
+                                    <span class="mapping-strategy-label">${strategyLabel}</span>
+                                </td>
                                 <td class="mapping-targets-cell"><div class="mapping-model-tags">${targetTags}</div>${targetSummary}</td>
                                 <td class="mapping-cooldown-cell">${Number(mapping.cooldown_seconds_on_429)}s</td>
                                 <td class="mapping-actions-cell"><div class="mapping-row-actions">
@@ -516,12 +536,14 @@
             const row = document.createElement("tr");
             const unavailable = target.available_model === false;
             const enabled = target.enabled !== false;
+            const manuallyDisabled = !enabled;
             const autoDisabled = target.status === "auto_disabled";
             const failureTooltip = buildTargetFailureTooltip(target);
             row.className = `mapping-target-row${unavailable ? " is-unavailable" : ""}${autoDisabled ? " is-auto-disabled" : ""}`;
             row.dataset.enabled = enabled ? "true" : "false";
             row.dataset.autoDisabled = autoDisabled ? "true" : "false";
             row.dataset.available = unavailable ? "false" : "true";
+            row.dataset.failureTooltip = failureTooltip;
             row.innerHTML = `
                 <td class="mapping-target-drag-cell">
                     <button type="button" class="mapping-drag-handle mapping-target-drag-handle" draggable="true" aria-label="拖动调整目标模型顺序" title="拖动调整顺序">
@@ -546,11 +568,11 @@
                             <button type="button" class="mapping-help-button mapping-target-unavailable-help"
                                 aria-label="目标模型不可用：该模型已不在当前可用模型目录中，不能编辑或启停，只能删除"
                                 data-tooltip="该目标模型已不在当前可用模型目录中，不能编辑或启停，只能删除。">?</button>` : ""}
-                        <span class="mapping-target-auto-disabled-status" ${autoDisabled ? "" : "hidden"}>
+                        <span class="mapping-target-auto-disabled-status" ${autoDisabled || manuallyDisabled ? "" : "hidden"}>
                             <span class="mapping-target-auto-disabled">禁用</span>
                             <button type="button" class="mapping-help-button mapping-target-auto-disabled-help"
-                                aria-label="${escapeAttribute(failureTooltip)}"
-                                data-tooltip="${escapeAttribute(failureTooltip)}">?</button>
+                                aria-label="${escapeAttribute(manuallyDisabled ? "手动禁用" : failureTooltip)}"
+                                data-tooltip="${escapeAttribute(manuallyDisabled ? "手动禁用" : failureTooltip)}">?</button>
                         </span>
                     </div>
                 </td>
@@ -583,7 +605,11 @@
             const available = row.dataset.available !== "false";
             row.classList.toggle("is-disabled", available && !enabled);
             row.classList.toggle("is-auto-disabled", available && autoDisabled);
-            row.querySelector(".mapping-target-auto-disabled-status").hidden = !autoDisabled;
+            row.querySelector(".mapping-target-auto-disabled-status").hidden = enabled && !autoDisabled;
+            const disabledHelp = row.querySelector(".mapping-target-auto-disabled-help");
+            const disabledTooltip = enabled ? (row.dataset.failureTooltip || "最后一次调用失败") : "手动禁用";
+            disabledHelp.setAttribute("aria-label", disabledTooltip);
+            disabledHelp.dataset.tooltip = disabledTooltip;
             if (row.dataset.available === "false") {
                 toggleButton.hidden = true;
                 return;
@@ -688,6 +714,7 @@
             editingMappingId = null;
             document.getElementById("mappingEditorTitle").textContent = "新增模型映射";
             document.getElementById("mappingIdInput").value = "";
+            document.getElementById("mappingStrategySelect").value = "highest_priority";
             document.getElementById("mappingCooldownInput").value = "60";
             document.getElementById("mappingTargetList").innerHTML = "";
             mappingEditorModal.show();
@@ -701,6 +728,7 @@
             editingMappingId = mappingId;
             document.getElementById("mappingEditorTitle").textContent = "编辑模型映射";
             document.getElementById("mappingIdInput").value = mapping.id;
+            document.getElementById("mappingStrategySelect").value = mapping.strategy || "highest_priority";
             document.getElementById("mappingCooldownInput").value = mapping.cooldown_seconds_on_429;
             document.getElementById("mappingTargetList").innerHTML = "";
             mapping.targets.forEach(createTargetRow);
@@ -736,7 +764,7 @@
                 .filter(target => target.model_id);
             return {
                 id: document.getElementById("mappingIdInput").value.trim(),
-                strategy: "sticky_failover",
+                strategy: document.getElementById("mappingStrategySelect").value,
                 cooldown_seconds_on_429: Number(document.getElementById("mappingCooldownInput").value),
                 targets
             };

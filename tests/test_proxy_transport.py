@@ -1331,6 +1331,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('data-provider-help-topic="auth_group_field"', html)
         self.assertIn('data-provider-help-topic="auth_groups_overview"', html)
         self.assertIn('data-provider-help-topic="auth_group_strategy"', html)
+        self.assertIn('<option value="least_inflight">最少占用</option>', html)
+        self.assertIn('<option value="sticky_failover">粘滞故障切换</option>', html)
+        self.assertIn("const strategyLabel = group.strategy === 'sticky_failover' ? '粘滞故障切换' : '最少占用';", html)
         self.assertIn('data-provider-help-topic="auth_entries_editor"', html)
         self.assertIn('data-provider-help-topic="fetch_models"', html)
         self.assertIn("所选 Auth Group 的第一个 entry", html)
@@ -2813,7 +2816,7 @@ class DashboardTemplateTests(unittest.TestCase):
         index_css = (root / "static" / "css" / "index.css").read_text(encoding="utf-8")
         admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
 
-        self.assertIn("/static/css/index.css?v=20260807-1", index_html)
+        self.assertIn("/static/css/index.css?v=20260807-2", index_html)
         self.assertIn("dashboard-tabs-section", index_html)
         self.assertIn('id="dashboardTabBtn_stats"', index_html)
         self.assertIn('id="dashboardTabBtn_userUsage"', index_html)

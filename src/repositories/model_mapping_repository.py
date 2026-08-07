@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from ..config.model_mapping_config import ModelMappingSchema
+from ..config.model_mapping_config import DEFAULT_MODEL_MAPPING_STRATEGY, ModelMappingSchema
 from ..utils.database import ConnectionFactory
 from ..utils.local_time import now_local_datetime_text
 
@@ -28,6 +28,7 @@ class ModelMappingRepository:
                     id TEXT PRIMARY KEY,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     sort_order INTEGER NOT NULL DEFAULT 0,
+                    strategy TEXT NOT NULL DEFAULT 'highest_priority',
                     cooldown_seconds_on_429 INTEGER NOT NULL DEFAULT 60,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -79,6 +80,11 @@ class ModelMappingRepository:
                     "UPDATE model_mappings SET sort_order = ? WHERE id = ?",
                     [(index, row["id"]) for index, row in enumerate(existing_rows)],
                 )
+            if "strategy" not in mapping_columns:
+                conn.execute(
+                    "ALTER TABLE model_mappings ADD COLUMN strategy TEXT NOT NULL "
+                    f"DEFAULT '{DEFAULT_MODEL_MAPPING_STRATEGY}'"
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_model_mappings_order ON model_mappings(sort_order, created_at)"
             )
@@ -87,7 +93,7 @@ class ModelMappingRepository:
         with self._get_connection() as conn:
             mappings = conn.execute(
                 """
-                SELECT id, enabled, sort_order, cooldown_seconds_on_429, created_at, updated_at
+                SELECT id, enabled, sort_order, strategy, cooldown_seconds_on_429, created_at, updated_at
                 FROM model_mappings
                 ORDER BY sort_order, created_at, id
                 """
@@ -116,7 +122,7 @@ class ModelMappingRepository:
                 "id": row["id"],
                 "enabled": bool(row["enabled"]),
                 "sort_order": int(row["sort_order"]),
-                "strategy": "sticky_failover",
+                "strategy": str(row["strategy"] or DEFAULT_MODEL_MAPPING_STRATEGY),
                 "cooldown_seconds_on_429": int(row["cooldown_seconds_on_429"]),
                 "targets": targets_by_mapping.get(row["id"], []),
                 "created_at": row["created_at"],
@@ -359,13 +365,14 @@ class ModelMappingRepository:
         conn.execute(
             """
             INSERT INTO model_mappings (
-                id, enabled, sort_order, cooldown_seconds_on_429, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                id, enabled, sort_order, strategy, cooldown_seconds_on_429, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mapping.id,
                 1 if mapping.enabled else 0,
                 sort_order,
+                mapping.strategy,
                 mapping.cooldown_seconds_on_429,
                 created_at or now_text,
                 now_text,

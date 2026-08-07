@@ -28,10 +28,10 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
 
         self.assertIn('data-date-preset="today"', html)
         self.assertIn('data-date-preset="last30"', html)
+        self.assertIn('data-date-preset="all"', html)
         self.assertIn("今天</button>", html)
         self.assertIn("近30天</button>", html)
-        self.assertNotIn("全部时间</button>", html)
-        self.assertNotIn('data-date-preset="all"', html)
+        self.assertIn("全部时间</button>", html)
         self.assertNotIn("近3天</button>", html)
 
     def test_dashboard_defaults_date_range_to_today(self) -> None:
