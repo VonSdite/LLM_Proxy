@@ -1248,9 +1248,7 @@ class ProxyController:
 
             def complete_mapped_image_request(meta: dict[str, Any]) -> None:
                 self._model_mapping_service.record_success(selection)
-                actual_meta = dict(meta)
-                actual_meta["response_model"] = target_model_id
-                on_complete(actual_meta)
+                on_complete(dict(meta))
 
             try:
                 if self._codex_proxy_service is not None and self._codex_proxy_service.has_image_model(target_model_id):
@@ -1379,9 +1377,7 @@ class ProxyController:
                 if stream_failed:
                     return
                 self._model_mapping_service.record_success(selection)
-                actual_meta = dict(meta)
-                actual_meta["response_model"] = target_model_id
-                on_complete(actual_meta)
+                on_complete(dict(meta))
 
             try:
                 result, status_code, failure_info = self._dispatch_completion_target(

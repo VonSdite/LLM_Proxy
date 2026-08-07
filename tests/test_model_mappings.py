@@ -1024,6 +1024,11 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
     def test_image_mapping_uses_codex_image_target(self) -> None:
         calls: list[str] = []
         completed: list[dict[str, Any]] = []
+
+        def complete_with_actual_model(kwargs: dict[str, Any]) -> tuple[Response, int, None]:
+            kwargs["on_complete"]({"response_model": "gpt-image-2-2026-08-08"})
+            return Response("ok", status=200), 200, None
+
         self.service.create_mapping(
             {
                 "id": "gpt-image-2",
@@ -1035,7 +1040,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         controller._model_mapping_service = self.service
         controller._codex_proxy_service = FakeMappedImageProxyService(
             ("gpt_image",),
-            {"gpt_image": (Response("ok", status=200), 200, None)},
+            {"gpt_image": complete_with_actual_model},
             calls,
         )
 
@@ -1055,13 +1060,18 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         assert response is not None
         self.assertEqual(b"ok", response.get_data())
         self.assertEqual(["gpt_image"], calls)
-        self.assertEqual("gpt_image", completed[0]["response_model"])
+        self.assertEqual("gpt-image-2-2026-08-08", completed[0]["response_model"])
 
     def test_successful_target_does_not_switch(self) -> None:
         calls: list[str] = []
         completed: list[dict[str, Any]] = []
+
+        def complete_with_actual_model(kwargs: dict[str, Any]) -> tuple[Response, int, None]:
+            kwargs["on_complete"]({"response_model": "gpt-5.6-2026-08-08"})
+            return Response("ok", status=200), 200, None
+
         outcomes = {
-            "alpha/fast": (Response("ok", status=200), 200, None),
+            "alpha/fast": complete_with_actual_model,
             "gpt_text": (Response("unexpected", status=200), 200, None),
             "claude_text": (Response("unexpected", status=200), 200, None),
         }
@@ -1071,7 +1081,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self._proxy(controller, completed)
 
         self.assertEqual(["alpha/fast"], calls)
-        self.assertEqual("alpha/fast", completed[0]["response_model"])
+        self.assertEqual("gpt-5.6-2026-08-08", completed[0]["response_model"])
 
     def test_target_exception_disables_and_switches(self) -> None:
         calls: list[str] = []
