@@ -57,6 +57,49 @@
     --shadow-card: 0 6px 18px rgba(1, 4, 9, 0.56);
 }
 
+table[data-resizable-columns] th.resizable-column-header {
+    position: relative;
+}
+
+.table-column-resize-handle {
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    right: -5px;
+    bottom: 0;
+    width: 10px;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.table-column-resize-handle::after {
+    position: absolute;
+    top: 7px;
+    right: 4px;
+    bottom: 7px;
+    width: 2px;
+    border-radius: 1px;
+    background: transparent;
+    content: "";
+    transition: background-color var(--transition);
+}
+
+.table-column-resize-handle:hover::after,
+.table-column-resize-handle:focus-visible::after,
+.table-column-resize-handle.is-resizing::after {
+    background: var(--primary);
+}
+
+.table-column-resize-handle:focus-visible {
+    outline: none;
+}
+
+body.is-resizing-table-column,
+body.is-resizing-table-column * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
 * {
     margin: 0;
     padding: 0;

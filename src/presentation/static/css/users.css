@@ -1082,9 +1082,7 @@
 }
 
 .users-page .permission-col {
-    min-width: 250px;
     width: 320px;
-    max-width: 320px;
 }
 
 .users-page .model-permission-summary {
@@ -1092,7 +1090,7 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
-    max-width: 320px;
+    max-width: 100%;
 }
 
 .users-page .permission-summary-bar {

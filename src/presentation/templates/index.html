@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260409-6">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260807-1">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}监控 API 请求和 Token 消耗{% endblock %}
@@ -87,7 +87,7 @@
 
             <div class="dashboard-tab-panel is-active" id="dashboardTabPanel_stats" role="tabpanel" aria-labelledby="dashboardTabBtn_stats">
                 <div class="stats-container">
-                    <table class="stats-table">
+                    <table class="stats-table" data-resizable-columns="statistics-summary">
                         <thead>
                             <tr>
                                 <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('ip_address', 'string')">IP <span class="sort-indicator" id="statsSortIndicator_ip_address"></span></button></th>
@@ -111,7 +111,7 @@
 
             <div class="dashboard-tab-panel" id="dashboardTabPanel_userUsage" role="tabpanel" aria-labelledby="dashboardTabBtn_userUsage" hidden>
                 <div class="stats-container">
-                    <table class="stats-table">
+                    <table class="stats-table" data-resizable-columns="statistics-user-usage">
                         <thead>
                             <tr>
                                 <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('username', 'string')">用户名 <span class="sort-indicator" id="userUsageSortIndicator_username"></span></button></th>
@@ -135,7 +135,7 @@
             <div class="dashboard-tab-panel" id="dashboardTabPanel_logs" role="tabpanel" aria-labelledby="dashboardTabBtn_logs" hidden>
                 <div class="table-card-shell">
                     <div class="table-container">
-                        <table>
+                        <table data-resizable-columns="statistics-logs">
                             <thead>
                                 <tr>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('ip_address', 'string')">IP <span class="sort-indicator" id="logsSortIndicator_ip_address"></span></button></th>

@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}用户管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260403-19">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260807-1">{% endblock %}
 {% block body_class %}users-page{% endblock %}
 {% block header_title %}用户管理{% endblock %}
 {% block header_subtitle %}管理用户、IP信息{% endblock %}
@@ -1319,7 +1319,7 @@
             }
 
             let html = `
-                <table class="users-table">
+                <table class="users-table" data-resizable-columns="users">
                     <thead>
                         <tr>
                             ${showSelectionControls ? `

@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260807-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260807-2">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置{% endblock %}
@@ -634,13 +634,8 @@
         let modelTestRowSequence = 0;
         let providerDragState = null;
         let providerDragTargetElement = null;
-        let providerNameColumnResizeState = null;
         let modelTestDragState = null;
         let modelTestDragTargetElement = null;
-        let providerNameColumnWidth = 132;
-        const providerNameColumnWidthStorageKey = 'providers.nameColumnWidth';
-        const providerNameColumnMinWidth = 96;
-        const providerNameColumnMaxWidth = 480;
         const providerNameMaxLength = 64;
         const providerNamePattern = /^[A-Za-z][A-Za-z0-9_]*$/;
         const providerHelpTopics = {
@@ -3664,91 +3659,6 @@
             }
         }
 
-        function normalizeProviderNameColumnWidth(width) {
-            if (width === null || width === '') return 132;
-            const numericWidth = Number(width);
-            if (!Number.isFinite(numericWidth)) return 132;
-            return Math.min(providerNameColumnMaxWidth, Math.max(providerNameColumnMinWidth, Math.round(numericWidth)));
-        }
-
-        function saveProviderNameColumnWidth() {
-            try {
-                localStorage.setItem(providerNameColumnWidthStorageKey, String(providerNameColumnWidth));
-            } catch (error) {
-                console.warn('Unable to save provider name column width:', error);
-            }
-        }
-
-        function applyProviderNameColumnWidth(width, shouldSave = false) {
-            providerNameColumnWidth = normalizeProviderNameColumnWidth(width);
-            document.getElementById('providersContainer')?.style.setProperty(
-                '--provider-name-column-width',
-                `${providerNameColumnWidth}px`
-            );
-            document.querySelectorAll('[data-provider-name-column-resizer]').forEach(resizer => {
-                resizer.setAttribute('aria-valuenow', String(providerNameColumnWidth));
-            });
-            if (shouldSave) saveProviderNameColumnWidth();
-        }
-
-        function loadProviderNameColumnWidth() {
-            try {
-                applyProviderNameColumnWidth(localStorage.getItem(providerNameColumnWidthStorageKey));
-            } catch (error) {
-                console.warn('Unable to load provider name column width:', error);
-                applyProviderNameColumnWidth(providerNameColumnWidth);
-            }
-        }
-
-        function finishProviderNameColumnResize(event) {
-            if (!providerNameColumnResizeState) return;
-            const { pointerId, resizer } = providerNameColumnResizeState;
-            if (event?.pointerId !== undefined && event.pointerId !== pointerId) return;
-            if (resizer.hasPointerCapture?.(pointerId)) {
-                resizer.releasePointerCapture(pointerId);
-            }
-            resizer.classList.remove('is-resizing');
-            document.body.classList.remove('is-resizing-provider-name-column');
-            providerNameColumnResizeState = null;
-            window.removeEventListener('pointermove', handleProviderNameColumnResize);
-            window.removeEventListener('pointerup', finishProviderNameColumnResize);
-            window.removeEventListener('pointercancel', finishProviderNameColumnResize);
-            saveProviderNameColumnWidth();
-        }
-
-        function handleProviderNameColumnResize(event) {
-            if (!providerNameColumnResizeState || event.pointerId !== providerNameColumnResizeState.pointerId) return;
-            applyProviderNameColumnWidth(
-                providerNameColumnResizeState.startWidth + event.clientX - providerNameColumnResizeState.startX
-            );
-        }
-
-        function startProviderNameColumnResize(event) {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            finishProviderNameColumnResize();
-            const resizer = event.currentTarget;
-            providerNameColumnResizeState = {
-                pointerId: event.pointerId,
-                resizer,
-                startWidth: providerNameColumnWidth,
-                startX: event.clientX,
-            };
-            resizer.setPointerCapture?.(event.pointerId);
-            resizer.classList.add('is-resizing');
-            document.body.classList.add('is-resizing-provider-name-column');
-            window.addEventListener('pointermove', handleProviderNameColumnResize);
-            window.addEventListener('pointerup', finishProviderNameColumnResize);
-            window.addEventListener('pointercancel', finishProviderNameColumnResize);
-        }
-
-        function handleProviderNameColumnResizeKeydown(event) {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-            event.preventDefault();
-            const direction = event.key === 'ArrowLeft' ? -1 : 1;
-            applyProviderNameColumnWidth(providerNameColumnWidth + direction * 16, true);
-        }
-
         function renderAuthGroups() {
             const container = document.getElementById('authGroupsContainer');
             const authGroupCountElement = document.getElementById('authGroupCount');
@@ -3901,7 +3811,7 @@
 
             html += `
                     <div class="provider-group-table-wrap">
-                        <table class="providers-table provider-list-table">
+                        <table class="providers-table provider-list-table" data-resizable-columns="providers">
                             <colgroup>
                                 <col class="provider-select-col">
                                 <col class="provider-name-col">
@@ -3922,23 +3832,7 @@
                                             >
                                         </div>
                                     </th>
-                                    <th class="provider-name-column">
-                                        名称
-                                        <span
-                                            class="provider-name-column-resizer"
-                                            data-provider-name-column-resizer
-                                            role="separator"
-                                            tabindex="0"
-                                            aria-label="调整名称列宽度"
-                                            aria-orientation="vertical"
-                                            aria-valuemin="${providerNameColumnMinWidth}"
-                                            aria-valuemax="${providerNameColumnMaxWidth}"
-                                            aria-valuenow="${providerNameColumnWidth}"
-                                            title="拖动调整名称列宽度"
-                                            onpointerdown="startProviderNameColumnResize(event)"
-                                            onkeydown="handleProviderNameColumnResizeKeydown(event)"
-                                        ></span>
-                                    </th>
+                                    <th class="provider-name-column">名称</th>
                                     <th>API 地址</th>
                                     <th>模型</th>
                                     <th>操作</th>
@@ -4082,7 +3976,6 @@
                     ${providerGroupSections.join('')}
                 </div>
             `;
-            applyProviderNameColumnWidth(providerNameColumnWidth);
             updateProviderSelectionUi();
             syncDeleteProviderPopover();
         }
@@ -5522,7 +5415,6 @@
 
         function initProvidersPage() {
             initThemeToggle();
-            loadProviderNameColumnWidth();
             setupCustomSelect('providerAuthMode');
             setupCustomSelect('providerAuthGroup');
             setupCustomSelect('modelTestAuthEntry');
