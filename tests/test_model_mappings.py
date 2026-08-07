@@ -183,7 +183,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
         settings_template = (project_root / "src/presentation/templates/settings.html").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260807-7", template)
+        self.assertIn("model_mappings.css?v=20260807-8", template)
         self.assertIn('id="mappingStrategySelect"', template)
         self.assertIn('<option value="highest_priority">最高优先级</option>', template)
         self.assertIn('<option value="sticky_failover">粘滞故障切换</option>', template)
@@ -195,6 +195,11 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('mapping.strategy || "highest_priority"', template)
         self.assertIn('class="mapping-strategy-badge">${strategyLabel}</span>', template)
         self.assertNotIn("mapping-strategy-label", template)
+        id_cell_markup = template.split('<td class="mapping-id-cell">', 1)[1].split("</td>", 1)[0]
+        target_summary_markup = template.split("const targetSummary =", 1)[1].split("`;", 1)[0]
+        self.assertNotIn("mapping-strategy-badge", id_cell_markup)
+        self.assertIn("mapping-strategy-badge", target_summary_markup)
+        self.assertIn("${targetTags}</div>${targetSummary}</td>", template)
         self.assertNotIn("<th>策略</th>", template)
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)

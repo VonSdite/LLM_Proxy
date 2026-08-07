@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260807-7">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260807-8">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -392,27 +392,26 @@
                             const encodedId = encodeURIComponent(mapping.id);
                             const targets = Array.isArray(mapping.targets) ? mapping.targets : [];
                             const preview = getTargetPreview(targets);
+                            const strategyLabel = mapping.strategy === "sticky_failover" ? "粘滞故障切换" : "最高优先级";
                             const targetTags = preview.visible.length
                                 ? preview.visible.map(target => {
                                     const targetId = String(target.model_id || "").trim();
                                     return `<span class="mapping-model-tag" title="${escapeHtml(targetId)}">${escapeHtml(targetId)}</span>`;
                                 }).join("")
                                 : '<span class="muted-text">未配置</span>';
-                            const targetSummary = preview.total
-                                ? `<div class="mapping-target-summary">
-                                    <span class="mapping-target-count">共 ${preview.total} 个</span>
-                                    ${preview.hiddenCount ? `<span class="mapping-target-more">+${preview.hiddenCount}</span>` : ""}
-                                    ${preview.hiddenCount ? `<button class="mapping-inline-button" type="button" onclick="openEditMapping('${encodedId}')">查看全部</button>` : ""}
-                                    ${mapping.current_target_model_id ? `<span class="mapping-current-target">当前：${escapeHtml(mapping.current_target_model_id)}</span>` : ""}
-                                </div>`
-                                : "";
+                            const targetSummary = `<div class="mapping-target-summary">
+                                <span class="mapping-strategy-badge">${strategyLabel}</span>
+                                ${preview.total ? `<span class="mapping-target-count">共 ${preview.total} 个</span>` : ""}
+                                ${preview.hiddenCount ? `<span class="mapping-target-more">+${preview.hiddenCount}</span>` : ""}
+                                ${preview.hiddenCount ? `<button class="mapping-inline-button" type="button" onclick="openEditMapping('${encodedId}')">查看全部</button>` : ""}
+                                ${mapping.current_target_model_id ? `<span class="mapping-current-target">当前：${escapeHtml(mapping.current_target_model_id)}</span>` : ""}
+                            </div>`;
                             const isDeletePending = pendingDeleteMappingId === mapping.id;
                             const isDeleteInFlight = deletingMappingId === mapping.id;
                             const isTogglePending = togglingMappingIds.has(mapping.id);
                             const actionLocked = mappingOrderActionInFlight || mappingCopyActionInFlight
                                 || isDeleteInFlight || isTogglePending;
                             const enabled = isMappingEnabled(mapping);
-                            const strategyLabel = mapping.strategy === "sticky_failover" ? "粘滞故障切换" : "最高优先级";
                             return `<tr
                                 data-mapping-row-id="${encodedId}"
                                 ondragover="handleMappingRowDragOver('${encodedId}', '${groupKey}', event)"
@@ -437,7 +436,6 @@
                                 </td>
                                 <td class="mapping-id-cell">
                                     <strong class="mapping-id" title="${escapeHtml(mapping.id)}">${escapeHtml(mapping.id)}</strong>
-                                    <span class="mapping-strategy-badge">${strategyLabel}</span>
                                 </td>
                                 <td class="mapping-targets-cell"><div class="mapping-model-tags">${targetTags}</div>${targetSummary}</td>
                                 <td class="mapping-cooldown-cell">${Number(mapping.cooldown_seconds_on_429)}s</td>
