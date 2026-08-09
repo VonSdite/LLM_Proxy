@@ -18,6 +18,7 @@ from ..services import (
     ProviderService,
     SettingsService,
 )
+from ..utils import resolve_client_ip
 from .controller_utils import build_value_error_response, coerce_string_list, get_json_object
 from .decorators import require_authentication
 
@@ -37,6 +38,7 @@ class ProviderController:
     ):
         self._app = ctx.flask_app
         self._logger = ctx.logger
+        self._config_manager = ctx.config_manager
         self._provider_service = provider_service
         self._provider_model_test_service = provider_model_test_service
         self._auth_group_service = auth_group_service
@@ -116,6 +118,18 @@ class ProviderController:
         )
         self._app.route("/api/auth-groups/<string:name>/entries/<string:entry_id>/restore", methods=["POST"])(
             auth(self.restore_auth_group_entry)
+        )
+
+    def _get_request_client_ip(self) -> str:
+        """按系统设置解析当前管理请求的客户端 IP。"""
+        config_manager = self._config_manager
+        real_ip_enabled = bool(config_manager and config_manager.is_real_client_ip_enabled())
+        real_ip_header = config_manager.get_real_client_ip_header() if config_manager else None
+        return resolve_client_ip(
+            request.headers,
+            request.remote_addr,
+            real_ip_enabled=real_ip_enabled,
+            real_ip_header=real_ip_header,
         )
 
     def get_providers(self) -> ResponseReturnValue:
@@ -467,6 +481,7 @@ class ProviderController:
             result = self._provider_model_test_service.test_models(
                 normalized_payload,
                 request_headers=request_headers,
+                ip_address=self._get_request_client_ip(),
             )
             self._logger.info(
                 "Provider models tested: provider=%s models=%s",

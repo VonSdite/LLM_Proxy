@@ -35,6 +35,14 @@ class FakeAuthService:
         return True
 
 
+class FakeConfigManager:
+    def is_real_client_ip_enabled(self) -> bool:
+        return True
+
+    def get_real_client_ip_header(self) -> str:
+        return "X-Forwarded-For"
+
+
 class FakeProviderService:
     def __init__(self) -> None:
         self.reorder_calls: list[list[str]] = []
@@ -169,11 +177,13 @@ class FakeProviderModelTestService:
         payload: dict[str, object],
         *,
         request_headers: dict[str, str] | None = None,
+        ip_address: str | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
                 "payload": dict(payload),
                 "request_headers": dict(request_headers or {}),
+                "ip_address": ip_address,
             }
         )
         raw_models = payload.get("models")
@@ -468,7 +478,7 @@ class ProviderControllerTestModelsRouteTests(unittest.TestCase):
         app = Flask(__name__)
         ctx = AppContext(
             logger=FakeLogger(),
-            config_manager=None,  # type: ignore[arg-type]
+            config_manager=FakeConfigManager(),
             root_path=Path(__file__).resolve().parents[1],
             flask_app=app,
         )
@@ -489,6 +499,7 @@ class ProviderControllerTestModelsRouteTests(unittest.TestCase):
     def test_test_models_route_uses_selected_auth_entry_headers(self) -> None:
         response = self.client.post(
             "/api/providers/test-models",
+            headers={"X-Forwarded-For": "10.0.0.8, 10.0.0.9"},
             json={
                 "api": "https://example.com/v1/chat/completions",
                 "auth_group": "pool-a",
@@ -506,6 +517,7 @@ class ProviderControllerTestModelsRouteTests(unittest.TestCase):
             },
             self.provider_model_test_service.calls[0]["request_headers"],
         )
+        self.assertEqual("10.0.0.8", self.provider_model_test_service.calls[0]["ip_address"])
 
     def test_test_models_route_rejects_auth_group_and_api_key_together(self) -> None:
         response = self.client.post(

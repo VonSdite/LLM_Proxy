@@ -55,6 +55,15 @@ class FakeBufferedResponse:
         self.closed = True
 
 
+class FakeLogService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def log_request(self, **kwargs) -> int:
+        self.calls.append(dict(kwargs))
+        return len(self.calls)
+
+
 class ProviderModelTestServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         app = Flask(__name__)
@@ -64,7 +73,12 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             root_path=Path(__file__).resolve().parents[1],
             flask_app=app,
         )
-        self.service = ProviderModelTestService(ctx, ProviderRuntimeFactory(ctx))
+        self.log_service = FakeLogService()
+        self.service = ProviderModelTestService(
+            ctx,
+            ProviderRuntimeFactory(ctx),
+            self.log_service,  # type: ignore[arg-type]
+        )
 
     def test_openai_chat_stream_test_injects_include_usage_and_calculates_metrics(self) -> None:
         captured: dict[str, object] = {}
@@ -91,10 +105,12 @@ class ProviderModelTestServiceTests(unittest.TestCase):
 
         result = self.service.test_models(
             {
+                "name": "demo",
                 "api": "https://example.com/v1/chat/completions",
                 "source_format": "openai_chat",
                 "models": ["demo-model"],
-            }
+            },
+            ip_address="10.0.0.8",
         )
 
         request_body = captured["body"]
@@ -104,6 +120,30 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertTrue(result["results"][0]["available"])
         self.assertIsNotNone(result["results"][0]["first_token_latency_ms"])
         self.assertIsNotNone(result["results"][0]["tps"])
+        self.assertEqual(1, len(self.log_service.calls))
+        self.assertEqual(
+            {
+                "request_model": "demo/demo-model",
+                "response_model": "demo-model",
+                "total_tokens": 20,
+                "prompt_tokens": 12,
+                "completion_tokens": 8,
+                "ip_address": "10.0.0.8",
+            },
+            {
+                key: self.log_service.calls[0][key]
+                for key in (
+                    "request_model",
+                    "response_model",
+                    "total_tokens",
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "ip_address",
+                )
+            },
+        )
+        self.assertIsNotNone(self.log_service.calls[0]["start_time"])
+        self.assertIsNotNone(self.log_service.calls[0]["end_time"])
 
     def test_provider_named_like_model_prefix_keeps_full_upstream_model_id(self) -> None:
         captured: dict[str, object] = {}
@@ -241,6 +281,53 @@ class ProviderModelTestServiceTests(unittest.TestCase):
 
         self.assertEqual(10000.0, result["results"][0]["first_token_latency_ms"])
         self.assertEqual(10.0, result["results"][0]["tps"])
+
+    def test_retry_attempts_write_one_request_log(self) -> None:
+        responses = [
+            FakeBufferedResponse(
+                b'{"error":{"message":"busy"}}',
+                status_code=429,
+            ),
+            FakeBufferedResponse(
+                (
+                    b'{"id":"chatcmpl_1","object":"chat.completion","model":"demo-model",'
+                    b'"choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},'
+                    b'"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,'
+                    b'"total_tokens":5}}'
+                )
+            ),
+        ]
+        opened_count = 0
+
+        def stub_open_upstream_response(provider, headers, body, **kwargs):
+            nonlocal opened_count
+            del provider, headers, body, kwargs
+            response = responses[opened_count]
+            opened_count += 1
+            return OpenedUpstreamResponse(
+                response=response,
+                status_code=response.status_code,
+                content_type=response.headers["Content-Type"],
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        result = self.service.test_models(
+            {
+                "name": "demo",
+                "api": "https://example.com/v1/chat/completions",
+                "source_format": "openai_chat",
+                "max_retries": 2,
+                "models": ["demo-model"],
+            }
+        )
+
+        self.assertTrue(result["results"][0]["available"])
+        self.assertEqual(2, opened_count)
+        self.assertEqual(1, len(self.log_service.calls))
+        self.assertEqual(5, self.log_service.calls[0]["total_tokens"])
 
     def test_stream_success_without_model_output_marks_unavailable(self) -> None:
         fake_response = FakeStreamResponse(

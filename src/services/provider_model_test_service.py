@@ -19,7 +19,9 @@ from ..hooks import HookContext, HookErrorType
 from ..proxy_core import decode_stream_events
 from ..translators import build_default_translator_registry
 from ..utils.http_headers import merge_http_headers, normalize_http_headers
+from ..utils.local_time import now_local_datetime
 from ..utils.net import build_requests_proxy_settings, build_requests_request_proxies
+from .log_service import LogService
 from .upstream_request_builder import build_upstream_request
 
 
@@ -32,10 +34,16 @@ class ProviderModelTestService:
         "Upstream returned success but no valid model output; check Provider API endpoint and source_format"
     )
 
-    def __init__(self, ctx: AppContext, runtime_factory: ProviderRuntimeFactory):
+    def __init__(
+        self,
+        ctx: AppContext,
+        runtime_factory: ProviderRuntimeFactory,
+        log_service: LogService,
+    ):
         self._logger = ctx.logger
         self._root_path = ctx.root_path
         self._runtime_factory = runtime_factory
+        self._log_service = log_service
         self._executor_registry = build_default_executor_registry(self._logger)
         self._translator_registry = build_default_translator_registry()
 
@@ -44,21 +52,31 @@ class ProviderModelTestService:
         payload: dict[str, Any],
         *,
         request_headers: Mapping[str, str] | None = None,
+        ip_address: str | None = None,
     ) -> dict[str, Any]:
         models = self._normalize_test_models(payload.get("models"))
         provider = self._build_provider(payload, models)
         normalized_headers = self._normalize_request_headers(request_headers)
         auth_entry_id = str(payload.get("auth_entry_id") or "").strip() or None
+        provider_name = str(payload.get("name") or "").strip()
         results = [
-            self._test_single_model(
+            self._test_and_log_single_model(
                 provider,
                 model_name,
                 request_headers=normalized_headers,
                 auth_entry_id=auth_entry_id,
+                request_model=self._build_log_request_model(provider_name, model_name),
+                ip_address=ip_address,
             )
             for model_name in models
         ]
         return {"results": results}
+
+    @staticmethod
+    def _build_log_request_model(provider_name: str, model_name: str) -> str:
+        if provider_name:
+            return f"{provider_name}/{model_name}"
+        return model_name
 
     @staticmethod
     def _normalize_test_models(value: Any) -> list[str]:
@@ -82,6 +100,38 @@ class ProviderModelTestService:
         provider_config = ProviderConfigSchema.from_payload(provider_payload)
         return self._runtime_factory.build_provider_from_schema(provider_config)
 
+    def _test_and_log_single_model(
+        self,
+        provider,
+        model_name: str,
+        *,
+        request_headers: dict[str, str],
+        auth_entry_id: str | None,
+        request_model: str,
+        ip_address: str | None,
+    ) -> dict[str, Any]:
+        log_started_at = now_local_datetime()
+        response_meta = self._create_empty_meta()
+        try:
+            return self._test_single_model(
+                provider,
+                model_name,
+                request_headers=request_headers,
+                auth_entry_id=auth_entry_id,
+                response_meta=response_meta,
+            )
+        finally:
+            self._log_service.log_request(
+                request_model=request_model,
+                response_model=str(response_meta.get("response_model") or "") or None,
+                total_tokens=int(response_meta.get("total_tokens") or 0),
+                prompt_tokens=int(response_meta.get("prompt_tokens") or 0),
+                completion_tokens=int(response_meta.get("completion_tokens") or 0),
+                start_time=log_started_at,
+                end_time=now_local_datetime(),
+                ip_address=ip_address,
+            )
+
     def _test_single_model(
         self,
         provider,
@@ -89,6 +139,7 @@ class ProviderModelTestService:
         *,
         request_headers: dict[str, str],
         auth_entry_id: str | None,
+        response_meta: dict[str, Any],
     ) -> dict[str, Any]:
         translator = self._translator_registry.get(provider.source_format, self._TEST_TARGET_FORMAT)
         max_retries = max(int(provider.max_retries or 1), 1)
@@ -153,6 +204,7 @@ class ProviderModelTestService:
                         translated_request=translated_request,
                         translator=translator,
                         request_started_at=request_started_at,
+                        meta=response_meta,
                     )
 
                 return self._collect_nonstream_result(
@@ -161,6 +213,7 @@ class ProviderModelTestService:
                     original_request=benchmark_request,
                     translated_request=translated_request,
                     translator=translator,
+                    meta=response_meta,
                 )
             except requests.RequestException as exc:
                 previous_error_type = self._classify_request_error(exc)
@@ -289,8 +342,8 @@ class ProviderModelTestService:
         translated_request: dict[str, Any],
         translator,
         request_started_at: float,
+        meta: dict[str, Any],
     ) -> dict[str, Any]:
-        meta = self._create_empty_meta()
         first_token_at: float | None = None
         completed_at = request_started_at
         stream_error: str | None = None
@@ -353,6 +406,7 @@ class ProviderModelTestService:
         original_request: dict[str, Any],
         translated_request: dict[str, Any],
         translator,
+        meta: dict[str, Any],
     ) -> dict[str, Any]:
         raw_body = self._read_response_body(opened)
         decoded_payload = self._decode_response_payload(raw_body)
@@ -372,7 +426,6 @@ class ProviderModelTestService:
                     error=error_message,
                 )
 
-        meta = self._create_empty_meta()
         if isinstance(translated_payload, dict):
             self._update_meta_from_payload(meta, translated_payload)
 
