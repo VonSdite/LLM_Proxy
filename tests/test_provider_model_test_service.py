@@ -359,6 +359,7 @@ class ProviderModelTestServiceTests(unittest.TestCase):
 
         self.assertFalse(result["results"][0]["available"])
         self.assertIn("no valid model output", result["results"][0]["error"])
+        self.assertEqual([], self.log_service.calls)
 
     def test_raw_text_stream_success_marks_unavailable(self) -> None:
         fake_response = FakeStreamResponse(
