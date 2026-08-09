@@ -112,25 +112,27 @@ class ProviderModelTestService:
     ) -> dict[str, Any]:
         log_started_at = now_local_datetime()
         response_meta = self._create_empty_meta()
-        try:
-            return self._test_single_model(
-                provider,
-                model_name,
-                request_headers=request_headers,
-                auth_entry_id=auth_entry_id,
-                response_meta=response_meta,
-            )
-        finally:
-            self._log_service.log_request(
-                request_model=request_model,
-                response_model=str(response_meta.get("response_model") or "") or None,
-                total_tokens=int(response_meta.get("total_tokens") or 0),
-                prompt_tokens=int(response_meta.get("prompt_tokens") or 0),
-                completion_tokens=int(response_meta.get("completion_tokens") or 0),
-                start_time=log_started_at,
-                end_time=now_local_datetime(),
-                ip_address=ip_address,
-            )
+        result = self._test_single_model(
+            provider,
+            model_name,
+            request_headers=request_headers,
+            auth_entry_id=auth_entry_id,
+            response_meta=response_meta,
+        )
+        if result.get("available") is not True:
+            return result
+
+        self._log_service.log_request(
+            request_model=request_model,
+            response_model=str(response_meta.get("response_model") or "") or None,
+            total_tokens=int(response_meta.get("total_tokens") or 0),
+            prompt_tokens=int(response_meta.get("prompt_tokens") or 0),
+            completion_tokens=int(response_meta.get("completion_tokens") or 0),
+            start_time=log_started_at,
+            end_time=now_local_datetime(),
+            ip_address=ip_address,
+        )
+        return result
 
     def _test_single_model(
         self,

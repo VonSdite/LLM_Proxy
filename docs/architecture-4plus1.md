@@ -240,7 +240,7 @@ decoder
   - 复用 translator / executor / request-side hook
   - 按当前 Provider 表单快照直连上游测试模型可用性、首字延迟与 TPS
   - 在协议支持时显式请求 usage 返回
-  - 每个模型测试完成后通过 `LogService` 写入请求明细和日聚合统计
+  - 每个成功模型测试完成后通过 `LogService` 写入请求明细和日聚合统计
   - 批量测试按前端当前选择的模型行逐条执行并逐条回填结果
 - `ModelDiscoveryService`
   - 按当前 Provider 表单快照拉取上游模型列表
@@ -645,7 +645,7 @@ provider editor form snapshot
   -> decoder
   -> translator.translate_response(openai_chat benchmark view)
   -> metric collector
-  -> LogService -> request_logs / daily_request_stats
+  -> successful result -> LogService -> request_logs / daily_request_stats
   -> modal result table
 ```
 
@@ -681,7 +681,8 @@ provider editor form snapshot
   - 两者都不写运行态冷却、并发、配额
 - 首字延迟仅在真实流式首个正文或推理增量到达时记录
 - TPS 仅在拿到 completion usage 后计算，计算口径为 `completion_tokens / 本次流式请求端到端耗时`
-- 每个模型测试写入一条请求历史；上游重试属于同一次模型测试，不重复计数
+- 每个成功模型测试写入一条请求历史；失败结果不写请求明细和日聚合统计
+- 上游重试属于同一次模型测试；最终成功时记录一次，最终失败时不记录
 - 请求历史中的请求模型使用 `{provider_name}/{upstream_model_id}`；未填写 Provider 名称时使用上游模型 ID
 - 请求历史使用当前管理请求按 `client_ip` 设置解析出的客户端 IP，并记录上游返回的 usage
 - 如果上游成功但未返回 usage：
