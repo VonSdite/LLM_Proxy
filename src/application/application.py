@@ -306,6 +306,7 @@ class Application:
         provider_model_test_service = ProviderModelTestService(
             self._ctx,
             self._provider_runtime_factory,
+            log_service,
         )
         auth_group_service = AuthGroupService(
             self._ctx,
