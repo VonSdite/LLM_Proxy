@@ -4,10 +4,11 @@
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
+
+import pysqlite3 as sqlite3
 
 from ..utils.database import ConnectionFactory
 from ..utils.local_time import (

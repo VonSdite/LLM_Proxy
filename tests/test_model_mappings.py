@@ -1,5 +1,4 @@
 import json
-import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -9,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import pysqlite3 as sqlite3
 from flask import Flask, Response
 from src.application.app_context import AppContext
 from src.config.model_mapping_config import ModelMappingSchema
