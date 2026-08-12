@@ -83,8 +83,11 @@ def convert_openai_responses_request_to_chat_request(
                     }
                 )
 
-    if body.get("max_output_tokens") is not None:
-        translated["max_tokens"] = body.get("max_output_tokens")
+    max_tokens = body.get("max_output_tokens")
+    if max_tokens is None:
+        max_tokens = body.get("max_completion_tokens")
+    if max_tokens is not None:
+        translated["max_tokens"] = max_tokens
     if body.get("temperature") is not None:
         translated["temperature"] = body.get("temperature")
     if body.get("top_p") is not None:
@@ -223,11 +226,31 @@ def translate_openai_chat_stream_payload_to_responses(
 
     usage = payload.get("usage")
     if isinstance(usage, dict):
+        input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+        output_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
         state["usage"] = {
-            "input_tokens": int(usage.get("prompt_tokens") or 0),
-            "output_tokens": int(usage.get("completion_tokens") or 0),
-            "total_tokens": int(usage.get("total_tokens") or 0),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": int(usage.get("total_tokens") or (input_tokens + output_tokens)),
         }
+        prompt_details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
+        if isinstance(prompt_details, dict):
+            cached_tokens = int(prompt_details.get("cached_tokens") or 0)
+            cache_creation_tokens = int(
+                prompt_details.get("cache_creation_tokens") or prompt_details.get("cache_creation_input_tokens") or 0
+            )
+            if cached_tokens > 0 or cache_creation_tokens > 0:
+                input_details: dict[str, Any] = {}
+                if cached_tokens > 0:
+                    input_details["cached_tokens"] = cached_tokens
+                if cache_creation_tokens > 0:
+                    input_details["cache_creation_tokens"] = cache_creation_tokens
+                state["usage"]["input_tokens_details"] = input_details
+        completion_details = usage.get("completion_tokens_details") or usage.get("output_tokens_details")
+        if isinstance(completion_details, dict) and int(completion_details.get("reasoning_tokens") or 0) > 0:
+            state["usage"]["output_tokens_details"] = {
+                "reasoning_tokens": int(completion_details.get("reasoning_tokens") or 0),
+            }
 
     for choice in payload.get("choices") or []:
         if not isinstance(choice, dict):
@@ -857,11 +880,32 @@ def convert_openai_chat_response_to_responses(
         "output": output_items,
     }
     if isinstance(payload.get("usage"), dict):
+        usage = payload["usage"]
+        input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+        output_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
         response["usage"] = {
-            "input_tokens": int(payload["usage"].get("prompt_tokens") or 0),
-            "output_tokens": int(payload["usage"].get("completion_tokens") or 0),
-            "total_tokens": int(payload["usage"].get("total_tokens") or 0),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": int(usage.get("total_tokens") or (input_tokens + output_tokens)),
         }
+        prompt_details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
+        if isinstance(prompt_details, dict):
+            cached_tokens = int(prompt_details.get("cached_tokens") or 0)
+            cache_creation_tokens = int(
+                prompt_details.get("cache_creation_tokens") or prompt_details.get("cache_creation_input_tokens") or 0
+            )
+            if cached_tokens > 0 or cache_creation_tokens > 0:
+                input_details: dict[str, Any] = {}
+                if cached_tokens > 0:
+                    input_details["cached_tokens"] = cached_tokens
+                if cache_creation_tokens > 0:
+                    input_details["cache_creation_tokens"] = cache_creation_tokens
+                response["usage"]["input_tokens_details"] = input_details
+        completion_details = usage.get("completion_tokens_details") or usage.get("output_tokens_details")
+        if isinstance(completion_details, dict) and int(completion_details.get("reasoning_tokens") or 0) > 0:
+            response["usage"]["output_tokens_details"] = {
+                "reasoning_tokens": int(completion_details.get("reasoning_tokens") or 0),
+            }
     response.update(_extract_echo_fields(original_request))
     if finish_reason is not None:
         response["finish_reason"] = finish_reason

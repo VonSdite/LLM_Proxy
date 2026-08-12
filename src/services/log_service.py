@@ -36,6 +36,7 @@ class LogService:
         total_tokens: int,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        usage_status: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         ip_address: str | None = None,
@@ -49,6 +50,7 @@ class LogService:
                 total_tokens=total_tokens,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
+                usage_status=usage_status,
                 start_time=start_time,
                 end_time=end_time,
                 ip_address=ip_address,
@@ -97,6 +99,7 @@ class LogService:
                     "total_tokens": row["total_tokens"],
                     "prompt_tokens": row["prompt_tokens"],
                     "completion_tokens": row["completion_tokens"],
+                    "usage_status": row["usage_status"],
                 }
                 for row in rows
             ]
@@ -142,6 +145,7 @@ class LogService:
                     "total_tokens": row["total_tokens"],
                     "prompt_tokens": row["prompt_tokens"],
                     "completion_tokens": row["completion_tokens"],
+                    "usage_status": row["usage_status"],
                     "ip_count": row["ip_count"],
                     "last_request_date": row["last_request_date"],
                 }
@@ -256,7 +260,7 @@ class LogService:
             len(daily_stats),
         )
         return {
-            "version": 1,
+            "version": 2,
             "kind": "llm_proxy.statistics",
             "request_logs": request_logs,
             "daily_request_stats": daily_stats,

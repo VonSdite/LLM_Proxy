@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import sys
 import unittest
 from datetime import datetime, timedelta
@@ -177,6 +178,33 @@ class DashboardFilterApiTests(unittest.TestCase):
             {(item["username"], item["request_model"]) for item in payload},
         )
 
+    def test_usage_status_distinguishes_known_and_unknown_counts(self) -> None:
+        self.log_service.log_request(
+            request_model="model-a",
+            response_model="resp-a",
+            total_tokens=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            usage_status="unknown",
+            start_time=datetime(2026, 4, 8, 13, 0, 0),
+            end_time=datetime(2026, 4, 8, 13, 0, 0),
+            ip_address="10.0.0.1",
+        )
+
+        response = self.client.get(
+            "/api/statistics",
+            query_string={
+                **self.DATE_FILTER,
+                "username": "alice",
+                "request_model": "model-a",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(1, len(payload))
+        self.assertEqual("partial", payload[0]["usage_status"])
+
     def test_user_usage_summary_api_groups_by_username(self) -> None:
         self._log_request("model-a", "resp-extra", 5, "10.0.0.1", datetime(2026, 4, 9, 9, 0, 0))
 
@@ -244,6 +272,8 @@ class DashboardFilterApiTests(unittest.TestCase):
             sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
 
         self.assertIn("请求模型", sheet_xml)
+        self.assertIn("Token 状态", sheet_xml)
+        self.assertIn("完整", sheet_xml)
         self.assertIn("model-a", sheet_xml)
         self.assertIn("model-b", sheet_xml)
         self.assertIn("model-c", sheet_xml)
@@ -266,6 +296,7 @@ class DashboardFilterApiTests(unittest.TestCase):
 
         self.assertIn("调用汇总", workbook_xml)
         self.assertIn("响应模型", sheet_xml)
+        self.assertIn("Token 状态", sheet_xml)
         self.assertIn("resp-a", sheet_xml)
 
     def test_statistics_export_user_usage_summary_returns_xlsx(self) -> None:
@@ -286,6 +317,7 @@ class DashboardFilterApiTests(unittest.TestCase):
 
         self.assertIn("用户用量", workbook_xml)
         self.assertIn("关联 IP 数", sheet_xml)
+        self.assertIn("Token 状态", sheet_xml)
         self.assertNotIn("请求模型", sheet_xml)
         self.assertIn("alice", sheet_xml)
 
@@ -302,7 +334,10 @@ class DashboardFilterApiTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
+        self.assertEqual(2, payload["version"])
         self.assertEqual("llm_proxy.statistics", payload["kind"])
+        self.assertEqual("known", payload["request_logs"][0]["usage_status"])
+        self.assertEqual("known", payload["daily_request_stats"][0]["usage_status"])
         self.assertEqual(
             {("10.0.0.1", "model-a", "resp-a", 10)},
             {
@@ -367,6 +402,59 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.assertEqual(22, merged_row["total_tokens"])
         self.assertEqual(10, merged_row["prompt_tokens"])
         self.assertEqual(12, merged_row["completion_tokens"])
+        self.assertEqual("known", merged_row["usage_status"])
+
+    def test_statistics_v2_import_preserves_usage_status(self) -> None:
+        payload = {
+            "version": 2,
+            "kind": "llm_proxy.statistics",
+            "request_logs": [
+                {
+                    "api_key_id": None,
+                    "ip_address": "10.0.0.2",
+                    "request_model": "model-partial-log",
+                    "response_model": "resp-partial-log",
+                    "total_tokens": 8,
+                    "prompt_tokens": 8,
+                    "completion_tokens": 0,
+                    "usage_status": "partial",
+                    "start_time": "2026-04-12 09:00:00.000000",
+                    "end_time": "2026-04-12 09:00:01.000000",
+                    "created_at": "2026-04-12 09:00:01.000000",
+                }
+            ],
+            "daily_request_stats": [
+                {
+                    "stat_date": "2026-04-12",
+                    "ip_address": "10.0.0.2",
+                    "request_model": "model-partial-stat",
+                    "response_model": "resp-partial-stat",
+                    "request_count": 1,
+                    "total_tokens": 8,
+                    "prompt_tokens": 8,
+                    "completion_tokens": 0,
+                    "usage_status": "partial",
+                }
+            ],
+        }
+
+        response = self.client.post("/api/statistics/daily-stats/import", json=payload)
+
+        self.assertEqual(201, response.status_code)
+        logs_response = self.client.get(
+            "/api/request-logs",
+            query_string={"start_date": "2026-04-12", "end_date": "2026-04-12"},
+        )
+        self.assertEqual("partial", logs_response.get_json()["logs"][0]["usage_status"])
+        stats_response = self.client.get(
+            "/api/statistics",
+            query_string={
+                "start_date": "2026-04-12",
+                "end_date": "2026-04-12",
+                "request_model": "model-partial-stat",
+            },
+        )
+        self.assertEqual("partial", stats_response.get_json()[0]["usage_status"])
 
     def test_request_logs_import_skips_duplicate_detail_rows(self) -> None:
         export_response = self.client.get(
@@ -510,6 +598,86 @@ class DashboardFilterApiTests(unittest.TestCase):
             {"error": "date range must not exceed one year"},
             response.get_json(),
         )
+
+
+class LogRepositoryUsageStatusMigrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.db_path = Path(__file__).resolve().parents[1] / f"usage-status-migration-{uuid4().hex}.db"
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE request_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ip_address TEXT,
+                    request_model TEXT NOT NULL,
+                    response_model TEXT,
+                    total_tokens INTEGER,
+                    prompt_tokens INTEGER DEFAULT 0,
+                    completion_tokens INTEGER DEFAULT 0,
+                    start_time TEXT NOT NULL,
+                    end_time TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE daily_request_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stat_date TEXT NOT NULL,
+                    ip_address TEXT,
+                    request_model TEXT NOT NULL,
+                    response_model TEXT NOT NULL DEFAULT '',
+                    request_count INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(stat_date, ip_address, request_model, response_model)
+                );
+                INSERT INTO request_logs (
+                    ip_address, request_model, response_model, total_tokens,
+                    prompt_tokens, completion_tokens, start_time, end_time, created_at
+                ) VALUES
+                    ('10.0.0.1', 'known-log', 'resp', 12, 7, 5,
+                     '2026-04-01 00:00:00.000000', '2026-04-01 00:00:01.000000',
+                     '2026-04-01 00:00:01.000000'),
+                    ('10.0.0.2', 'unknown-log', 'resp', 0, 0, 0,
+                     '2026-04-01 00:00:00.000000', '2026-04-01 00:00:01.000000',
+                     '2026-04-01 00:00:01.000000');
+                INSERT INTO daily_request_stats (
+                    stat_date, ip_address, request_model, response_model, request_count,
+                    total_tokens, prompt_tokens, completion_tokens, created_at, updated_at
+                ) VALUES
+                    ('2026-04-01', '10.0.0.1', 'known-stat', 'resp', 1, 12, 7, 5,
+                     '2026-04-01 00:00:01.000000', '2026-04-01 00:00:01.000000'),
+                    ('2026-04-01', '10.0.0.2', 'unknown-stat', 'resp', 1, 0, 0, 0,
+                     '2026-04-01 00:00:01.000000', '2026-04-01 00:00:01.000000');
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def tearDown(self) -> None:
+        if self.db_path.exists():
+            self.db_path.unlink()
+
+    def test_legacy_tables_add_and_backfill_usage_status(self) -> None:
+        connection_factory = create_connection_factory(self.db_path)
+
+        LogRepository(connection_factory)
+
+        with connection_factory() as conn:
+            request_columns = {row["name"] for row in conn.execute("PRAGMA table_info(request_logs)")}
+            daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_request_stats)")}
+            request_statuses = dict(conn.execute("SELECT request_model, usage_status FROM request_logs").fetchall())
+            daily_statuses = dict(
+                conn.execute("SELECT request_model, usage_status FROM daily_request_stats").fetchall()
+            )
+
+        self.assertIn("usage_status", request_columns)
+        self.assertIn("usage_status", daily_columns)
+        self.assertEqual({"known-log": "known", "unknown-log": "unknown"}, request_statuses)
+        self.assertEqual({"known-stat": "known", "unknown-stat": "unknown"}, daily_statuses)
 
 
 if __name__ == "__main__":

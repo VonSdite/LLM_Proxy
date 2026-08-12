@@ -3300,10 +3300,11 @@ class ProxyServicePipelineTests(unittest.TestCase):
                 self.assertIn(b"partial", stream_body)
                 self.assertIn(expected_error, stream_body)
                 self.assertEqual(1 if expects_done else 0, stream_body.count(b"data: [DONE]"))
-                self.assertEqual([], completed_meta)
+                self.assertEqual(1, len(completed_meta))
+                self.assertEqual("unknown", completed_meta[0]["usage_status"])
                 self.assertTrue(failed_response.closed)
 
-    def test_stream_client_cancel_does_not_call_completion_callback(self) -> None:
+    def test_stream_client_cancel_records_unknown_usage(self) -> None:
         app, service = self._build_service(llm_request_debug_enabled=True)
         provider = LLMProvider(
             name="chat-upstream",
@@ -3349,7 +3350,8 @@ class ProxyServicePipelineTests(unittest.TestCase):
             response.close()
 
         self.assertIn(b"first", first_chunk)
-        self.assertEqual([], completed_meta)
+        self.assertEqual(1, len(completed_meta))
+        self.assertEqual("unknown", completed_meta[0]["usage_status"])
         self.assertTrue(fake_response.closed)
         response_traces = [
             entry for entry in trace_entries if entry["stage"] in {"upstream_response", "downstream_response"}
@@ -3493,7 +3495,8 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertIn(b"event: response.failed", stream_body)
         self.assertIn(b"upstream_stream_processing_error", stream_body)
         self.assertNotIn(b"event: response.completed", stream_body)
-        self.assertEqual([], completed_meta)
+        self.assertEqual(1, len(completed_meta))
+        self.assertEqual("unknown", completed_meta[0]["usage_status"])
         self.assertTrue(fake_response.closed)
 
     def test_stream_hook_abort_emits_openai_chat_error_chunk_and_done(self) -> None:
@@ -3954,6 +3957,101 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertNotIn(b"event: response.done", stream_body)
         self.assertIn(b'"delta": "Hi from Codex"', stream_body)
         self.assertNotIn(b"[DONE]", stream_body)
+        self.assertTrue(fake_response.closed)
+
+    def test_usage_is_collected_before_response_guard(self) -> None:
+        class RemoveUsageHook(BaseHook):
+            def response_guard(self, ctx: Any, body: Any) -> Any:
+                del ctx
+                if isinstance(body, dict):
+                    changed = dict(body)
+                    changed.pop("usage", None)
+                    return changed
+                return body
+
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            hook=RemoveUsageHook(),
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'{"id":"chatcmpl-guard","model":"gpt-4.1","choices":[],'
+                b'"usage":{"prompt_tokens":11,"completion_tokens":3}}',
+            ]
+        )
+        service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+            response=fake_response,
+            status_code=200,
+            content_type="application/json",
+            is_stream=False,
+            stream_format="sse_json",
+        )
+        captured: list[dict[str, Any]] = []
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {"model": "chat-upstream/gpt-4.1", "messages": [], "stream": False},
+                {},
+                on_complete=captured.append,
+            )
+            response.get_data()
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual(
+            {"usage_status": "known", "prompt_tokens": 11, "completion_tokens": 3},
+            {key: captured[0][key] for key in ("usage_status", "prompt_tokens", "completion_tokens")},
+        )
+
+    def test_cancelled_stream_records_partial_usage(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="chat-upstream",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+        )
+        fake_response = FakeStreamResponse(
+            [
+                b'data: {"id":"chatcmpl-cancel","model":"gpt-4.1","choices":[{"delta":{"content":"x"}}],'
+                b'"usage":{"prompt_tokens":5}}\n\n',
+                b"data: [DONE]\n\n",
+            ]
+        )
+        service._open_upstream_response = lambda *args, **kwargs: OpenedUpstreamResponse(  # type: ignore[method-assign]
+            response=fake_response,
+            status_code=200,
+            content_type="text/event-stream",
+            is_stream=True,
+            stream_format="sse_json",
+        )
+        captured: list[dict[str, Any]] = []
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {"model": "chat-upstream/gpt-4.1", "messages": [], "stream": True},
+                {},
+                on_complete=captured.append,
+            )
+            iterator = iter(response.response)
+            next(iterator)
+            response.close()
+
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertEqual(1, len(captured))
+        self.assertEqual(5, captured[0]["prompt_tokens"])
+        self.assertEqual("partial", captured[0]["usage_status"])
         self.assertTrue(fake_response.closed)
 
 

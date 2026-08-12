@@ -22,6 +22,7 @@ from ..proxy_core import (
     is_terminal_chunk,
     should_emit_terminal_chunk,
 )
+from ..proxy_core.usage import public_usage_meta
 from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_module_request_proxies, build_requests_proxy_settings
 from ..utils.proxy_warning import (
@@ -358,11 +359,14 @@ class ClaudeProxyService:
         body["model"] = model_name
         body["stream"] = bool(stream)
         try:
-            max_tokens = int(body.get("max_tokens") or 0)
+            max_tokens = int(body.get("max_tokens") or body.get("max_completion_tokens") or 0)
         except (TypeError, ValueError):
             max_tokens = 0
         if max_tokens <= 0:
             body["max_tokens"] = 4096
+        else:
+            body["max_tokens"] = max_tokens
+        body.pop("max_completion_tokens", None)
 
     def _build_claude_headers(
         self,
@@ -500,6 +504,11 @@ class ClaudeProxyService:
             try:
                 for event in decode_stream_events(response.iter_content(chunk_size=None), "sse_json"):
                     if event.kind == "json" and isinstance(event.payload, dict):
+                        ProxyResponseBuilder._update_meta_from_payload(
+                            meta,
+                            event.payload,
+                            source_format="claude_chat",
+                        )
                         event_type = str(event.payload.get("type") or event.event or "").strip()
                         if event_type == "message_stop":
                             completed = True
@@ -521,8 +530,6 @@ class ClaudeProxyService:
                         if terminal_chunk and not completed and not upstream_error_message:
                             continue
 
-                        if chunk.kind == "json" and isinstance(chunk.payload, dict):
-                            ProxyResponseBuilder._update_meta_from_payload(meta, chunk.payload)
                         encoded = encode_downstream_chunk(chunk, target_format)
                         if encoded:
                             if terminal_chunk:
@@ -622,14 +629,13 @@ class ClaudeProxyService:
                             )
                         except Exception as exc:
                             self._logger.error("Error in Claude on_stream_failure callback: %s", exc)
-                if (
-                    on_complete is not None
-                    and not downstream_cancelled
-                    and not transport_failed
-                    and not processing_failed
-                ):
+                should_record_completion = completed or (
+                    downstream_started
+                    and (downstream_cancelled or transport_failed or processing_failed or bool(upstream_error_message))
+                )
+                if on_complete is not None and should_record_completion:
                     try:
-                        on_complete(meta)
+                        on_complete(public_usage_meta(meta))
                     except Exception as exc:
                         self._logger.error("Error in Claude on_complete callback: %s", exc)
 
@@ -676,18 +682,27 @@ class ClaudeProxyService:
                     error_code="claude_response_parse_failed",
                 ),
             )
+        meta = ProxyResponseBuilder._create_empty_meta()
+        ProxyResponseBuilder._update_meta_from_payload(
+            meta,
+            payload,
+            source_format="claude_chat",
+        )
         translated_payload = translator.translate_nonstream_response(
             model_name,
             original_request,
             translated_request,
             payload,
         )
-        meta = ProxyResponseBuilder._create_empty_meta()
         if isinstance(translated_payload, dict):
-            ProxyResponseBuilder._update_meta_from_payload(meta, translated_payload)
+            ProxyResponseBuilder._update_meta_from_payload(
+                meta,
+                translated_payload,
+                source_format="claude_chat",
+            )
         if on_complete is not None:
             try:
-                on_complete(meta)
+                on_complete(public_usage_meta(meta))
             except Exception as exc:
                 self._logger.error("Error in Claude on_complete callback: %s", exc)
 
