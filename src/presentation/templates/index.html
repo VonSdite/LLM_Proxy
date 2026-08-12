@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260807-3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260812-1">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}监控 API 请求和 Token 消耗{% endblock %}
@@ -97,12 +97,13 @@
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="statsSortIndicator_prompt_tokens"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="statsSortIndicator_completion_tokens"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="statsSortIndicator_total_tokens"></span></button></th>
+                                <th>Token 状态</th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_count', 'number')">请求数 <span class="sort-indicator" id="statsSortIndicator_request_count"></span></button></th>
                             </tr>
                         </thead>
                         <tbody id="statsTable">
                             <tr>
-                                <td colspan="8" class="loading">加载统计数据...</td>
+                                <td colspan="9" class="loading">加载统计数据...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -118,6 +119,7 @@
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="userUsageSortIndicator_prompt_tokens"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="userUsageSortIndicator_completion_tokens"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="userUsageSortIndicator_total_tokens"></span></button></th>
+                                <th>Token 状态</th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('request_count', 'number')">请求数 <span class="sort-indicator" id="userUsageSortIndicator_request_count"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('ip_count', 'number')">关联 IP 数 <span class="sort-indicator" id="userUsageSortIndicator_ip_count"></span></button></th>
                                 <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('last_request_date', 'date')">最近请求日期 <span class="sort-indicator" id="userUsageSortIndicator_last_request_date"></span></button></th>
@@ -125,7 +127,7 @@
                         </thead>
                         <tbody id="userUsageTable">
                             <tr>
-                                <td colspan="7" class="loading">加载用户用量...</td>
+                                <td colspan="8" class="loading">加载用户用量...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -145,6 +147,7 @@
                                     <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="logsSortIndicator_prompt_tokens"></span></button></th>
                                     <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="logsSortIndicator_completion_tokens"></span></button></th>
                                     <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="logsSortIndicator_total_tokens"></span></button></th>
+                                    <th>Token 状态</th>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('start_time', 'date')">开始时间 <span class="sort-indicator" id="logsSortIndicator_start_time"></span></button></th>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('end_time', 'date')">结束时间 <span class="sort-indicator" id="logsSortIndicator_end_time"></span></button></th>
                                     <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('duration', 'number')">耗时(秒) <span class="sort-indicator" id="logsSortIndicator_duration"></span></button></th>
@@ -152,7 +155,7 @@
                             </thead>
                             <tbody id="logsTable">
                                 <tr>
-                                    <td colspan="10" class="loading">加载请求数据...</td>
+                                    <td colspan="11" class="loading">加载请求数据...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -280,6 +283,29 @@
         function normalizeNumber(value) {
             const n = Number(value);
             return Number.isFinite(n) ? n : 0;
+        }
+
+        function normalizeUsageStatus(value) {
+            const normalized = String(value || 'unknown').trim().toLowerCase();
+            return ['known', 'partial', 'unknown'].includes(normalized) ? normalized : 'unknown';
+        }
+
+        function combineUsageStatuses(items) {
+            const statuses = items.map(item => normalizeUsageStatus(item?.usage_status));
+            if (statuses.length > 0 && statuses.every(status => status === 'known')) return 'known';
+            if (statuses.length > 0 && statuses.every(status => status === 'unknown')) return 'unknown';
+            return 'partial';
+        }
+
+        function renderUsageStatus(value) {
+            const status = normalizeUsageStatus(value);
+            const labels = { known: '完整', partial: '部分', unknown: '未知' };
+            const titles = {
+                known: '上游提供了输入和输出 token',
+                partial: '统计范围内存在不完整或未知的 token 用量',
+                unknown: '上游未提供可确认的 token 用量',
+            };
+            return `<span class="usage-status usage-status-${status}" title="${titles[status]}">${labels[status]}</span>`;
         }
 
         function toDateInput(date) {
@@ -1037,7 +1063,7 @@
         // 加载统计数据
         async function loadStatistics() {
             const requestToken = ++statsRequestToken;
-            document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="loading">加载统计数据...</td></tr>';
+            document.getElementById('statsTable').innerHTML = '<tr><td colspan="9" class="loading">加载统计数据...</td></tr>';
 
             try {
                 const params = buildDashboardSearchParams({
@@ -1057,7 +1083,7 @@
             } catch (error) {
                 if (requestToken !== statsRequestToken) return;
                 console.error('加载统计数据失败:', error);
-                document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="error">加载统计数据失败</td></tr>';
+                document.getElementById('statsTable').innerHTML = '<tr><td colspan="9" class="error">加载统计数据失败</td></tr>';
                 showMessage('加载统计数据失败，请稍后重试', 'error');
             }
         }
@@ -1067,7 +1093,7 @@
             updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
 
             if (statsData.length === 0) {
-                statsTable.innerHTML = `<tr><td colspan="10" class="empty-state">
+                statsTable.innerHTML = `<tr><td colspan="9" class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
@@ -1097,6 +1123,7 @@
                         <td class="num-col">${renderNumber(stat.prompt_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(stat.completion_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(stat.total_tokens || 0)}</td>
+                        <td>${renderUsageStatus(stat.usage_status)}</td>
                         <td class="num-col">${renderNumber(stat.request_count || 0)}</td>
                     </tr>
                 `;
@@ -1108,6 +1135,7 @@
                     <td class="num-col">${renderNumber(totalPromptTokens)}</td>
                     <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
                     <td class="num-col">${renderNumber(totalTokens)}</td>
+                    <td>${renderUsageStatus(combineUsageStatuses(statsData))}</td>
                     <td class="num-col">${renderNumber(totalRequests)}</td>
                 </tr>
             `;
@@ -1116,7 +1144,7 @@
 
         async function loadUserUsageSummary() {
             const requestToken = ++userUsageRequestToken;
-            document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="7" class="loading">加载用户用量...</td></tr>';
+            document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="8" class="loading">加载用户用量...</td></tr>';
 
             try {
                 const params = buildDashboardSearchParams({
@@ -1136,7 +1164,7 @@
             } catch (error) {
                 if (requestToken !== userUsageRequestToken) return;
                 console.error('加载用户用量失败:', error);
-                document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="7" class="error">加载用户用量失败</td></tr>';
+                document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="8" class="error">加载用户用量失败</td></tr>';
                 showMessage('加载用户用量失败，请稍后重试', 'error');
             }
         }
@@ -1146,7 +1174,7 @@
             updateSortIndicators('userUsage', userUsageSortState, ['username', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count', 'ip_count', 'last_request_date']);
 
             if (userUsageData.length === 0) {
-                tableBody.innerHTML = `<tr><td colspan="7" class="empty-state">
+                tableBody.innerHTML = `<tr><td colspan="8" class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
@@ -1173,6 +1201,7 @@
                         <td class="num-col">${renderNumber(item.prompt_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(item.completion_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(item.total_tokens || 0)}</td>
+                        <td>${renderUsageStatus(item.usage_status)}</td>
                         <td class="num-col">${renderNumber(item.request_count || 0)}</td>
                         <td class="num-col">${renderNumber(item.ip_count || 0)}</td>
                         <td>${escapeHtml(item.last_request_date || '-')}</td>
@@ -1186,6 +1215,7 @@
                     <td class="num-col">${renderNumber(totalPromptTokens)}</td>
                     <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
                     <td class="num-col">${renderNumber(totalTokens)}</td>
+                    <td>${renderUsageStatus(combineUsageStatuses(userUsageData))}</td>
                     <td class="num-col">${renderNumber(totalRequests)}</td>
                     <td class="num-col">-</td>
                     <td>-</td>
@@ -1246,7 +1276,7 @@
             const requestToken = ++logsRequestToken;
             document.getElementById('tableFooter').style.display = 'none';
             // 显示加载状态
-            document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="loading">加载请求数据...</td></tr>';
+            document.getElementById('logsTable').innerHTML = '<tr><td colspan="11" class="loading">加载请求数据...</td></tr>';
 
             try {
                 const params = buildDashboardSearchParams({
@@ -1271,7 +1301,7 @@
                 if (requestToken !== logsRequestToken) return;
                 document.getElementById('tableFooter').style.display = 'none';
                 console.error('加载日志失败:', error);
-                document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="error">加载日志失败</td></tr>';
+                document.getElementById('logsTable').innerHTML = '<tr><td colspan="11" class="error">加载日志失败</td></tr>';
                 showMessage('加载日志失败，请稍后重试', 'error');
             }
         }
@@ -1284,7 +1314,7 @@
             if (logs.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" class="empty-state">
+                        <td colspan="11" class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
@@ -1312,6 +1342,7 @@
                         <td class="num-col">${renderNumber(log.prompt_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(log.completion_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(log.total_tokens || 0)}</td>
+                        <td>${renderUsageStatus(log.usage_status)}</td>
                         <td>${formatDateTime(startTime)}</td>
                         <td>${formatDateTime(endTime)}</td>
                         <td class="num-col"><span class="numeric-value">${duration}</span></td>

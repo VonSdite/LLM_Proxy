@@ -47,6 +47,13 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
         self.assertIn("时间范围不能超过一年", html)
         self.assertIn("syncDateRangeInputLimits();", html)
 
+    def test_dashboard_displays_token_usage_status(self) -> None:
+        html = self.render_dashboard()
+
+        self.assertIn("Token 状态", html)
+        self.assertIn("function renderUsageStatus(value)", html)
+        self.assertIn("partial: '部分'", html)
+
 
 if __name__ == "__main__":
     unittest.main()

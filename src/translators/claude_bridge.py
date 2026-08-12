@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from ..proxy_core.contracts import DownstreamChunk
+from ..proxy_core.usage import openai_usage_to_claude
 from .event_chunk_utils import build_json_event_chunk as _emit_event
 from .reasoning_utils import (
     extract_openai_reasoning_delta,
@@ -29,8 +30,11 @@ def convert_claude_request_to_openai_chat_request(
         "stream": bool(stream),
     }
 
-    if body.get("max_tokens") is not None:
-        translated["max_tokens"] = body.get("max_tokens")
+    max_tokens = body.get("max_tokens")
+    if max_tokens is None:
+        max_tokens = body.get("max_completion_tokens")
+    if max_tokens is not None:
+        translated["max_tokens"] = max_tokens
     if body.get("temperature") is not None:
         translated["temperature"] = body.get("temperature")
     elif body.get("top_p") is not None:
@@ -191,11 +195,7 @@ def translate_openai_chat_stream_payload_to_claude(
 
     usage = payload.get("usage")
     if isinstance(usage, dict):
-        state["usage"] = {
-            "input_tokens": int(usage.get("prompt_tokens") or 0),
-            "output_tokens": int(usage.get("completion_tokens") or 0),
-            "cache_read_input_tokens": int(((usage.get("prompt_tokens_details") or {}).get("cached_tokens")) or 0),
-        }
+        state["usage"] = openai_usage_to_claude(usage)
 
     for choice in payload.get("choices") or []:
         if not isinstance(choice, dict):
@@ -321,6 +321,16 @@ def finalize_claude_stream(
                         if int(usage.get("cache_read_input_tokens") or 0) > 0
                         else {}
                     ),
+                    **(
+                        {"cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens") or 0)}
+                        if int(usage.get("cache_creation_input_tokens") or 0) > 0
+                        else {}
+                    ),
+                    **(
+                        {"thinking_tokens": int(usage.get("thinking_tokens") or 0)}
+                        if int(usage.get("thinking_tokens") or 0) > 0
+                        else {}
+                    ),
                 },
             },
         )
@@ -366,14 +376,8 @@ def convert_openai_chat_response_to_claude(
         "stop_sequence": None,
     }
     if isinstance(payload.get("usage"), dict):
-        usage_payload: dict[str, Any] = {
-            "input_tokens": int(payload["usage"].get("prompt_tokens") or 0),
-            "output_tokens": int(payload["usage"].get("completion_tokens") or 0),
-        }
+        usage_payload = openai_usage_to_claude(payload["usage"])
         response["usage"] = usage_payload
-        cached_tokens = int(((payload["usage"].get("prompt_tokens_details") or {}).get("cached_tokens")) or 0)
-        if cached_tokens > 0:
-            usage_payload["cache_read_input_tokens"] = cached_tokens
     return response
 
 

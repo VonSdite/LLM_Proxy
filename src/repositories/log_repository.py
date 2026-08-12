@@ -74,6 +74,7 @@ class LogRepository:
                     total_tokens INTEGER,
                     prompt_tokens INTEGER DEFAULT 0,
                     completion_tokens INTEGER DEFAULT 0,
+                    usage_status TEXT NOT NULL DEFAULT 'unknown',
                     start_time TEXT NOT NULL,
                     end_time TEXT,
                     created_at TEXT NOT NULL
@@ -85,6 +86,17 @@ class LogRepository:
             }
             if "api_key_id" not in request_log_columns:
                 cursor.execute("ALTER TABLE request_logs ADD COLUMN api_key_id INTEGER")
+            if "usage_status" not in request_log_columns:
+                cursor.execute("ALTER TABLE request_logs ADD COLUMN usage_status TEXT NOT NULL DEFAULT 'unknown'")
+                cursor.execute(
+                    """
+                    UPDATE request_logs
+                    SET usage_status = 'known'
+                    WHERE COALESCE(total_tokens, 0) > 0
+                       OR COALESCE(prompt_tokens, 0) > 0
+                       OR COALESCE(completion_tokens, 0) > 0
+                    """
+                )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_start_time ON request_logs(start_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_address ON request_logs(ip_address)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_api_key ON request_logs(api_key_id)")
@@ -100,6 +112,7 @@ class LogRepository:
                     total_tokens INTEGER NOT NULL DEFAULT 0,
                     prompt_tokens INTEGER NOT NULL DEFAULT 0,
                     completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    usage_status TEXT NOT NULL DEFAULT 'unknown',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(stat_date, ip_address, request_model, response_model)
@@ -108,6 +121,20 @@ class LogRepository:
             )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_request_stats(stat_date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_ip ON daily_request_stats(ip_address)")
+            daily_stat_columns = {
+                str(row["name"]).strip() for row in cursor.execute("PRAGMA table_info(daily_request_stats)").fetchall()
+            }
+            if "usage_status" not in daily_stat_columns:
+                cursor.execute(
+                    "ALTER TABLE daily_request_stats ADD COLUMN usage_status TEXT NOT NULL DEFAULT 'unknown'"
+                )
+                cursor.execute(
+                    """
+                    UPDATE daily_request_stats
+                    SET usage_status = 'known'
+                    WHERE total_tokens > 0 OR prompt_tokens > 0 OR completion_tokens > 0
+                    """
+                )
 
     def insert(
         self,
@@ -116,6 +143,7 @@ class LogRepository:
         total_tokens: int,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        usage_status: str | None = None,
         start_time: object | None = None,
         end_time: object | None = None,
         ip_address: str | None = None,
@@ -128,6 +156,12 @@ class LogRepository:
         safe_total_tokens = int(total_tokens or 0)
         safe_prompt_tokens = int(prompt_tokens or 0)
         safe_completion_tokens = int(completion_tokens or 0)
+        inferred_usage_status = (
+            "known" if any((safe_total_tokens, safe_prompt_tokens, safe_completion_tokens)) else "unknown"
+        )
+        safe_usage_status = self._normalize_usage_status(
+            usage_status if usage_status is not None else inferred_usage_status
+        )
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -136,8 +170,8 @@ class LogRepository:
                 """
                 INSERT INTO request_logs
                 (api_key_id, ip_address, request_model, response_model, total_tokens,
-                 prompt_tokens, completion_tokens, start_time, end_time, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 prompt_tokens, completion_tokens, usage_status, start_time, end_time, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     api_key_id,
@@ -147,6 +181,7 @@ class LogRepository:
                     safe_total_tokens,
                     safe_prompt_tokens,
                     safe_completion_tokens,
+                    safe_usage_status,
                     format_local_datetime(start_time_value),
                     format_local_datetime(end_time_value),
                     now_text,
@@ -159,16 +194,21 @@ class LogRepository:
                 INSERT INTO daily_request_stats
                 (
                     stat_date, ip_address, request_model, response_model,
-                    request_count, total_tokens, prompt_tokens, completion_tokens,
+                    request_count, total_tokens, prompt_tokens, completion_tokens, usage_status,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(stat_date, ip_address, request_model, response_model)
                 DO UPDATE SET
                     request_count = request_count + 1,
                     total_tokens = total_tokens + excluded.total_tokens,
                     prompt_tokens = prompt_tokens + excluded.prompt_tokens,
                     completion_tokens = completion_tokens + excluded.completion_tokens,
+                    usage_status = CASE
+                        WHEN usage_status = 'unknown' AND excluded.usage_status = 'unknown' THEN 'unknown'
+                        WHEN usage_status = 'known' AND excluded.usage_status = 'known' THEN 'known'
+                        ELSE 'partial'
+                    END,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -179,6 +219,7 @@ class LogRepository:
                     safe_total_tokens,
                     safe_prompt_tokens,
                     safe_completion_tokens,
+                    safe_usage_status,
                     now_text,
                     now_text,
                 ),
@@ -311,7 +352,13 @@ class LogRepository:
                     COALESCE(SUM(d.request_count), 0) as request_count,
                     COALESCE(SUM(d.total_tokens), 0) as total_tokens,
                     COALESCE(SUM(d.prompt_tokens), 0) as prompt_tokens,
-                    COALESCE(SUM(d.completion_tokens), 0) as completion_tokens
+                    COALESCE(SUM(d.completion_tokens), 0) as completion_tokens,
+                    CASE
+                        WHEN SUM(CASE WHEN d.usage_status = 'unknown' THEN 1 ELSE 0 END) = COUNT(*) THEN 'unknown'
+                        WHEN SUM(CASE WHEN d.usage_status = 'unknown' THEN 1 ELSE 0 END) > 0 THEN 'partial'
+                        WHEN MIN(d.usage_status) = 'known' AND MAX(d.usage_status) = 'known' THEN 'known'
+                        ELSE 'partial'
+                    END as usage_status
                 FROM daily_request_stats d
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
@@ -361,6 +408,12 @@ class LogRepository:
                     COALESCE(SUM(d.total_tokens), 0) as total_tokens,
                     COALESCE(SUM(d.prompt_tokens), 0) as prompt_tokens,
                     COALESCE(SUM(d.completion_tokens), 0) as completion_tokens,
+                    CASE
+                        WHEN SUM(CASE WHEN d.usage_status = 'unknown' THEN 1 ELSE 0 END) = COUNT(*) THEN 'unknown'
+                        WHEN SUM(CASE WHEN d.usage_status = 'unknown' THEN 1 ELSE 0 END) > 0 THEN 'partial'
+                        WHEN MIN(d.usage_status) = 'known' AND MAX(d.usage_status) = 'known' THEN 'known'
+                        ELSE 'partial'
+                    END as usage_status,
                     COUNT(DISTINCT d.ip_address) as ip_count,
                     MAX(d.stat_date) as last_request_date
                 FROM daily_request_stats d
@@ -419,7 +472,7 @@ class LogRepository:
             )
             data_query = f"""
                 SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
-                       l.total_tokens, l.prompt_tokens, l.completion_tokens,
+                       l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
                        l.start_time, l.end_time, l.created_at
                 FROM request_logs l
                 LEFT JOIN users u ON l.ip_address = u.ip_address
@@ -472,7 +525,7 @@ class LogRepository:
             )
             query = f"""
                 SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
-                       l.total_tokens, l.prompt_tokens, l.completion_tokens,
+                       l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
                        l.start_time, l.end_time, l.created_at
                 FROM request_logs l
                 LEFT JOIN users u ON l.ip_address = u.ip_address
@@ -516,6 +569,7 @@ class LogRepository:
                     l.total_tokens,
                     l.prompt_tokens,
                     l.completion_tokens,
+                    l.usage_status,
                     l.start_time,
                     l.end_time,
                     l.created_at
@@ -563,7 +617,8 @@ class LogRepository:
                     d.request_count,
                     d.total_tokens,
                     d.prompt_tokens,
-                    d.completion_tokens
+                    d.completion_tokens,
+                    d.usage_status
                 FROM daily_request_stats d
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
@@ -596,16 +651,21 @@ class LogRepository:
                     INSERT INTO daily_request_stats
                     (
                         stat_date, ip_address, request_model, response_model,
-                        request_count, total_tokens, prompt_tokens, completion_tokens,
+                        request_count, total_tokens, prompt_tokens, completion_tokens, usage_status,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(stat_date, ip_address, request_model, response_model)
                     DO UPDATE SET
                         request_count = request_count + excluded.request_count,
                         total_tokens = total_tokens + excluded.total_tokens,
                         prompt_tokens = prompt_tokens + excluded.prompt_tokens,
                         completion_tokens = completion_tokens + excluded.completion_tokens,
+                        usage_status = CASE
+                            WHEN usage_status = 'unknown' AND excluded.usage_status = 'unknown' THEN 'unknown'
+                            WHEN usage_status = 'known' AND excluded.usage_status = 'known' THEN 'known'
+                            ELSE 'partial'
+                        END,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -617,6 +677,7 @@ class LogRepository:
                         row["total_tokens"],
                         row["prompt_tokens"],
                         row["completion_tokens"],
+                        row["usage_status"],
                         now_text,
                         now_text,
                     ),
@@ -648,9 +709,9 @@ class LogRepository:
                     INSERT INTO request_logs
                     (
                         api_key_id, ip_address, request_model, response_model, total_tokens,
-                        prompt_tokens, completion_tokens, start_time, end_time, created_at
+                        prompt_tokens, completion_tokens, usage_status, start_time, end_time, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         row["api_key_id"],
@@ -660,6 +721,7 @@ class LogRepository:
                         row["total_tokens"],
                         row["prompt_tokens"],
                         row["completion_tokens"],
+                        row["usage_status"],
                         row["start_time"],
                         row["end_time"],
                         row["created_at"],
@@ -739,6 +801,9 @@ class LogRepository:
         response_model = cls._normalize_stat_text(
             row.get("response_model"), field_name="response_model", required=False
         )
+        total_tokens = cls._normalize_stat_int(row.get("total_tokens"), field_name="total_tokens")
+        prompt_tokens = cls._normalize_stat_int(row.get("prompt_tokens"), field_name="prompt_tokens")
+        completion_tokens = cls._normalize_stat_int(row.get("completion_tokens"), field_name="completion_tokens")
         return {
             "stat_date": cls._normalize_stat_date(row.get("stat_date")),
             "ip_address": cls._normalize_stat_text(row.get("ip_address"), field_name="ip_address", required=False),
@@ -747,15 +812,23 @@ class LogRepository:
             ),
             "response_model": response_model or "",
             "request_count": cls._normalize_stat_int(row.get("request_count"), field_name="request_count"),
-            "total_tokens": cls._normalize_stat_int(row.get("total_tokens"), field_name="total_tokens"),
-            "prompt_tokens": cls._normalize_stat_int(row.get("prompt_tokens"), field_name="prompt_tokens"),
-            "completion_tokens": cls._normalize_stat_int(row.get("completion_tokens"), field_name="completion_tokens"),
+            "total_tokens": total_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "usage_status": cls._normalize_import_usage_status(
+                row.get("usage_status"), total_tokens, prompt_tokens, completion_tokens
+            ),
         }
 
     @classmethod
     def _normalize_request_log_row(cls, row: dict[str, Any], *, default_created_at: str) -> dict[str, Any]:
         if not isinstance(row, dict):
             raise ValueError("Each request log row must be an object")
+        total_tokens = cls._normalize_optional_stat_int(row.get("total_tokens"), field_name="total_tokens")
+        prompt_tokens = cls._normalize_optional_stat_int(row.get("prompt_tokens"), field_name="prompt_tokens")
+        completion_tokens = cls._normalize_optional_stat_int(
+            row.get("completion_tokens"), field_name="completion_tokens"
+        )
         return {
             "api_key_id": cls._normalize_optional_positive_int(row.get("api_key_id"), field_name="api_key_id"),
             "ip_address": cls._normalize_stat_text(row.get("ip_address"), field_name="ip_address", required=False),
@@ -765,10 +838,11 @@ class LogRepository:
             "response_model": cls._normalize_stat_text(
                 row.get("response_model"), field_name="response_model", required=False
             ),
-            "total_tokens": cls._normalize_optional_stat_int(row.get("total_tokens"), field_name="total_tokens"),
-            "prompt_tokens": cls._normalize_optional_stat_int(row.get("prompt_tokens"), field_name="prompt_tokens"),
-            "completion_tokens": cls._normalize_optional_stat_int(
-                row.get("completion_tokens"), field_name="completion_tokens"
+            "total_tokens": total_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "usage_status": cls._normalize_import_usage_status(
+                row.get("usage_status"), total_tokens, prompt_tokens, completion_tokens
             ),
             "start_time": cls._normalize_stat_text(row.get("start_time"), field_name="start_time", required=True),
             "end_time": cls._normalize_stat_text(row.get("end_time"), field_name="end_time", required=False),
@@ -797,6 +871,19 @@ class LogRepository:
         if parsed <= 0:
             raise ValueError(f"request log {field_name} must be greater than 0")
         return parsed
+
+    @staticmethod
+    def _normalize_usage_status(value: Any) -> str:
+        normalized = str(value or "unknown").strip().lower()
+        if normalized not in {"unknown", "partial", "known"}:
+            return "unknown"
+        return normalized
+
+    @classmethod
+    def _normalize_import_usage_status(cls, value: Any, *token_values: int | None) -> str:
+        if value is None or str(value).strip() == "":
+            return "known" if any(int(token or 0) > 0 for token in token_values) else "unknown"
+        return cls._normalize_usage_status(value)
 
     @staticmethod
     def _daily_stat_exists(cursor: sqlite3.Cursor, row: dict[str, Any]) -> bool:
@@ -831,6 +918,7 @@ class LogRepository:
               AND total_tokens IS ?
               AND prompt_tokens IS ?
               AND completion_tokens IS ?
+              AND usage_status IS ?
               AND start_time IS ?
               AND end_time IS ?
             LIMIT 1
@@ -842,6 +930,7 @@ class LogRepository:
                 row["total_tokens"],
                 row["prompt_tokens"],
                 row["completion_tokens"],
+                row["usage_status"],
                 row["start_time"],
                 row["end_time"],
             ),
@@ -858,6 +947,8 @@ class LogRepository:
                 row["total_tokens"],
                 row["prompt_tokens"],
                 row["completion_tokens"],
+                row["usage_status"],
+                row["usage_status"],
                 now_text,
                 row["stat_date"],
                 row["request_model"],
@@ -870,6 +961,8 @@ class LogRepository:
                 row["total_tokens"],
                 row["prompt_tokens"],
                 row["completion_tokens"],
+                row["usage_status"],
+                row["usage_status"],
                 now_text,
                 row["stat_date"],
                 row["ip_address"],
@@ -885,6 +978,11 @@ class LogRepository:
                 total_tokens = total_tokens + ?,
                 prompt_tokens = prompt_tokens + ?,
                 completion_tokens = completion_tokens + ?,
+                usage_status = CASE
+                    WHEN usage_status = 'unknown' AND ? = 'unknown' THEN 'unknown'
+                    WHEN usage_status = 'known' AND ? = 'known' THEN 'known'
+                    ELSE 'partial'
+                END,
                 updated_at = ?
             WHERE {where_clause}
             """,

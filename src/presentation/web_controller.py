@@ -331,6 +331,15 @@ class WebController:
             return 0
         return round(max((end - start).total_seconds(), 0), 2)
 
+    @staticmethod
+    def _format_usage_status(value: Any) -> str:
+        """将 token 采集状态转换为管理端展示文本。"""
+        return {
+            "known": "完整",
+            "partial": "部分",
+            "unknown": "未知",
+        }.get(str(value or "unknown").strip().lower(), "未知")
+
     def get_statistics(self) -> ResponseReturnValue:
         try:
             self._validate_dashboard_date_range(
@@ -412,7 +421,16 @@ class WebController:
                     sort_key=sort_key,
                     sort_direction=sort_direction,
                 )
-                headers = ["用户名", "请求数", "输入token", "输出token", "总 Token", "关联 IP 数", "最近请求日期"]
+                headers = [
+                    "用户名",
+                    "请求数",
+                    "输入token",
+                    "输出token",
+                    "总 Token",
+                    "Token 状态",
+                    "关联 IP 数",
+                    "最近请求日期",
+                ]
                 rows = [
                     [
                         item["username"],
@@ -420,6 +438,7 @@ class WebController:
                         item["prompt_tokens"],
                         item["completion_tokens"],
                         item["total_tokens"],
+                        self._format_usage_status(item.get("usage_status")),
                         item["ip_count"],
                         item["last_request_date"],
                     ]
@@ -444,6 +463,7 @@ class WebController:
                     "输入token",
                     "输出token",
                     "总 Token",
+                    "Token 状态",
                     "开始时间",
                     "结束时间",
                     "耗时(秒)",
@@ -457,6 +477,7 @@ class WebController:
                         item["prompt_tokens"],
                         item["completion_tokens"],
                         item["total_tokens"],
+                        self._format_usage_status(item.get("usage_status")),
                         item["start_time"],
                         item["end_time"],
                         self._calculate_log_duration(item["start_time"], item["end_time"]),
@@ -474,7 +495,17 @@ class WebController:
                     sort_key=sort_key,
                     sort_direction=sort_direction,
                 )
-                headers = ["IP", "用户名", "请求模型", "响应模型", "输入token", "输出token", "总 Token", "请求数"]
+                headers = [
+                    "IP",
+                    "用户名",
+                    "请求模型",
+                    "响应模型",
+                    "输入token",
+                    "输出token",
+                    "总 Token",
+                    "Token 状态",
+                    "请求数",
+                ]
                 rows = [
                     [
                         item["ip_address"],
@@ -484,6 +515,7 @@ class WebController:
                         item["prompt_tokens"],
                         item["completion_tokens"],
                         item["total_tokens"],
+                        self._format_usage_status(item.get("usage_status")),
                         item["request_count"],
                     ]
                     for item in data

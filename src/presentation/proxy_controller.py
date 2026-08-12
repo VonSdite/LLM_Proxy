@@ -127,6 +127,7 @@ class LogServiceLike(Protocol):
         total_tokens: int,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        usage_status: str | None = None,
         start_time: Any = None,
         end_time: Any = None,
         ip_address: str | None = None,
@@ -447,14 +448,15 @@ class ProxyController:
 
     def _log_request(self, **kwargs: Any) -> int | None:
         """兼容旧测试替身的请求日志写入封装。"""
-        api_key_id = kwargs.get("api_key_id")
         try:
             return self._log_service.log_request(**kwargs)
         except TypeError as exc:
-            if api_key_id is None or "api_key_id" not in str(exc):
+            error_text = str(exc)
+            if "api_key_id" not in error_text and "usage_status" not in error_text:
                 raise
             fallback_kwargs = dict(kwargs)
             fallback_kwargs.pop("api_key_id", None)
+            fallback_kwargs.pop("usage_status", None)
             return self._log_service.log_request(**fallback_kwargs)
 
     def _list_available_model_names(self, *, visible_provider_models_only: bool = False) -> tuple[str, ...]:
@@ -652,6 +654,7 @@ class ProxyController:
                     "total_tokens": response_meta.get("total_tokens", 0),
                     "prompt_tokens": response_meta.get("prompt_tokens", 0),
                     "completion_tokens": response_meta.get("completion_tokens", 0),
+                    "usage_status": response_meta.get("usage_status", "unknown"),
                     "start_time": start_time,
                     "end_time": now_local_datetime(),
                     "ip_address": client_ip,
@@ -904,6 +907,7 @@ class ProxyController:
                     "total_tokens": response_meta.get("total_tokens", 0),
                     "prompt_tokens": response_meta.get("prompt_tokens", 0),
                     "completion_tokens": response_meta.get("completion_tokens", 0),
+                    "usage_status": response_meta.get("usage_status", "unknown"),
                     "start_time": start_time,
                     "end_time": now_local_datetime(),
                     "ip_address": client_ip,

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ..proxy_core.contracts import DownstreamChunk, StreamEvent
+from ..proxy_core.usage import claude_usage_to_openai
 from .claude_bridge import (
     convert_claude_request_to_openai_chat_request as _convert_claude_request_to_openai_chat_request,
 )
@@ -156,8 +157,11 @@ class OpenAIResponsesTranslator:
         if input_items:
             translated["input"] = input_items
 
-        if body.get("max_tokens") is not None:
-            translated["max_output_tokens"] = body.get("max_tokens")
+        max_output_tokens = body.get("max_tokens")
+        if max_output_tokens is None:
+            max_output_tokens = body.get("max_completion_tokens")
+        if max_output_tokens is not None:
+            translated["max_output_tokens"] = max_output_tokens
         if body.get("temperature") is not None:
             translated["temperature"] = body.get("temperature")
         if body.get("top_p") is not None:
@@ -659,9 +663,12 @@ class ClaudeChatTranslator:
     target_format: str = "openai_chat"
 
     def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
+        max_tokens = body.get("max_tokens")
+        if max_tokens is None:
+            max_tokens = body.get("max_completion_tokens")
         translated: dict[str, Any] = {
             "model": model_name,
-            "max_tokens": int(body.get("max_tokens") or 4096),
+            "max_tokens": int(max_tokens or 4096),
             "messages": [],
             "stream": bool(stream),
         }
@@ -1399,7 +1406,7 @@ def _to_openai_responses_tool_choice(tool_choice: Any) -> Any:
     return tool_choice
 
 
-def _extract_openai_responses_usage(usage: Any) -> dict[str, int]:
+def _extract_openai_responses_usage(usage: Any) -> dict[str, Any]:
     if not isinstance(usage, dict):
         return {}
 
@@ -1408,11 +1415,30 @@ def _extract_openai_responses_usage(usage: Any) -> dict[str, int]:
     total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
     if prompt_tokens <= 0 and completion_tokens <= 0 and total_tokens <= 0:
         return {}
-    return {
+    result: dict[str, Any] = {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
     }
+    input_details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details")
+    if isinstance(input_details, dict):
+        cached_tokens = int(input_details.get("cached_tokens") or 0)
+        cache_creation_tokens = int(
+            input_details.get("cache_creation_tokens") or input_details.get("cache_creation_input_tokens") or 0
+        )
+        if cached_tokens > 0 or cache_creation_tokens > 0:
+            prompt_details: dict[str, Any] = {}
+            if cached_tokens > 0:
+                prompt_details["cached_tokens"] = cached_tokens
+            if cache_creation_tokens > 0:
+                prompt_details["cache_creation_tokens"] = cache_creation_tokens
+            result["prompt_tokens_details"] = prompt_details
+    output_details = usage.get("output_tokens_details") or usage.get("completion_tokens_details")
+    if isinstance(output_details, dict):
+        reasoning_tokens = int(output_details.get("reasoning_tokens") or 0)
+        if reasoning_tokens > 0:
+            result["completion_tokens_details"] = {"reasoning_tokens": reasoning_tokens}
+    return result
 
 
 def _extract_openai_responses_message_and_tool_calls(outputs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -1528,20 +1554,7 @@ def _build_openai_usage_chunk_from_usage(
 def _extract_claude_usage(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
-    prompt_tokens = int(payload.get("input_tokens") or 0)
-    completion_tokens = int(payload.get("output_tokens") or 0)
-    usage: dict[str, Any] = {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": prompt_tokens + completion_tokens,
-    }
-    cached_tokens = int(payload.get("cache_read_input_tokens") or 0)
-    if cached_tokens > 0:
-        usage.setdefault("prompt_tokens_details", {})["cached_tokens"] = cached_tokens
-    reasoning_tokens = int(payload.get("thinking_tokens") or 0)
-    if reasoning_tokens > 0:
-        usage["completion_tokens_details"] = {"reasoning_tokens": reasoning_tokens}
-    return usage
+    return claude_usage_to_openai(payload)
 
 
 def _merge_claude_usage_state(state: dict[str, Any], payload: Any) -> dict[str, Any]:

@@ -23,6 +23,12 @@ from ..proxy_core import (
     is_terminal_chunk,
     should_emit_terminal_chunk,
 )
+from ..proxy_core.usage import (
+    USAGE_STATUS_UNKNOWN,
+    create_usage_meta,
+    merge_usage_meta,
+    public_usage_meta,
+)
 from ..translators import Translator
 from ..translators.stream_aggregator import (
     StreamAggregationError,
@@ -177,18 +183,27 @@ class ProxyResponseBuilder:
             if completed:
                 return
             completed = True
+            if hook_abort is not None and meta.get("response_model") is None:
+                meta["response_model"] = request_ctx.upstream_model or request_ctx.request_model
+            completion_meta = public_usage_meta(meta)
+            has_usage = completion_meta.get("usage_status") != USAGE_STATUS_UNKNOWN
             if finalize_attempt is not None:
                 try:
                     if hook_abort is not None:
-                        if meta.get("response_model") is None:
-                            meta["response_model"] = request_ctx.upstream_model or request_ctx.request_model
                         finalize_attempt(
                             status_code=opened.status_code,
                             error_message=hook_abort.message,
-                            usage=meta,
+                            usage=completion_meta,
                         )
                     elif outcome == "success":
-                        finalize_attempt(status_code=opened.status_code, usage=meta)
+                        finalize_attempt(status_code=opened.status_code, usage=completion_meta)
+                    elif has_usage:
+                        finalize_attempt(
+                            status_code=opened.status_code,
+                            error_type=error_type,
+                            error_message=error_message,
+                            usage=completion_meta,
+                        )
                     elif error_type is not None:
                         finalize_attempt(
                             error_type=error_type,
@@ -216,9 +231,12 @@ class ProxyResponseBuilder:
                     )
                 except Exception as exc:
                     self._logger.error("Error in on_stream_failure callback: %s", exc)
-            if on_complete and (outcome == "success" or hook_abort is not None):
+            should_record_completion = outcome == "success" or hook_abort is not None
+            if downstream_started and outcome in {"client_cancelled", "upstream_error", "processing_error"}:
+                should_record_completion = True
+            if on_complete and should_record_completion:
                 try:
-                    on_complete(meta)
+                    on_complete(completion_meta)
                 except Exception as exc:
                     self._logger.error("Error in on_complete callback: %s", exc)
 
@@ -249,8 +267,6 @@ class ProxyResponseBuilder:
                                 terminal_sent = True
                             yield encoded_terminal
                         continue
-                    if guarded_chunk.kind == "json" and isinstance(guarded_chunk.payload, dict):
-                        self._update_meta_from_payload(meta, guarded_chunk.payload)
                     if (
                         downstream_target_format == "openai_chat"
                         and guarded_chunk.kind == "json"
@@ -288,6 +304,12 @@ class ProxyResponseBuilder:
                     upstream_payload_buffer,
                 )
                 for event in decode_stream_events(upstream_chunks, opened.stream_format):
+                    if event.kind == "json" and isinstance(event.payload, dict):
+                        self._update_meta_from_payload(
+                            meta,
+                            event.payload,
+                            source_format=translator.source_format,
+                        )
                     downstream_chunks = translator.translate_stream_event(
                         request_ctx.upstream_model,
                         original_request,
@@ -552,16 +574,28 @@ class ProxyResponseBuilder:
         trace_enabled = self._trace.is_enabled(trace_id)
         raw_response_headers = dict(getattr(response, "headers", {}) or {})
         upstream_payload_buffer = bytearray() if trace_enabled else None
+        meta = self._create_empty_meta()
 
         try:
             upstream_chunks = self._iter_stream_chunks_with_trace(
                 response.iter_content(chunk_size=None),
                 upstream_payload_buffer,
             )
+
+            def collect_upstream_events() -> Iterator[StreamEvent]:
+                for event in decode_stream_events(upstream_chunks, opened.stream_format):
+                    if event.kind == "json" and isinstance(event.payload, dict):
+                        self._update_meta_from_payload(
+                            meta,
+                            event.payload,
+                            source_format=translator.source_format,
+                        )
+                    yield event
+
             native_payload = aggregate_stream_to_native_response(
                 source_format=translator.source_format,
                 model_name=request_ctx.upstream_model,
-                events=decode_stream_events(upstream_chunks, opened.stream_format),
+                events=collect_upstream_events(),
             )
             translated_payload = translator.translate_nonstream_response(
                 request_ctx.upstream_model,
@@ -569,22 +603,26 @@ class ProxyResponseBuilder:
                 translated_request,
                 native_payload,
             )
+            if isinstance(translated_payload, dict):
+                self._update_meta_from_payload(
+                    meta,
+                    translated_payload,
+                    source_format=translator.source_format,
+                )
             guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
             body_to_send = translated_payload if guarded_payload is None else guarded_payload
             response_body = encode_downstream_response_body(body_to_send, downstream_target_format)
             headers = self._filter_response_headers(getattr(response, "headers", {}))
             headers["Content-Type"] = self._resolve_nonstream_content_type(body_to_send, opened.content_type)
 
-            meta = self._create_empty_meta()
-            if isinstance(body_to_send, dict):
-                self._update_meta_from_payload(meta, body_to_send)
+            completion_meta = public_usage_meta(meta)
             if on_complete:
                 try:
-                    on_complete(meta)
+                    on_complete(completion_meta)
                 except Exception as exc:
                     self._logger.error("Error in on_complete callback: %s", exc)
             if finalize_attempt is not None:
-                finalize_attempt(status_code=opened.status_code, usage=meta)
+                finalize_attempt(status_code=opened.status_code, usage=completion_meta)
 
             if trace_enabled:
                 self._trace.log_entry(
@@ -844,25 +882,36 @@ class ProxyResponseBuilder:
                 stream=False,
             )
             parsed_body = self._parse_json_bytes(raw_body)
+            meta = self._create_empty_meta()
+            if isinstance(parsed_body, dict):
+                self._update_meta_from_payload(
+                    meta,
+                    parsed_body,
+                    source_format=translator.source_format,
+                )
             translated_payload = translator.translate_nonstream_response(
                 request_ctx.upstream_model,
                 original_request,
                 translated_request,
                 parsed_body if parsed_body is not None else raw_body,
             )
+            if isinstance(translated_payload, dict):
+                self._update_meta_from_payload(
+                    meta,
+                    translated_payload,
+                    source_format=translator.source_format,
+                )
             guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
             body_to_send = translated_payload if guarded_payload is None else guarded_payload
 
-            meta = self._create_empty_meta()
-            if isinstance(body_to_send, dict):
-                self._update_meta_from_payload(meta, body_to_send)
+            completion_meta = public_usage_meta(meta)
             if on_complete:
                 try:
-                    on_complete(meta)
+                    on_complete(completion_meta)
                 except Exception as exc:
                     self._logger.error("Error in on_complete callback: %s", exc)
             if finalize_attempt is not None:
-                finalize_attempt(status_code=opened.status_code, usage=meta)
+                finalize_attempt(status_code=opened.status_code, usage=completion_meta)
 
             response_body = encode_downstream_response_body(body_to_send, downstream_target_format)
             headers = self._filter_response_headers(getattr(response, "headers", {}))
@@ -1142,15 +1191,15 @@ class ProxyResponseBuilder:
 
     @staticmethod
     def _create_empty_meta() -> dict[str, Any]:
-        return {
-            "response_model": None,
-            "total_tokens": 0,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-        }
+        return create_usage_meta()
 
     @staticmethod
-    def _update_meta_from_payload(meta: dict[str, Any], payload: dict[str, Any]) -> None:
+    def _update_meta_from_payload(
+        meta: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        source_format: str | None = None,
+    ) -> None:
         model = payload.get("model")
         if model:
             meta["response_model"] = model
@@ -1162,39 +1211,13 @@ class ProxyResponseBuilder:
                 meta["response_model"] = message.get("model")
             if message.get("modelVersion") is not None:
                 meta["response_model"] = message.get("modelVersion")
-        usage = payload.get("usage")
-        usage_metadata = payload.get("usageMetadata")
         response = payload.get("response")
         if isinstance(response, dict):
             if response.get("model") is not None:
                 meta["response_model"] = response.get("model")
             if response.get("modelVersion") is not None:
                 meta["response_model"] = response.get("modelVersion")
-            if isinstance(response.get("usage"), dict):
-                usage = response.get("usage")
-            if isinstance(response.get("usageMetadata"), dict):
-                usage_metadata = response.get("usageMetadata")
-        if isinstance(usage, dict):
-            if usage.get("total_tokens") is not None:
-                meta["total_tokens"] = int(usage.get("total_tokens") or 0)
-            elif usage.get("input_tokens") is not None or usage.get("output_tokens") is not None:
-                meta["total_tokens"] = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
-            if usage.get("prompt_tokens") is not None:
-                meta["prompt_tokens"] = int(usage.get("prompt_tokens") or 0)
-            elif usage.get("input_tokens") is not None:
-                meta["prompt_tokens"] = int(usage.get("input_tokens") or 0)
-            if usage.get("completion_tokens") is not None:
-                meta["completion_tokens"] = int(usage.get("completion_tokens") or 0)
-            elif usage.get("output_tokens") is not None:
-                meta["completion_tokens"] = int(usage.get("output_tokens") or 0)
-            return
-        if not isinstance(usage_metadata, dict):
-            return
-        meta["prompt_tokens"] = int(usage_metadata.get("promptTokenCount") or 0)
-        meta["completion_tokens"] = int(usage_metadata.get("candidatesTokenCount") or 0)
-        meta["total_tokens"] = int(
-            usage_metadata.get("totalTokenCount") or (meta["prompt_tokens"] + meta["completion_tokens"])
-        )
+        merge_usage_meta(meta, payload, source_format)
 
     @classmethod
     def _update_meta_from_stream_state(cls, meta: dict[str, Any], state: dict[str, Any]) -> None:

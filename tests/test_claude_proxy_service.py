@@ -527,7 +527,9 @@ class ClaudeProxyServiceTests(unittest.TestCase):
                         self.assertEqual(1, streamed.count(absent))
                     self.assertIn(b"partial", streamed)
                     self.assertTrue(fake_response.closed)
-                    self.assertEqual([], completed_meta)
+                    self.assertEqual(1, len(completed_meta))
+                    self.assertEqual(1, completed_meta[0]["prompt_tokens"])
+                    self.assertEqual("partial", completed_meta[0]["usage_status"])
                     self.assertEqual("error", auth_entry["usage_status"])
                     self.assertEqual("claude_stream_failed", auth_entry["usage_error_type"])
 
@@ -567,7 +569,7 @@ class ClaudeProxyServiceTests(unittest.TestCase):
         self.assertEqual("success", auth_entry["usage_status"])
         self.assertTrue(fake_response.closed)
 
-    def test_stream_close_marks_client_cancelled_without_completion_or_auth_update(self) -> None:
+    def test_stream_close_records_partial_usage_without_auth_update(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             write_auth_file(root, "claude-first.json", "access-first", mtime=2000)
@@ -601,7 +603,9 @@ class ClaudeProxyServiceTests(unittest.TestCase):
         self.assertIsNone(failure)
         self.assertEqual(200, status_code)
         self.assertIn(b"assistant", first_chunk)
-        self.assertEqual([], completed_meta)
+        self.assertEqual(1, len(completed_meta))
+        self.assertEqual(1, completed_meta[0]["prompt_tokens"])
+        self.assertEqual("partial", completed_meta[0]["usage_status"])
         self.assertEqual("unknown", auth_entry["usage_status"])
         self.assertTrue(fake_response.closed)
 

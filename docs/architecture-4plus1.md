@@ -48,6 +48,7 @@ downstream request
   -> usage request enrichment / provider protocol signing
   -> executor
   -> decoder
+  -> raw upstream usage collector
   -> translator.translate_nonstream_response() or translate_stream_event()
   -> response_guard
   -> encoder
@@ -80,7 +81,7 @@ decoder
 - Codex / Claude OAuth 提交前的 transport 异常会记录当前认证文件失败并尝试下一个候选认证文件
 - 提交后的 transport 异常会编码为当前下游协议的流内错误事件，当前请求不执行透明重试
 - 目标协议终止事件已经发出时，后续 HTTP framing 异常保持当前流的逻辑完成状态
-- 客户端取消会关闭上游响应并释放请求占用的运行时资源，不触发成功完成统计
+- 客户端取消会关闭上游响应并释放请求占用的运行时资源；已采集的 usage 以 `known` 或 `partial` 状态记录，未采集到 usage 的请求以 `unknown` 状态记录
 
 模型映射在进入具体 Provider 或 OAuth 代理前增加一层目标策略选择：
 
@@ -200,7 +201,7 @@ decoder
   - 按首个非空目标协议字节区分流提交前后的 transport 失败
   - 流提交后的 transport 失败会发送下游协议错误事件并记录当前认证文件失败
   - 缺少 `response.completed` 或 `response.done` 的 EOF 按未完成流处理
-  - 客户端取消会关闭上游响应，不触发成功完成统计，也不更新认证文件成功或失败状态
+  - 客户端取消会关闭上游响应；下游已提交时记录带 `usage_status` 的请求统计，认证文件成功或失败状态保持不变
 - `ClaudeProxyService`
   - 代理下游直接使用的 Claude 普通模型名
   - 使用 `data/oauth/claude/*.json` 中的 OAuth access token 请求 Anthropic Messages
@@ -209,7 +210,7 @@ decoder
   - 按首个非空目标协议字节区分流提交前后的 transport 失败
   - 流提交后的 transport 失败会发送下游协议错误事件并记录当前认证文件失败
   - 缺少 `message_stop` 的 EOF 按未完成流处理
-  - 客户端取消会关闭上游响应，不触发成功完成统计，也不更新认证文件成功或失败状态
+  - 客户端取消会关闭上游响应；下游已提交时记录带 `usage_status` 的请求统计，认证文件成功或失败状态保持不变
 - `ProviderManager`
   - 加载 provider 配置
   - 维护 `provider/model -> provider` 映射
@@ -234,6 +235,8 @@ decoder
   - 在中间尝试传播聚合错误，在最后一次尝试按目标协议构造结构化 `502` 响应
   - 预取首个非空目标协议字节并建立流提交边界
   - 跟踪协议终止事件、上游 transport 失败和客户端取消
+  - 在翻译和 `response_guard` 之前从原始上游响应或事件采集 usage，合并 Claude `message_start` 与 `message_delta` 的 token
+  - 对缺失 `total_tokens` 的 OpenAI usage 按输入与输出 token 重算 total；对缓存创建、缓存读取和推理 token 保留协议扩展细项
   - 按下游协议编码流内错误事件并结算上游响应资源
   - 在流实际结束后记录成功、失败或客户端取消结果
 - `ProviderModelTestService`
@@ -268,6 +271,10 @@ decoder
   - 为原生响应聚合后的完整 source payload 提供 source-to-target response translation
   - 维护 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 与 Claude `thinking` 的请求语义映射
   - 将 OpenAI Chat 上游 reasoning 内容转换为下游协议对应的 thinking / reasoning 输出
+- `UsageNormalizer`
+  - 位于 `src/proxy_core/usage.py`
+  - 统一 OpenAI Chat、OpenAI Responses、Claude Messages 和 Gemini 风格 usage 的输入、输出、total、缓存与推理字段
+  - 定义 `known`、`partial`、`unknown` 三种记录状态，并提供 OpenAI 与 Claude usage 双向映射
 - `Encoder`
   - 将统一 chunk 编码成下游协议
 - `Hook`
@@ -465,7 +472,7 @@ OAuth 模型是数据平面的例外路由：
   - 每次数据面请求读取当前 `api_keys.enabled`，开启时要求有效 API Key
   - 数据面转发始终从发往上游的 header 中移除下游 `Authorization`
   - 统计完成回调写日志时会带上 `api_key_id`，用于同步累加 key 级用量
-  - 流式 transport 失败和客户端取消不调用统计完成回调
+  - 流式 transport 失败和客户端取消在下游已提交后调用统计完成回调；usage 未知时记录 `unknown`，只采集到部分 token 时记录 `partial`
 - `ModelCatalogService`
   - 每次用户 / API Key 权限管理读取当前 Provider 配置模型和 Codex / Claude OAuth 可用模型
   - Codex OAuth 图片模型和普通 OAuth 模型使用同一显式权限列表语义
@@ -608,7 +615,7 @@ Hook 运行时上下文还会暴露最小重试状态：
 | `openai_responses` | `response.failed` |
 | `claude_chat` | `event: error` |
 
-目标协议终止事件已经发出时，后续 HTTP framing 异常保持逻辑完成状态。客户端取消会关闭上游响应并释放 Auth Group inflight，不调用成功完成回调，不写入成功请求统计，也不更新 Auth Entry 成功或失败状态。
+目标协议终止事件已经发出时，后续 HTTP framing 异常保持逻辑完成状态。客户端取消会关闭上游响应并释放 Auth Group inflight；下游已经提交时写入带有 `usage_status` 的请求日志，但不把取消请求标记为成功流完成。
 
 Codex / Claude OAuth 流分别以 `response.completed` / `response.done` 和 `message_stop` 作为成功终止事件。缺少这些事件的 EOF 按未完成流处理：提交前进入下一认证文件候选，提交后发送下游协议错误事件并记录当前认证文件失败。普通 Provider 保持现有协议兼容收尾行为。
 
@@ -645,7 +652,7 @@ provider editor form snapshot
   -> decoder
   -> translator.translate_response(openai_chat benchmark view)
   -> metric collector
-  -> successful result -> LogService -> request_logs / daily_request_stats
+  -> response outcome with usage status -> LogService -> request_logs / daily_request_stats
   -> modal result table
 ```
 
@@ -906,12 +913,17 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - `/v1/models` 只返回两者交集
 - 统计完成回调执行后：
   - `request_logs.api_key_id` 记录本次使用的 key
+  - `request_logs.usage_status` 与 `daily_request_stats.usage_status` 标记 usage 为 `known`、`partial` 或 `unknown`
   - `api_keys.total_request_count`
   - `api_keys.prompt_tokens`
   - `api_keys.completion_tokens`
   - `api_keys.total_tokens`
   - `api_keys.last_used_at`
   - 这些字段与请求日志在同一 SQLite 事务中更新
+
+`request_logs` 和 `daily_request_stats` 的 token 数值在无法从上游得到 usage 时保持为零，`usage_status=unknown` 保留“未提供 usage”的事实；聚合行混合不同状态时使用 `partial`。
+
+统计管理页面与 Excel 导出显示 Token 状态：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 2 并保留原始 `usage_status` 值。
 
 ## 4. Development View
 
@@ -1078,6 +1090,7 @@ sequenceDiagram
             Client-->>Controller: close downstream connection
             Controller-->>Service: close response iterator
             Service->>Executor: close upstream response
+            Service->>Service: 记录 known、partial 或 unknown usage 统计
         end
     end
 ```
@@ -1146,6 +1159,7 @@ sequenceDiagram
         else 客户端取消
             Controller->>CodexProxy: close response iterator
             CodexProxy->>ChatGPT: close upstream response
+            CodexProxy->>Controller: 完成统计回调携带 usage_status
             Note over CodexProxy,CodexOAuth: 认证文件状态保持不变
         end
     end
@@ -1215,6 +1229,7 @@ sequenceDiagram
         else 客户端取消
             Client-->>Service: close downstream connection
             Service->>Executor: close upstream response
+            Service->>Service: 记录 known、partial 或 unknown usage 统计
         end
     end
 ```

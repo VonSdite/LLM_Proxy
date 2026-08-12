@@ -663,6 +663,54 @@
     font-size: 15px;
 }
 
+.dashboard-page .usage-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 2px 9px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.dashboard-page .usage-status-known {
+    color: #166534;
+    background: #dcfce7;
+    border-color: #bbf7d0;
+}
+
+.dashboard-page .usage-status-partial {
+    color: #92400e;
+    background: #fef3c7;
+    border-color: #fde68a;
+}
+
+.dashboard-page .usage-status-unknown {
+    color: #475569;
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+}
+
+:root[data-theme="dark"] .dashboard-page .usage-status-known {
+    color: #86efac;
+    background: rgba(22, 101, 52, 0.28);
+    border-color: rgba(74, 222, 128, 0.32);
+}
+
+:root[data-theme="dark"] .dashboard-page .usage-status-partial {
+    color: #fcd34d;
+    background: rgba(146, 64, 14, 0.28);
+    border-color: rgba(251, 191, 36, 0.32);
+}
+
+:root[data-theme="dark"] .dashboard-page .usage-status-unknown {
+    color: #cbd5e1;
+    background: rgba(71, 85, 105, 0.28);
+    border-color: rgba(148, 163, 184, 0.32);
+}
+
 .dashboard-page .ip-address,
 .dashboard-page .table-model-tag {
     display: inline-flex;

@@ -166,8 +166,8 @@ class CodexProxyServiceTests(unittest.TestCase):
             ],
             body["input"],
         )
+        self.assertEqual(100, body["max_output_tokens"])
         for field in (
-            "max_output_tokens",
             "max_completion_tokens",
             "temperature",
             "top_p",
@@ -1080,7 +1080,8 @@ class CodexProxyServiceTests(unittest.TestCase):
                         self.assertEqual(1, streamed.count(absent))
                     self.assertIn(b"partial", streamed)
                     self.assertTrue(fake_response.closed)
-                    self.assertEqual([], completed_meta)
+                    self.assertEqual(1, len(completed_meta))
+                    self.assertEqual("unknown", completed_meta[0]["usage_status"])
                     self.assertEqual("error", auth_entry["usage_status"])
                     self.assertEqual("codex_stream_failed", auth_entry["usage_error_type"])
 
@@ -1189,7 +1190,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual("success", auth_entry["usage_status"])
         self.assertTrue(fake_response.closed)
 
-    def test_stream_close_marks_client_cancelled_without_completion_or_auth_update(self) -> None:
+    def test_stream_close_records_unknown_usage_without_auth_update(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
@@ -1222,7 +1223,8 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertIsNone(failure)
         self.assertEqual(200, status_code)
         self.assertIn(b"partial", first_chunk)
-        self.assertEqual([], completed_meta)
+        self.assertEqual(1, len(completed_meta))
+        self.assertEqual("unknown", completed_meta[0]["usage_status"])
         self.assertEqual("unknown", auth_entry["usage_status"])
         self.assertTrue(fake_response.closed)
 

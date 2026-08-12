@@ -128,6 +128,7 @@ class ProviderModelTestService:
             total_tokens=int(response_meta.get("total_tokens") or 0),
             prompt_tokens=int(response_meta.get("prompt_tokens") or 0),
             completion_tokens=int(response_meta.get("completion_tokens") or 0),
+            usage_status=str(response_meta.get("usage_status") or "unknown"),
             start_time=log_started_at,
             end_time=now_local_datetime(),
             ip_address=ip_address,
@@ -500,6 +501,7 @@ class ProviderModelTestService:
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
+            "usage_status": "unknown",
         }
 
     @staticmethod
@@ -519,10 +521,14 @@ class ProviderModelTestService:
             meta["prompt_tokens"] = int(prompt_tokens or 0)
         if completion_tokens is not None:
             meta["completion_tokens"] = int(completion_tokens or 0)
-        if total_tokens is not None:
-            meta["total_tokens"] = int(total_tokens or 0)
+        if total_tokens not in (None, "") and int(total_tokens or 0) > 0:
+            meta["total_tokens"] = int(total_tokens)
         elif prompt_tokens is not None or completion_tokens is not None:
             meta["total_tokens"] = int(meta["prompt_tokens"]) + int(meta["completion_tokens"])
+        if prompt_tokens is not None and completion_tokens is not None:
+            meta["usage_status"] = "known"
+        elif prompt_tokens is not None or completion_tokens is not None:
+            meta["usage_status"] = "partial"
 
     @staticmethod
     def _has_openai_chat_output_delta(payload: dict[str, Any]) -> bool:

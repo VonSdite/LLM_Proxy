@@ -22,6 +22,7 @@ from ..proxy_core import (
     is_terminal_chunk,
     should_emit_terminal_chunk,
 )
+from ..proxy_core.usage import public_usage_meta
 from ..utils.net import build_module_request_proxies, build_requests_proxy_settings
 from ..utils.proxy_warning import (
     PROXY_WARNING_ERROR_CODE,
@@ -765,9 +766,13 @@ class CodexProxyService:
                 item["role"] = "developer"
         if str(body.get("service_tier") or "").strip() not in {"priority", "fast"}:
             body.pop("service_tier", None)
+        max_output_tokens = body.get("max_output_tokens")
+        if max_output_tokens is None:
+            max_output_tokens = body.get("max_completion_tokens")
+        if max_output_tokens is not None:
+            body["max_output_tokens"] = max_output_tokens
+        body.pop("max_completion_tokens", None)
         for field in (
-            "max_output_tokens",
-            "max_completion_tokens",
             "temperature",
             "top_p",
             "truncation",
@@ -1135,6 +1140,11 @@ class CodexProxyService:
             try:
                 for event in decode_stream_events(response.iter_content(chunk_size=None), "sse_json"):
                     if event.kind == "json" and isinstance(event.payload, dict):
+                        ProxyResponseBuilder._update_meta_from_payload(
+                            meta,
+                            event.payload,
+                            source_format="openai_responses",
+                        )
                         event_type = str(event.payload.get("type") or event.event or "").strip()
                         if event_type in {"response.completed", "response.done"}:
                             completed = True
@@ -1157,7 +1167,6 @@ class CodexProxyService:
                             continue
 
                         if chunk.kind == "json" and isinstance(chunk.payload, dict):
-                            ProxyResponseBuilder._update_meta_from_payload(meta, chunk.payload)
                             if (
                                 target_format == "openai_chat"
                                 and not forward_stream_usage
@@ -1265,14 +1274,13 @@ class CodexProxyService:
                             )
                         except Exception as exc:
                             self._logger.error("Error in Codex on_stream_failure callback: %s", exc)
-                if (
-                    on_complete is not None
-                    and not downstream_cancelled
-                    and not transport_failed
-                    and not processing_failed
-                ):
+                should_record_completion = completed or (
+                    downstream_started
+                    and (downstream_cancelled or transport_failed or processing_failed or failed_payload is not None)
+                )
+                if on_complete is not None and should_record_completion:
                     try:
-                        on_complete(meta)
+                        on_complete(public_usage_meta(meta))
                     except Exception as exc:
                         self._logger.error("Error in Codex on_complete callback: %s", exc)
 
@@ -1340,11 +1348,20 @@ class CodexProxyService:
                 payload_for_translation,
             )
             meta = ProxyResponseBuilder._create_empty_meta()
+            ProxyResponseBuilder._update_meta_from_payload(
+                meta,
+                completed_payload,
+                source_format="openai_responses",
+            )
             if isinstance(translated_payload, dict):
-                ProxyResponseBuilder._update_meta_from_payload(meta, translated_payload)
+                ProxyResponseBuilder._update_meta_from_payload(
+                    meta,
+                    translated_payload,
+                    source_format="openai_responses",
+                )
             if on_complete is not None:
                 try:
-                    on_complete(meta)
+                    on_complete(public_usage_meta(meta))
                 except Exception as exc:
                     self._logger.error("Error in Codex on_complete callback: %s", exc)
 
@@ -1704,12 +1721,17 @@ class CodexProxyService:
         usage = usage or {}
         input_tokens = cls._safe_int(usage.get("input_tokens") or usage.get("prompt_tokens"), 0)
         output_tokens = cls._safe_int(usage.get("output_tokens") or usage.get("completion_tokens"), 0)
-        total_tokens = cls._safe_int(usage.get("total_tokens"), input_tokens + output_tokens)
+        total_candidate = cls._safe_int(usage.get("total_tokens"), 0)
+        total_tokens = total_candidate if total_candidate > 0 else input_tokens + output_tokens
+        has_input = "input_tokens" in usage or "prompt_tokens" in usage
+        has_output = "output_tokens" in usage or "completion_tokens" in usage
+        usage_status = "known" if has_input and has_output else "partial" if has_input or has_output else "unknown"
         return {
             "response_model": image_model,
             "total_tokens": total_tokens,
             "prompt_tokens": input_tokens,
             "completion_tokens": output_tokens,
+            "usage_status": usage_status,
         }
 
     @staticmethod
