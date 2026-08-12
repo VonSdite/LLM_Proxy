@@ -202,6 +202,26 @@ class RecordingProxyService:
         return self._proxy_result
 
 
+class CompletingProxyService(RecordingProxyService):
+    def __init__(self, proxy_result, response_meta: dict[str, Any]) -> None:
+        super().__init__(proxy_result)
+        self._response_meta = response_meta
+
+    def proxy_request(self, *args, **kwargs):
+        result = super().proxy_request(*args, **kwargs)
+        kwargs["on_complete"](dict(self._response_meta))
+        return result
+
+
+class RecordingLogService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def log_request(self, **kwargs) -> int:
+        self.calls.append(dict(kwargs))
+        return len(self.calls)
+
+
 class FakeCodexProxyService:
     def __init__(
         self,
@@ -911,6 +931,63 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
         self.assertIsNotNone(proxy_service.last_kwargs)
         assert proxy_service.last_kwargs is not None
         self.assertEqual("openai_responses", proxy_service.last_kwargs["resolved_target_format"])
+
+    def test_text_completion_logs_cache_usage_metadata(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/responses",
+            source_format="openai_responses",
+            model_list=("gpt-5.2",),
+            target_formats=("openai_responses",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        proxy_service = CompletingProxyService(
+            (
+                app.response_class(
+                    '{"id":"resp_1","object":"response"}',
+                    status=200,
+                    mimetype="application/json",
+                ),
+                200,
+                None,
+            ),
+            {
+                "response_model": "gpt-5.2",
+                "total_tokens": 15,
+                "prompt_tokens": 12,
+                "completion_tokens": 3,
+                "usage_status": "known",
+                "cache_read_input_tokens": 4,
+                "cache_creation_input_tokens": 2,
+                "cache_usage_status": "known",
+            },
+        )
+        log_service = RecordingLogService()
+        ProxyController(
+            ctx,
+            proxy_service,
+            FakeUserService(),
+            log_service,
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().post(
+            "/v1/responses",
+            json={"model": "demo/gpt-5.2", "input": "hi"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(1, len(log_service.calls))
+        self.assertEqual(4, log_service.calls[0]["cache_read_input_tokens"])
+        self.assertEqual(2, log_service.calls[0]["cache_creation_input_tokens"])
+        self.assertEqual("known", log_service.calls[0]["cache_usage_status"])
 
     def test_responses_route_allows_openai_responses_target(self) -> None:
         provider = LLMProvider(

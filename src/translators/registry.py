@@ -35,6 +35,24 @@ from .responses_bridge import (
 from .responses_bridge import (
     translate_openai_chat_downstream_chunk_to_responses as _translate_openai_chat_downstream_chunk_to_responses,
 )
+from .responses_claude_bridge import (
+    convert_claude_request_to_openai_responses as _convert_claude_request_to_openai_responses,
+)
+from .responses_claude_bridge import (
+    convert_claude_response_to_openai_responses as _convert_claude_response_to_openai_responses,
+)
+from .responses_claude_bridge import (
+    convert_openai_responses_request_to_claude as _convert_openai_responses_request_to_claude,
+)
+from .responses_claude_bridge import (
+    convert_openai_responses_response_to_claude as _convert_openai_responses_response_to_claude,
+)
+from .responses_claude_bridge import (
+    translate_claude_stream_to_openai_responses as _translate_claude_stream_to_openai_responses,
+)
+from .responses_claude_bridge import (
+    translate_openai_responses_stream_to_claude as _translate_openai_responses_stream_to_claude,
+)
 from .tool_result_utils import normalize_tool_result_content
 
 
@@ -230,7 +248,11 @@ class OpenAIResponsesTranslator:
 
         if event_type == "response.output_item.added":
             item = payload.get("item") or {}
-            if isinstance(item, dict) and str(item.get("type") or "").strip().lower() == "function_call":
+            if isinstance(item, dict) and str(item.get("type") or "").strip().lower() in {
+                "function_call",
+                "custom_tool_call",
+            }:
+                item_type = str(item.get("type") or "").strip().lower()
                 item_id = str(item.get("id") or payload.get("item_id") or "").strip()
                 if item_id:
                     call_id = str(item.get("call_id") or "").strip()
@@ -240,25 +262,30 @@ class OpenAIResponsesTranslator:
                     if accumulator is None:
                         tool_index = int(state.get("next_tool_index") or 0)
                         state["next_tool_index"] = tool_index + 1
-                        initial_input = item.get("input")
-                        initial_arguments = []
-                        if isinstance(initial_input, dict) and initial_input:
-                            initial_arguments.append(json.dumps(initial_input, ensure_ascii=False))
                         accumulator = {
                             "id": call_id,
-                            "name": str(item.get("name") or ""),
+                            "name": _qualified_responses_tool_name(item),
                             "tool_index": tool_index,
                             "delta_emitted": False,
-                            "arguments": initial_arguments,
+                            "arguments": [],
                         }
                         items[item_id] = accumulator
                     else:
                         accumulator["id"] = call_id or accumulator.get("id") or item_id
                         if item.get("name") not in (None, ""):
-                            accumulator["name"] = str(item["name"])
+                            accumulator["name"] = _qualified_responses_tool_name(item)
                     state["saw_tool_call"] = True
                     if not accumulator.get("delta_emitted"):
                         accumulator["delta_emitted"] = True
+                        initial_arguments = (
+                            json.dumps({"input": str(item.get("input") or "")}, ensure_ascii=False)
+                            if item_type == "custom_tool_call" and item.get("input") not in (None, "")
+                            else str(item.get("arguments") or "")
+                            if item_type == "function_call"
+                            else ""
+                        )
+                        if initial_arguments:
+                            accumulator["arguments"].append(initial_arguments)
                         outputs.append(
                             DownstreamChunk(
                                 kind="json",
@@ -273,7 +300,7 @@ class OpenAIResponsesTranslator:
                                         "type": "function",
                                         "function": {
                                             "name": accumulator.get("name") or "",
-                                            "arguments": "",
+                                            "arguments": initial_arguments,
                                         },
                                     },
                                 ),
@@ -286,7 +313,7 @@ class OpenAIResponsesTranslator:
             if not isinstance(item, dict):
                 return outputs
             item_type = str(item.get("type") or "").strip().lower()
-            if item_type != "function_call":
+            if item_type not in {"function_call", "custom_tool_call"}:
                 return outputs
             item_id = str(item.get("id") or payload.get("item_id") or "").strip()
             if not item_id:
@@ -297,16 +324,20 @@ class OpenAIResponsesTranslator:
                 state["next_tool_index"] = tool_index + 1
                 accumulator = {
                     "id": str(item.get("call_id") or item_id),
-                    "name": str(item.get("name") or ""),
+                    "name": _qualified_responses_tool_name(item),
                     "tool_index": tool_index,
                     "delta_emitted": False,
                     "arguments": [],
                 }
                 items[item_id] = accumulator
             elif item.get("name") not in (None, ""):
-                accumulator["name"] = str(item["name"])
+                accumulator["name"] = _qualified_responses_tool_name(item)
             state["saw_tool_call"] = True
-            arguments = item.get("arguments")
+            arguments = (
+                json.dumps({"input": str(item.get("input") or "")}, ensure_ascii=False)
+                if item_type == "custom_tool_call"
+                else item.get("arguments")
+            )
             current_arguments = "".join(accumulator.get("arguments") or [])
             function: dict[str, Any] = {}
             if isinstance(arguments, str):
@@ -377,7 +408,9 @@ class OpenAIResponsesTranslator:
                 )
             return outputs
 
-        if event_type == "response.function_call_arguments.delta":
+        if event_type in {"response.function_call_arguments.delta", "response.custom_tool_call_input.delta"}:
+            if event_type == "response.custom_tool_call_input.delta":
+                return outputs
             item_id = str(payload.get("item_id") or "")
             accumulator = items.get(item_id)
             delta = payload.get("delta")
@@ -442,10 +475,12 @@ class OpenAIResponsesTranslator:
                     )
             return outputs
 
-        if event_type == "response.function_call_arguments.done":
+        if event_type in {"response.function_call_arguments.done", "response.custom_tool_call_input.done"}:
             item_id = str(payload.get("item_id") or "")
             accumulator = items.get(item_id)
             arguments = payload.get("arguments")
+            if event_type == "response.custom_tool_call_input.done":
+                arguments = json.dumps({"input": str(payload.get("input") or "")}, ensure_ascii=False)
             if accumulator is not None and isinstance(arguments, str):
                 current_arguments = "".join(accumulator.get("arguments") or [])
                 if arguments.startswith(current_arguments):
@@ -692,15 +727,17 @@ class ClaudeChatTranslator:
             if budget_tokens > 0 and int(translated["max_tokens"]) <= budget_tokens:
                 translated["max_tokens"] = budget_tokens + 1
 
-        system_parts: list[str] = []
+        system_parts: list[dict[str, Any]] = []
         for message in body.get("messages", []) or []:
             if not isinstance(message, dict):
                 continue
             role = str(message.get("role") or "").strip().lower()
-            if role == "system":
-                text = _extract_text_content(message.get("content"))
-                if text:
-                    system_parts.append(text)
+            if role in {"system", "developer"}:
+                blocks = _to_claude_content_blocks(message.get("content"))
+                text_blocks = [block for block in blocks if block.get("type") == "text"]
+                if text_blocks:
+                    _copy_cache_control(message, text_blocks[-1])
+                    system_parts.extend(text_blocks)
                 continue
             if role == "tool":
                 tool_use_id = str(message.get("tool_call_id") or "").strip()
@@ -720,6 +757,8 @@ class ClaudeChatTranslator:
                 continue
 
             content_blocks = _to_claude_content_blocks(message.get("content"))
+            if content_blocks:
+                _copy_cache_control(message, content_blocks[-1])
             if role == "assistant":
                 content_blocks.extend(_to_claude_tool_use_blocks(message.get("tool_calls")))
             translated["messages"].append(
@@ -730,7 +769,10 @@ class ClaudeChatTranslator:
             )
 
         if system_parts:
-            translated["system"] = "\n\n".join(system_parts)
+            if len(system_parts) == 1 and "cache_control" not in system_parts[0]:
+                translated["system"] = system_parts[0]["text"]
+            else:
+                translated["system"] = system_parts
 
         tools = _to_claude_tools(body.get("tools"))
         if tools:
@@ -1060,15 +1102,14 @@ class OpenAIChatClaudeTranslator:
 
 
 @dataclass(frozen=True)
-class ComposedTranslator:
-    source_format: str
-    target_format: str
-    source_to_chat: Translator
-    chat_to_target: Translator
+class OpenAIResponsesClaudeTranslator:
+    """上游 Responses 到下游 Claude 的直接转换器。"""
+
+    source_format: str = "openai_responses"
+    target_format: str = "claude_chat"
 
     def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
-        chat_request = self.chat_to_target.translate_request(model_name, body, stream)
-        return self.source_to_chat.translate_request(model_name, chat_request, stream)
+        return _convert_claude_request_to_openai_responses(model_name, body, stream)
 
     def translate_stream_event(
         self,
@@ -1078,39 +1119,13 @@ class ComposedTranslator:
         event: StreamEvent,
         state: dict[str, Any],
     ) -> list[DownstreamChunk]:
-        chat_request = state.setdefault(
-            "chat_request",
-            self.chat_to_target.translate_request(
-                model_name,
-                original_request,
-                bool(original_request.get("stream", False)),
-            ),
-        )
-        chat_state = state.setdefault("chat_state", {})
-        target_state = state.setdefault("target_state", {})
-        chat_chunks = self.source_to_chat.translate_stream_event(
+        return _translate_openai_responses_stream_to_claude(
             model_name,
-            chat_request,
+            original_request,
             translated_request,
             event,
-            chat_state,
+            state.setdefault("responses_claude_bridge", {}),
         )
-        outputs: list[DownstreamChunk] = []
-        for chat_chunk in chat_chunks:
-            outputs.extend(
-                self.chat_to_target.translate_stream_event(
-                    model_name,
-                    original_request,
-                    chat_request,
-                    StreamEvent(
-                        kind=chat_chunk.kind,
-                        payload=chat_chunk.payload,
-                        event=chat_chunk.event,
-                    ),
-                    target_state,
-                )
-            )
-        return outputs
 
     def translate_nonstream_response(
         self,
@@ -1119,22 +1134,52 @@ class ComposedTranslator:
         translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
-        chat_request = self.chat_to_target.translate_request(
+        return _convert_openai_responses_response_to_claude(
             model_name,
             original_request,
-            bool(original_request.get("stream", False)),
-        )
-        chat_response = self.source_to_chat.translate_nonstream_response(
-            model_name,
-            chat_request,
             translated_request,
             payload,
         )
-        return self.chat_to_target.translate_nonstream_response(
+
+
+@dataclass(frozen=True)
+class ClaudeOpenAIResponsesTranslator:
+    """上游 Claude 到下游 Responses 的直接转换器。"""
+
+    source_format: str = "claude_chat"
+    target_format: str = "openai_responses"
+
+    def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
+        return _convert_openai_responses_request_to_claude(model_name, body, stream)
+
+    def translate_stream_event(
+        self,
+        model_name: str,
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
+        event: StreamEvent,
+        state: dict[str, Any],
+    ) -> list[DownstreamChunk]:
+        return _translate_claude_stream_to_openai_responses(
             model_name,
             original_request,
-            chat_request,
-            chat_response,
+            translated_request,
+            event,
+            state.setdefault("claude_responses_bridge", {}),
+        )
+
+    def translate_nonstream_response(
+        self,
+        model_name: str,
+        original_request: dict[str, Any],
+        translated_request: dict[str, Any],
+        payload: Any,
+    ) -> Any:
+        return _convert_claude_response_to_openai_responses(
+            model_name,
+            original_request,
+            translated_request,
+            payload,
         )
 
 
@@ -1166,6 +1211,8 @@ def build_default_translator_registry() -> TranslatorRegistry:
     claude_chat = ClaudeChatTranslator()
     claude_passthrough = ClaudePassthroughTranslator()
     openai_chat_claude = OpenAIChatClaudeTranslator()
+    openai_responses_claude = OpenAIResponsesClaudeTranslator()
+    claude_openai_responses = ClaudeOpenAIResponsesTranslator()
 
     builtin_translators: tuple[Translator, ...] = (
         openai_chat,
@@ -1175,15 +1222,10 @@ def build_default_translator_registry() -> TranslatorRegistry:
         claude_chat,
         claude_passthrough,
         openai_chat_claude,
+        openai_responses_claude,
+        claude_openai_responses,
     )
     for translator in builtin_translators:
-        registry.register(translator)
-
-    composed_translators: tuple[Translator, ...] = (
-        ComposedTranslator("openai_responses", "claude_chat", openai_responses, openai_chat_claude),
-        ComposedTranslator("claude_chat", "openai_responses", claude_chat, openai_chat_responses),
-    )
-    for translator in composed_translators:
         registry.register(translator)
 
     return registry
@@ -1201,12 +1243,48 @@ def _to_claude_content_blocks(content: Any) -> list[dict[str, Any]]:
             continue
         item_type = str(item.get("type") or "").strip().lower()
         if item_type in {"text", "input_text"} and isinstance(item.get("text"), str):
-            blocks.append({"type": "text", "text": item["text"]})
+            block = {"type": "text", "text": item["text"]}
+            _copy_cache_control(item, block)
+            blocks.append(block)
         elif item_type == "image_url":
             image_url = item.get("image_url")
             if isinstance(image_url, dict) and isinstance(image_url.get("url"), str):
-                blocks.append({"type": "text", "text": f"[image] {image_url['url']}"})
+                block = _openai_url_to_claude_content("image", image_url["url"])
+                if block is not None:
+                    _copy_cache_control(item, block)
+                    blocks.append(block)
+        elif item_type in {"file", "input_file"}:
+            file_payload = item.get("file") if isinstance(item.get("file"), dict) else item
+            file_data = file_payload.get("file_data") if isinstance(file_payload, dict) else None
+            if isinstance(file_data, str):
+                block = _openai_url_to_claude_content("document", file_data)
+                if block is not None:
+                    _copy_cache_control(item, block)
+                    blocks.append(block)
     return blocks
+
+
+def _copy_cache_control(source: dict[str, Any], target: dict[str, Any]) -> None:
+    if isinstance(source.get("cache_control"), dict):
+        target["cache_control"] = copy.deepcopy(source["cache_control"])
+
+
+def _openai_url_to_claude_content(content_type: str, value: str) -> dict[str, Any] | None:
+    if value.startswith("data:") and ";base64," in value:
+        metadata, data = value[5:].split(";base64,", 1)
+        if not data:
+            return None
+        return {
+            "type": content_type,
+            "source": {
+                "type": "base64",
+                "media_type": metadata or "application/octet-stream",
+                "data": data,
+            },
+        }
+    if content_type == "image":
+        return {"type": "image", "source": {"type": "url", "url": value}}
+    return None
 
 
 def _to_claude_tool_use_blocks(tool_calls: Any) -> list[dict[str, Any]]:
@@ -1250,13 +1328,13 @@ def _to_claude_tools(tools: Any) -> list[dict[str, Any]]:
         function = tool.get("function")
         if not isinstance(function, dict) or not function.get("name"):
             continue
-        translated.append(
-            {
-                "name": str(function.get("name")),
-                "description": str(function.get("description") or ""),
-                "input_schema": function.get("parameters") or {"type": "object", "properties": {}},
-            }
-        )
+        translated_tool = {
+            "name": str(function.get("name")),
+            "description": str(function.get("description") or ""),
+            "input_schema": function.get("parameters") or {"type": "object", "properties": {}},
+        }
+        _copy_cache_control(tool, translated_tool)
+        translated.append(translated_tool)
     return translated
 
 
@@ -1303,7 +1381,7 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]
         if not isinstance(message, dict):
             continue
         role = str(message.get("role") or "").strip().lower()
-        if role == "system":
+        if role in {"system", "developer"}:
             text = _extract_text_content(message.get("content"))
             if text:
                 instructions.append(text)
@@ -1410,11 +1488,23 @@ def _extract_openai_responses_usage(usage: Any) -> dict[str, Any]:
     if not isinstance(usage, dict):
         return {}
 
+    usage_present = any(
+        key in usage
+        for key in (
+            "input_tokens",
+            "prompt_tokens",
+            "output_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "input_tokens_details",
+            "prompt_tokens_details",
+        )
+    )
+    if not usage_present:
+        return {}
     prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
     completion_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
     total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
-    if prompt_tokens <= 0 and completion_tokens <= 0 and total_tokens <= 0:
-        return {}
     result: dict[str, Any] = {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -1422,16 +1512,20 @@ def _extract_openai_responses_usage(usage: Any) -> dict[str, Any]:
     }
     input_details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details")
     if isinstance(input_details, dict):
-        cached_tokens = int(input_details.get("cached_tokens") or 0)
-        cache_creation_tokens = int(
-            input_details.get("cache_creation_tokens") or input_details.get("cache_creation_input_tokens") or 0
+        cached_present, cached_tokens = _first_present_usage_int(input_details, "cached_tokens")
+        cache_creation_present, cache_creation_tokens = _first_present_usage_int(
+            input_details,
+            "cache_write_tokens",
+            "cache_creation_tokens",
+            "cache_creation_input_tokens",
+            "cached_creation_tokens",
         )
-        if cached_tokens > 0 or cache_creation_tokens > 0:
+        if cached_present or cache_creation_present:
             prompt_details: dict[str, Any] = {}
-            if cached_tokens > 0:
+            if cached_present:
                 prompt_details["cached_tokens"] = cached_tokens
-            if cache_creation_tokens > 0:
-                prompt_details["cache_creation_tokens"] = cache_creation_tokens
+            if cache_creation_present:
+                prompt_details["cache_write_tokens"] = cache_creation_tokens
             result["prompt_tokens_details"] = prompt_details
     output_details = usage.get("output_tokens_details") or usage.get("completion_tokens_details")
     if isinstance(output_details, dict):
@@ -1439,6 +1533,17 @@ def _extract_openai_responses_usage(usage: Any) -> dict[str, Any]:
         if reasoning_tokens > 0:
             result["completion_tokens_details"] = {"reasoning_tokens": reasoning_tokens}
     return result
+
+
+def _first_present_usage_int(payload: dict[str, Any], *keys: str) -> tuple[bool, int]:
+    for key in keys:
+        if key not in payload:
+            continue
+        try:
+            return True, max(int(payload[key] or 0), 0)
+        except (TypeError, ValueError):
+            return True, 0
+    return False, 0
 
 
 def _extract_openai_responses_message_and_tool_calls(outputs: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -1461,19 +1566,33 @@ def _extract_openai_responses_message_and_tool_calls(outputs: Any) -> tuple[dict
                     message["content"] += part["text"]
                 elif part_type == "refusal" and isinstance(part.get("refusal"), str):
                     message["refusal"] = str(message.get("refusal") or "") + part["refusal"]
-        elif item_type == "function_call":
+        elif item_type in {"function_call", "custom_tool_call"}:
+            arguments = (
+                json.dumps({"input": str(item.get("input") or "")}, ensure_ascii=False)
+                if item_type == "custom_tool_call"
+                else str(item.get("arguments") or "{}")
+            )
             tool_calls.append(
                 {
                     "id": str(item.get("call_id") or item.get("id") or ""),
                     "type": "function",
                     "function": {
-                        "name": str(item.get("name") or ""),
-                        "arguments": str(item.get("arguments") or "{}"),
+                        "name": _qualified_responses_tool_name(item),
+                        "arguments": arguments,
                     },
                 }
             )
 
     return message, tool_calls
+
+
+def _qualified_responses_tool_name(item: dict[str, Any]) -> str:
+    name = str(item.get("name") or "").strip()
+    namespace = str(item.get("namespace") or "").strip()
+    if not namespace or name.startswith("mcp__") or name.startswith(namespace):
+        return name
+    separator = "" if namespace.endswith("__") else "__"
+    return f"{namespace}{separator}{name}"
 
 
 def _extract_openai_responses_reasoning_content(outputs: Any) -> str:

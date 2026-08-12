@@ -10,6 +10,8 @@ from typing import Any
 USAGE_STATUS_UNKNOWN = "unknown"
 USAGE_STATUS_PARTIAL = "partial"
 USAGE_STATUS_KNOWN = "known"
+CACHE_USAGE_STATUS_UNKNOWN = "unknown"
+CACHE_USAGE_STATUS_KNOWN = "known"
 
 
 def safe_int(value: Any) -> int:
@@ -30,6 +32,7 @@ def create_usage_meta() -> dict[str, Any]:
         "usage_status": USAGE_STATUS_UNKNOWN,
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0,
+        "cache_usage_status": CACHE_USAGE_STATUS_UNKNOWN,
         "reasoning_tokens": 0,
         "_usage_fields": set(),
         "_total_explicit": False,
@@ -61,8 +64,11 @@ def extract_canonical_usage(payload: Any, source_format: str | None = None) -> d
     assert usage is not None
     if normalized_source == "claude_chat" and _contains_claude_usage_fields(usage):
         input_tokens = _optional_int(usage.get("input_tokens"))
-        cache_read = _optional_int(usage.get("cache_read_input_tokens")) or 0
-        cache_creation = _optional_int(usage.get("cache_creation_input_tokens")) or 0
+        cache_read_value = _optional_int(usage.get("cache_read_input_tokens"))
+        cache_creation_value = _optional_int(usage.get("cache_creation_input_tokens"))
+        cache_read = cache_read_value or 0
+        cache_creation = cache_creation_value or 0
+        cache_usage_known = any(key in usage for key in ("cache_read_input_tokens", "cache_creation_input_tokens"))
         output_tokens = _optional_int(usage.get("output_tokens"))
         if isinstance(payload, dict) and payload.get("type") == "message_start" and output_tokens == 0:
             output_tokens = None
@@ -86,6 +92,9 @@ def extract_canonical_usage(payload: Any, source_format: str | None = None) -> d
             fields=fields,
             cache_read=cache_read,
             cache_creation=cache_creation,
+            cache_usage_known=cache_usage_known,
+            cache_read_present="cache_read_input_tokens" in usage,
+            cache_creation_present="cache_creation_input_tokens" in usage,
             reasoning=reasoning or 0,
             usage_seen=True,
         )
@@ -94,15 +103,72 @@ def extract_canonical_usage(payload: Any, source_format: str | None = None) -> d
     completion = _first_optional_int(usage, "completion_tokens", "output_tokens")
     total = _optional_int(usage.get("total_tokens"))
     details = usage.get("prompt_tokens_details")
+    if not isinstance(details, dict):
+        details = usage.get("input_tokens_details")
     cached = _optional_int(details.get("cached_tokens")) if isinstance(details, dict) else None
     cache_creation = _first_optional_int(
         usage,
         "cache_creation_input_tokens",
         "cache_creation_tokens",
+        "cached_creation_tokens",
+        "cache_write_tokens",
     )
     if cache_creation is None and isinstance(details, dict):
-        cache_creation = _first_optional_int(details, "cache_creation_tokens", "cache_creation_input_tokens")
+        cache_creation = _first_optional_int(
+            details,
+            "cache_write_tokens",
+            "cache_creation_tokens",
+            "cache_creation_input_tokens",
+            "cached_creation_tokens",
+        )
+    cache_usage_known = any(
+        key in usage
+        for key in (
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+            "cache_creation_tokens",
+            "cached_creation_tokens",
+            "cache_write_tokens",
+        )
+    ) or (
+        isinstance(details, dict)
+        and any(
+            key in details
+            for key in (
+                "cached_tokens",
+                "cache_write_tokens",
+                "cache_creation_tokens",
+                "cache_creation_input_tokens",
+                "cached_creation_tokens",
+            )
+        )
+    )
+    cache_read_present = "cache_read_input_tokens" in usage or (
+        isinstance(details, dict) and "cached_tokens" in details
+    )
+    cache_creation_present = any(
+        key in usage
+        for key in (
+            "cache_creation_input_tokens",
+            "cache_creation_tokens",
+            "cached_creation_tokens",
+            "cache_write_tokens",
+        )
+    ) or (
+        isinstance(details, dict)
+        and any(
+            key in details
+            for key in (
+                "cache_write_tokens",
+                "cache_creation_tokens",
+                "cache_creation_input_tokens",
+                "cached_creation_tokens",
+            )
+        )
+    )
     completion_details = usage.get("completion_tokens_details")
+    if not isinstance(completion_details, dict):
+        completion_details = usage.get("output_tokens_details")
     reasoning = (
         _optional_int(completion_details.get("reasoning_tokens")) if isinstance(completion_details, dict) else None
     )
@@ -123,6 +189,9 @@ def extract_canonical_usage(payload: Any, source_format: str | None = None) -> d
         fields=fields,
         cache_read=cached or 0,
         cache_creation=cache_creation or 0,
+        cache_usage_known=cache_usage_known,
+        cache_read_present=cache_read_present,
+        cache_creation_present=cache_creation_present,
         reasoning=reasoning or 0,
         usage_seen=True,
     )
@@ -154,6 +223,9 @@ def merge_usage_meta(meta: dict[str, Any], payload: Any, source_format: str | No
             meta[field] = value
         fields.add(field)
 
+    if incoming.get("cache_usage_status") == CACHE_USAGE_STATUS_KNOWN:
+        meta["cache_usage_status"] = CACHE_USAGE_STATUS_KNOWN
+
     if incoming.get("total_tokens") is not None:
         value = safe_int(incoming["total_tokens"])
         if not meta.get("_total_explicit") or (safe_int(meta.get("total_tokens")) == 0 and value > 0):
@@ -184,9 +256,9 @@ def openai_usage_to_claude(usage: Any) -> dict[str, Any]:
         "input_tokens": max(prompt - cached - cache_creation, 0),
         "output_tokens": safe_int(canonical.get("completion_tokens")),
     }
-    if cached > 0:
+    if canonical.get("_cache_read_present"):
         result["cache_read_input_tokens"] = cached
-    if cache_creation > 0:
+    if canonical.get("_cache_creation_present"):
         result["cache_creation_input_tokens"] = cache_creation
     reasoning = safe_int(canonical.get("reasoning_tokens"))
     if reasoning > 0:
@@ -206,13 +278,16 @@ def claude_usage_to_openai(usage: Any) -> dict[str, Any]:
     }
     cached = safe_int(canonical.get("cache_read_input_tokens"))
     cache_creation = safe_int(canonical.get("cache_creation_input_tokens"))
-    if cached or cache_creation:
+    if canonical.get("cache_usage_status") == CACHE_USAGE_STATUS_KNOWN:
         details: dict[str, Any] = {}
-        if cached:
+        if canonical.get("_cache_read_present"):
             details["cached_tokens"] = cached
-        if cache_creation:
+        if canonical.get("_cache_creation_present"):
+            details["cache_write_tokens"] = cache_creation
+            details["cached_creation_tokens"] = cache_creation
             details["cache_creation_tokens"] = cache_creation
-        result["prompt_tokens_details"] = details
+        if details:
+            result["prompt_tokens_details"] = details
     reasoning = safe_int(canonical.get("reasoning_tokens"))
     if reasoning:
         result["completion_tokens_details"] = {"reasoning_tokens": reasoning}
@@ -269,6 +344,9 @@ def _build_usage(
     fields: set[str],
     cache_read: int = 0,
     cache_creation: int = 0,
+    cache_usage_known: bool = False,
+    cache_read_present: bool = False,
+    cache_creation_present: bool = False,
     reasoning: int = 0,
     usage_seen: bool = True,
 ) -> dict[str, Any]:
@@ -283,10 +361,14 @@ def _build_usage(
     elif prompt is not None or completion is not None:
         result["total_tokens"] = max(prompt or 0, 0) + max(completion or 0, 0)
         result["_total_explicit"] = False
-    if cache_read:
+    if cache_usage_known:
         result["cache_read_input_tokens"] = cache_read
-    if cache_creation:
         result["cache_creation_input_tokens"] = cache_creation
+        result["cache_usage_status"] = CACHE_USAGE_STATUS_KNOWN
+    else:
+        result["cache_usage_status"] = CACHE_USAGE_STATUS_UNKNOWN
+    result["_cache_read_present"] = cache_read_present
+    result["_cache_creation_present"] = cache_creation_present
     if reasoning:
         result["reasoning_tokens"] = reasoning
     return result

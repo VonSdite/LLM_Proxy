@@ -98,12 +98,15 @@
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="statsSortIndicator_completion_tokens"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="statsSortIndicator_total_tokens"></span></button></th>
                                 <th>Token 状态</th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('cache_read_input_tokens', 'number')">缓存读取 Token <span class="sort-indicator" id="statsSortIndicator_cache_read_input_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('cache_creation_input_tokens', 'number')">缓存写入 Token <span class="sort-indicator" id="statsSortIndicator_cache_creation_input_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('cache_hit_rate', 'number')">缓存命中率 <span class="sort-indicator" id="statsSortIndicator_cache_hit_rate"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_count', 'number')">请求数 <span class="sort-indicator" id="statsSortIndicator_request_count"></span></button></th>
                             </tr>
                         </thead>
                         <tbody id="statsTable">
                             <tr>
-                                <td colspan="9" class="loading">加载统计数据...</td>
+                                <td colspan="12" class="loading">加载统计数据...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -120,6 +123,9 @@
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="userUsageSortIndicator_completion_tokens"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="userUsageSortIndicator_total_tokens"></span></button></th>
                                 <th>Token 状态</th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('cache_read_input_tokens', 'number')">缓存读取 Token <span class="sort-indicator" id="userUsageSortIndicator_cache_read_input_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('cache_creation_input_tokens', 'number')">缓存写入 Token <span class="sort-indicator" id="userUsageSortIndicator_cache_creation_input_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('cache_hit_rate', 'number')">缓存命中率 <span class="sort-indicator" id="userUsageSortIndicator_cache_hit_rate"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('request_count', 'number')">请求数 <span class="sort-indicator" id="userUsageSortIndicator_request_count"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('ip_count', 'number')">关联 IP 数 <span class="sort-indicator" id="userUsageSortIndicator_ip_count"></span></button></th>
                                 <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleUserUsageSort('last_request_date', 'date')">最近请求日期 <span class="sort-indicator" id="userUsageSortIndicator_last_request_date"></span></button></th>
@@ -127,7 +133,7 @@
                         </thead>
                         <tbody id="userUsageTable">
                             <tr>
-                                <td colspan="8" class="loading">加载用户用量...</td>
+                                <td colspan="11" class="loading">加载用户用量...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -148,6 +154,9 @@
                                     <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="logsSortIndicator_completion_tokens"></span></button></th>
                                     <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="logsSortIndicator_total_tokens"></span></button></th>
                                     <th>Token 状态</th>
+                                    <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('cache_read_input_tokens', 'number')">缓存读取 Token <span class="sort-indicator" id="logsSortIndicator_cache_read_input_tokens"></span></button></th>
+                                    <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('cache_creation_input_tokens', 'number')">缓存写入 Token <span class="sort-indicator" id="logsSortIndicator_cache_creation_input_tokens"></span></button></th>
+                                    <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('cache_hit_rate', 'number')">缓存命中率 <span class="sort-indicator" id="logsSortIndicator_cache_hit_rate"></span></button></th>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('start_time', 'date')">开始时间 <span class="sort-indicator" id="logsSortIndicator_start_time"></span></button></th>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('end_time', 'date')">结束时间 <span class="sort-indicator" id="logsSortIndicator_end_time"></span></button></th>
                                     <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('duration', 'number')">耗时(秒) <span class="sort-indicator" id="logsSortIndicator_duration"></span></button></th>
@@ -155,7 +164,7 @@
                             </thead>
                             <tbody id="logsTable">
                                 <tr>
-                                    <td colspan="11" class="loading">加载请求数据...</td>
+                                    <td colspan="14" class="loading">加载请求数据...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -306,6 +315,27 @@
                 unknown: '上游未提供可确认的 token 用量',
             };
             return `<span class="usage-status usage-status-${status}" title="${titles[status]}">${labels[status]}</span>`;
+        }
+
+        function renderCacheHitRate(value, status) {
+            if (normalizeUsageStatus(status) === 'unknown' || value === null || value === undefined) {
+                return '<span title="上游未提供缓存 token 明细">未知</span>';
+            }
+            const rate = Math.max(normalizeNumber(value), 0) * 100;
+            return `<span class="numeric-value">${rate.toFixed(2)}%</span>`;
+        }
+
+        function aggregateCacheHitRate(items) {
+            const knownPromptTokens = items.reduce(
+                (sum, item) => sum + normalizeNumber(item.cache_known_prompt_tokens),
+                0,
+            );
+            if (knownPromptTokens <= 0) return null;
+            const cacheReadTokens = items.reduce(
+                (sum, item) => sum + normalizeNumber(item.cache_read_input_tokens),
+                0,
+            );
+            return cacheReadTokens / knownPromptTokens;
         }
 
         function toDateInput(date) {
@@ -1063,7 +1093,7 @@
         // 加载统计数据
         async function loadStatistics() {
             const requestToken = ++statsRequestToken;
-            document.getElementById('statsTable').innerHTML = '<tr><td colspan="9" class="loading">加载统计数据...</td></tr>';
+            document.getElementById('statsTable').innerHTML = '<tr><td colspan="12" class="loading">加载统计数据...</td></tr>';
 
             try {
                 const params = buildDashboardSearchParams({
@@ -1083,17 +1113,17 @@
             } catch (error) {
                 if (requestToken !== statsRequestToken) return;
                 console.error('加载统计数据失败:', error);
-                document.getElementById('statsTable').innerHTML = '<tr><td colspan="9" class="error">加载统计数据失败</td></tr>';
+                document.getElementById('statsTable').innerHTML = '<tr><td colspan="12" class="error">加载统计数据失败</td></tr>';
                 showMessage('加载统计数据失败，请稍后重试', 'error');
             }
         }
 
         function renderStatistics() {
             const statsTable = document.getElementById('statsTable');
-            updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
+            updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens', 'cache_hit_rate', 'request_count']);
 
             if (statsData.length === 0) {
-                statsTable.innerHTML = `<tr><td colspan="9" class="empty-state">
+                statsTable.innerHTML = `<tr><td colspan="12" class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
@@ -1107,12 +1137,16 @@
             let totalTokens = 0;
             let totalPromptTokens = 0;
             let totalCompletionTokens = 0;
+            let totalCacheReadTokens = 0;
+            let totalCacheCreationTokens = 0;
 
             statsData.forEach(stat => {
                 totalRequests += stat.request_count || 0;
                 totalTokens += stat.total_tokens || 0;
                 totalPromptTokens += stat.prompt_tokens || 0;
                 totalCompletionTokens += stat.completion_tokens || 0;
+                totalCacheReadTokens += stat.cache_read_input_tokens || 0;
+                totalCacheCreationTokens += stat.cache_creation_input_tokens || 0;
 
                 html += `
                     <tr>
@@ -1124,6 +1158,9 @@
                         <td class="num-col">${renderNumber(stat.completion_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(stat.total_tokens || 0)}</td>
                         <td>${renderUsageStatus(stat.usage_status)}</td>
+                        <td class="num-col">${renderNumber(stat.cache_read_input_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(stat.cache_creation_input_tokens || 0)}</td>
+                        <td class="num-col">${renderCacheHitRate(stat.cache_hit_rate, stat.cache_usage_status)}</td>
                         <td class="num-col">${renderNumber(stat.request_count || 0)}</td>
                     </tr>
                 `;
@@ -1136,6 +1173,9 @@
                     <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
                     <td class="num-col">${renderNumber(totalTokens)}</td>
                     <td>${renderUsageStatus(combineUsageStatuses(statsData))}</td>
+                    <td class="num-col">${renderNumber(totalCacheReadTokens)}</td>
+                    <td class="num-col">${renderNumber(totalCacheCreationTokens)}</td>
+                    <td class="num-col">${renderCacheHitRate(aggregateCacheHitRate(statsData), 'known')}</td>
                     <td class="num-col">${renderNumber(totalRequests)}</td>
                 </tr>
             `;
@@ -1144,7 +1184,7 @@
 
         async function loadUserUsageSummary() {
             const requestToken = ++userUsageRequestToken;
-            document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="8" class="loading">加载用户用量...</td></tr>';
+            document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="11" class="loading">加载用户用量...</td></tr>';
 
             try {
                 const params = buildDashboardSearchParams({
@@ -1164,17 +1204,17 @@
             } catch (error) {
                 if (requestToken !== userUsageRequestToken) return;
                 console.error('加载用户用量失败:', error);
-                document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="8" class="error">加载用户用量失败</td></tr>';
+                document.getElementById('userUsageTable').innerHTML = '<tr><td colspan="11" class="error">加载用户用量失败</td></tr>';
                 showMessage('加载用户用量失败，请稍后重试', 'error');
             }
         }
 
         function renderUserUsageSummary() {
             const tableBody = document.getElementById('userUsageTable');
-            updateSortIndicators('userUsage', userUsageSortState, ['username', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count', 'ip_count', 'last_request_date']);
+            updateSortIndicators('userUsage', userUsageSortState, ['username', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens', 'cache_hit_rate', 'request_count', 'ip_count', 'last_request_date']);
 
             if (userUsageData.length === 0) {
-                tableBody.innerHTML = `<tr><td colspan="8" class="empty-state">
+                tableBody.innerHTML = `<tr><td colspan="11" class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
@@ -1188,12 +1228,16 @@
             let totalTokens = 0;
             let totalPromptTokens = 0;
             let totalCompletionTokens = 0;
+            let totalCacheReadTokens = 0;
+            let totalCacheCreationTokens = 0;
 
             userUsageData.forEach(item => {
                 totalRequests += item.request_count || 0;
                 totalTokens += item.total_tokens || 0;
                 totalPromptTokens += item.prompt_tokens || 0;
                 totalCompletionTokens += item.completion_tokens || 0;
+                totalCacheReadTokens += item.cache_read_input_tokens || 0;
+                totalCacheCreationTokens += item.cache_creation_input_tokens || 0;
 
                 html += `
                     <tr>
@@ -1202,6 +1246,9 @@
                         <td class="num-col">${renderNumber(item.completion_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(item.total_tokens || 0)}</td>
                         <td>${renderUsageStatus(item.usage_status)}</td>
+                        <td class="num-col">${renderNumber(item.cache_read_input_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(item.cache_creation_input_tokens || 0)}</td>
+                        <td class="num-col">${renderCacheHitRate(item.cache_hit_rate, item.cache_usage_status)}</td>
                         <td class="num-col">${renderNumber(item.request_count || 0)}</td>
                         <td class="num-col">${renderNumber(item.ip_count || 0)}</td>
                         <td>${escapeHtml(item.last_request_date || '-')}</td>
@@ -1216,6 +1263,9 @@
                     <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
                     <td class="num-col">${renderNumber(totalTokens)}</td>
                     <td>${renderUsageStatus(combineUsageStatuses(userUsageData))}</td>
+                    <td class="num-col">${renderNumber(totalCacheReadTokens)}</td>
+                    <td class="num-col">${renderNumber(totalCacheCreationTokens)}</td>
+                    <td class="num-col">${renderCacheHitRate(aggregateCacheHitRate(userUsageData), 'known')}</td>
                     <td class="num-col">${renderNumber(totalRequests)}</td>
                     <td class="num-col">-</td>
                     <td>-</td>
@@ -1276,7 +1326,7 @@
             const requestToken = ++logsRequestToken;
             document.getElementById('tableFooter').style.display = 'none';
             // 显示加载状态
-            document.getElementById('logsTable').innerHTML = '<tr><td colspan="11" class="loading">加载请求数据...</td></tr>';
+            document.getElementById('logsTable').innerHTML = '<tr><td colspan="14" class="loading">加载请求数据...</td></tr>';
 
             try {
                 const params = buildDashboardSearchParams({
@@ -1301,7 +1351,7 @@
                 if (requestToken !== logsRequestToken) return;
                 document.getElementById('tableFooter').style.display = 'none';
                 console.error('加载日志失败:', error);
-                document.getElementById('logsTable').innerHTML = '<tr><td colspan="11" class="error">加载日志失败</td></tr>';
+                document.getElementById('logsTable').innerHTML = '<tr><td colspan="14" class="error">加载日志失败</td></tr>';
                 showMessage('加载日志失败，请稍后重试', 'error');
             }
         }
@@ -1309,12 +1359,12 @@
         // 渲染日志表格
         function renderLogs(logs) {
             const tbody = document.getElementById('logsTable');
-            updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
+            updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens', 'cache_hit_rate', 'start_time', 'end_time', 'duration']);
 
             if (logs.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="11" class="empty-state">
+                        <td colspan="14" class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
@@ -1343,6 +1393,9 @@
                         <td class="num-col">${renderNumber(log.completion_tokens || 0)}</td>
                         <td class="num-col">${renderNumber(log.total_tokens || 0)}</td>
                         <td>${renderUsageStatus(log.usage_status)}</td>
+                        <td class="num-col">${renderNumber(log.cache_read_input_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(log.cache_creation_input_tokens || 0)}</td>
+                        <td class="num-col">${renderCacheHitRate(log.cache_hit_rate, log.cache_usage_status)}</td>
                         <td>${formatDateTime(startTime)}</td>
                         <td>${formatDateTime(endTime)}</td>
                         <td class="num-col"><span class="numeric-value">${duration}</span></td>

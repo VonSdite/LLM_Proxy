@@ -128,6 +128,9 @@ class LogServiceLike(Protocol):
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         usage_status: str | None = None,
+        cache_read_input_tokens: int = 0,
+        cache_creation_input_tokens: int = 0,
+        cache_usage_status: str | None = None,
         start_time: Any = None,
         end_time: Any = None,
         ip_address: str | None = None,
@@ -452,11 +455,18 @@ class ProxyController:
             return self._log_service.log_request(**kwargs)
         except TypeError as exc:
             error_text = str(exc)
-            if "api_key_id" not in error_text and "usage_status" not in error_text:
+            compatibility_fields = {
+                "api_key_id",
+                "usage_status",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+                "cache_usage_status",
+            }
+            if not any(field in error_text for field in compatibility_fields):
                 raise
             fallback_kwargs = dict(kwargs)
-            fallback_kwargs.pop("api_key_id", None)
-            fallback_kwargs.pop("usage_status", None)
+            for field in compatibility_fields:
+                fallback_kwargs.pop(field, None)
             return self._log_service.log_request(**fallback_kwargs)
 
     def _list_available_model_names(self, *, visible_provider_models_only: bool = False) -> tuple[str, ...]:
@@ -655,6 +665,9 @@ class ProxyController:
                     "prompt_tokens": response_meta.get("prompt_tokens", 0),
                     "completion_tokens": response_meta.get("completion_tokens", 0),
                     "usage_status": response_meta.get("usage_status", "unknown"),
+                    "cache_read_input_tokens": response_meta.get("cache_read_input_tokens", 0),
+                    "cache_creation_input_tokens": response_meta.get("cache_creation_input_tokens", 0),
+                    "cache_usage_status": response_meta.get("cache_usage_status", "unknown"),
                     "start_time": start_time,
                     "end_time": now_local_datetime(),
                     "ip_address": client_ip,
@@ -908,6 +921,9 @@ class ProxyController:
                     "prompt_tokens": response_meta.get("prompt_tokens", 0),
                     "completion_tokens": response_meta.get("completion_tokens", 0),
                     "usage_status": response_meta.get("usage_status", "unknown"),
+                    "cache_read_input_tokens": response_meta.get("cache_read_input_tokens", 0),
+                    "cache_creation_input_tokens": response_meta.get("cache_creation_input_tokens", 0),
+                    "cache_usage_status": response_meta.get("cache_usage_status", "unknown"),
                     "start_time": start_time,
                     "end_time": now_local_datetime(),
                     "ip_address": client_ip,
