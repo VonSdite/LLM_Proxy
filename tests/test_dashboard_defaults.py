@@ -53,6 +53,10 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
         self.assertIn("Token 状态", html)
         self.assertIn("function renderUsageStatus(value)", html)
         self.assertIn("partial: '部分'", html)
+        self.assertIn("缓存读取 Token", html)
+        self.assertIn("缓存写入 Token", html)
+        self.assertIn("缓存命中率", html)
+        self.assertIn("function renderCacheHitRate(value, status)", html)
 
 
 if __name__ == "__main__":

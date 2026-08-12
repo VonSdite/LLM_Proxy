@@ -340,6 +340,16 @@ class WebController:
             "unknown": "未知",
         }.get(str(value or "unknown").strip().lower(), "未知")
 
+    @staticmethod
+    def _format_cache_hit_rate(value: Any) -> str:
+        """将缓存 Token 命中率转换为百分比文本。"""
+        if value is None:
+            return "未知"
+        try:
+            return f"{max(float(value), 0) * 100:.2f}%"
+        except (TypeError, ValueError):
+            return "未知"
+
     def get_statistics(self) -> ResponseReturnValue:
         try:
             self._validate_dashboard_date_range(
@@ -428,6 +438,9 @@ class WebController:
                     "输出token",
                     "总 Token",
                     "Token 状态",
+                    "缓存读取 Token",
+                    "缓存写入 Token",
+                    "缓存命中率",
                     "关联 IP 数",
                     "最近请求日期",
                 ]
@@ -439,6 +452,9 @@ class WebController:
                         item["completion_tokens"],
                         item["total_tokens"],
                         self._format_usage_status(item.get("usage_status")),
+                        item["cache_read_input_tokens"],
+                        item["cache_creation_input_tokens"],
+                        self._format_cache_hit_rate(item.get("cache_hit_rate")),
                         item["ip_count"],
                         item["last_request_date"],
                     ]
@@ -464,6 +480,9 @@ class WebController:
                     "输出token",
                     "总 Token",
                     "Token 状态",
+                    "缓存读取 Token",
+                    "缓存写入 Token",
+                    "缓存命中率",
                     "开始时间",
                     "结束时间",
                     "耗时(秒)",
@@ -478,6 +497,9 @@ class WebController:
                         item["completion_tokens"],
                         item["total_tokens"],
                         self._format_usage_status(item.get("usage_status")),
+                        item["cache_read_input_tokens"],
+                        item["cache_creation_input_tokens"],
+                        self._format_cache_hit_rate(item.get("cache_hit_rate")),
                         item["start_time"],
                         item["end_time"],
                         self._calculate_log_duration(item["start_time"], item["end_time"]),
@@ -504,6 +526,9 @@ class WebController:
                     "输出token",
                     "总 Token",
                     "Token 状态",
+                    "缓存读取 Token",
+                    "缓存写入 Token",
+                    "缓存命中率",
                     "请求数",
                 ]
                 rows = [
@@ -516,6 +541,9 @@ class WebController:
                         item["completion_tokens"],
                         item["total_tokens"],
                         self._format_usage_status(item.get("usage_status")),
+                        item["cache_read_input_tokens"],
+                        item["cache_creation_input_tokens"],
+                        self._format_cache_hit_rate(item.get("cache_hit_rate")),
                         item["request_count"],
                     ]
                     for item in data

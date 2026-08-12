@@ -30,6 +30,10 @@ class LogRepository:
         "total_tokens": "COALESCE(SUM(d.total_tokens), 0)",
         "prompt_tokens": "COALESCE(SUM(d.prompt_tokens), 0)",
         "completion_tokens": "COALESCE(SUM(d.completion_tokens), 0)",
+        "cache_read_input_tokens": "COALESCE(SUM(d.cache_read_input_tokens), 0)",
+        "cache_creation_input_tokens": "COALESCE(SUM(d.cache_creation_input_tokens), 0)",
+        "cache_hit_rate": "CASE WHEN SUM(d.cache_known_prompt_tokens) > 0 "
+        "THEN SUM(d.cache_read_input_tokens) * 1.0 / SUM(d.cache_known_prompt_tokens) END",
     }
 
     _USER_USAGE_SORT_COLUMNS = {
@@ -38,6 +42,10 @@ class LogRepository:
         "total_tokens": "COALESCE(SUM(d.total_tokens), 0)",
         "prompt_tokens": "COALESCE(SUM(d.prompt_tokens), 0)",
         "completion_tokens": "COALESCE(SUM(d.completion_tokens), 0)",
+        "cache_read_input_tokens": "COALESCE(SUM(d.cache_read_input_tokens), 0)",
+        "cache_creation_input_tokens": "COALESCE(SUM(d.cache_creation_input_tokens), 0)",
+        "cache_hit_rate": "CASE WHEN SUM(d.cache_known_prompt_tokens) > 0 "
+        "THEN SUM(d.cache_read_input_tokens) * 1.0 / SUM(d.cache_known_prompt_tokens) END",
         "ip_count": "COUNT(DISTINCT d.ip_address)",
         "last_request_date": "MAX(d.stat_date)",
     }
@@ -50,6 +58,10 @@ class LogRepository:
         "total_tokens": "COALESCE(l.total_tokens, 0)",
         "prompt_tokens": "COALESCE(l.prompt_tokens, 0)",
         "completion_tokens": "COALESCE(l.completion_tokens, 0)",
+        "cache_read_input_tokens": "COALESCE(l.cache_read_input_tokens, 0)",
+        "cache_creation_input_tokens": "COALESCE(l.cache_creation_input_tokens, 0)",
+        "cache_hit_rate": "CASE WHEN l.cache_usage_status = 'known' AND l.prompt_tokens > 0 "
+        "THEN l.cache_read_input_tokens * 1.0 / l.prompt_tokens END",
         "start_time": "l.start_time",
         "end_time": "COALESCE(l.end_time, '')",
         "duration": "MAX(COALESCE((julianday(l.end_time) - julianday(l.start_time)) * 86400.0, 0), 0)",
@@ -75,6 +87,9 @@ class LogRepository:
                     prompt_tokens INTEGER DEFAULT 0,
                     completion_tokens INTEGER DEFAULT 0,
                     usage_status TEXT NOT NULL DEFAULT 'unknown',
+                    cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_usage_status TEXT NOT NULL DEFAULT 'unknown',
                     start_time TEXT NOT NULL,
                     end_time TEXT,
                     created_at TEXT NOT NULL
@@ -97,6 +112,11 @@ class LogRepository:
                        OR COALESCE(completion_tokens, 0) > 0
                     """
                 )
+            for column_name in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+                if column_name not in request_log_columns:
+                    cursor.execute(f"ALTER TABLE request_logs ADD COLUMN {column_name} INTEGER NOT NULL DEFAULT 0")
+            if "cache_usage_status" not in request_log_columns:
+                cursor.execute("ALTER TABLE request_logs ADD COLUMN cache_usage_status TEXT NOT NULL DEFAULT 'unknown'")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_start_time ON request_logs(start_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_address ON request_logs(ip_address)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_api_key ON request_logs(api_key_id)")
@@ -113,6 +133,10 @@ class LogRepository:
                     prompt_tokens INTEGER NOT NULL DEFAULT 0,
                     completion_tokens INTEGER NOT NULL DEFAULT 0,
                     usage_status TEXT NOT NULL DEFAULT 'unknown',
+                    cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_known_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_usage_status TEXT NOT NULL DEFAULT 'unknown',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(stat_date, ip_address, request_model, response_model)
@@ -135,6 +159,19 @@ class LogRepository:
                     WHERE total_tokens > 0 OR prompt_tokens > 0 OR completion_tokens > 0
                     """
                 )
+            for column_name in (
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+                "cache_known_prompt_tokens",
+            ):
+                if column_name not in daily_stat_columns:
+                    cursor.execute(
+                        f"ALTER TABLE daily_request_stats ADD COLUMN {column_name} INTEGER NOT NULL DEFAULT 0"
+                    )
+            if "cache_usage_status" not in daily_stat_columns:
+                cursor.execute(
+                    "ALTER TABLE daily_request_stats ADD COLUMN cache_usage_status TEXT NOT NULL DEFAULT 'unknown'"
+                )
 
     def insert(
         self,
@@ -144,6 +181,9 @@ class LogRepository:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         usage_status: str | None = None,
+        cache_read_input_tokens: int = 0,
+        cache_creation_input_tokens: int = 0,
+        cache_usage_status: str | None = None,
         start_time: object | None = None,
         end_time: object | None = None,
         ip_address: str | None = None,
@@ -156,12 +196,16 @@ class LogRepository:
         safe_total_tokens = int(total_tokens or 0)
         safe_prompt_tokens = int(prompt_tokens or 0)
         safe_completion_tokens = int(completion_tokens or 0)
+        safe_cache_read_tokens = max(int(cache_read_input_tokens or 0), 0)
+        safe_cache_creation_tokens = max(int(cache_creation_input_tokens or 0), 0)
         inferred_usage_status = (
             "known" if any((safe_total_tokens, safe_prompt_tokens, safe_completion_tokens)) else "unknown"
         )
         safe_usage_status = self._normalize_usage_status(
             usage_status if usage_status is not None else inferred_usage_status
         )
+        safe_cache_usage_status = self._normalize_cache_usage_status(cache_usage_status)
+        cache_known_prompt_tokens = safe_prompt_tokens if safe_cache_usage_status == "known" else 0
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -170,8 +214,10 @@ class LogRepository:
                 """
                 INSERT INTO request_logs
                 (api_key_id, ip_address, request_model, response_model, total_tokens,
-                 prompt_tokens, completion_tokens, usage_status, start_time, end_time, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 prompt_tokens, completion_tokens, usage_status,
+                 cache_read_input_tokens, cache_creation_input_tokens, cache_usage_status,
+                 start_time, end_time, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     api_key_id,
@@ -182,6 +228,9 @@ class LogRepository:
                     safe_prompt_tokens,
                     safe_completion_tokens,
                     safe_usage_status,
+                    safe_cache_read_tokens,
+                    safe_cache_creation_tokens,
+                    safe_cache_usage_status,
                     format_local_datetime(start_time_value),
                     format_local_datetime(end_time_value),
                     now_text,
@@ -195,18 +244,28 @@ class LogRepository:
                 (
                     stat_date, ip_address, request_model, response_model,
                     request_count, total_tokens, prompt_tokens, completion_tokens, usage_status,
+                    cache_read_input_tokens, cache_creation_input_tokens,
+                    cache_known_prompt_tokens, cache_usage_status,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(stat_date, ip_address, request_model, response_model)
                 DO UPDATE SET
                     request_count = request_count + 1,
                     total_tokens = total_tokens + excluded.total_tokens,
                     prompt_tokens = prompt_tokens + excluded.prompt_tokens,
                     completion_tokens = completion_tokens + excluded.completion_tokens,
+                    cache_read_input_tokens = cache_read_input_tokens + excluded.cache_read_input_tokens,
+                    cache_creation_input_tokens = cache_creation_input_tokens + excluded.cache_creation_input_tokens,
+                    cache_known_prompt_tokens = cache_known_prompt_tokens + excluded.cache_known_prompt_tokens,
                     usage_status = CASE
                         WHEN usage_status = 'unknown' AND excluded.usage_status = 'unknown' THEN 'unknown'
                         WHEN usage_status = 'known' AND excluded.usage_status = 'known' THEN 'known'
+                        ELSE 'partial'
+                    END,
+                    cache_usage_status = CASE
+                        WHEN cache_usage_status = 'unknown' AND excluded.cache_usage_status = 'unknown' THEN 'unknown'
+                        WHEN cache_usage_status = 'known' AND excluded.cache_usage_status = 'known' THEN 'known'
                         ELSE 'partial'
                     END,
                     updated_at = excluded.updated_at
@@ -220,6 +279,10 @@ class LogRepository:
                     safe_prompt_tokens,
                     safe_completion_tokens,
                     safe_usage_status,
+                    safe_cache_read_tokens,
+                    safe_cache_creation_tokens,
+                    cache_known_prompt_tokens,
+                    safe_cache_usage_status,
                     now_text,
                     now_text,
                 ),
@@ -353,12 +416,27 @@ class LogRepository:
                     COALESCE(SUM(d.total_tokens), 0) as total_tokens,
                     COALESCE(SUM(d.prompt_tokens), 0) as prompt_tokens,
                     COALESCE(SUM(d.completion_tokens), 0) as completion_tokens,
+                    COALESCE(SUM(d.cache_read_input_tokens), 0) as cache_read_input_tokens,
+                    COALESCE(SUM(d.cache_creation_input_tokens), 0) as cache_creation_input_tokens,
+                    COALESCE(SUM(d.cache_known_prompt_tokens), 0) as cache_known_prompt_tokens,
+                    CASE
+                        WHEN SUM(d.cache_known_prompt_tokens) > 0
+                        THEN SUM(d.cache_read_input_tokens) * 1.0 / SUM(d.cache_known_prompt_tokens)
+                        ELSE NULL
+                    END as cache_hit_rate,
                     CASE
                         WHEN SUM(CASE WHEN d.usage_status = 'unknown' THEN 1 ELSE 0 END) = COUNT(*) THEN 'unknown'
                         WHEN SUM(CASE WHEN d.usage_status = 'unknown' THEN 1 ELSE 0 END) > 0 THEN 'partial'
                         WHEN MIN(d.usage_status) = 'known' AND MAX(d.usage_status) = 'known' THEN 'known'
                         ELSE 'partial'
-                    END as usage_status
+                    END as usage_status,
+                    CASE
+                        WHEN SUM(CASE WHEN d.cache_usage_status = 'unknown' THEN 1 ELSE 0 END) = COUNT(*)
+                            THEN 'unknown'
+                        WHEN MIN(d.cache_usage_status) = 'known' AND MAX(d.cache_usage_status) = 'known'
+                            THEN 'known'
+                        ELSE 'partial'
+                    END as cache_usage_status
                 FROM daily_request_stats d
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
@@ -408,12 +486,27 @@ class LogRepository:
                     COALESCE(SUM(d.total_tokens), 0) as total_tokens,
                     COALESCE(SUM(d.prompt_tokens), 0) as prompt_tokens,
                     COALESCE(SUM(d.completion_tokens), 0) as completion_tokens,
+                    COALESCE(SUM(d.cache_read_input_tokens), 0) as cache_read_input_tokens,
+                    COALESCE(SUM(d.cache_creation_input_tokens), 0) as cache_creation_input_tokens,
+                    COALESCE(SUM(d.cache_known_prompt_tokens), 0) as cache_known_prompt_tokens,
+                    CASE
+                        WHEN SUM(d.cache_known_prompt_tokens) > 0
+                        THEN SUM(d.cache_read_input_tokens) * 1.0 / SUM(d.cache_known_prompt_tokens)
+                        ELSE NULL
+                    END as cache_hit_rate,
                     CASE
                         WHEN SUM(CASE WHEN d.usage_status = 'unknown' THEN 1 ELSE 0 END) = COUNT(*) THEN 'unknown'
                         WHEN SUM(CASE WHEN d.usage_status = 'unknown' THEN 1 ELSE 0 END) > 0 THEN 'partial'
                         WHEN MIN(d.usage_status) = 'known' AND MAX(d.usage_status) = 'known' THEN 'known'
                         ELSE 'partial'
                     END as usage_status,
+                    CASE
+                        WHEN SUM(CASE WHEN d.cache_usage_status = 'unknown' THEN 1 ELSE 0 END) = COUNT(*)
+                            THEN 'unknown'
+                        WHEN MIN(d.cache_usage_status) = 'known' AND MAX(d.cache_usage_status) = 'known'
+                            THEN 'known'
+                        ELSE 'partial'
+                    END as cache_usage_status,
                     COUNT(DISTINCT d.ip_address) as ip_count,
                     MAX(d.stat_date) as last_request_date
                 FROM daily_request_stats d
@@ -473,6 +566,14 @@ class LogRepository:
             data_query = f"""
                 SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
+                       l.cache_read_input_tokens, l.cache_creation_input_tokens, l.cache_usage_status,
+                       CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
+                           as cache_known_prompt_tokens,
+                       CASE
+                           WHEN l.cache_usage_status = 'known' AND l.prompt_tokens > 0
+                           THEN l.cache_read_input_tokens * 1.0 / l.prompt_tokens
+                           ELSE NULL
+                       END as cache_hit_rate,
                        l.start_time, l.end_time, l.created_at
                 FROM request_logs l
                 LEFT JOIN users u ON l.ip_address = u.ip_address
@@ -526,6 +627,14 @@ class LogRepository:
             query = f"""
                 SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
+                       l.cache_read_input_tokens, l.cache_creation_input_tokens, l.cache_usage_status,
+                       CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
+                           as cache_known_prompt_tokens,
+                       CASE
+                           WHEN l.cache_usage_status = 'known' AND l.prompt_tokens > 0
+                           THEN l.cache_read_input_tokens * 1.0 / l.prompt_tokens
+                           ELSE NULL
+                       END as cache_hit_rate,
                        l.start_time, l.end_time, l.created_at
                 FROM request_logs l
                 LEFT JOIN users u ON l.ip_address = u.ip_address
@@ -570,6 +679,9 @@ class LogRepository:
                     l.prompt_tokens,
                     l.completion_tokens,
                     l.usage_status,
+                    l.cache_read_input_tokens,
+                    l.cache_creation_input_tokens,
+                    l.cache_usage_status,
                     l.start_time,
                     l.end_time,
                     l.created_at
@@ -618,7 +730,11 @@ class LogRepository:
                     d.total_tokens,
                     d.prompt_tokens,
                     d.completion_tokens,
-                    d.usage_status
+                    d.usage_status,
+                    d.cache_read_input_tokens,
+                    d.cache_creation_input_tokens,
+                    d.cache_known_prompt_tokens,
+                    d.cache_usage_status
                 FROM daily_request_stats d
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
@@ -652,18 +768,30 @@ class LogRepository:
                     (
                         stat_date, ip_address, request_model, response_model,
                         request_count, total_tokens, prompt_tokens, completion_tokens, usage_status,
+                        cache_read_input_tokens, cache_creation_input_tokens,
+                        cache_known_prompt_tokens, cache_usage_status,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(stat_date, ip_address, request_model, response_model)
                     DO UPDATE SET
                         request_count = request_count + excluded.request_count,
                         total_tokens = total_tokens + excluded.total_tokens,
                         prompt_tokens = prompt_tokens + excluded.prompt_tokens,
                         completion_tokens = completion_tokens + excluded.completion_tokens,
+                        cache_read_input_tokens = cache_read_input_tokens + excluded.cache_read_input_tokens,
+                        cache_creation_input_tokens = cache_creation_input_tokens + excluded.cache_creation_input_tokens,
+                        cache_known_prompt_tokens = cache_known_prompt_tokens + excluded.cache_known_prompt_tokens,
                         usage_status = CASE
                             WHEN usage_status = 'unknown' AND excluded.usage_status = 'unknown' THEN 'unknown'
                             WHEN usage_status = 'known' AND excluded.usage_status = 'known' THEN 'known'
+                            ELSE 'partial'
+                        END,
+                        cache_usage_status = CASE
+                            WHEN cache_usage_status = 'unknown' AND excluded.cache_usage_status = 'unknown'
+                                THEN 'unknown'
+                            WHEN cache_usage_status = 'known' AND excluded.cache_usage_status = 'known'
+                                THEN 'known'
                             ELSE 'partial'
                         END,
                         updated_at = excluded.updated_at
@@ -678,6 +806,10 @@ class LogRepository:
                         row["prompt_tokens"],
                         row["completion_tokens"],
                         row["usage_status"],
+                        row["cache_read_input_tokens"],
+                        row["cache_creation_input_tokens"],
+                        row["cache_known_prompt_tokens"],
+                        row["cache_usage_status"],
                         now_text,
                         now_text,
                     ),
@@ -709,9 +841,11 @@ class LogRepository:
                     INSERT INTO request_logs
                     (
                         api_key_id, ip_address, request_model, response_model, total_tokens,
-                        prompt_tokens, completion_tokens, usage_status, start_time, end_time, created_at
+                        prompt_tokens, completion_tokens, usage_status,
+                        cache_read_input_tokens, cache_creation_input_tokens, cache_usage_status,
+                        start_time, end_time, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         row["api_key_id"],
@@ -722,6 +856,9 @@ class LogRepository:
                         row["prompt_tokens"],
                         row["completion_tokens"],
                         row["usage_status"],
+                        row["cache_read_input_tokens"],
+                        row["cache_creation_input_tokens"],
+                        row["cache_usage_status"],
                         row["start_time"],
                         row["end_time"],
                         row["created_at"],
@@ -804,6 +941,18 @@ class LogRepository:
         total_tokens = cls._normalize_stat_int(row.get("total_tokens"), field_name="total_tokens")
         prompt_tokens = cls._normalize_stat_int(row.get("prompt_tokens"), field_name="prompt_tokens")
         completion_tokens = cls._normalize_stat_int(row.get("completion_tokens"), field_name="completion_tokens")
+        cache_read_tokens = cls._normalize_stat_int(
+            row.get("cache_read_input_tokens"), field_name="cache_read_input_tokens"
+        )
+        cache_creation_tokens = cls._normalize_stat_int(
+            row.get("cache_creation_input_tokens"), field_name="cache_creation_input_tokens"
+        )
+        cache_usage_status = cls._normalize_cache_usage_status(row.get("cache_usage_status"))
+        cache_known_prompt_tokens = cls._normalize_stat_int(
+            row.get("cache_known_prompt_tokens"), field_name="cache_known_prompt_tokens"
+        )
+        if "cache_known_prompt_tokens" not in row and cache_usage_status == "known":
+            cache_known_prompt_tokens = prompt_tokens
         return {
             "stat_date": cls._normalize_stat_date(row.get("stat_date")),
             "ip_address": cls._normalize_stat_text(row.get("ip_address"), field_name="ip_address", required=False),
@@ -818,6 +967,10 @@ class LogRepository:
             "usage_status": cls._normalize_import_usage_status(
                 row.get("usage_status"), total_tokens, prompt_tokens, completion_tokens
             ),
+            "cache_read_input_tokens": cache_read_tokens,
+            "cache_creation_input_tokens": cache_creation_tokens,
+            "cache_known_prompt_tokens": cache_known_prompt_tokens,
+            "cache_usage_status": cache_usage_status,
         }
 
     @classmethod
@@ -828,6 +981,12 @@ class LogRepository:
         prompt_tokens = cls._normalize_optional_stat_int(row.get("prompt_tokens"), field_name="prompt_tokens")
         completion_tokens = cls._normalize_optional_stat_int(
             row.get("completion_tokens"), field_name="completion_tokens"
+        )
+        cache_read_tokens = cls._normalize_stat_int(
+            row.get("cache_read_input_tokens"), field_name="cache_read_input_tokens"
+        )
+        cache_creation_tokens = cls._normalize_stat_int(
+            row.get("cache_creation_input_tokens"), field_name="cache_creation_input_tokens"
         )
         return {
             "api_key_id": cls._normalize_optional_positive_int(row.get("api_key_id"), field_name="api_key_id"),
@@ -844,6 +1003,9 @@ class LogRepository:
             "usage_status": cls._normalize_import_usage_status(
                 row.get("usage_status"), total_tokens, prompt_tokens, completion_tokens
             ),
+            "cache_read_input_tokens": cache_read_tokens,
+            "cache_creation_input_tokens": cache_creation_tokens,
+            "cache_usage_status": cls._normalize_cache_usage_status(row.get("cache_usage_status")),
             "start_time": cls._normalize_stat_text(row.get("start_time"), field_name="start_time", required=True),
             "end_time": cls._normalize_stat_text(row.get("end_time"), field_name="end_time", required=False),
             "created_at": cls._normalize_stat_text(row.get("created_at"), field_name="created_at", required=False)
@@ -874,6 +1036,13 @@ class LogRepository:
 
     @staticmethod
     def _normalize_usage_status(value: Any) -> str:
+        normalized = str(value or "unknown").strip().lower()
+        if normalized not in {"unknown", "partial", "known"}:
+            return "unknown"
+        return normalized
+
+    @staticmethod
+    def _normalize_cache_usage_status(value: Any) -> str:
         normalized = str(value or "unknown").strip().lower()
         if normalized not in {"unknown", "partial", "known"}:
             return "unknown"
@@ -919,6 +1088,9 @@ class LogRepository:
               AND prompt_tokens IS ?
               AND completion_tokens IS ?
               AND usage_status IS ?
+              AND cache_read_input_tokens IS ?
+              AND cache_creation_input_tokens IS ?
+              AND cache_usage_status IS ?
               AND start_time IS ?
               AND end_time IS ?
             LIMIT 1
@@ -931,6 +1103,9 @@ class LogRepository:
                 row["prompt_tokens"],
                 row["completion_tokens"],
                 row["usage_status"],
+                row["cache_read_input_tokens"],
+                row["cache_creation_input_tokens"],
+                row["cache_usage_status"],
                 row["start_time"],
                 row["end_time"],
             ),
@@ -947,8 +1122,13 @@ class LogRepository:
                 row["total_tokens"],
                 row["prompt_tokens"],
                 row["completion_tokens"],
+                row["cache_read_input_tokens"],
+                row["cache_creation_input_tokens"],
+                row["cache_known_prompt_tokens"],
                 row["usage_status"],
                 row["usage_status"],
+                row["cache_usage_status"],
+                row["cache_usage_status"],
                 now_text,
                 row["stat_date"],
                 row["request_model"],
@@ -961,8 +1141,13 @@ class LogRepository:
                 row["total_tokens"],
                 row["prompt_tokens"],
                 row["completion_tokens"],
+                row["cache_read_input_tokens"],
+                row["cache_creation_input_tokens"],
+                row["cache_known_prompt_tokens"],
                 row["usage_status"],
                 row["usage_status"],
+                row["cache_usage_status"],
+                row["cache_usage_status"],
                 now_text,
                 row["stat_date"],
                 row["ip_address"],
@@ -978,9 +1163,17 @@ class LogRepository:
                 total_tokens = total_tokens + ?,
                 prompt_tokens = prompt_tokens + ?,
                 completion_tokens = completion_tokens + ?,
+                cache_read_input_tokens = cache_read_input_tokens + ?,
+                cache_creation_input_tokens = cache_creation_input_tokens + ?,
+                cache_known_prompt_tokens = cache_known_prompt_tokens + ?,
                 usage_status = CASE
                     WHEN usage_status = 'unknown' AND ? = 'unknown' THEN 'unknown'
                     WHEN usage_status = 'known' AND ? = 'known' THEN 'known'
+                    ELSE 'partial'
+                END,
+                cache_usage_status = CASE
+                    WHEN cache_usage_status = 'unknown' AND ? = 'unknown' THEN 'unknown'
+                    WHEN cache_usage_status = 'known' AND ? = 'known' THEN 'known'
                     ELSE 'partial'
                 END,
                 updated_at = ?

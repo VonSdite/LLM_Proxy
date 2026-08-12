@@ -268,6 +268,9 @@ decoder
   - 在上游响应完成后向 response translator 提供完整 source payload
 - `TranslatorRegistry`
   - 负责协议适配
+  - 为 `openai_chat`、`openai_responses`、`claude_chat` 的 3×3 协议组合注册 9 个直接转换器
+  - OpenAI Chat 与 OpenAI Responses 的请求、非流式响应和 SSE 事件直接互转，保留 custom tool、namespace、additional tools、推理历史和缓存零值字段
+  - OpenAI Responses 与 Claude Messages 的请求、非流式响应和 SSE 事件直接互转，保留原生工具、推理、引用、媒体和缓存字段
   - 为原生响应聚合后的完整 source payload 提供 source-to-target response translation
   - 维护 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 与 Claude `thinking` 的请求语义映射
   - 将 OpenAI Chat 上游 reasoning 内容转换为下游协议对应的 thinking / reasoning 输出
@@ -275,6 +278,7 @@ decoder
   - 位于 `src/proxy_core/usage.py`
   - 统一 OpenAI Chat、OpenAI Responses、Claude Messages 和 Gemini 风格 usage 的输入、输出、total、缓存与推理字段
   - 定义 `known`、`partial`、`unknown` 三种记录状态，并提供 OpenAI 与 Claude usage 双向映射
+  - 单独记录缓存 usage 的 `known` / `unknown` 状态；缓存字段显式为零属于 `known`
 - `Encoder`
   - 将统一 chunk 编码成下游协议
 - `Hook`
@@ -914,6 +918,8 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - 统计完成回调执行后：
   - `request_logs.api_key_id` 记录本次使用的 key
   - `request_logs.usage_status` 与 `daily_request_stats.usage_status` 标记 usage 为 `known`、`partial` 或 `unknown`
+  - `request_logs` 记录缓存读取 Token、缓存写入 Token 和缓存 usage 状态
+  - `daily_request_stats` 累加缓存读取 Token、缓存写入 Token，以及缓存 usage 已知请求的完整输入 Token
   - `api_keys.total_request_count`
   - `api_keys.prompt_tokens`
   - `api_keys.completion_tokens`
@@ -921,9 +927,11 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - `api_keys.last_used_at`
   - 这些字段与请求日志在同一 SQLite 事务中更新
 
-`request_logs` 和 `daily_request_stats` 的 token 数值在无法从上游得到 usage 时保持为零，`usage_status=unknown` 保留“未提供 usage”的事实；聚合行混合不同状态时使用 `partial`。
+`request_logs` 和 `daily_request_stats` 的 token 数值在无法从上游得到 usage 时保持为零，`usage_status=unknown` 保留“未提供 usage”的事实；聚合行混合不同状态时使用 `partial`。缓存字段使用独立的 `cache_usage_status`，上游显式返回零缓存 Token 时状态为 `known`，上游没有返回缓存字段时状态为 `unknown`。
 
-统计管理页面与 Excel 导出显示 Token 状态：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 2 并保留原始 `usage_status` 值。
+缓存命中率按 `SUM(cache_read_input_tokens) / SUM(cache_known_prompt_tokens)` 计算。`cache_known_prompt_tokens` 只包含缓存 usage 已知请求的完整 prompt/input Token，混合已知和未知请求时未知请求不进入分母；没有有效分母时命中率为空，已知且缓存读取为零时命中率为 `0%`。
+
+统计管理页面与 Excel 导出显示 Token 状态、缓存读取 Token、缓存写入 Token 和缓存命中率：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 3 并保留原始 `usage_status`、缓存 Token 和 `cache_usage_status` 值；版本 2 包中的缓存状态按 `unknown` 导入。
 
 ## 4. Development View
 

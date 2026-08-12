@@ -1,3 +1,4 @@
+import base64
 import json
 import sys
 import unittest
@@ -19,11 +20,12 @@ from src.services.proxy_service import ProxyService
 from src.services.upstream_request_builder import build_upstream_request
 from src.translators import (
     ClaudeChatTranslator,
+    ClaudeOpenAIResponsesTranslator,
     ClaudePassthroughTranslator,
-    ComposedTranslator,
     OpenAIChatClaudeTranslator,
     OpenAIChatResponsesTranslator,
     OpenAIChatTranslator,
+    OpenAIResponsesClaudeTranslator,
     OpenAIResponsesPassthroughTranslator,
     OpenAIResponsesTranslator,
     build_default_translator_registry,
@@ -34,6 +36,14 @@ from src.translators.stream_aggregator import (
     aggregate_stream_to_openai_chat,
     infer_stream_aggregation_status_code,
 )
+
+
+def _valid_claude_cais_signature() -> str:
+    """构造满足 Claude CAIS 结构校验的最小签名。"""
+    channel = b"\x08\x10\x2a\x01\x00\x32\x08claude-x"
+    container = b"\x0a" + bytes([len(channel)]) + channel
+    payload = b"\x08\x02\x12" + bytes([len(container)]) + container
+    return base64.b64encode(payload).decode("ascii")
 
 
 class FakeLogger:
@@ -1398,7 +1408,177 @@ class TranslatorTests(unittest.TestCase):
 
         self.assertEqual("xhigh", translated["reasoning_effort"])
 
-    def test_composed_claude_to_responses_maps_thinking_effort(self) -> None:
+    def test_direct_responses_to_chat_preserves_custom_tools_and_history_order(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+
+        translated = translator.translate_request(
+            "gpt-4.1",
+            {
+                "input": [
+                    {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text", "text": "checking"}],
+                    },
+                    {
+                        "type": "custom_tool_call",
+                        "call_id": "call_1",
+                        "namespace": "ops",
+                        "name": "shell",
+                        "input": "pwd",
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "queued"}],
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_1",
+                        "output": "C:/repo",
+                    },
+                    {
+                        "type": "additional_tools",
+                        "tools": [
+                            {
+                                "type": "namespace",
+                                "name": "ops",
+                                "tools": [{"type": "custom", "name": "shell", "description": "Run command"}],
+                            }
+                        ],
+                    },
+                ],
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "answer",
+                        "schema": {"type": "object"},
+                        "strict": True,
+                    }
+                },
+            },
+            False,
+        )
+
+        self.assertEqual(["assistant", "tool", "assistant"], [item["role"] for item in translated["messages"]])
+        tool_call = translated["messages"][0]["tool_calls"][0]
+        self.assertEqual("checking", translated["messages"][0]["reasoning_content"])
+        self.assertEqual("ops__shell", tool_call["function"]["name"])
+        self.assertEqual('{"input": "pwd"}', tool_call["function"]["arguments"])
+        self.assertEqual("call_1", translated["messages"][1]["tool_call_id"])
+        self.assertEqual("queued", translated["messages"][2]["content"][0]["text"])
+        self.assertEqual("ops__shell", translated["tools"][0]["function"]["name"])
+        self.assertEqual("string", translated["tools"][0]["function"]["parameters"]["properties"]["input"]["type"])
+        self.assertEqual("answer", translated["response_format"]["json_schema"]["name"])
+
+    def test_direct_responses_response_to_chat_maps_custom_tool_call(self) -> None:
+        translator = OpenAIResponsesTranslator()
+
+        translated = translator.translate_nonstream_response(
+            "gpt-4.1",
+            {},
+            {"model": "gpt-4.1"},
+            {
+                "id": "resp_custom",
+                "model": "gpt-4.1",
+                "output": [
+                    {
+                        "id": "ctc_call_1",
+                        "type": "custom_tool_call",
+                        "call_id": "call_1",
+                        "namespace": "ops",
+                        "name": "shell",
+                        "input": "pwd",
+                    }
+                ],
+            },
+        )
+
+        message = translated["choices"][0]["message"]
+        self.assertEqual("tool_calls", translated["choices"][0]["finish_reason"])
+        self.assertEqual("ops__shell", message["tool_calls"][0]["function"]["name"])
+        self.assertEqual('{"input": "pwd"}', message["tool_calls"][0]["function"]["arguments"])
+
+    def test_direct_responses_stream_to_chat_maps_custom_tool_call(self) -> None:
+        translator = OpenAIResponsesTranslator()
+        state: dict[str, Any] = {}
+        events = [
+            StreamEvent(
+                kind="json",
+                event="response.output_item.added",
+                payload={
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {
+                        "id": "ctc_call_1",
+                        "type": "custom_tool_call",
+                        "call_id": "call_1",
+                        "namespace": "ops",
+                        "name": "shell",
+                    },
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                event="response.custom_tool_call_input.done",
+                payload={
+                    "type": "response.custom_tool_call_input.done",
+                    "item_id": "ctc_call_1",
+                    "output_index": 0,
+                    "input": "pwd",
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                event="response.completed",
+                payload={"type": "response.completed", "response": {"model": "gpt-4.1"}},
+            ),
+        ]
+
+        chunks = [
+            chunk
+            for event in events
+            for chunk in translator.translate_stream_event("gpt-4.1", {}, {"model": "gpt-4.1"}, event, state)
+        ]
+        tool_deltas = [
+            chunk.payload["choices"][0]["delta"]["tool_calls"][0]
+            for chunk in chunks
+            if chunk.kind == "json"
+            and chunk.payload.get("choices")
+            and chunk.payload["choices"][0]["delta"].get("tool_calls")
+        ]
+
+        self.assertEqual("ops__shell", tool_deltas[0]["function"]["name"])
+        self.assertEqual('{"input": "pwd"}', "".join(item["function"].get("arguments", "") for item in tool_deltas))
+
+    def test_direct_responses_stream_to_chat_emits_arguments_from_added_item(self) -> None:
+        translator = OpenAIResponsesTranslator()
+
+        chunks = translator.translate_stream_event(
+            "gpt-4.1",
+            {},
+            {"model": "gpt-4.1"},
+            StreamEvent(
+                kind="json",
+                event="response.output_item.added",
+                payload={
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {
+                        "id": "fc_call_1",
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "lookup",
+                        "arguments": '{"q":"x"}',
+                    },
+                },
+            ),
+            {},
+        )
+
+        tool_call = chunks[0].payload["choices"][0]["delta"]["tool_calls"][0]
+        self.assertEqual('{"q":"x"}', tool_call["function"]["arguments"])
+
+    def test_direct_claude_to_responses_maps_thinking_effort(self) -> None:
         translator = build_default_translator_registry().get("openai_responses", "claude_chat")
 
         translated = translator.translate_request(
@@ -1413,7 +1593,7 @@ class TranslatorTests(unittest.TestCase):
 
         self.assertEqual({"effort": "xhigh"}, translated["reasoning"])
 
-    def test_composed_responses_to_claude_maps_reasoning_effort(self) -> None:
+    def test_direct_responses_to_claude_maps_reasoning_effort(self) -> None:
         translator = build_default_translator_registry().get("claude_chat", "openai_responses")
 
         translated = translator.translate_request(
@@ -1427,6 +1607,448 @@ class TranslatorTests(unittest.TestCase):
         )
 
         self.assertEqual({"type": "enabled", "budget_tokens": 16384}, translated["thinking"])
+
+    def test_direct_responses_request_to_claude_preserves_native_content(self) -> None:
+        translator = ClaudeOpenAIResponsesTranslator()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "instructions": "Be exact",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "developer",
+                        "cache_control": {"type": "ephemeral"},
+                        "content": [{"type": "input_text", "text": "Use JSON"}],
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": "data:image/png;base64,aGVsbG8=",
+                                "cache_control": {"type": "ephemeral"},
+                            },
+                            {
+                                "type": "input_file",
+                                "file_data": "data:application/pdf;base64,cGRm",
+                            },
+                        ],
+                    },
+                    {
+                        "type": "custom_tool_call",
+                        "call_id": "call_1",
+                        "namespace": "ops",
+                        "name": "shell",
+                        "input": "pwd",
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_1",
+                        "output": "C:/repo",
+                    },
+                ],
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "ops",
+                        "tools": [
+                            {
+                                "type": "custom",
+                                "name": "shell",
+                                "description": "Run a command",
+                            }
+                        ],
+                    }
+                ],
+                "max_output_tokens": 512,
+            },
+            False,
+        )
+
+        self.assertEqual(512, translated["max_tokens"])
+        self.assertEqual("Be exact", translated["system"][0]["text"])
+        self.assertEqual("Use JSON", translated["system"][1]["text"])
+        self.assertEqual({"type": "ephemeral"}, translated["system"][1]["cache_control"])
+        user_blocks = translated["messages"][0]["content"]
+        self.assertEqual("image", user_blocks[0]["type"])
+        self.assertEqual("base64", user_blocks[0]["source"]["type"])
+        self.assertEqual({"type": "ephemeral"}, user_blocks[0]["cache_control"])
+        self.assertEqual("document", user_blocks[1]["type"])
+        self.assertEqual("ops__shell", translated["messages"][1]["content"][0]["name"])
+        self.assertEqual({"input": "pwd"}, translated["messages"][1]["content"][0]["input"])
+        self.assertEqual("tool_result", translated["messages"][2]["content"][0]["type"])
+        self.assertEqual("ops__shell", translated["tools"][0]["name"])
+
+    def test_direct_responses_request_to_claude_matches_tool_compatibility_rules(self) -> None:
+        translator = ClaudeOpenAIResponsesTranslator()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call.with space:1",
+                        "name": "lookup",
+                        "arguments": '{"query":"x"}',
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Checking."}],
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call.with space:1",
+                        "output": "done",
+                    },
+                    {
+                        "type": "additional_tools",
+                        "tools": [
+                            {"type": "custom", "name": "lookup", "description": "lower priority"},
+                            {
+                                "type": "namespace",
+                                "name": "ops",
+                                "tools": [{"type": "custom", "name": "shell"}],
+                            },
+                        ],
+                    },
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "lookup",
+                        "description": "top level",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                            "oneOf": [{"required": ["query"]}],
+                        },
+                    }
+                ],
+            },
+            False,
+        )
+
+        self.assertEqual(2, len(translated["messages"]))
+        assistant_blocks = translated["messages"][0]["content"]
+        self.assertEqual(["text", "tool_use"], [block["type"] for block in assistant_blocks])
+        self.assertEqual("call_with_space_1", assistant_blocks[1]["id"])
+        self.assertEqual("call_with_space_1", translated["messages"][1]["content"][0]["tool_use_id"])
+        self.assertEqual(["lookup", "ops__shell"], [tool["name"] for tool in translated["tools"]])
+        self.assertEqual("top level", translated["tools"][0]["description"])
+        self.assertNotIn("oneOf", translated["tools"][0]["input_schema"])
+        self.assertEqual("string", translated["tools"][1]["input_schema"]["properties"]["input"]["type"])
+
+    def test_direct_responses_request_to_claude_preserves_system_markers_and_web_search(self) -> None:
+        translator = ClaudeOpenAIResponsesTranslator()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "developer",
+                        "cache_control": {"type": "ephemeral"},
+                        "content": [
+                            {"type": "input_text", "text": "Use evidence"},
+                            {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+                        ],
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "web_search",
+                        "max_uses": 3,
+                        "filters": {"allowed_domains": ["example.com"]},
+                        "user_location": {"type": "approximate", "country": "CN"},
+                    }
+                ],
+            },
+            False,
+        )
+
+        self.assertEqual(["text", "input_image"], [block["type"] for block in translated["system"]])
+        self.assertEqual({"type": "ephemeral"}, translated["system"][1]["cache_control"])
+        self.assertEqual("web_search_20250305", translated["tools"][0]["type"])
+        self.assertEqual(["example.com"], translated["tools"][0]["allowed_domains"])
+        self.assertEqual("CN", translated["tools"][0]["user_location"]["country"])
+
+    def test_direct_responses_request_to_claude_drops_incompatible_reasoning_signature(self) -> None:
+        translator = ClaudeOpenAIResponsesTranslator()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "input": [
+                    {
+                        "type": "reasoning",
+                        "encrypted_content": "gAAAA-invalid-gpt-signature",
+                        "summary": [{"type": "summary_text", "text": "private"}],
+                    },
+                    {"type": "message", "role": "user", "content": "continue"},
+                ]
+            },
+            False,
+        )
+
+        self.assertEqual(1, len(translated["messages"]))
+        self.assertEqual("user", translated["messages"][0]["role"])
+
+    def test_direct_responses_request_to_claude_preserves_valid_reasoning_signature(self) -> None:
+        translator = ClaudeOpenAIResponsesTranslator()
+        signature = _valid_claude_cais_signature()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "input": [
+                    {
+                        "type": "reasoning",
+                        "encrypted_content": signature,
+                        "summary": [{"type": "summary_text", "text": "private"}],
+                    },
+                    {"type": "message", "role": "user", "content": "continue"},
+                ]
+            },
+            False,
+        )
+
+        reasoning = translated["messages"][0]["content"][0]
+        self.assertEqual("thinking", reasoning["type"])
+        self.assertEqual("private", reasoning["thinking"])
+        self.assertEqual(signature, reasoning["signature"])
+
+    def test_direct_claude_response_to_responses_preserves_extended_blocks(self) -> None:
+        translator = ClaudeOpenAIResponsesTranslator()
+        original_request = {
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "ops",
+                    "tools": [{"type": "custom", "name": "shell"}],
+                }
+            ]
+        }
+
+        response = translator.translate_nonstream_response(
+            "claude-sonnet-4-5",
+            original_request,
+            {"model": "claude-sonnet-4-5"},
+            {
+                "id": "msg_1",
+                "model": "claude-sonnet-4-5",
+                "content": [
+                    {"type": "thinking", "thinking": "check", "signature": "sig_1"},
+                    {"type": "redacted_thinking", "data": "opaque"},
+                    {
+                        "type": "text",
+                        "text": "answer",
+                        "citations": [{"type": "web_search_result_location", "url": "https://example.com"}],
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "call_1",
+                        "name": "ops__shell",
+                        "input": {"input": "pwd"},
+                    },
+                ],
+                "usage": {
+                    "input_tokens": 5,
+                    "cache_creation_input_tokens": 2,
+                    "cache_read_input_tokens": 4,
+                    "output_tokens": 3,
+                },
+            },
+        )
+
+        reasoning = [item for item in response["output"] if item["type"] == "reasoning"]
+        self.assertEqual("sig_1", reasoning[0]["encrypted_content"])
+        self.assertEqual("claude-redacted-thinking:opaque", reasoning[1]["encrypted_content"])
+        message = next(item for item in response["output"] if item["type"] == "message")
+        self.assertEqual("https://example.com", message["content"][0]["annotations"][0]["url"])
+        tool_call = next(item for item in response["output"] if item["type"] == "custom_tool_call")
+        self.assertEqual("shell", tool_call["name"])
+        self.assertEqual("ops", tool_call["namespace"])
+        self.assertEqual("pwd", tool_call["input"])
+        self.assertEqual(11, response["usage"]["input_tokens"])
+        self.assertEqual(4, response["usage"]["input_tokens_details"]["cached_tokens"])
+        self.assertEqual(2, response["usage"]["input_tokens_details"]["cache_write_tokens"])
+
+    def test_direct_responses_stream_to_claude_maps_events_without_chat_chunks(self) -> None:
+        translator = OpenAIResponsesClaudeTranslator()
+        state: dict[str, Any] = {}
+        events = [
+            StreamEvent(
+                kind="json",
+                event="response.created",
+                payload={
+                    "type": "response.created",
+                    "response": {"id": "resp_1", "model": "gpt-5.4"},
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                event="response.output_text.delta",
+                payload={"type": "response.output_text.delta", "output_index": 0, "delta": "hi"},
+            ),
+            StreamEvent(
+                kind="json",
+                event="response.completed",
+                payload={
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp_1",
+                        "model": "gpt-5.4",
+                        "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+                    },
+                },
+            ),
+        ]
+
+        chunks = [
+            chunk for event in events for chunk in translator.translate_stream_event("gpt-5.4", {}, {}, event, state)
+        ]
+
+        event_names = [chunk.event for chunk in chunks]
+        self.assertEqual("message_start", event_names[0])
+        self.assertIn("content_block_start", event_names)
+        self.assertIn("content_block_delta", event_names)
+        self.assertEqual("message_stop", event_names[-1])
+        self.assertTrue(all(chunk.payload.get("object") != "chat.completion.chunk" for chunk in chunks))
+
+    def test_direct_responses_stream_to_claude_keeps_signature_from_added_item(self) -> None:
+        translator = OpenAIResponsesClaudeTranslator()
+        state: dict[str, Any] = {}
+        signature = _valid_claude_cais_signature()
+        events = [
+            StreamEvent(
+                kind="json",
+                event="response.output_item.added",
+                payload={
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {
+                        "id": "rs_1",
+                        "type": "reasoning",
+                        "encrypted_content": signature,
+                    },
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                event="response.reasoning_summary_text.done",
+                payload={
+                    "type": "response.reasoning_summary_text.done",
+                    "item_id": "rs_1",
+                    "text": "private",
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                event="response.output_item.done",
+                payload={
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {"id": "rs_1", "type": "reasoning"},
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                event="response.completed",
+                payload={"type": "response.completed", "response": {"usage": {}}},
+            ),
+        ]
+
+        chunks = [
+            chunk for event in events for chunk in translator.translate_stream_event("gpt-5.4", {}, {}, event, state)
+        ]
+        thinking_delta = next(
+            chunk.payload["delta"]
+            for chunk in chunks
+            if chunk.event == "content_block_delta" and chunk.payload["delta"]["type"] == "thinking_delta"
+        )
+        signature_delta = next(
+            chunk.payload["delta"]
+            for chunk in chunks
+            if chunk.event == "content_block_delta" and chunk.payload["delta"]["type"] == "signature_delta"
+        )
+
+        self.assertEqual("private", thinking_delta["thinking"])
+        self.assertEqual(signature, signature_delta["signature"])
+
+    def test_direct_claude_stream_to_responses_hides_server_tools_and_keeps_indices_contiguous(self) -> None:
+        translator = ClaudeOpenAIResponsesTranslator()
+        state: dict[str, Any] = {}
+        events = [
+            StreamEvent(
+                kind="json",
+                payload={
+                    "type": "message_start",
+                    "message": {"id": "msg_1", "model": "claude-sonnet-4-5", "usage": {}},
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                payload={"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+            ),
+            StreamEvent(
+                kind="json",
+                payload={"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "A"}},
+            ),
+            StreamEvent(kind="json", payload={"type": "content_block_stop", "index": 0}),
+            StreamEvent(
+                kind="json",
+                payload={
+                    "type": "content_block_start",
+                    "index": 1,
+                    "content_block": {"type": "server_tool_use", "name": "web_search"},
+                },
+            ),
+            StreamEvent(kind="json", payload={"type": "content_block_stop", "index": 1}),
+            StreamEvent(
+                kind="json",
+                payload={"type": "content_block_start", "index": 2, "content_block": {"type": "text"}},
+            ),
+            StreamEvent(
+                kind="json",
+                payload={"type": "content_block_delta", "index": 2, "delta": {"type": "text_delta", "text": "B"}},
+            ),
+            StreamEvent(kind="json", payload={"type": "content_block_stop", "index": 2}),
+            StreamEvent(
+                kind="json",
+                payload={
+                    "type": "content_block_start",
+                    "index": 3,
+                    "content_block": {"type": "tool_use", "id": "call_1", "name": "lookup"},
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                payload={
+                    "type": "content_block_delta",
+                    "index": 3,
+                    "delta": {"type": "input_json_delta", "partial_json": '{"q":"x"}'},
+                },
+            ),
+            StreamEvent(kind="json", payload={"type": "content_block_stop", "index": 3}),
+            StreamEvent(kind="json", payload={"type": "message_stop"}),
+        ]
+
+        chunks = [
+            chunk
+            for event in events
+            for chunk in translator.translate_stream_event("claude-sonnet-4-5", {}, {}, event, state)
+        ]
+        done_items = [chunk.payload for chunk in chunks if chunk.event == "response.output_item.done"]
+
+        self.assertEqual([0, 1], [item["output_index"] for item in done_items])
+        self.assertEqual(["message", "function_call"], [item["item"]["type"] for item in done_items])
+        self.assertEqual("AB", done_items[0]["item"]["content"][0]["text"])
 
     def test_claude_chat_translator_maps_chat_request(self) -> None:
         translator = ClaudeChatTranslator()
@@ -1447,6 +2069,63 @@ class TranslatorTests(unittest.TestCase):
         self.assertEqual("user", translated["messages"][0]["role"])
         self.assertEqual("Hello", translated["messages"][0]["content"][0]["text"])
         self.assertTrue(translated["stream"])
+
+    def test_chat_to_claude_preserves_developer_media_and_cache_control(self) -> None:
+        translator = ClaudeChatTranslator()
+
+        translated = translator.translate_request(
+            "claude-sonnet-4-5",
+            {
+                "messages": [
+                    {
+                        "role": "developer",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Use JSON",
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "cache_control": {"type": "ephemeral"},
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/png;base64,aGVsbG8="},
+                            },
+                            {
+                                "type": "file",
+                                "file": {
+                                    "file_data": "data:application/pdf;base64,cGRm",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "cache_control": {"type": "ephemeral"},
+                        "function": {
+                            "name": "lookup",
+                            "parameters": {"type": "object"},
+                        },
+                    }
+                ],
+            },
+            False,
+        )
+
+        self.assertEqual("Use JSON", translated["system"][0]["text"])
+        self.assertEqual({"type": "ephemeral"}, translated["system"][0]["cache_control"])
+        user_blocks = translated["messages"][0]["content"]
+        self.assertEqual("image", user_blocks[0]["type"])
+        self.assertEqual("base64", user_blocks[0]["source"]["type"])
+        self.assertEqual("document", user_blocks[1]["type"])
+        self.assertEqual({"type": "ephemeral"}, user_blocks[1]["cache_control"])
+        self.assertEqual({"type": "ephemeral"}, translated["tools"][0]["cache_control"])
 
     def test_claude_chat_translator_maps_chat_reasoning_effort(self) -> None:
         translator = ClaudeChatTranslator()
@@ -1730,6 +2409,127 @@ class TranslatorTests(unittest.TestCase):
         self.assertFalse(translated["store"])
         self.assertEqual(["reasoning.encrypted_content"], translated["include"])
 
+    def test_direct_chat_to_responses_restores_custom_tool_identity(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+        original_request = {
+            "input": [
+                {
+                    "type": "additional_tools",
+                    "tools": [
+                        {
+                            "type": "namespace",
+                            "name": "ops",
+                            "tools": [{"type": "custom", "name": "shell"}],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        translated = translator.translate_nonstream_response(
+            "gpt-4.1",
+            original_request,
+            {"model": "gpt-4.1"},
+            {
+                "id": "chatcmpl_custom",
+                "model": "gpt-4.1",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "ops__shell",
+                                        "arguments": '{"input":"pwd"}',
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+            },
+        )
+
+        item = next(item for item in translated["output"] if item["type"] == "custom_tool_call")
+        self.assertEqual("shell", item["name"])
+        self.assertEqual("ops", item["namespace"])
+        self.assertEqual("pwd", item["input"])
+
+    def test_direct_chat_stream_to_responses_restores_custom_tool_identity(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+        state: dict[str, Any] = {}
+        original_request = {
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "ops",
+                    "tools": [{"type": "custom", "name": "shell"}],
+                }
+            ]
+        }
+        events = [
+            StreamEvent(
+                kind="json",
+                payload={
+                    "id": "chatcmpl_custom_stream",
+                    "model": "gpt-4.1",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_1",
+                                        "function": {"name": "ops__shell", "arguments": ""},
+                                    }
+                                ]
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+            ),
+            StreamEvent(
+                kind="json",
+                payload={
+                    "id": "chatcmpl_custom_stream",
+                    "model": "gpt-4.1",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"tool_calls": [{"index": 0, "function": {"arguments": '{"input":"pwd"}'}}]},
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                },
+            ),
+            StreamEvent(kind="done", payload="[DONE]"),
+        ]
+
+        chunks = [
+            chunk
+            for event in events
+            for chunk in translator.translate_stream_event(
+                "gpt-4.1", original_request, {"model": "gpt-4.1"}, event, state
+            )
+        ]
+        added = next(chunk.payload["item"] for chunk in chunks if chunk.event == "response.output_item.added")
+        done = next(
+            chunk.payload["item"]
+            for chunk in chunks
+            if chunk.event == "response.output_item.done" and chunk.payload["item"]["type"] == "custom_tool_call"
+        )
+
+        self.assertEqual("custom_tool_call", added["type"])
+        self.assertEqual("shell", added["name"])
+        self.assertEqual("ops", added["namespace"])
+        self.assertEqual("pwd", done["input"])
+
     def test_openai_responses_passthrough_translator_normalizes_response_done_event(
         self,
     ) -> None:
@@ -1773,9 +2573,9 @@ class TranslatorRegistryTests(unittest.TestCase):
                 "openai_responses",
                 "openai_responses",
             ): OpenAIResponsesPassthroughTranslator,
-            ("openai_responses", "claude_chat"): ComposedTranslator,
+            ("openai_responses", "claude_chat"): OpenAIResponsesClaudeTranslator,
             ("claude_chat", "openai_chat"): ClaudeChatTranslator,
-            ("claude_chat", "openai_responses"): ComposedTranslator,
+            ("claude_chat", "openai_responses"): ClaudeOpenAIResponsesTranslator,
             ("claude_chat", "claude_chat"): ClaudePassthroughTranslator,
         }
 

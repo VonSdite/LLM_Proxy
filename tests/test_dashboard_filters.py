@@ -297,6 +297,9 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.assertIn("调用汇总", workbook_xml)
         self.assertIn("响应模型", sheet_xml)
         self.assertIn("Token 状态", sheet_xml)
+        self.assertIn("缓存读取 Token", sheet_xml)
+        self.assertIn("缓存写入 Token", sheet_xml)
+        self.assertIn("缓存命中率", sheet_xml)
         self.assertIn("resp-a", sheet_xml)
 
     def test_statistics_export_user_usage_summary_returns_xlsx(self) -> None:
@@ -318,6 +321,7 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.assertIn("用户用量", workbook_xml)
         self.assertIn("关联 IP 数", sheet_xml)
         self.assertIn("Token 状态", sheet_xml)
+        self.assertIn("缓存命中率", sheet_xml)
         self.assertNotIn("请求模型", sheet_xml)
         self.assertIn("alice", sheet_xml)
 
@@ -334,10 +338,12 @@ class DashboardFilterApiTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
-        self.assertEqual(2, payload["version"])
+        self.assertEqual(3, payload["version"])
         self.assertEqual("llm_proxy.statistics", payload["kind"])
         self.assertEqual("known", payload["request_logs"][0]["usage_status"])
         self.assertEqual("known", payload["daily_request_stats"][0]["usage_status"])
+        self.assertEqual("unknown", payload["request_logs"][0]["cache_usage_status"])
+        self.assertEqual("unknown", payload["daily_request_stats"][0]["cache_usage_status"])
         self.assertEqual(
             {("10.0.0.1", "model-a", "resp-a", 10)},
             {
@@ -455,6 +461,187 @@ class DashboardFilterApiTests(unittest.TestCase):
             },
         )
         self.assertEqual("partial", stats_response.get_json()[0]["usage_status"])
+
+    def test_cache_hit_rate_uses_only_requests_with_known_cache_usage(self) -> None:
+        self.log_service.log_request(
+            request_model="model-cache",
+            response_model="resp-cache",
+            total_tokens=120,
+            prompt_tokens=100,
+            completion_tokens=20,
+            cache_read_input_tokens=40,
+            cache_creation_input_tokens=10,
+            cache_usage_status="known",
+            start_time=datetime(2026, 4, 13, 9, 0, 0),
+            end_time=datetime(2026, 4, 13, 9, 0, 1),
+            ip_address="10.0.0.1",
+        )
+        self.log_service.log_request(
+            request_model="model-cache",
+            response_model="resp-cache",
+            total_tokens=220,
+            prompt_tokens=200,
+            completion_tokens=20,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+            cache_usage_status="unknown",
+            start_time=datetime(2026, 4, 13, 10, 0, 0),
+            end_time=datetime(2026, 4, 13, 10, 0, 1),
+            ip_address="10.0.0.1",
+        )
+
+        response = self.client.get(
+            "/api/statistics",
+            query_string={
+                "start_date": "2026-04-13",
+                "end_date": "2026-04-13",
+                "request_model": "model-cache",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        row = response.get_json()[0]
+        self.assertEqual(40, row["cache_read_input_tokens"])
+        self.assertEqual(10, row["cache_creation_input_tokens"])
+        self.assertEqual("partial", row["cache_usage_status"])
+        self.assertEqual(0.4, row["cache_hit_rate"])
+
+    def test_known_zero_cache_usage_has_zero_hit_rate(self) -> None:
+        self.log_service.log_request(
+            request_model="model-no-hit",
+            response_model="resp-no-hit",
+            total_tokens=60,
+            prompt_tokens=50,
+            completion_tokens=10,
+            cache_usage_status="known",
+            start_time=datetime(2026, 4, 14, 9, 0, 0),
+            end_time=datetime(2026, 4, 14, 9, 0, 1),
+            ip_address="10.0.0.2",
+        )
+
+        response = self.client.get(
+            "/api/statistics",
+            query_string={
+                "start_date": "2026-04-14",
+                "end_date": "2026-04-14",
+                "request_model": "model-no-hit",
+            },
+        )
+
+        row = response.get_json()[0]
+        self.assertEqual("known", row["cache_usage_status"])
+        self.assertEqual(0.0, row["cache_hit_rate"])
+
+    def test_statistics_v3_import_preserves_cache_usage(self) -> None:
+        payload = {
+            "version": 3,
+            "kind": "llm_proxy.statistics",
+            "request_logs": [
+                {
+                    "ip_address": "10.0.0.2",
+                    "request_model": "model-cache-log",
+                    "response_model": "resp-cache-log",
+                    "total_tokens": 12,
+                    "prompt_tokens": 10,
+                    "completion_tokens": 2,
+                    "usage_status": "known",
+                    "cache_read_input_tokens": 4,
+                    "cache_creation_input_tokens": 2,
+                    "cache_usage_status": "known",
+                    "start_time": "2026-04-15 09:00:00.000000",
+                    "end_time": "2026-04-15 09:00:01.000000",
+                }
+            ],
+            "daily_request_stats": [
+                {
+                    "stat_date": "2026-04-15",
+                    "ip_address": "10.0.0.2",
+                    "request_model": "model-cache-stat",
+                    "response_model": "resp-cache-stat",
+                    "request_count": 1,
+                    "total_tokens": 12,
+                    "prompt_tokens": 10,
+                    "completion_tokens": 2,
+                    "usage_status": "known",
+                    "cache_read_input_tokens": 4,
+                    "cache_creation_input_tokens": 2,
+                    "cache_known_prompt_tokens": 10,
+                    "cache_usage_status": "known",
+                }
+            ],
+        }
+
+        response = self.client.post("/api/statistics/daily-stats/import", json=payload)
+
+        self.assertEqual(201, response.status_code)
+        logs = self.client.get(
+            "/api/request-logs",
+            query_string={"start_date": "2026-04-15", "end_date": "2026-04-15"},
+        ).get_json()["logs"]
+        imported_log = next(item for item in logs if item["request_model"] == "model-cache-log")
+        self.assertEqual(4, imported_log["cache_read_input_tokens"])
+        self.assertEqual(0.4, imported_log["cache_hit_rate"])
+        stats = self.client.get(
+            "/api/statistics",
+            query_string={
+                "start_date": "2026-04-15",
+                "end_date": "2026-04-15",
+                "request_model": "model-cache-stat",
+            },
+        ).get_json()[0]
+        self.assertEqual(0.4, stats["cache_hit_rate"])
+
+    def test_statistics_v3_import_uses_only_known_cache_prompt_as_denominator(self) -> None:
+        payload = {
+            "version": 3,
+            "kind": "llm_proxy.statistics",
+            "request_logs": [],
+            "daily_request_stats": [
+                {
+                    "stat_date": "2026-04-16",
+                    "ip_address": "10.0.0.2",
+                    "request_model": "model-cache-mixed",
+                    "response_model": "resp-cache-mixed",
+                    "request_count": 1,
+                    "total_tokens": 120,
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "usage_status": "known",
+                    "cache_read_input_tokens": 40,
+                    "cache_creation_input_tokens": 10,
+                    "cache_known_prompt_tokens": 100,
+                    "cache_usage_status": "known",
+                },
+                {
+                    "stat_date": "2026-04-16",
+                    "ip_address": "10.0.0.2",
+                    "request_model": "model-cache-mixed",
+                    "response_model": "resp-cache-mixed",
+                    "request_count": 1,
+                    "total_tokens": 220,
+                    "prompt_tokens": 200,
+                    "completion_tokens": 20,
+                    "usage_status": "known",
+                    "cache_usage_status": "unknown",
+                },
+            ],
+        }
+
+        response = self.client.post("/api/statistics/daily-stats/import", json=payload)
+
+        self.assertEqual(201, response.status_code)
+        stats = self.client.get(
+            "/api/statistics",
+            query_string={
+                "start_date": "2026-04-16",
+                "end_date": "2026-04-16",
+                "request_model": "model-cache-mixed",
+            },
+        ).get_json()[0]
+        self.assertEqual(2, stats["request_count"])
+        self.assertEqual(100, stats["cache_known_prompt_tokens"])
+        self.assertEqual("partial", stats["cache_usage_status"])
+        self.assertEqual(0.4, stats["cache_hit_rate"])
 
     def test_request_logs_import_skips_duplicate_detail_rows(self) -> None:
         export_response = self.client.get(

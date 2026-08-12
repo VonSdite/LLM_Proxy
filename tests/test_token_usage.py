@@ -4,11 +4,55 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.proxy_core.usage import extract_canonical_usage
 from src.services.proxy_response_builder import ProxyResponseBuilder
 from src.translators import ClaudeChatTranslator, OpenAIChatClaudeTranslator, build_default_translator_registry
 
 
 class TokenUsageTests(unittest.TestCase):
+    def test_openai_cache_write_aliases_are_normalized_and_marked_known(self) -> None:
+        chat_usage = extract_canonical_usage(
+            {
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 3,
+                    "prompt_tokens_details": {
+                        "cached_tokens": 4,
+                        "cache_write_tokens": 2,
+                    },
+                }
+            },
+            "openai_chat",
+        )
+        responses_usage = extract_canonical_usage(
+            {
+                "usage": {
+                    "input_tokens": 12,
+                    "output_tokens": 3,
+                    "input_tokens_details": {
+                        "cached_tokens": 0,
+                        "cached_creation_tokens": 2,
+                    },
+                }
+            },
+            "openai_responses",
+        )
+
+        self.assertEqual(4, chat_usage["cache_read_input_tokens"])
+        self.assertEqual(2, chat_usage["cache_creation_input_tokens"])
+        self.assertEqual("known", chat_usage["cache_usage_status"])
+        self.assertEqual(0, responses_usage["cache_read_input_tokens"])
+        self.assertEqual(2, responses_usage["cache_creation_input_tokens"])
+        self.assertEqual("known", responses_usage["cache_usage_status"])
+
+    def test_usage_without_cache_details_marks_cache_usage_unknown(self) -> None:
+        usage = extract_canonical_usage(
+            {"usage": {"prompt_tokens": 12, "completion_tokens": 3}},
+            "openai_chat",
+        )
+
+        self.assertEqual("unknown", usage["cache_usage_status"])
+
     def test_claude_stream_usage_merges_message_start_and_delta(self) -> None:
         meta = ProxyResponseBuilder._create_empty_meta()
 
@@ -126,6 +170,95 @@ class TokenUsageTests(unittest.TestCase):
         self.assertEqual(4, response["usage"]["cache_read_input_tokens"])
         self.assertEqual(3, response["usage"]["output_tokens"])
         self.assertEqual(1, response["usage"]["thinking_tokens"])
+
+    def test_responses_to_claude_preserves_known_zero_cache_usage(self) -> None:
+        translator = build_default_translator_registry().get("openai_responses", "claude_chat")
+        response = translator.translate_nonstream_response(
+            "gpt-5.4",
+            {},
+            {"model": "gpt-5.4"},
+            {
+                "id": "resp-zero-cache",
+                "output": [],
+                "usage": {
+                    "input_tokens": 11,
+                    "output_tokens": 3,
+                    "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                },
+            },
+        )
+
+        self.assertEqual(0, response["usage"]["cache_read_input_tokens"])
+        self.assertEqual(0, response["usage"]["cache_creation_input_tokens"])
+        normalized = extract_canonical_usage(response, "claude_chat")
+        self.assertEqual("known", normalized["cache_usage_status"])
+
+    def test_openai_direct_bridges_preserve_known_zero_cache_usage(self) -> None:
+        registry = build_default_translator_registry()
+        responses_response = registry.get("openai_chat", "openai_responses").translate_nonstream_response(
+            "gpt-4.1",
+            {},
+            {"model": "gpt-4.1"},
+            {
+                "id": "chatcmpl-zero-cache",
+                "model": "gpt-4.1",
+                "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 3,
+                    "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                },
+            },
+        )
+        chat_response = registry.get("openai_responses", "openai_chat").translate_nonstream_response(
+            "gpt-4.1",
+            {},
+            {"model": "gpt-4.1"},
+            {
+                "id": "resp-zero-cache",
+                "model": "gpt-4.1",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}],
+                "usage": {
+                    "input_tokens": 11,
+                    "output_tokens": 3,
+                    "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                },
+            },
+        )
+
+        self.assertEqual(
+            {"cached_tokens": 0, "cache_write_tokens": 0},
+            responses_response["usage"]["input_tokens_details"],
+        )
+        self.assertEqual(
+            {"cached_tokens": 0, "cache_write_tokens": 0},
+            chat_response["usage"]["prompt_tokens_details"],
+        )
+
+    def test_responses_to_chat_preserves_explicit_all_zero_usage(self) -> None:
+        response = (
+            build_default_translator_registry()
+            .get("openai_responses", "openai_chat")
+            .translate_nonstream_response(
+                "gpt-4.1",
+                {},
+                {"model": "gpt-4.1"},
+                {
+                    "id": "resp-zero-usage",
+                    "model": "gpt-4.1",
+                    "output": [],
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "input_tokens_details": {"cached_tokens": 0},
+                    },
+                },
+            )
+        )
+
+        self.assertEqual(0, response["usage"]["total_tokens"])
+        self.assertEqual(0, response["usage"]["prompt_tokens_details"]["cached_tokens"])
 
     def test_output_token_limit_aliases_are_forwarded(self) -> None:
         claude_request = OpenAIChatClaudeTranslator().translate_request(
