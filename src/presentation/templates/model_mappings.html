@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260807-8">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260813-1">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -43,10 +43,19 @@
                                 <label class="form-label" for="mappingStrategySelect">选择策略</label>
                                 <button
                                     type="button"
-                                    class="mapping-help-button"
+                                    class="mapping-help-button mapping-help-button-rich mapping-strategy-help"
                                     aria-describedby="mappingStrategyHelp"
-                                    data-tooltip="最高优先级：每个新请求都选择正常候选中优先级最高的目标，高优先级目标恢复后自动切回。粘滞故障切换：继续使用当前成功目标，直到该目标不可用。未设置策略时默认使用最高优先级。"
-                                >?</button>
+                                >?<span class="mapping-help-tooltip" role="tooltip">
+                                    <span class="mapping-help-section">
+                                        <strong>最高优先级</strong>
+                                        <span>每次请求选择当前正常候选中优先级最高的目标。高优先级目标恢复后自动切回。</span>
+                                    </span>
+                                    <span class="mapping-help-section">
+                                        <strong>粘滞故障切换</strong>
+                                        <span>继续使用最近成功的目标。该目标进入冷却、禁用或不可用后，才重新选择。</span>
+                                    </span>
+                                    <span class="mapping-help-note">未设置策略时使用“最高优先级”。</span>
+                                </span></button>
                                 <span class="visually-hidden" id="mappingStrategyHelp">最高优先级策略会在每个新请求中选择正常候选中优先级最高的目标，高优先级目标恢复后自动切回。粘滞故障切换策略会继续使用当前成功目标，直到该目标不可用。未设置策略时默认使用最高优先级。</span>
                             </div>
                             <select class="form-select" id="mappingStrategySelect">
@@ -55,20 +64,13 @@
                             </select>
                         </div>
                         <div class="mapping-field">
-                            <label class="form-label" for="mappingCooldownInput">429 冷却秒数</label>
+                            <label class="form-label" for="mappingCooldownInput">故障冷却秒数</label>
                             <input type="number" class="form-control" id="mappingCooldownInput" min="0" value="60">
                         </div>
                     </div>
                     <div class="mapping-target-section">
                         <div class="mapping-target-label">
                             <label class="form-label">目标模型</label>
-                            <button
-                                type="button"
-                                class="mapping-help-button"
-                                aria-describedby="mappingTargetHelp"
-                                data-tooltip="优先级数字越大越先使用，同优先级按列表顺序选择。单目标或正常候选全部不可用时，仍按最高优先级尝试一个运行时目标。429 进入冷却，其他异常自动禁用。"
-                            >?</button>
-                            <span class="visually-hidden" id="mappingTargetHelp">优先级数字越大越先使用，同优先级按列表顺序选择。单目标或正常候选全部不可用时，仍按最高优先级尝试一个运行时目标。429 进入冷却，其他异常自动禁用。</span>
                         </div>
                         <div class="mapping-target-table-shell">
                             <table class="mapping-target-table" aria-label="目标模型列表">
@@ -82,7 +84,31 @@
                                     <tr class="mapping-target-table-header">
                                         <th aria-label="排序"></th>
                                         <th>模型 ID</th>
-                                        <th>优先级</th>
+                                        <th>
+                                            <span class="mapping-table-heading">
+                                                优先级
+                                                <button
+                                                    type="button"
+                                                    class="mapping-help-button mapping-help-button-rich mapping-priority-help"
+                                                    aria-describedby="mappingPriorityHelp"
+                                                >?<span class="mapping-help-tooltip" role="tooltip">
+                                                    <span class="mapping-help-section">
+                                                        <strong>选择顺序</strong>
+                                                        <span>数字越大越先选择；优先级相同时，按目标模型的列表顺序选择。</span>
+                                                    </span>
+                                                    <span class="mapping-help-section">
+                                                        <strong>临时冷却</strong>
+                                                        <span>429、5xx、网络或流异常，以及 401/403/408/425 会进入冷却，之后自动重试。</span>
+                                                    </span>
+                                                    <span class="mapping-help-section">
+                                                        <strong>自动禁用</strong>
+                                                        <span>重定向、404、405、410 表示目标长期不可用。其他 4xx 只切换本次请求，不改变目标状态。</span>
+                                                    </span>
+                                                    <span class="mapping-help-note">没有正常候选时，仍尝试运行时存在的最高优先级目标。</span>
+                                                </span></button>
+                                            </span>
+                                            <span class="visually-hidden" id="mappingPriorityHelp">优先级数字越大越先选择，相同时按列表顺序选择。429、5xx、网络或流异常，以及 401、403、408、425 进入临时冷却。重定向、404、405、410 自动禁用。其他 4xx 只切换本次请求，不改变目标状态。没有正常候选时，仍尝试运行时存在的最高优先级目标。</span>
+                                        </th>
                                         <th>操作</th>
                                     </tr>
                                 </thead>
@@ -386,7 +412,7 @@
                                 </div>
                             </th>
                             <th class="mapping-id-column">模型 ID</th>
-                            <th>目标模型</th><th>429 冷却</th><th>操作</th>
+                            <th>目标模型</th><th>故障冷却</th><th>操作</th>
                         </tr></thead>
                         <tbody>${mappings.map(mapping => {
                             const encodedId = encodeURIComponent(mapping.id);

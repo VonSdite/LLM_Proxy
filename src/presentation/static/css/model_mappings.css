@@ -469,6 +469,10 @@
     justify-self: start;
 }
 
+.model-mappings-page .modal .mapping-field-label .form-label {
+    align-self: center;
+}
+
 .model-mappings-page .modal .form-label {
     display: inline-flex;
     align-items: center;
@@ -540,6 +544,78 @@
     pointer-events: none;
     text-align: left;
     visibility: hidden;
+}
+
+.mapping-help-button-rich::after {
+    content: none;
+}
+
+.mapping-help-tooltip {
+    position: absolute;
+    z-index: 1100;
+    top: calc(100% + 10px);
+    left: -10px;
+    display: grid;
+    width: min(360px, calc(100vw - 40px));
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid #344256;
+    border-radius: 12px;
+    background: #17202c;
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.28);
+    color: #f8fafc;
+    cursor: default;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.55;
+    opacity: 0;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+    text-align: left;
+    visibility: hidden;
+}
+
+.mapping-help-section {
+    display: grid;
+    gap: 2px;
+}
+
+.mapping-help-section strong {
+    color: #bfdbfe;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.mapping-help-note {
+    padding-top: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.24);
+    color: #cbd5e1;
+}
+
+.mapping-help-button-rich:hover .mapping-help-tooltip,
+.mapping-help-button-rich:focus-visible .mapping-help-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+.mapping-table-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.model-mappings-page .mapping-priority-help {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    font-size: 11px;
+}
+
+.mapping-priority-help .mapping-help-tooltip {
+    right: -10px;
+    left: auto;
+    width: min(380px, calc(100vw - 40px));
+    text-transform: none;
 }
 
 .mapping-help-button:hover::after,
@@ -1409,6 +1485,14 @@
 
     .mapping-editor-fields {
         grid-template-columns: 1fr;
+    }
+
+    .mapping-help-tooltip,
+    .mapping-priority-help .mapping-help-tooltip {
+        right: auto;
+        left: 50%;
+        width: min(340px, calc(100vw - 32px));
+        transform: translateX(-50%);
     }
 
     .mapping-target-table colgroup,

@@ -90,7 +90,8 @@ decoder
 - `sticky_failover` 保存当前成功目标；该目标保持正常候选状态时，后续请求继续使用它
 - 目标按优先级从高到低选择，同优先级按配置顺序选择；未提供策略或策略为空时使用 `highest_priority`
 - 目标自身的 Provider 最大尝试次数、Auth Group Auth Entry 或 OAuth 认证文件候选先耗尽，映射层才切换到下一个目标
-- `429` 目标进入冷却，优先采用 `Retry-After`，否则采用映射配置的冷却秒数；其他非 2xx 状态或异常自动禁用目标
+- `429` 优先采用 `Retry-After` 进入冷却；`401`、`403`、`408`、`425`、`5xx`、网络异常和流异常采用映射配置的冷却秒数
+- `3xx`、`404`、`405`、`410` 自动禁用目标；其他 `4xx` 只触发当前请求的故障切换并记录错误，不改变目标可用状态
 - 正常候选为空时，人工禁用、自动禁用和冷却不阻止兜底选择；系统始终从当前运行时仍存在的全部目标中选择最高优先级目标
 - 正常故障切换在同一个下游请求内每个目标最多尝试一次；进入兜底态后固定最高优先级目标，该目标失败时结束本次请求；新请求重新选择目标，单目标或全部目标禁用时仍会再次映射到该目标
 - 流提交前失败可以在当前请求内切换目标；流提交后失败不改写当前响应，只更新运行状态供后续选择
@@ -161,7 +162,7 @@ decoder
   - 暴露模型映射 CRUD、目标启停、JSON 导入导出和目标模型目录接口
 - `ModelMappingService`
   - 校验映射 ID 和目标模型范围；映射 ID 可以与 OAuth 文本或图片模型 ID 重名
-  - 维护缺省 `highest_priority` 与可选 `sticky_failover` 策略、优先级、429 冷却、自动禁用、故障兜底和跨重启当前目标
+  - 维护缺省 `highest_priority` 与可选 `sticky_failover` 策略、优先级、可恢复故障冷却、长期不可用自动禁用、故障兜底和跨重启当前目标
   - 自定义映射 ID 的路由优先级高于 Provider、Codex OAuth 和 Claude OAuth；同名 OAuth 模型由自定义映射接管
 - `ModelMappingRepository`
   - 在 SQLite 中事务持久化映射定义、选择策略、目标配置、目标运行状态和当前目标
@@ -483,7 +484,7 @@ OAuth 模型是数据平面的例外路由：
   - 不缓存模型目录，OAuth 模型变化后管理端重新加载即可出现在权限选择列表
 - `ModelMappingService`
   - 每次路由和管理查询读取当前 Provider / OAuth 文本模型目录，不缓存目标可用性
-  - 映射策略、目标人工启用状态、429 冷却、自动禁用错误和当前目标保存在 SQLite
+  - 映射策略、目标人工启用状态、故障冷却、自动禁用错误和当前目标保存在 SQLite
   - `highest_priority` 在每次请求中重新比较正常候选，高优先级目标恢复后立即参与选择
   - `sticky_failover` 在当前目标仍正常可用时保持流量，当前目标不可用时重新按优先级选择
   - 正常候选为空时忽略目标的人工禁用、自动禁用和冷却状态，按最高优先级选择运行时目标；兜底目标在当前请求失败后不重复调用
@@ -506,7 +507,7 @@ OAuth 模型是数据平面的例外路由：
 
 ### 3.3 Control-Plane Model Mapping Management
 
-模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出和映射级启停。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、目标选择策略、429 冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。人工禁用和自动禁用目标都显示“禁用”标签；人工禁用提示显示“手动禁用”，自动禁用提示展示最近一次失败的状态码和错误内容。重新启用并保存映射会清除该目标的运行故障状态。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。
+模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出和映射级启停。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、目标选择策略、故障冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。选择策略帮助信息按策略分段展示；优先级帮助信息位于优先级表头，说明排序、冷却、自动禁用和兜底规则。人工禁用和自动禁用目标都显示“禁用”标签；人工禁用提示显示“手动禁用”，自动禁用提示展示最近一次失败的状态码和错误内容。重新启用并保存映射会清除该目标的运行故障状态。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。
 
 页面与 API：
 
@@ -527,7 +528,7 @@ OAuth 模型是数据平面的例外路由：
 
 SQLite 表：
 
-- `model_mappings` 保存映射 ID、映射级启用状态、显示顺序、目标选择策略和 429 默认冷却秒数
+- `model_mappings` 保存映射 ID、映射级启用状态、显示顺序、目标选择策略和默认故障冷却秒数
 - `model_mapping_targets` 保存目标模型、优先级、人工启用状态和同优先级顺序
 - `model_mapping_target_runtime` 保存自动禁用、冷却截止时间、最近状态码和错误摘要
 - `model_mapping_runtime` 保存当前目标；`sticky_failover` 使用该值保持目标，`highest_priority` 使用该值展示最近选择
@@ -975,7 +976,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - [src/services/model_catalog_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_catalog_service.py)
   - 汇总 Provider 配置模型、Codex / Claude OAuth 可用模型、Codex 图片模型与模型映射 ID，供用户和 API Key 模型权限共用
 - [src/services/model_mapping_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/model_mapping_service.py)
-  - 模型映射校验、映射级启停与排序、目标选择策略、429 冷却、自动禁用、故障兜底和当前目标编排
+  - 模型映射校验、映射级启停与排序、目标选择策略、故障冷却、自动禁用、故障兜底和当前目标编排
 - [src/repositories/model_mapping_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/model_mapping_repository.py)
   - 模型映射定义、启用状态、显示顺序、目标配置和运行状态 SQLite 持久化
 - [src/presentation/model_mapping_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/model_mapping_controller.py)
@@ -1269,8 +1270,12 @@ sequenceDiagram
         Controller->>Mapping: record_success(TargetB)
         Mapping->>SQLite: persist current TargetB
         Controller-->>Client: TargetB response
-    else TargetA fails after stream commit
+    else TargetA has a recoverable failure after stream commit
         TargetA-->>Client: protocol error in current stream
+        Controller->>Mapping: record_failure(TargetA)
+        Mapping->>SQLite: cool down TargetA for later requests
+    else TargetA reports a long-lived unavailable status
+        TargetA-->>Controller: 3xx / 404 / 405 / 410
         Controller->>Mapping: record_failure(TargetA)
         Mapping->>SQLite: auto-disable TargetA for later requests
     else client cancels
