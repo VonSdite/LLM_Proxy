@@ -663,6 +663,53 @@
     font-size: 15px;
 }
 
+.dashboard-page .api-key-usage-preview {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 0 9px;
+    border: 1px solid rgba(95, 143, 190, 0.2);
+    border-radius: 8px;
+    background: rgba(95, 143, 190, 0.08);
+    color: var(--text-secondary);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.dashboard-page .api-key-usage-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 9px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.dashboard-page .api-key-usage-status.is-enabled {
+    border-color: rgba(37, 145, 95, 0.24);
+    background: rgba(37, 145, 95, 0.1);
+    color: #18794e;
+}
+
+.dashboard-page .api-key-usage-status.is-disabled,
+.dashboard-page .api-key-usage-status.is-deleted {
+    border-color: rgba(130, 139, 153, 0.24);
+    background: rgba(130, 139, 153, 0.1);
+    color: #667085;
+}
+
+:root[data-theme="dark"] .dashboard-page .api-key-usage-status.is-enabled {
+    color: #5bd6a0;
+}
+
+:root[data-theme="dark"] .dashboard-page .api-key-usage-status.is-disabled,
+:root[data-theme="dark"] .dashboard-page .api-key-usage-status.is-deleted {
+    color: #a7b0bd;
+}
+
 .dashboard-page .ip-address,
 .dashboard-page .table-model-tag {
     display: inline-flex;

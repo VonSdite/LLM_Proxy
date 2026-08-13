@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260812-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260813-1">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}监控 API 请求和 Token 消耗{% endblock %}
@@ -75,6 +75,16 @@
                     aria-selected="false"
                     aria-controls="dashboardTabPanel_userUsage"
                 >用户用量</button>
+                {% if api_key_management_enabled %}
+                <button
+                    type="button"
+                    class="dashboard-tab-btn"
+                    id="dashboardTabBtn_apiKeyUsage"
+                    onclick="switchDashboardTab('apiKeyUsage')"
+                    aria-selected="false"
+                    aria-controls="dashboardTabPanel_apiKeyUsage"
+                >KEY 用量</button>
+                {% endif %}
                 <button
                     type="button"
                     class="dashboard-tab-btn"
@@ -135,6 +145,34 @@
                     </table>
                 </div>
             </div>
+
+            {% if api_key_management_enabled %}
+            <div class="dashboard-tab-panel" id="dashboardTabPanel_apiKeyUsage" role="tabpanel" aria-labelledby="dashboardTabBtn_apiKeyUsage" hidden>
+                <div class="stats-container">
+                    <table class="stats-table" data-resizable-columns="statistics-api-key-usage">
+                        <thead>
+                            <tr>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('key_name', 'string')">KEY 名称 <span class="sort-indicator" id="apiKeyUsageSortIndicator_key_name"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('key_preview', 'string')">KEY <span class="sort-indicator" id="apiKeyUsageSortIndicator_key_preview"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('status', 'string')">状态 <span class="sort-indicator" id="apiKeyUsageSortIndicator_status"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="apiKeyUsageSortIndicator_prompt_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('completion_tokens', 'number')">输出token <span class="sort-indicator" id="apiKeyUsageSortIndicator_completion_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('total_tokens', 'number')">总 Token <span class="sort-indicator" id="apiKeyUsageSortIndicator_total_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('cache_read_input_tokens', 'number')">缓存读取 Token <span class="sort-indicator" id="apiKeyUsageSortIndicator_cache_read_input_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('cache_creation_input_tokens', 'number')">缓存写入 Token <span class="sort-indicator" id="apiKeyUsageSortIndicator_cache_creation_input_tokens"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('cache_hit_rate', 'number')">缓存命中率 <span class="sort-indicator" id="apiKeyUsageSortIndicator_cache_hit_rate"></span></button></th>
+                                <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleApiKeyUsageSort('request_count', 'number')">请求数 <span class="sort-indicator" id="apiKeyUsageSortIndicator_request_count"></span></button></th>
+                            </tr>
+                        </thead>
+                        <tbody id="apiKeyUsageTable">
+                            <tr>
+                                <td colspan="10" class="loading">加载 KEY 用量...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
 
             <div class="dashboard-tab-panel" id="dashboardTabPanel_logs" role="tabpanel" aria-labelledby="dashboardTabBtn_logs" hidden>
                 <div class="table-card-shell">
@@ -201,18 +239,26 @@
         let activeCustomSelect = null;
         let statsData = [];
         let userUsageData = [];
+        let apiKeyUsageData = [];
         let logsData = [];
         let activeDashboardTab = 'stats';
         let statsRequestToken = 0;
         let userUsageRequestToken = 0;
+        let apiKeyUsageRequestToken = 0;
         let logsRequestToken = 0;
         let statisticsImportInFlight = false;
+        const apiKeyUsageEnabled = {{ 'true' if api_key_management_enabled else 'false' }};
         const statsSortState = {
             key: 'total_tokens',
             direction: 'desc',
             type: 'number'
         };
         const userUsageSortState = {
+            key: 'total_tokens',
+            direction: 'desc',
+            type: 'number'
+        };
+        const apiKeyUsageSortState = {
             key: 'total_tokens',
             direction: 'desc',
             type: 'number'
@@ -232,7 +278,7 @@
         }
 
         function syncDashboardTabUi() {
-            ['stats', 'userUsage', 'logs'].forEach(tabName => {
+            getDashboardTabNames().forEach(tabName => {
                 const isActive = tabName === activeDashboardTab;
                 const button = getDashboardTabButton(tabName);
                 const panel = getDashboardTabPanel(tabName);
@@ -258,11 +304,21 @@
                 loadUserUsageSummary();
                 return;
             }
+            if (activeDashboardTab === 'apiKeyUsage') {
+                loadApiKeyUsageSummary();
+                return;
+            }
             loadLogs();
         }
 
+        function getDashboardTabNames() {
+            return apiKeyUsageEnabled
+                ? ['stats', 'userUsage', 'apiKeyUsage', 'logs']
+                : ['stats', 'userUsage', 'logs'];
+        }
+
         function switchDashboardTab(tabName) {
-            if (!['stats', 'userUsage', 'logs'].includes(tabName)) {
+            if (!getDashboardTabNames().includes(tabName)) {
                 return;
             }
 
@@ -605,6 +661,17 @@
                 userUsageSortState.direction = type === 'string' ? 'asc' : 'desc';
             }
             loadUserUsageSummary();
+        }
+
+        function toggleApiKeyUsageSort(key, type) {
+            if (apiKeyUsageSortState.key === key) {
+                apiKeyUsageSortState.direction = apiKeyUsageSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                apiKeyUsageSortState.key = key;
+                apiKeyUsageSortState.type = type;
+                apiKeyUsageSortState.direction = type === 'string' ? 'asc' : 'desc';
+            }
+            loadApiKeyUsageSummary();
         }
 
         function toggleLogsSort(key, type) {
@@ -1018,6 +1085,7 @@
             loadRequestModels();
             updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
             updateSortIndicators('userUsage', userUsageSortState, ['username', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count', 'ip_count', 'last_request_date']);
+            updateSortIndicators('apiKeyUsage', apiKeyUsageSortState, ['key_name', 'key_preview', 'status', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens', 'cache_hit_rate', 'request_count']);
             updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
             syncDashboardTabUi();
             switchDashboardTab(activeDashboardTab);
@@ -1233,6 +1301,107 @@
                     <td class="num-col">${renderNumber(totalRequests)}</td>
                     <td class="num-col">-</td>
                     <td>-</td>
+                </tr>
+            `;
+            tableBody.innerHTML = html;
+        }
+
+        function renderApiKeyUsageStatus(status) {
+            const normalized = String(status || '').trim().toLowerCase();
+            const labels = {
+                enabled: '启用',
+                disabled: '停用',
+                deleted: '已删除'
+            };
+            const safeStatus = Object.prototype.hasOwnProperty.call(labels, normalized) ? normalized : 'deleted';
+            return `<span class="api-key-usage-status is-${safeStatus}">${labels[safeStatus]}</span>`;
+        }
+
+        async function loadApiKeyUsageSummary() {
+            const requestToken = ++apiKeyUsageRequestToken;
+            const tableBody = document.getElementById('apiKeyUsageTable');
+            if (!tableBody) return;
+            tableBody.innerHTML = '<tr><td colspan="10" class="loading">加载 KEY 用量...</td></tr>';
+
+            try {
+                const params = buildDashboardSearchParams({
+                    sort_key: apiKeyUsageSortState.key,
+                    sort_direction: apiKeyUsageSortState.direction,
+                });
+                const response = await fetch(`/api/statistics/api-key-usage-summary?${params}`, { cache: 'no-store' });
+                if (handleUnauthorizedResponse(response)) return;
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.error || '加载 KEY 用量失败');
+                }
+                if (requestToken !== apiKeyUsageRequestToken) return;
+                apiKeyUsageData = Array.isArray(data) ? data : [];
+                renderApiKeyUsageSummary();
+            } catch (error) {
+                if (requestToken !== apiKeyUsageRequestToken) return;
+                console.error('加载 KEY 用量失败:', error);
+                tableBody.innerHTML = '<tr><td colspan="10" class="error">加载 KEY 用量失败</td></tr>';
+                showMessage('加载 KEY 用量失败，请稍后重试', 'error');
+            }
+        }
+
+        function renderApiKeyUsageSummary() {
+            const tableBody = document.getElementById('apiKeyUsageTable');
+            if (!tableBody) return;
+            updateSortIndicators('apiKeyUsage', apiKeyUsageSortState, ['key_name', 'key_preview', 'status', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens', 'cache_hit_rate', 'request_count']);
+
+            if (apiKeyUsageData.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="10" class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
+                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <p>当前时间范围内暂无 KEY 用量</p>
+                            </td></tr>`;
+                return;
+            }
+
+            let html = '';
+            let totalRequests = 0;
+            let totalTokens = 0;
+            let totalPromptTokens = 0;
+            let totalCompletionTokens = 0;
+            let totalCacheReadTokens = 0;
+            let totalCacheCreationTokens = 0;
+
+            apiKeyUsageData.forEach(item => {
+                totalRequests += normalizeNumber(item.request_count);
+                totalTokens += normalizeNumber(item.total_tokens);
+                totalPromptTokens += normalizeNumber(item.prompt_tokens);
+                totalCompletionTokens += normalizeNumber(item.completion_tokens);
+                totalCacheReadTokens += normalizeNumber(item.cache_read_input_tokens);
+                totalCacheCreationTokens += normalizeNumber(item.cache_creation_input_tokens);
+
+                html += `
+                    <tr>
+                        <td>${escapeHtml(item.key_name || '-')}</td>
+                        <td><code class="api-key-usage-preview">${escapeHtml(item.key_preview || '-')}</code></td>
+                        <td>${renderApiKeyUsageStatus(item.status)}</td>
+                        <td class="num-col">${renderNumber(item.prompt_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(item.completion_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(item.total_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(item.cache_read_input_tokens || 0)}</td>
+                        <td class="num-col">${renderNumber(item.cache_creation_input_tokens || 0)}</td>
+                        <td class="num-col">${renderCacheHitRate(item.cache_hit_rate, item.cache_usage_status)}</td>
+                        <td class="num-col">${renderNumber(item.request_count || 0)}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                <tr class="stats-total-row">
+                    <td colspan="3">总计</td>
+                    <td class="num-col">${renderNumber(totalPromptTokens)}</td>
+                    <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
+                    <td class="num-col">${renderNumber(totalTokens)}</td>
+                    <td class="num-col">${renderNumber(totalCacheReadTokens)}</td>
+                    <td class="num-col">${renderNumber(totalCacheCreationTokens)}</td>
+                    <td class="num-col">${renderCacheHitRate(aggregateCacheHitRate(apiKeyUsageData), 'known')}</td>
+                    <td class="num-col">${renderNumber(totalRequests)}</td>
                 </tr>
             `;
             tableBody.innerHTML = html;
@@ -1487,6 +1656,9 @@
             if (activeDashboardTab === 'userUsage') {
                 return userUsageSortState;
             }
+            if (activeDashboardTab === 'apiKeyUsage') {
+                return apiKeyUsageSortState;
+            }
             if (activeDashboardTab === 'logs') {
                 return logsSortState;
             }
@@ -1494,7 +1666,9 @@
         }
 
         function getActiveExportTabName() {
-            return activeDashboardTab === 'userUsage' ? 'user_usage' : activeDashboardTab;
+            if (activeDashboardTab === 'userUsage') return 'user_usage';
+            if (activeDashboardTab === 'apiKeyUsage') return 'api_key_usage';
+            return activeDashboardTab;
         }
 
         function exportActiveDashboardTab() {
