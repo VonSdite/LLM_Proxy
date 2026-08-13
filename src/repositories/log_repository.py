@@ -49,6 +49,21 @@ class LogRepository:
         "last_request_date": "MAX(d.stat_date)",
     }
 
+    _API_KEY_USAGE_SORT_COLUMNS = {
+        "key_name": "COALESCE(NULLIF(k.name, ''), '已删除 KEY #' || l.api_key_id)",
+        "key_preview": "COALESCE(NULLIF(k.key_prefix, '') || '...' || NULLIF(k.key_suffix, ''), '')",
+        "status": "CASE WHEN k.id IS NULL THEN 2 WHEN k.enabled = 1 THEN 0 ELSE 1 END",
+        "request_count": "COUNT(*)",
+        "total_tokens": "COALESCE(SUM(l.total_tokens), 0)",
+        "prompt_tokens": "COALESCE(SUM(l.prompt_tokens), 0)",
+        "completion_tokens": "COALESCE(SUM(l.completion_tokens), 0)",
+        "cache_read_input_tokens": "COALESCE(SUM(l.cache_read_input_tokens), 0)",
+        "cache_creation_input_tokens": "COALESCE(SUM(l.cache_creation_input_tokens), 0)",
+        "cache_hit_rate": "CASE WHEN SUM(CASE WHEN l.cache_usage_status = 'known' "
+        "THEN l.prompt_tokens ELSE 0 END) > 0 THEN SUM(l.cache_read_input_tokens) * 1.0 / "
+        "SUM(CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END) END",
+    }
+
     _LOG_SORT_COLUMNS = {
         "ip_address": "COALESCE(l.ip_address, '')",
         "username": "COALESCE(u.username, '-')",
@@ -512,6 +527,90 @@ class LogRepository:
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
                 GROUP BY COALESCE(NULLIF(u.username, ''), d.ip_address, '-')
+                {order_clause}
+            """
+            cursor.execute(query, params)
+            return cursor.fetchall()
+
+    def get_api_key_usage_summary(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[SQLiteRow]:
+        """按 API Key 查询指定时间范围内的用量汇总。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            conditions = ["l.api_key_id IS NOT NULL"]
+            params: list[Any] = []
+
+            if start_date:
+                conditions.append("l.start_time >= ?")
+                params.append(f"{start_date} 00:00:00.000000")
+            if end_date:
+                conditions.append('l.start_time < DATE(?, "+1 day")')
+                params.append(end_date)
+            self._append_text_filter(conditions, params, "u.username", username)
+            self._append_text_filter(conditions, params, "l.request_model", request_model)
+
+            where_clause = " AND ".join(conditions)
+            order_clause = self._build_order_clause(
+                self._API_KEY_USAGE_SORT_COLUMNS,
+                sort_key,
+                sort_direction,
+                "total_tokens",
+                "l.api_key_id ASC",
+            )
+            query = f"""
+                SELECT
+                    l.api_key_id,
+                    COALESCE(NULLIF(k.name, ''), '已删除 KEY #' || l.api_key_id) as key_name,
+                    CASE
+                        WHEN NULLIF(k.key_prefix, '') IS NOT NULL AND NULLIF(k.key_suffix, '') IS NOT NULL
+                        THEN k.key_prefix || '...' || k.key_suffix
+                        ELSE '-'
+                    END as key_preview,
+                    CASE
+                        WHEN k.id IS NULL THEN 'deleted'
+                        WHEN k.enabled = 1 THEN 'enabled'
+                        ELSE 'disabled'
+                    END as status,
+                    COUNT(*) as request_count,
+                    COALESCE(SUM(l.total_tokens), 0) as total_tokens,
+                    COALESCE(SUM(l.prompt_tokens), 0) as prompt_tokens,
+                    COALESCE(SUM(l.completion_tokens), 0) as completion_tokens,
+                    COALESCE(SUM(l.cache_read_input_tokens), 0) as cache_read_input_tokens,
+                    COALESCE(SUM(l.cache_creation_input_tokens), 0) as cache_creation_input_tokens,
+                    COALESCE(SUM(
+                        CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
+                    ), 0) as cache_known_prompt_tokens,
+                    CASE
+                        WHEN SUM(CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END) > 0
+                        THEN SUM(l.cache_read_input_tokens) * 1.0
+                            / SUM(CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END)
+                        ELSE NULL
+                    END as cache_hit_rate,
+                    CASE
+                        WHEN SUM(CASE WHEN l.usage_status = 'unknown' THEN 1 ELSE 0 END) = COUNT(*) THEN 'unknown'
+                        WHEN SUM(CASE WHEN l.usage_status = 'unknown' THEN 1 ELSE 0 END) > 0 THEN 'partial'
+                        WHEN MIN(l.usage_status) = 'known' AND MAX(l.usage_status) = 'known' THEN 'known'
+                        ELSE 'partial'
+                    END as usage_status,
+                    CASE
+                        WHEN SUM(CASE WHEN l.cache_usage_status = 'unknown' THEN 1 ELSE 0 END) = COUNT(*)
+                            THEN 'unknown'
+                        WHEN MIN(l.cache_usage_status) = 'known' AND MAX(l.cache_usage_status) = 'known'
+                            THEN 'known'
+                        ELSE 'partial'
+                    END as cache_usage_status
+                FROM request_logs l
+                LEFT JOIN api_keys k ON l.api_key_id = k.id
+                LEFT JOIN users u ON l.ip_address = u.ip_address
+                WHERE {where_clause}
+                GROUP BY l.api_key_id, k.id, k.name, k.key_prefix, k.key_suffix, k.enabled
                 {order_clause}
             """
             cursor.execute(query, params)

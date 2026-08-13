@@ -183,6 +183,42 @@ class LogService:
             self._logger.error(f"Failed to get user usage summary: {exc}")
             return []
 
+    def get_api_key_usage_summary(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        username: str | Sequence[str] | None = None,
+        request_model: str | Sequence[str] | None = None,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """获取 API Key 维度的时间范围用量汇总。"""
+        try:
+            rows = self._repository.get_api_key_usage_summary(
+                start_date,
+                end_date,
+                username=username,
+                request_model=request_model,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
+            )
+            result = [dict(row) for row in rows]
+            self._logger.debug(
+                "API key usage summary queried: start_date=%s end_date=%s username=%s request_model=%s "
+                "sort_key=%s sort_direction=%s rows=%s",
+                start_date,
+                end_date,
+                username,
+                request_model,
+                sort_key,
+                sort_direction,
+                len(result),
+            )
+            return result
+        except Exception as exc:
+            self._logger.error(f"Failed to get API key usage summary: {exc}")
+            return []
+
     def get_request_logs(
         self,
         page: int = 1,

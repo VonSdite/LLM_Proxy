@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext, Logger
 from src.presentation.web_controller import WebController
+from src.repositories.api_key_repository import ApiKeyRepository
 from src.repositories.log_repository import LogRepository
 from src.repositories.user_repository import UserRepository
 from src.services import AuthenticationService, LogService, SettingsService
@@ -115,6 +116,7 @@ class DashboardFilterApiTests(unittest.TestCase):
             flask_app=self.app,
         )
         self.connection_factory = create_connection_factory(self.db_path)
+        self.api_key_repository = ApiKeyRepository(self.connection_factory)
         self.log_repository = LogRepository(self.connection_factory)
         self.user_repository = UserRepository(self.connection_factory)
         self.log_service = LogService(self.ctx, self.log_repository)
@@ -146,6 +148,10 @@ class DashboardFilterApiTests(unittest.TestCase):
         total_tokens: int,
         ip_address: str,
         start_time: datetime,
+        api_key_id: int | None = None,
+        cache_read_input_tokens: int = 0,
+        cache_creation_input_tokens: int = 0,
+        cache_usage_status: str | None = None,
     ) -> None:
         self.log_service.log_request(
             request_model=request_model,
@@ -156,7 +162,22 @@ class DashboardFilterApiTests(unittest.TestCase):
             start_time=start_time,
             end_time=start_time,
             ip_address=ip_address,
+            api_key_id=api_key_id,
+            cache_read_input_tokens=cache_read_input_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
+            cache_usage_status=cache_usage_status,
         )
+
+    def _create_api_key(self, name: str, suffix: str) -> int:
+        key_id = self.api_key_repository.create(
+            name=name,
+            api_key=f"sk-test-{suffix}",
+            key_hash=f"hash-{suffix}",
+            key_prefix="sk-test",
+            key_suffix=suffix,
+        )
+        assert key_id is not None
+        return key_id
 
     def test_statistics_api_supports_multi_value_filters(self) -> None:
         response = self.client.get(
@@ -226,6 +247,64 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.assertEqual(35, payload[0]["total_tokens"])
         self.assertEqual(1, payload[0]["ip_count"])
         self.assertEqual("2026-04-09", payload[0]["last_request_date"])
+
+    def test_api_key_usage_summary_groups_by_key_with_date_and_model_filters(self) -> None:
+        client_a_id = self._create_api_key("客户端 A", "aaaa")
+        client_b_id = self._create_api_key("客户端 B", "bbbb")
+        self._log_request(
+            "model-a",
+            "resp-a",
+            12,
+            "10.0.0.1",
+            datetime(2026, 4, 9, 9, 0, 0),
+            api_key_id=client_a_id,
+            cache_read_input_tokens=3,
+            cache_creation_input_tokens=2,
+            cache_usage_status="known",
+        )
+        self._log_request(
+            "model-a",
+            "resp-a",
+            18,
+            "10.0.0.1",
+            datetime(2026, 4, 10, 9, 0, 0),
+            api_key_id=client_a_id,
+            cache_read_input_tokens=6,
+            cache_creation_input_tokens=4,
+            cache_usage_status="known",
+        )
+        self._log_request(
+            "model-b",
+            "resp-b",
+            50,
+            "10.0.0.2",
+            datetime(2026, 4, 10, 10, 0, 0),
+            api_key_id=client_b_id,
+        )
+
+        response = self.client.get(
+            "/api/statistics/api-key-usage-summary",
+            query_string={
+                **self.DATE_FILTER,
+                "username": "alice",
+                "request_model": "model-a",
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(1, len(payload))
+        self.assertEqual("客户端 A", payload[0]["key_name"])
+        self.assertEqual("sk-test...aaaa", payload[0]["key_preview"])
+        self.assertEqual("enabled", payload[0]["status"])
+        self.assertEqual(2, payload[0]["request_count"])
+        self.assertEqual(30, payload[0]["total_tokens"])
+        self.assertEqual(9, payload[0]["cache_read_input_tokens"])
+        self.assertEqual(6, payload[0]["cache_creation_input_tokens"])
+        self.assertEqual(15, payload[0]["cache_known_prompt_tokens"])
+        self.assertEqual(0.6, payload[0]["cache_hit_rate"])
+        self.assertEqual("known", payload[0]["cache_usage_status"])
+        self.assertNotIn("last_used_at", payload[0])
 
     def test_request_logs_api_supports_multi_value_filters(self) -> None:
         response = self.client.get(
@@ -324,6 +403,44 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.assertIn("缓存命中率", sheet_xml)
         self.assertNotIn("请求模型", sheet_xml)
         self.assertIn("alice", sheet_xml)
+
+    def test_statistics_export_api_key_usage_returns_xlsx(self) -> None:
+        client_a_id = self._create_api_key("客户端 A", "aaaa")
+        self._log_request(
+            "model-a",
+            "resp-a",
+            12,
+            "10.0.0.1",
+            datetime(2026, 4, 9, 9, 0, 0),
+            api_key_id=client_a_id,
+            cache_read_input_tokens=3,
+            cache_creation_input_tokens=2,
+            cache_usage_status="known",
+        )
+
+        response = self.client.get(
+            "/api/statistics/export",
+            query_string={
+                "tab": "api_key_usage",
+                **self.DATE_FILTER,
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn("api-key-usage-", response.headers["Content-Disposition"])
+        with ZipFile(BytesIO(response.data)) as archive:
+            workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
+            sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+        self.assertIn("KEY 用量", workbook_xml)
+        self.assertIn("KEY 名称", sheet_xml)
+        self.assertIn("客户端 A", sheet_xml)
+        self.assertIn("sk-test...aaaa", sheet_xml)
+        self.assertIn("缓存读取 Token", sheet_xml)
+        self.assertIn("缓存写入 Token", sheet_xml)
+        self.assertIn("缓存命中率", sheet_xml)
+        self.assertIn("50.00%", sheet_xml)
+        self.assertNotIn("最近使用时间", sheet_xml)
 
     def test_daily_stats_export_returns_json_rows(self) -> None:
         response = self.client.get(

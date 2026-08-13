@@ -2810,29 +2810,68 @@ process.stdout.write(JSON.stringify({
 
 
 class DashboardTemplateTests(unittest.TestCase):
+    def test_api_key_usage_tab_follows_api_key_management_setting(self) -> None:
+        app = create_flask_app()
+        common_context = {
+            "active_page": "index",
+            "current_username": "",
+            "auth_enabled": False,
+            "oauth_enabled": False,
+            "model_mapping_enabled": False,
+        }
+
+        with app.test_request_context("/statistics"):
+            enabled_html = render_template(
+                "index.html",
+                **common_context,
+                api_key_management_enabled=True,
+            )
+            disabled_html = render_template(
+                "index.html",
+                **common_context,
+                api_key_management_enabled=False,
+            )
+
+        self.assertIn('id="dashboardTabBtn_apiKeyUsage"', enabled_html)
+        self.assertIn('id="dashboardTabPanel_apiKeyUsage"', enabled_html)
+        self.assertIn("const apiKeyUsageEnabled = true;", enabled_html)
+        self.assertNotIn('id="dashboardTabBtn_apiKeyUsage"', disabled_html)
+        self.assertNotIn('id="dashboardTabPanel_apiKeyUsage"', disabled_html)
+        self.assertIn("const apiKeyUsageEnabled = false;", disabled_html)
+
     def test_index_template_uses_lazy_loaded_tabs(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"
         index_html = (root / "templates" / "index.html").read_text(encoding="utf-8")
         index_css = (root / "static" / "css" / "index.css").read_text(encoding="utf-8")
         admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
 
-        self.assertIn("/static/css/index.css?v=20260812-1", index_html)
+        self.assertIn("/static/css/index.css?v=20260813-1", index_html)
         self.assertIn("dashboard-tabs-section", index_html)
         self.assertIn('id="dashboardTabBtn_stats"', index_html)
         self.assertIn('id="dashboardTabBtn_userUsage"', index_html)
+        self.assertIn('id="dashboardTabBtn_apiKeyUsage"', index_html)
         self.assertIn('id="dashboardTabBtn_logs"', index_html)
         self.assertIn("调用汇总</button>", index_html)
         self.assertIn("用户用量</button>", index_html)
+        self.assertIn("KEY 用量</button>", index_html)
+        self.assertNotIn("最近使用时间", index_html)
+        self.assertIn("缓存读取 Token", index_html)
+        self.assertIn("缓存写入 Token", index_html)
+        self.assertIn("缓存命中率", index_html)
         self.assertNotIn("用户用量汇总</button>", index_html)
         self.assertNotIn("userUsageSortIndicator_request_model", index_html)
         self.assertIn('id="userUsageTable"', index_html)
-        self.assertEqual(3, index_html.count("data-resizable-columns="))
+        self.assertEqual(4, index_html.count("data-resizable-columns="))
         self.assertIn('data-resizable-columns="statistics-summary"', index_html)
         self.assertIn('data-resizable-columns="statistics-user-usage"', index_html)
+        self.assertIn('data-resizable-columns="statistics-api-key-usage"', index_html)
         self.assertIn('data-resizable-columns="statistics-logs"', index_html)
         self.assertIn("function loadUserUsageSummary()", index_html)
         self.assertIn("function renderUserUsageSummary()", index_html)
         self.assertIn("function toggleUserUsageSort(", index_html)
+        self.assertIn("function loadApiKeyUsageSummary()", index_html)
+        self.assertIn("function renderApiKeyUsageSummary()", index_html)
+        self.assertIn("function toggleApiKeyUsageSort(", index_html)
         self.assertIn("function exportActiveDashboardTab()", index_html)
         self.assertIn(
             '<button class="btn btn-primary" onclick="exportActiveDashboardTab()">导出 Excel</button>', index_html
@@ -2853,6 +2892,10 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn("function loadActiveDashboardTabData()", index_html)
         self.assertIn("fetch(`/api/statistics?${params}`, { cache: 'no-store' })", index_html)
         self.assertIn("fetch(`/api/statistics/user-usage-summary?${params}`, { cache: 'no-store' })", index_html)
+        self.assertIn(
+            "fetch(`/api/statistics/api-key-usage-summary?${params}`, { cache: 'no-store' })",
+            index_html,
+        )
         self.assertIn("window.location.href = `/api/statistics/export?${params}`;", index_html)
         self.assertIn("/api/statistics/daily-stats/export", index_html)
         self.assertIn("/api/statistics/daily-stats/import", index_html)

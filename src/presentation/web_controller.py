@@ -53,6 +53,7 @@ class WebController:
 
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
         self._app.route("/api/statistics/user-usage-summary", methods=["GET"])(auth(self.get_user_usage_summary))
+        self._app.route("/api/statistics/api-key-usage-summary", methods=["GET"])(auth(self.get_api_key_usage_summary))
         self._app.route("/api/statistics/export", methods=["GET"])(auth(self.export_statistics))
         self._app.route("/api/statistics/daily-stats/export", methods=["GET"])(auth(self.export_daily_stats))
         self._app.route("/api/statistics/daily-stats/import", methods=["POST"])(auth(self.import_daily_stats))
@@ -410,6 +411,36 @@ class WebController:
             self._logger.error("Error getting user usage summary: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
+    def get_api_key_usage_summary(self) -> ResponseReturnValue:
+        try:
+            self._validate_dashboard_date_range(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+            )
+            usernames = self._get_multi_filter_values("username")
+            request_models = self._get_multi_filter_values("request_model")
+            self._logger.debug(
+                "API key usage summary queried: start_date=%s end_date=%s usernames=%s request_models=%s",
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+                usernames,
+                request_models,
+            )
+            summary = self._log_service.get_api_key_usage_summary(
+                request.args.get("start_date"),
+                request.args.get("end_date"),
+                usernames or None,
+                request_models or None,
+                sort_key=request.args.get("sort_key"),
+                sort_direction=request.args.get("sort_direction"),
+            )
+            return jsonify(summary)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error getting API key usage summary: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
     def export_statistics(self) -> ResponseReturnValue:
         try:
             self._validate_dashboard_date_range(
@@ -422,7 +453,52 @@ class WebController:
             sort_key = request.args.get("sort_key")
             sort_direction = request.args.get("sort_direction")
 
-            if tab == "user_usage":
+            if tab == "api_key_usage":
+                data = self._log_service.get_api_key_usage_summary(
+                    request.args.get("start_date"),
+                    request.args.get("end_date"),
+                    usernames or None,
+                    request_models or None,
+                    sort_key=sort_key,
+                    sort_direction=sort_direction,
+                )
+                headers = [
+                    "KEY 名称",
+                    "KEY",
+                    "状态",
+                    "输入token",
+                    "输出token",
+                    "总 Token",
+                    "Token 状态",
+                    "缓存读取 Token",
+                    "缓存写入 Token",
+                    "缓存命中率",
+                    "请求数",
+                ]
+                status_labels = {
+                    "enabled": "启用",
+                    "disabled": "停用",
+                    "deleted": "已删除",
+                }
+                rows = [
+                    [
+                        item["key_name"],
+                        item["key_preview"],
+                        status_labels.get(str(item.get("status") or ""), "未知"),
+                        item["prompt_tokens"],
+                        item["completion_tokens"],
+                        item["total_tokens"],
+                        self._format_usage_status(item.get("usage_status")),
+                        item["cache_read_input_tokens"],
+                        item["cache_creation_input_tokens"],
+                        self._format_cache_hit_rate(item.get("cache_hit_rate")),
+                        item["request_count"],
+                    ]
+                    for item in data
+                ]
+                sheet_name = "KEY 用量"
+                file_prefix = "api-key-usage"
+            elif tab == "user_usage":
                 data = self._log_service.get_user_usage_summary(
                     request.args.get("start_date"),
                     request.args.get("end_date"),
