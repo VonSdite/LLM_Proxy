@@ -421,7 +421,7 @@ class _OpenAIChatResponseAccumulator:
             if self._usage is None:
                 self._usage = {}
             for field, value in usage.items():
-                if value is not None and (self._usage.get(field) in (None, 0, "") or value not in (0, "")):
+                if value is not None:
                     self._usage[field] = copy.deepcopy(value)
         for field, value in payload.items():
             if field not in {"id", "object", "created", "model", "choices", "usage"}:
@@ -533,8 +533,8 @@ class _OpenAIChatResponseAccumulator:
 class _OpenAIResponsesResponseAccumulator:
     """合并 OpenAI Responses 原生事件，生成完整 response 对象。"""
 
-    _SUCCESS_EVENTS = {"response.completed", "response.done"}
-    _FAILURE_EVENTS = {"response.failed", "response.incomplete", "response.cancelled", "response.canceled"}
+    _SUCCESS_EVENTS = {"response.completed", "response.done", "response.incomplete"}
+    _FAILURE_EVENTS = {"response.failed", "response.cancelled", "response.canceled"}
 
     def __init__(self, model_name: str) -> None:
         self._default_model_name = model_name
@@ -1144,9 +1144,7 @@ class _ClaudeResponseAccumulator:
         for field, value in usage.items():
             if value is None:
                 continue
-            current = self._usage.get(field)
-            if current in (None, 0, "") or value not in (0, ""):
-                self._usage[field] = copy.deepcopy(value)
+            self._usage[field] = copy.deepcopy(value)
 
     @staticmethod
     def _finalize_tool_input(block: dict[str, Any]) -> None:

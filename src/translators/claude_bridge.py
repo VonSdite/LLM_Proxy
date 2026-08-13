@@ -52,7 +52,7 @@ def convert_claude_request_to_openai_chat_request(
         translated["stop"] = stops
 
     thinking = body.get("thinking")
-    reasoning_effort = openai_reasoning_effort_from_claude_thinking(thinking)
+    reasoning_effort = openai_reasoning_effort_from_claude_thinking(thinking, body.get("output_config"))
     if reasoning_effort is not None:
         translated["reasoning_effort"] = reasoning_effort
 
@@ -116,6 +116,10 @@ def convert_claude_request_to_openai_chat_request(
                 "type": "function",
                 "function": {"name": str(tool_choice.get("name"))},
             }
+        elif tool_type == "none":
+            translated["tool_choice"] = "none"
+        if tool_choice.get("disable_parallel_tool_use") is not None:
+            translated["parallel_tool_calls"] = not bool(tool_choice["disable_parallel_tool_use"])
 
     return translated
 
@@ -416,7 +420,7 @@ def _convert_claude_blocks_to_openai_parts(
         if not isinstance(part, dict):
             continue
         part_type = str(part.get("type") or "").strip().lower()
-        if part_type in {"text", "image"}:
+        if part_type in {"text", "image", "document"}:
             converted = _convert_claude_part_to_openai_content(part)
             if converted is not None:
                 content_items.append(converted)
@@ -470,6 +474,19 @@ def _convert_claude_part_to_openai_content(part: dict[str, Any]) -> dict[str, An
                     "image_url": {"url": str(source.get("url"))},
                 }
         return None
+    if part_type == "document":
+        source = part.get("source") or {}
+        if not isinstance(source, dict):
+            return None
+        source_type = str(source.get("type") or "").strip().lower()
+        if source_type == "base64" and source.get("data"):
+            media_type = str(source.get("media_type") or "application/octet-stream")
+            file_payload: dict[str, Any] = {
+                "file_data": f"data:{media_type};base64,{source['data']}",
+            }
+            if part.get("title"):
+                file_payload["filename"] = str(part["title"])
+            return {"type": "file", "file": file_payload}
     return None
 
 
@@ -688,6 +705,19 @@ def _convert_openai_message_to_claude_blocks(message: dict[str, Any]) -> list[di
 
     for tool_call in message.get("tool_calls") or []:
         if not isinstance(tool_call, dict):
+            continue
+        if str(tool_call.get("type") or "").strip().lower() == "custom":
+            custom = tool_call.get("custom")
+            if not isinstance(custom, dict) or not custom.get("name"):
+                continue
+            content_blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": str(tool_call.get("id") or f"toolu_{custom['name']}"),
+                    "name": str(custom["name"]),
+                    "input": {"input": str(custom.get("input") or "")},
+                }
+            )
             continue
         function = tool_call.get("function") or {}
         if not isinstance(function, dict):

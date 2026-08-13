@@ -57,7 +57,10 @@ def normalize_openai_reasoning_effort(value: Any) -> str | None:
     return OPENAI_REASONING_FALLBACK_EFFORT
 
 
-def openai_reasoning_effort_from_claude_thinking(thinking: Any) -> str | None:
+def openai_reasoning_effort_from_claude_thinking(
+    thinking: Any,
+    output_config: Any = None,
+) -> str | None:
     """把 Claude thinking 请求规整成 OpenAI reasoning_effort。"""
     if not isinstance(thinking, dict):
         return None
@@ -65,6 +68,10 @@ def openai_reasoning_effort_from_claude_thinking(thinking: Any) -> str | None:
     thinking_type = str(thinking.get("type") or "").strip().lower()
     if thinking_type == "disabled":
         return "none"
+    if thinking_type in {"adaptive", "auto"} and isinstance(output_config, dict):
+        effort = normalize_openai_reasoning_effort(output_config.get("effort"))
+        if effort is not None:
+            return effort
     if thinking_type in {"enabled", "adaptive", "auto"}:
         return openai_reasoning_effort_from_budget(thinking.get("budget_tokens"))
     if thinking_type:

@@ -45,6 +45,21 @@ class TokenUsageTests(unittest.TestCase):
         self.assertEqual(2, responses_usage["cache_creation_input_tokens"])
         self.assertEqual("known", responses_usage["cache_usage_status"])
 
+    def test_top_level_cache_read_alias_and_total_only_usage_are_preserved(self) -> None:
+        usage = extract_canonical_usage(
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 1,
+                "cache_read_input_tokens": 5,
+            },
+            "openai_chat",
+        )
+        total_only = extract_canonical_usage({"total_tokens": 7}, "openai_chat")
+
+        self.assertEqual(5, usage["cache_read_input_tokens"])
+        self.assertEqual(7, total_only["total_tokens"])
+        self.assertTrue(total_only["_total_explicit"])
+
     def test_usage_without_cache_details_marks_cache_usage_unknown(self) -> None:
         usage = extract_canonical_usage(
             {"usage": {"prompt_tokens": 12, "completion_tokens": 3}},
@@ -85,6 +100,100 @@ class TokenUsageTests(unittest.TestCase):
         self.assertEqual(3, meta["completion_tokens"])
         self.assertEqual(16, meta["total_tokens"])
         self.assertEqual("known", meta["usage_status"])
+
+    def test_claude_stream_usage_uses_latest_explicit_cache_values(self) -> None:
+        meta = ProxyResponseBuilder._create_empty_meta()
+
+        ProxyResponseBuilder._update_meta_from_payload(
+            meta,
+            {
+                "type": "message_start",
+                "message": {
+                    "usage": {
+                        "input_tokens": 13,
+                        "output_tokens": 1,
+                        "cache_read_input_tokens": 100,
+                        "cache_creation_input_tokens": 7,
+                    }
+                },
+            },
+            source_format="claude_chat",
+        )
+        ProxyResponseBuilder._update_meta_from_payload(
+            meta,
+            {
+                "type": "message_delta",
+                "usage": {
+                    "output_tokens": 4,
+                    "cache_read_input_tokens": 22000,
+                    "cache_creation_input_tokens": 31,
+                },
+            },
+            source_format="claude_chat",
+        )
+
+        self.assertEqual(22044, meta["prompt_tokens"])
+        self.assertEqual(4, meta["completion_tokens"])
+        self.assertEqual(22048, meta["total_tokens"])
+        self.assertEqual(22000, meta["cache_read_input_tokens"])
+        self.assertEqual(31, meta["cache_creation_input_tokens"])
+
+    def test_claude_nested_thinking_tokens_are_preserved(self) -> None:
+        usage = extract_canonical_usage(
+            {
+                "usage": {
+                    "input_tokens": 2,
+                    "output_tokens": 244,
+                    "cache_creation_input_tokens": 831,
+                    "cache_read_input_tokens": 44225,
+                    "output_tokens_details": {"thinking_tokens": 40},
+                }
+            },
+            "claude_chat",
+        )
+
+        self.assertEqual(45058, usage["prompt_tokens"])
+        self.assertEqual(244, usage["completion_tokens"])
+        self.assertEqual(45302, usage["total_tokens"])
+        self.assertEqual(40, usage["reasoning_tokens"])
+
+        details_only = extract_canonical_usage(
+            {"output_tokens_details": {"reasoning_tokens": 0}},
+            "claude_chat",
+        )
+        self.assertEqual(0, details_only["reasoning_tokens"])
+        self.assertTrue(details_only["_reasoning_present"])
+
+    def test_translated_responses_usage_is_not_reinterpreted_as_claude_usage(self) -> None:
+        meta = ProxyResponseBuilder._create_empty_meta()
+        ProxyResponseBuilder._update_meta_from_payload(
+            meta,
+            {
+                "usage": {
+                    "input_tokens": 5,
+                    "output_tokens": 3,
+                    "cache_read_input_tokens": 4,
+                    "cache_creation_input_tokens": 2,
+                }
+            },
+            source_format="claude_chat",
+        )
+        ProxyResponseBuilder._update_meta_from_payload(
+            meta,
+            {
+                "usage": {
+                    "input_tokens": 11,
+                    "output_tokens": 3,
+                    "total_tokens": 14,
+                    "input_tokens_details": {"cached_tokens": 4, "cache_write_tokens": 2},
+                }
+            },
+            source_format="openai_responses",
+        )
+
+        self.assertEqual(11, meta["prompt_tokens"])
+        self.assertEqual(3, meta["completion_tokens"])
+        self.assertEqual(14, meta["total_tokens"])
 
     def test_openai_usage_without_total_recomputes_total(self) -> None:
         meta = ProxyResponseBuilder._create_empty_meta()

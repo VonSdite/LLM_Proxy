@@ -698,7 +698,7 @@ class ClaudeProxyService:
             ProxyResponseBuilder._update_meta_from_payload(
                 meta,
                 translated_payload,
-                source_format="claude_chat",
+                source_format=target_format,
             )
         if on_complete is not None:
             try:

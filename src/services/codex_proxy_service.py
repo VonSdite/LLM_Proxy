@@ -766,11 +766,7 @@ class CodexProxyService:
                 item["role"] = "developer"
         if str(body.get("service_tier") or "").strip() not in {"priority", "fast"}:
             body.pop("service_tier", None)
-        max_output_tokens = body.get("max_output_tokens")
-        if max_output_tokens is None:
-            max_output_tokens = body.get("max_completion_tokens")
-        if max_output_tokens is not None:
-            body["max_output_tokens"] = max_output_tokens
+        body.pop("max_output_tokens", None)
         body.pop("max_completion_tokens", None)
         for field in (
             "temperature",
@@ -1146,7 +1142,7 @@ class CodexProxyService:
                             source_format="openai_responses",
                         )
                         event_type = str(event.payload.get("type") or event.event or "").strip()
-                        if event_type in {"response.completed", "response.done"}:
+                        if event_type in {"response.completed", "response.done", "response.incomplete"}:
                             completed = True
                         elif event_type in {"response.failed", "response.cancelled", "error"}:
                             failed_payload = event.payload
@@ -1314,7 +1310,7 @@ class CodexProxyService:
                 if event.kind != "json" or not isinstance(event.payload, dict):
                     continue
                 event_type = str(event.payload.get("type") or event.event or "").strip()
-                if event_type in {"response.completed", "response.done"}:
+                if event_type in {"response.completed", "response.done", "response.incomplete"}:
                     completed_payload = event.payload
                 elif event_type in {"response.failed", "response.cancelled", "error"}:
                     failed_payload = event.payload
@@ -1357,7 +1353,7 @@ class CodexProxyService:
                 ProxyResponseBuilder._update_meta_from_payload(
                     meta,
                     translated_payload,
-                    source_format="openai_responses",
+                    source_format=target_format,
                 )
             if on_complete is not None:
                 try:

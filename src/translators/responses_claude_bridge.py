@@ -14,6 +14,7 @@ from typing import Any
 
 from ..proxy_core.contracts import DownstreamChunk, StreamEvent
 from ..proxy_core.usage import extract_canonical_usage, openai_usage_to_claude, safe_int
+from .annotation_utils import claude_citations_to_responses, responses_annotations_to_claude
 from .event_chunk_utils import build_json_event_chunk
 from .reasoning_utils import (
     openai_reasoning_effort_from_claude_thinking,
@@ -55,6 +56,7 @@ def convert_claude_request_to_openai_responses(
             translated["input"].append({"type": "message", "role": "developer", "content": [part]})
 
     custom_tool_names = _claude_custom_tool_names(body.get("tools"))
+    custom_tool_call_ids: set[str] = set()
     for message in body.get("messages") or []:
         if not isinstance(message, dict):
             continue
@@ -96,14 +98,19 @@ def convert_claude_request_to_openai_responses(
                 if message_parts:
                     translated["input"].append({"type": "message", "role": role, "content": message_parts})
                     message_parts = []
-                translated["input"].append(_claude_tool_use_to_responses(block, custom_tool_names))
+                tool_call = _claude_tool_use_to_responses(block, custom_tool_names)
+                translated["input"].append(tool_call)
+                if tool_call.get("type") == "custom_tool_call":
+                    custom_tool_call_ids.add(str(tool_call.get("call_id") or ""))
             elif block_type == "tool_result":
                 if message_parts:
                     translated["input"].append({"type": "message", "role": role, "content": message_parts})
                     message_parts = []
                 translated["input"].append(
                     {
-                        "type": "function_call_output",
+                        "type": "custom_tool_call_output"
+                        if str(block.get("tool_use_id") or "") in custom_tool_call_ids
+                        else "function_call_output",
                         "call_id": str(block.get("tool_use_id") or ""),
                         "output": normalize_tool_result_content(block.get("content")),
                     }
@@ -130,7 +137,7 @@ def convert_claude_request_to_openai_responses(
         if body.get(field) is not None:
             translated[field] = copy.deepcopy(body[field])
 
-    reasoning_effort = openai_reasoning_effort_from_claude_thinking(body.get("thinking"))
+    reasoning_effort = openai_reasoning_effort_from_claude_thinking(body.get("thinking"), body.get("output_config"))
     if reasoning_effort is not None:
         translated["reasoning"] = {"effort": reasoning_effort}
 
@@ -140,6 +147,8 @@ def convert_claude_request_to_openai_responses(
     tool_choice = _claude_tool_choice_to_responses(body.get("tool_choice"))
     if tool_choice is not None:
         translated["tool_choice"] = tool_choice
+    if isinstance(body.get("tool_choice"), dict) and body["tool_choice"].get("disable_parallel_tool_use") is not None:
+        translated["parallel_tool_calls"] = not bool(body["tool_choice"]["disable_parallel_tool_use"])
     return translated
 
 
@@ -270,12 +279,16 @@ def convert_openai_responses_request_to_claude(
     if not translated["messages"] and system_blocks:
         translated["messages"] = [{"role": "user", "content": [{"type": "text", "text": ""}]}]
 
-    tools = _responses_tools_to_claude(body)
-    if tools:
-        translated["tools"] = tools
-    tool_choice = _responses_tool_choice_to_claude(body.get("tool_choice"), tools, body)
-    if tool_choice is not None:
-        translated["tool_choice"] = tool_choice
+    if not _responses_tool_choice_disables_tools(body.get("tool_choice")):
+        tools = _responses_tools_to_claude(body)
+        if tools:
+            translated["tools"] = tools
+        tool_choice = _responses_tool_choice_to_claude(body.get("tool_choice"), tools, body)
+        if body.get("parallel_tool_calls") is not None and tools:
+            tool_choice = tool_choice or {"type": "auto"}
+            tool_choice["disable_parallel_tool_use"] = not bool(body["parallel_tool_calls"])
+        if tool_choice is not None:
+            translated["tool_choice"] = tool_choice
     return translated
 
 
@@ -358,10 +371,12 @@ def convert_claude_response_to_openai_responses(
             continue
         block_type = str(block.get("type") or "").strip().lower()
         if block_type == "text":
+            text = str(block.get("text") or "")
             text_part: dict[str, Any] = {
                 "type": "output_text",
-                "annotations": copy.deepcopy(block.get("citations") or []),
-                "text": str(block.get("text") or ""),
+                "annotations": claude_citations_to_responses(block.get("citations"), text),
+                "logprobs": [],
+                "text": text,
             }
             output.append(
                 {
@@ -399,10 +414,12 @@ def convert_claude_response_to_openai_responses(
         "id": response_id,
         "object": "response",
         "created_at": int(time.time()),
-        "status": "completed",
+        "status": "incomplete" if payload.get("stop_reason") == "max_tokens" else "completed",
         "model": response_model,
         "output": output,
     }
+    if payload.get("stop_reason") == "max_tokens":
+        response["incomplete_details"] = {"reason": "max_output_tokens"}
     _copy_response_request_fields(original_request, response)
     if isinstance(payload.get("usage"), dict):
         response["usage"] = _claude_usage_to_responses(payload["usage"])
@@ -457,16 +474,19 @@ def translate_openai_responses_stream_to_claude(
         annotation = payload.get("annotation")
         if isinstance(annotation, dict):
             outputs.extend(_ensure_claude_stream_block(state, "text", payload))
-            outputs.append(
-                _claude_event(
-                    "content_block_delta",
-                    {
-                        "type": "content_block_delta",
-                        "index": state["active_block"]["index"],
-                        "delta": {"type": "citations_delta", "citation": copy.deepcopy(annotation)},
-                    },
+            text = str(state["active_block"].get("text") or "")
+            citations = responses_annotations_to_claude([annotation], text)
+            for citation in citations:
+                outputs.append(
+                    _claude_event(
+                        "content_block_delta",
+                        {
+                            "type": "content_block_delta",
+                            "index": state["active_block"]["index"],
+                            "delta": {"type": "citations_delta", "citation": citation},
+                        },
+                    )
                 )
-            )
         return outputs
 
     if event_type in {
@@ -568,7 +588,7 @@ def translate_openai_responses_stream_to_claude(
             outputs.extend(_complete_responses_item_to_claude(state, item, payload))
         return outputs
 
-    if event_type in {"response.completed", "response.done"}:
+    if event_type in {"response.completed", "response.done", "response.incomplete"}:
         response = payload.get("response") or {}
         if isinstance(response, dict):
             if response.get("model") not in (None, ""):
@@ -666,19 +686,21 @@ def translate_claude_stream_to_openai_responses(
                 )
             )
         elif delta_type == "citations_delta" and isinstance(delta.get("citation"), dict):
-            block_state.setdefault("annotations", []).append(copy.deepcopy(delta["citation"]))
-            outputs.append(
-                _responses_event(
-                    state,
-                    "response.output_text.annotation.added",
-                    {
-                        "item_id": block_state["id"],
-                        "output_index": block_state["output_index"],
-                        "content_index": 0,
-                        "annotation": copy.deepcopy(delta["citation"]),
-                    },
+            annotations = claude_citations_to_responses([delta["citation"]], block_state["text"])
+            block_state.setdefault("annotations", []).extend(annotations)
+            for annotation in annotations:
+                outputs.append(
+                    _responses_event(
+                        state,
+                        "response.output_text.annotation.added",
+                        {
+                            "item_id": block_state["id"],
+                            "output_index": block_state["output_index"],
+                            "content_index": 0,
+                            "annotation": annotation,
+                        },
+                    )
                 )
-            )
         elif delta_type == "thinking_delta" and isinstance(delta.get("thinking"), str):
             block_state["text"] += delta["thinking"]
             outputs.append(
@@ -728,12 +750,16 @@ def translate_claude_stream_to_openai_responses(
 
     if event_type == "message_stop":
         outputs.extend(_finish_open_responses_message(state))
-        response = _responses_stream_response(state, "completed")
+        incomplete = state.get("stop_reason") == "max_tokens"
+        response = _responses_stream_response(state, "incomplete" if incomplete else "completed")
         response["output"] = copy.deepcopy(state.get("output") or [])
+        if incomplete:
+            response["incomplete_details"] = {"reason": "max_output_tokens"}
         if state.get("usage"):
             response["usage"] = _claude_usage_to_responses(state["usage"])
         _copy_response_request_fields(original_request, response)
-        outputs.append(_responses_event(state, "response.completed", {"response": response}))
+        event_name = "response.incomplete" if incomplete else "response.completed"
+        outputs.append(_responses_event(state, event_name, {"response": response}))
         state["completed"] = True
         return outputs
 
@@ -838,7 +864,7 @@ def _responses_output_part_to_claude(part: Any) -> dict[str, Any] | None:
     if part_type in {"output_text", "text"} and isinstance(part.get("text"), str):
         block: dict[str, Any] = {"type": "text", "text": part["text"]}
         if isinstance(part.get("annotations"), list) and part["annotations"]:
-            block["citations"] = copy.deepcopy(part["annotations"])
+            block["citations"] = responses_annotations_to_claude(part["annotations"], part["text"])
         return block
     if part_type == "refusal" and isinstance(part.get("refusal"), str):
         return {"type": "text", "text": part["refusal"]}
@@ -1402,6 +1428,12 @@ def _claude_tool_choice_to_responses(tool_choice: Any) -> Any:
     return None
 
 
+def _responses_tool_choice_disables_tools(tool_choice: Any) -> bool:
+    if isinstance(tool_choice, str):
+        return tool_choice.strip().lower() == "none"
+    return isinstance(tool_choice, dict) and str(tool_choice.get("type") or "").strip().lower() == "none"
+
+
 def _responses_tool_choice_to_claude(
     tool_choice: Any,
     tools: list[dict[str, Any]],
@@ -1787,7 +1819,7 @@ def _start_claude_responses_block(
         "output_index": output_index,
         "type": block_type,
         "text": str(block.get("text") or block.get("thinking") or ""),
-        "annotations": copy.deepcopy(block.get("citations") or []),
+        "annotations": claude_citations_to_responses(block.get("citations"), str(block.get("text") or "")),
         "arguments": json.dumps(block.get("input") or {}, ensure_ascii=False)
         if block_type == "tool_use" and block.get("input")
         else "",

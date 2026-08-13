@@ -76,7 +76,14 @@ def extract_canonical_usage(payload: Any, source_format: str | None = None) -> d
         if input_tokens is not None or cache_read or cache_creation:
             prompt = (input_tokens or 0) + cache_read + cache_creation
         total = _optional_int(usage.get("total_tokens"))
-        reasoning = _optional_int(usage.get("thinking_tokens"))
+        output_details = usage.get("output_tokens_details")
+        reasoning = (
+            _first_optional_int(output_details, "thinking_tokens", "reasoning_tokens")
+            if isinstance(output_details, dict)
+            else None
+        )
+        if reasoning is None:
+            reasoning = _first_optional_int(usage, "thinking_tokens", "reasoning_tokens")
         fields = {
             key
             for key, value in (
@@ -96,6 +103,9 @@ def extract_canonical_usage(payload: Any, source_format: str | None = None) -> d
             cache_read_present="cache_read_input_tokens" in usage,
             cache_creation_present="cache_creation_input_tokens" in usage,
             reasoning=reasoning or 0,
+            reasoning_present=reasoning is not None,
+            input_tokens=input_tokens or 0,
+            input_tokens_present=input_tokens is not None,
             usage_seen=True,
         )
 
@@ -106,6 +116,8 @@ def extract_canonical_usage(payload: Any, source_format: str | None = None) -> d
     if not isinstance(details, dict):
         details = usage.get("input_tokens_details")
     cached = _optional_int(details.get("cached_tokens")) if isinstance(details, dict) else None
+    if cached is None:
+        cached = _optional_int(usage.get("cache_read_input_tokens"))
     cache_creation = _first_optional_int(
         usage,
         "cache_creation_input_tokens",
@@ -193,6 +205,7 @@ def extract_canonical_usage(payload: Any, source_format: str | None = None) -> d
         cache_read_present=cache_read_present,
         cache_creation_present=cache_creation_present,
         reasoning=reasoning or 0,
+        reasoning_present=reasoning is not None,
         usage_seen=True,
     )
 
@@ -209,28 +222,59 @@ def merge_usage_meta(meta: dict[str, Any], payload: Any, source_format: str | No
         fields = set(fields or ())
         meta["_usage_fields"] = fields
 
-    for field in (
-        "prompt_tokens",
-        "completion_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
-        "reasoning_tokens",
-    ):
-        if field not in incoming:
-            continue
-        value = safe_int(incoming[field])
-        if field not in fields or (safe_int(meta.get(field)) == 0 and value > 0):
-            meta[field] = value
-        fields.add(field)
+    incoming_fields = incoming.get("_fields")
+    if not isinstance(incoming_fields, set):
+        incoming_fields = set(incoming_fields or ())
+
+    normalized_source = str(source_format or "").strip().lower()
+    if normalized_source == "claude_chat":
+        if incoming.get("_input_tokens_present"):
+            meta["_claude_input_tokens"] = safe_int(incoming.get("_input_tokens"))
+        if incoming.get("_cache_read_present"):
+            meta["cache_read_input_tokens"] = safe_int(incoming.get("cache_read_input_tokens"))
+            fields.add("cache_read_input_tokens")
+        if incoming.get("_cache_creation_present"):
+            meta["cache_creation_input_tokens"] = safe_int(incoming.get("cache_creation_input_tokens"))
+            fields.add("cache_creation_input_tokens")
+        if (
+            incoming.get("_input_tokens_present")
+            or incoming.get("_cache_read_present")
+            or incoming.get("_cache_creation_present")
+        ):
+            meta["prompt_tokens"] = (
+                safe_int(meta.get("_claude_input_tokens"))
+                + safe_int(meta.get("cache_read_input_tokens"))
+                + safe_int(meta.get("cache_creation_input_tokens"))
+            )
+            fields.add("prompt_tokens")
+    elif "prompt_tokens" in incoming_fields:
+        meta["prompt_tokens"] = safe_int(incoming.get("prompt_tokens"))
+        fields.add("prompt_tokens")
+
+    if "completion_tokens" in incoming_fields:
+        meta["completion_tokens"] = safe_int(incoming.get("completion_tokens"))
+        fields.add("completion_tokens")
+    if normalized_source != "claude_chat":
+        if incoming.get("_cache_read_present"):
+            meta["cache_read_input_tokens"] = safe_int(incoming.get("cache_read_input_tokens"))
+            fields.add("cache_read_input_tokens")
+        if incoming.get("_cache_creation_present"):
+            meta["cache_creation_input_tokens"] = safe_int(incoming.get("cache_creation_input_tokens"))
+            fields.add("cache_creation_input_tokens")
+    if incoming.get("_reasoning_present"):
+        meta["reasoning_tokens"] = safe_int(incoming.get("reasoning_tokens"))
+        fields.add("reasoning_tokens")
 
     if incoming.get("cache_usage_status") == CACHE_USAGE_STATUS_KNOWN:
         meta["cache_usage_status"] = CACHE_USAGE_STATUS_KNOWN
 
     if incoming.get("total_tokens") is not None:
         value = safe_int(incoming["total_tokens"])
-        if not meta.get("_total_explicit") or (safe_int(meta.get("total_tokens")) == 0 and value > 0):
+        if incoming.get("_total_explicit"):
             meta["total_tokens"] = value
-        meta["_total_explicit"] = bool(incoming.get("_total_explicit")) or meta.get("_total_explicit", False)
+            meta["_total_explicit"] = True
+        elif not meta.get("_total_explicit"):
+            meta["total_tokens"] = value
 
     if "prompt_tokens" in fields or "completion_tokens" in fields:
         if "prompt_tokens" in fields and "completion_tokens" in fields:
@@ -306,6 +350,13 @@ def _find_usage(payload: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | N
             "output_tokens",
             "cache_read_input_tokens",
             "cache_creation_input_tokens",
+            "total_tokens",
+            "prompt_tokens_details",
+            "input_tokens_details",
+            "completion_tokens_details",
+            "output_tokens_details",
+            "thinking_tokens",
+            "reasoning_tokens",
         )
     ):
         return payload, None
@@ -332,6 +383,8 @@ def _contains_claude_usage_fields(usage: dict[str, Any]) -> bool:
             "cache_read_input_tokens",
             "cache_creation_input_tokens",
             "thinking_tokens",
+            "reasoning_tokens",
+            "output_tokens_details",
         )
     )
 
@@ -348,6 +401,9 @@ def _build_usage(
     cache_read_present: bool = False,
     cache_creation_present: bool = False,
     reasoning: int = 0,
+    reasoning_present: bool = False,
+    input_tokens: int = 0,
+    input_tokens_present: bool = False,
     usage_seen: bool = True,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"_usage_seen": usage_seen, "_fields": fields}
@@ -369,7 +425,10 @@ def _build_usage(
         result["cache_usage_status"] = CACHE_USAGE_STATUS_UNKNOWN
     result["_cache_read_present"] = cache_read_present
     result["_cache_creation_present"] = cache_creation_present
-    if reasoning:
+    result["_reasoning_present"] = reasoning_present
+    result["_input_tokens"] = input_tokens
+    result["_input_tokens_present"] = input_tokens_present
+    if reasoning_present:
         result["reasoning_tokens"] = reasoning
     return result
 
