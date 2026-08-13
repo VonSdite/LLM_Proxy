@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260813-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260814-1">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -43,19 +43,14 @@
                                 <label class="form-label" for="mappingStrategySelect">选择策略</label>
                                 <button
                                     type="button"
-                                    class="mapping-help-button mapping-help-button-rich mapping-strategy-help"
+                                    class="mapping-help-button mapping-strategy-help"
+                                    data-mapping-help-topic="strategy"
+                                    onclick="toggleMappingHelp('strategy', event)"
+                                    aria-label="查看选择策略说明"
+                                    aria-expanded="false"
+                                    aria-controls="mappingHelpPopover"
                                     aria-describedby="mappingStrategyHelp"
-                                >?<span class="mapping-help-tooltip" role="tooltip">
-                                    <span class="mapping-help-section">
-                                        <strong>最高优先级</strong>
-                                        <span>每次请求选择当前正常候选中优先级最高的目标。高优先级目标恢复后自动切回。</span>
-                                    </span>
-                                    <span class="mapping-help-section">
-                                        <strong>粘滞故障切换</strong>
-                                        <span>继续使用最近成功的目标。该目标进入冷却、禁用或不可用后，才重新选择。</span>
-                                    </span>
-                                    <span class="mapping-help-note">未设置策略时使用“最高优先级”。</span>
-                                </span></button>
+                                >?</button>
                                 <span class="visually-hidden" id="mappingStrategyHelp">最高优先级策略会在每个新请求中选择正常候选中优先级最高的目标，高优先级目标恢复后自动切回。粘滞故障切换策略会继续使用当前成功目标，直到该目标不可用。未设置策略时默认使用最高优先级。</span>
                             </div>
                             <select class="form-select" id="mappingStrategySelect">
@@ -64,7 +59,20 @@
                             </select>
                         </div>
                         <div class="mapping-field">
-                            <label class="form-label" for="mappingCooldownInput">故障冷却秒数</label>
+                            <div class="mapping-field-label">
+                                <label class="form-label" for="mappingCooldownInput">故障冷却秒数</label>
+                                <button
+                                    type="button"
+                                    class="mapping-help-button mapping-cooldown-help"
+                                    data-mapping-help-topic="cooldown"
+                                    onclick="toggleMappingHelp('cooldown', event)"
+                                    aria-label="查看故障冷却说明"
+                                    aria-expanded="false"
+                                    aria-controls="mappingHelpPopover"
+                                    aria-describedby="mappingCooldownHelp"
+                                >?</button>
+                                <span class="visually-hidden" id="mappingCooldownHelp">401、403、408、425、429、5xx、网络或流异常进入临时冷却，之后自动重试。429 优先采用上游 Retry-After，其他情况使用设置的故障冷却秒数。重定向、404、405、410 自动禁用。其他 4xx 只切换本次请求，不改变目标状态。</span>
+                            </div>
                             <input type="number" class="form-control" id="mappingCooldownInput" min="0" value="60">
                         </div>
                     </div>
@@ -89,25 +97,16 @@
                                                 优先级
                                                 <button
                                                     type="button"
-                                                    class="mapping-help-button mapping-help-button-rich mapping-priority-help"
+                                                    class="mapping-help-button mapping-priority-help"
+                                                    data-mapping-help-topic="priority"
+                                                    onclick="toggleMappingHelp('priority', event)"
+                                                    aria-label="查看优先级说明"
+                                                    aria-expanded="false"
+                                                    aria-controls="mappingHelpPopover"
                                                     aria-describedby="mappingPriorityHelp"
-                                                >?<span class="mapping-help-tooltip" role="tooltip">
-                                                    <span class="mapping-help-section">
-                                                        <strong>选择顺序</strong>
-                                                        <span>数字越大越先选择；优先级相同时，按目标模型的列表顺序选择。</span>
-                                                    </span>
-                                                    <span class="mapping-help-section">
-                                                        <strong>临时冷却</strong>
-                                                        <span>429、5xx、网络或流异常，以及 401/403/408/425 会进入冷却，之后自动重试。</span>
-                                                    </span>
-                                                    <span class="mapping-help-section">
-                                                        <strong>自动禁用</strong>
-                                                        <span>重定向、404、405、410 表示目标长期不可用。其他 4xx 只切换本次请求，不改变目标状态。</span>
-                                                    </span>
-                                                    <span class="mapping-help-note">没有正常候选时，仍尝试运行时存在的最高优先级目标。</span>
-                                                </span></button>
+                                                >?</button>
                                             </span>
-                                            <span class="visually-hidden" id="mappingPriorityHelp">优先级数字越大越先选择，相同时按列表顺序选择。429、5xx、网络或流异常，以及 401、403、408、425 进入临时冷却。重定向、404、405、410 自动禁用。其他 4xx 只切换本次请求，不改变目标状态。没有正常候选时，仍尝试运行时存在的最高优先级目标。</span>
+                                            <span class="visually-hidden" id="mappingPriorityHelp">优先级数字越大越先选择，相同时按列表顺序选择。没有正常候选时，仍尝试运行时存在的最高优先级目标。</span>
                                         </th>
                                         <th>操作</th>
                                     </tr>
@@ -148,6 +147,13 @@
             <button type="button" class="btn-action btn-delete inline-confirm-action" onclick="confirmDeleteTarget(event)">确认</button>
         </div>
     </div>
+    <div class="mapping-help-popover" id="mappingHelpPopover" data-placement="bottom" hidden>
+        <div class="mapping-help-popover-header">
+            <div class="mapping-help-popover-title" id="mappingHelpTitle">说明</div>
+            <button type="button" class="mapping-help-popover-close" onclick="hideMappingHelpPopover()" aria-label="关闭说明">×</button>
+        </div>
+        <div class="mapping-help-popover-body" id="mappingHelpBody"></div>
+    </div>
 {% endblock %}
 
 {% block page_scripts %}
@@ -165,7 +171,34 @@
         let targetDragRow = null;
         let mappingOrderActionInFlight = false;
         let mappingCopyActionInFlight = false;
+        let activeMappingHelpTrigger = null;
+        let mappingHelpHideTimer = null;
         const togglingMappingIds = new Set();
+        const mappingHelpTopics = {
+            strategy: {
+                title: "选择策略",
+                html: `
+                    <p><code>最高优先级</code>每次请求选择当前正常候选中优先级最高的目标。高优先级目标恢复后自动切回。</p>
+                    <p><code>粘滞故障切换</code>继续使用最近成功的目标。该目标进入冷却、禁用或不可用后，才重新选择。</p>
+                    <p>未设置策略时使用“最高优先级”。</p>
+                `
+            },
+            cooldown: {
+                title: "故障冷却",
+                html: `
+                    <p><code>临时冷却</code>401/403/408/425、429、5xx、网络或流异常会进入冷却，之后自动重试。429 优先采用上游 Retry-After，其他情况使用这里设置的秒数。</p>
+                    <p><code>自动禁用</code>重定向、404、405、410 表示目标长期不可用，目标会保持禁用状态。</p>
+                    <p><code>仅切换当前请求</code>其他 4xx 通常与请求内容有关，只切换本次请求，不改变目标状态。</p>
+                `
+            },
+            priority: {
+                title: "优先级",
+                html: `
+                    <p><code>选择顺序</code>数字越大越先选择；优先级相同时，按目标模型的列表顺序选择。</p>
+                    <p><code>兜底选择</code>没有正常候选时，仍尝试运行时存在的最高优先级目标。</p>
+                `
+            }
+        };
 
         function escapeHtml(value) {
             const node = document.createElement("div");
@@ -1033,8 +1066,134 @@
             }
         }
 
+        function clearMappingHelpHideTimer() {
+            if (!mappingHelpHideTimer) return;
+            clearTimeout(mappingHelpHideTimer);
+            mappingHelpHideTimer = null;
+        }
+
+        function scheduleMappingHelpPopoverHide() {
+            clearMappingHelpHideTimer();
+            mappingHelpHideTimer = setTimeout(hideMappingHelpPopover, 160);
+        }
+
+        function hideMappingHelpPopover() {
+            clearMappingHelpHideTimer();
+            const popover = document.getElementById("mappingHelpPopover");
+            if (popover) {
+                popover.hidden = true;
+                popover.style.removeProperty("top");
+                popover.style.removeProperty("left");
+                popover.style.removeProperty("visibility");
+                popover.style.removeProperty("--popover-arrow-left");
+                popover.dataset.placement = "bottom";
+            }
+            activeMappingHelpTrigger?.setAttribute("aria-expanded", "false");
+            activeMappingHelpTrigger = null;
+        }
+
+        function positionMappingHelpPopover(trigger, popover) {
+            if (!trigger || !popover) return;
+            const triggerRect = trigger.getBoundingClientRect();
+            popover.hidden = false;
+            popover.style.visibility = "hidden";
+            popover.style.left = "0";
+            popover.style.top = "0";
+            popover.style.removeProperty("--popover-arrow-left");
+
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 12;
+            const centeredLeft = triggerRect.left + (triggerRect.width / 2) - (popoverRect.width / 2);
+            const maxLeft = window.innerWidth - popoverRect.width - viewportPadding;
+            const left = Math.max(viewportPadding, Math.min(centeredLeft, maxLeft));
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? "bottom" : "top";
+            popover.style.left = `${left}px`;
+            popover.style.top = `${top}px`;
+            popover.style.setProperty("--popover-arrow-left", `${arrowLeft}px`);
+            popover.style.visibility = "visible";
+        }
+
+        function showMappingHelp(topic, trigger) {
+            clearMappingHelpHideTimer();
+            const helpTopic = mappingHelpTopics[String(topic || "")];
+            const popover = document.getElementById("mappingHelpPopover");
+            if (!helpTopic || !trigger || !popover) return;
+            if (activeMappingHelpTrigger && activeMappingHelpTrigger !== trigger) {
+                activeMappingHelpTrigger.setAttribute("aria-expanded", "false");
+            }
+            document.getElementById("mappingHelpTitle").textContent = helpTopic.title;
+            document.getElementById("mappingHelpBody").innerHTML = helpTopic.html;
+            activeMappingHelpTrigger = trigger;
+            activeMappingHelpTrigger.setAttribute("aria-expanded", "true");
+            positionMappingHelpPopover(trigger, popover);
+        }
+
+        function toggleMappingHelp(topic, event) {
+            event?.preventDefault();
+            event?.stopPropagation();
+            const trigger = event?.currentTarget || null;
+            showMappingHelp(topic, trigger);
+        }
+
+        function isMappingHelpRelatedTargetWithin(element, event) {
+            return element && event.relatedTarget instanceof Node && element.contains(event.relatedTarget);
+        }
+
+        function initMappingHelpInteractions() {
+            document.addEventListener("mouseover", event => {
+                const trigger = event.target instanceof Element
+                    ? event.target.closest("[data-mapping-help-topic]")
+                    : null;
+                if (!trigger || isMappingHelpRelatedTargetWithin(trigger, event)) return;
+                showMappingHelp(trigger.dataset.mappingHelpTopic, trigger);
+            });
+            document.addEventListener("mouseout", event => {
+                const trigger = event.target instanceof Element
+                    ? event.target.closest("[data-mapping-help-topic]")
+                    : null;
+                if (!trigger || isMappingHelpRelatedTargetWithin(trigger, event)) return;
+                scheduleMappingHelpPopoverHide();
+            });
+            document.addEventListener("focusin", event => {
+                const trigger = event.target instanceof Element
+                    ? event.target.closest("[data-mapping-help-topic]")
+                    : null;
+                if (trigger) showMappingHelp(trigger.dataset.mappingHelpTopic, trigger);
+            });
+            document.addEventListener("focusout", event => {
+                const trigger = event.target instanceof Element
+                    ? event.target.closest("[data-mapping-help-topic]")
+                    : null;
+                const popover = document.getElementById("mappingHelpPopover");
+                if (!trigger || isMappingHelpRelatedTargetWithin(popover, event)) return;
+                scheduleMappingHelpPopoverHide();
+            });
+
+            const popover = document.getElementById("mappingHelpPopover");
+            popover?.addEventListener("mouseover", event => {
+                if (!isMappingHelpRelatedTargetWithin(popover, event)) clearMappingHelpHideTimer();
+            });
+            popover?.addEventListener("mouseout", event => {
+                if (!isMappingHelpRelatedTargetWithin(popover, event)) scheduleMappingHelpPopoverHide();
+            });
+            popover?.addEventListener("focusin", clearMappingHelpHideTimer);
+            popover?.addEventListener("focusout", scheduleMappingHelpPopoverHide);
+        }
+
         document.addEventListener("DOMContentLoaded", () => {
             mappingEditorModal = new bootstrap.Modal(document.getElementById("mappingEditorModal"));
+            initMappingHelpInteractions();
             document.getElementById("createMappingBtn").addEventListener("click", openCreateMapping);
             document.getElementById("addTargetBtn").addEventListener("click", () => createTargetRow({ priority: 1, enabled: true, status: "available" }));
             document.getElementById("saveMappingBtn").addEventListener("click", saveMapping);
@@ -1051,21 +1210,34 @@
                 if (pendingDeleteTargetRow && !event.target.closest(".mapping-target-delete-trigger") && !event.target.closest("#mappingTargetDeletePopover")) {
                     closeDeleteTargetConfirm();
                 }
+                if (!event.target.closest("[data-mapping-help-topic]") && !event.target.closest("#mappingHelpPopover")) {
+                    hideMappingHelpPopover();
+                }
             });
             document.addEventListener("keydown", event => {
                 if (event.key !== "Escape") return;
                 closeDeleteMappingConfirm();
                 closeDeleteTargetConfirm();
+                hideMappingHelpPopover();
             });
             window.addEventListener("resize", () => {
                 syncMappingDeletePopover();
                 syncTargetDeletePopover();
+                if (activeMappingHelpTrigger) {
+                    positionMappingHelpPopover(activeMappingHelpTrigger, document.getElementById("mappingHelpPopover"));
+                }
             });
             window.addEventListener("scroll", () => {
                 syncMappingDeletePopover();
                 syncTargetDeletePopover();
+                if (activeMappingHelpTrigger) {
+                    positionMappingHelpPopover(activeMappingHelpTrigger, document.getElementById("mappingHelpPopover"));
+                }
             }, true);
-            document.getElementById("mappingEditorModal").addEventListener("hidden.bs.modal", closeDeleteTargetConfirm);
+            document.getElementById("mappingEditorModal").addEventListener("hidden.bs.modal", () => {
+                closeDeleteTargetConfirm();
+                hideMappingHelpPopover();
+            });
             loadMappings();
         });
     </script>
