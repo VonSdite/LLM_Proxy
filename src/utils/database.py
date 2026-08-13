@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """数据库工具函数。"""
 
-import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
+
+import pysqlite3 as sqlite3
 
 ConnectionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
 
