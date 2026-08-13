@@ -4,11 +4,13 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import time
 from typing import Any
 
 from ..proxy_core.contracts import DownstreamChunk
+from .annotation_utils import chat_annotations_to_responses, copy_logprobs
 from .event_chunk_utils import build_json_event_chunk as _emit_event
 from .reasoning_utils import (
     extract_openai_reasoning_delta,
@@ -109,9 +111,7 @@ def convert_openai_responses_request_to_chat_request(
             if item_type not in {"function_call", "custom_tool_call"}:
                 flush_tool_calls()
             if item_type in {"", "message"}:
-                if role == "developer":
-                    role = "user"
-                if role not in {"system", "assistant"}:
+                if role not in {"system", "developer", "assistant"}:
                     role = "user"
                 content = _from_openai_responses_message_content(item.get("content"))
                 message = {"role": role, "content": content if content else ""}
@@ -129,18 +129,25 @@ def convert_openai_responses_request_to_chat_request(
             elif item_type in {"function_call", "custom_tool_call"}:
                 call_id = str(item.get("call_id") or item.get("id") or "")
                 name = _qualified_responses_tool_name(item.get("namespace"), item.get("name"))
-                arguments = (
-                    _custom_tool_arguments(item.get("input"))
-                    if item_type == "custom_tool_call"
-                    else str(item.get("arguments") or "{}")
-                )
-                pending_tool_calls.append(
-                    {
-                        "id": call_id,
-                        "type": "function",
-                        "function": {"name": name, "arguments": arguments},
-                    }
-                )
+                if item_type == "custom_tool_call":
+                    pending_tool_calls.append(
+                        {
+                            "id": call_id,
+                            "type": "custom",
+                            "custom": {"name": name, "input": str(item.get("input") or "")},
+                        }
+                    )
+                else:
+                    pending_tool_calls.append(
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": str(item.get("arguments") or "{}"),
+                            },
+                        }
+                    )
                 pending_tool_call_ids.append(call_id)
             elif item_type in {"function_call_output", "custom_tool_call_output"}:
                 call_id = str(item.get("call_id") or "").strip()
@@ -172,6 +179,12 @@ def convert_openai_responses_request_to_chat_request(
         translated["user"] = body.get("user")
     if body.get("metadata") is not None:
         translated["metadata"] = body.get("metadata")
+    for field in ("prompt_cache_key", "safety_identifier"):
+        if body.get(field) is not None:
+            translated[field] = copy.deepcopy(body[field])
+    if body.get("top_logprobs") is not None:
+        translated["top_logprobs"] = body["top_logprobs"]
+        translated["logprobs"] = True
     reasoning_effort = openai_reasoning_effort_from_responses_reasoning(body.get("reasoning"))
     if reasoning_effort is not None:
         translated["reasoning_effort"] = reasoning_effort
@@ -181,6 +194,8 @@ def convert_openai_responses_request_to_chat_request(
         response_format = _responses_text_format_to_chat(text_format.get("format"))
         if response_format is not None:
             translated["response_format"] = response_format
+        if text_format.get("verbosity") is not None:
+            translated["verbosity"] = text_format["verbosity"]
 
     chat_tools = []
     for descriptor in _responses_tool_winners(body, filter_apply_patch=False):
@@ -188,13 +203,19 @@ def convert_openai_responses_request_to_chat_request(
         tool_type = descriptor["tool_type"]
         if tool_type not in {"function", "custom"}:
             continue
-        parameters = _responses_tool_parameters(tool)
         if tool_type == "custom":
-            parameters = {
-                "type": "object",
-                "properties": {"input": {"type": "string"}},
-                "required": ["input"],
+            custom_tool = {
+                "type": "custom",
+                "custom": {
+                    "name": descriptor["name"],
+                    "description": _responses_tool_description(tool),
+                },
             }
+            if tool.get("format") is not None:
+                custom_tool["custom"]["format"] = copy.deepcopy(tool["format"])
+            chat_tools.append(custom_tool)
+            continue
+        parameters = _responses_tool_parameters(tool)
         chat_tools.append(
             {
                 "type": "function",
@@ -216,12 +237,12 @@ def convert_openai_responses_request_to_chat_request(
         choice_type = str(tool_choice.get("type") or "").strip().lower()
         nested = tool_choice.get(choice_type)
         name = nested.get("name") if isinstance(nested, dict) else tool_choice.get("name")
-        translated["tool_choice"] = {
-            "type": "function",
-            "function": {
-                "name": _qualified_responses_tool_name(tool_choice.get("namespace"), name),
-            },
-        }
+        qualified_name = _qualified_responses_tool_name(tool_choice.get("namespace"), name)
+        translated["tool_choice"] = (
+            {"type": "custom", "custom": {"name": qualified_name}}
+            if choice_type == "custom"
+            else {"type": "function", "function": {"name": qualified_name}}
+        )
     elif tool_choice not in (None, ""):
         translated["tool_choice"] = tool_choice
 
@@ -269,10 +290,6 @@ def _qualified_responses_tool_name(namespace: Any, name: Any) -> str:
         return name_text
     separator = "" if namespace_text.endswith("__") else "__"
     return f"{namespace_text}{separator}{name_text}"
-
-
-def _custom_tool_arguments(value: Any) -> str:
-    return json.dumps({"input": str(value or "")}, ensure_ascii=False)
 
 
 def _responses_tool_output_to_chat(output: Any) -> Any:
@@ -468,6 +485,10 @@ def translate_openai_chat_stream_payload_to_responses(
             outputs.extend(_ensure_message_open(state))
             message_state = state["message"]
             message_state["content"] += content
+            choice_logprobs = choice.get("logprobs")
+            logprobs = copy_logprobs(choice_logprobs.get("content")) if isinstance(choice_logprobs, dict) else []
+            if logprobs:
+                message_state.setdefault("logprobs", []).extend(logprobs)
             outputs.append(
                 _emit_event(
                     "response.output_text.delta",
@@ -478,7 +499,7 @@ def translate_openai_chat_stream_payload_to_responses(
                         "output_index": message_state["output_index"],
                         "content_index": 0,
                         "delta": content,
-                        "logprobs": [],
+                        "logprobs": logprobs,
                     },
                 )
             )
@@ -496,17 +517,21 @@ def translate_openai_chat_stream_payload_to_responses(
                 function = tool_call.get("function") or {}
                 if not isinstance(function, dict):
                     function = {}
+                custom = tool_call.get("custom") or {}
+                if not isinstance(custom, dict):
+                    custom = {}
+                tool_name = str(custom.get("name") or function.get("name") or "")
                 tool_state, open_events = _ensure_tool_open(
                     state,
                     tool_index,
                     str(tool_call.get("id") or ""),
-                    str(function.get("name") or ""),
+                    tool_name,
                     original_request,
                 )
                 outputs.extend(open_events)
-                if function.get("name"):
-                    _update_responses_tool_identity(tool_state, str(function["name"]), original_request)
-                arguments_delta = function.get("arguments")
+                if tool_name:
+                    _update_responses_tool_identity(tool_state, tool_name, original_request)
+                arguments_delta = custom.get("input") if custom else function.get("arguments")
                 if isinstance(arguments_delta, str) and arguments_delta:
                     tool_state["arguments"] += arguments_delta
                     if not tool_state.get("custom"):
@@ -522,6 +547,9 @@ def translate_openai_chat_stream_payload_to_responses(
                                 },
                             )
                         )
+
+        if choice.get("finish_reason") not in (None, ""):
+            state["finish_reason"] = choice["finish_reason"]
 
     return outputs
 
@@ -754,12 +782,8 @@ def finalize_openai_responses_stream(
     outputs.extend(_finalize_reasoning(state))
     outputs.extend(_finalize_message(state))
     outputs.extend(_finalize_tool_calls(state))
-    outputs.append(
-        _emit_event(
-            "response.completed",
-            _build_completed_payload(model_name, original_request, translated_request, state),
-        )
-    )
+    completed_payload = _build_completed_payload(model_name, original_request, translated_request, state)
+    outputs.append(_emit_event(completed_payload["type"], completed_payload))
     state["completed"] = True
     return outputs
 
@@ -770,6 +794,7 @@ def _finalize_message(state: dict[str, Any]) -> list[DownstreamChunk]:
         return []
 
     text = str(message_state.get("content") or "")
+    logprobs = copy_logprobs(message_state.get("logprobs"))
     output_index = int(message_state.get("output_index") or 0)
     item_id = str(message_state.get("item_id") or "")
     message_state["done"] = True
@@ -783,7 +808,7 @@ def _finalize_message(state: dict[str, Any]) -> list[DownstreamChunk]:
                 "output_index": output_index,
                 "content_index": 0,
                 "text": text,
-                "logprobs": [],
+                "logprobs": logprobs,
             },
         ),
         _emit_event(
@@ -794,7 +819,7 @@ def _finalize_message(state: dict[str, Any]) -> list[DownstreamChunk]:
                 "item_id": item_id,
                 "output_index": output_index,
                 "content_index": 0,
-                "part": {"type": "output_text", "annotations": [], "logprobs": [], "text": text},
+                "part": {"type": "output_text", "annotations": [], "logprobs": logprobs, "text": text},
             },
         ),
         _emit_event(
@@ -808,7 +833,7 @@ def _finalize_message(state: dict[str, Any]) -> list[DownstreamChunk]:
                     "type": "message",
                     "status": "completed",
                     "role": "assistant",
-                    "content": [{"type": "output_text", "annotations": [], "logprobs": [], "text": text}],
+                    "content": [{"type": "output_text", "annotations": [], "logprobs": logprobs, "text": text}],
                 },
             },
         ),
@@ -865,7 +890,7 @@ def _finalize_tool_calls(state: dict[str, Any]) -> list[DownstreamChunk]:
         tool_state = state["tool_calls"][tool_index]
         if tool_state.get("done"):
             continue
-        arguments = str(tool_state.get("arguments") or "{}")
+        arguments = str(tool_state.get("arguments") or ("" if tool_state.get("custom") else "{}"))
         if tool_state.get("custom"):
             custom_input = _unwrap_custom_tool_arguments(arguments)
             outputs.append(
@@ -944,21 +969,26 @@ def _build_completed_payload(
     state: dict[str, Any],
 ) -> dict[str, Any]:
     response_model = str(state.get("response_model") or translated_request.get("model") or model_name)
+    finish_reason = str(state.get("finish_reason") or "").strip().lower()
+    incomplete_reason = _responses_incomplete_reason(finish_reason)
     response = {
         "id": state["response_id"],
         "object": "response",
         "created_at": int(state["created"]),
-        "status": "completed",
+        "status": "incomplete" if incomplete_reason else "completed",
         "background": False,
         "error": None,
         "model": response_model,
         "output": _build_output_items(state),
     }
+    if incomplete_reason:
+        response["incomplete_details"] = {"reason": incomplete_reason}
     usage = state.get("usage")
     if isinstance(usage, dict) and usage:
         response["usage"] = usage
     response.update(_extract_echo_fields(original_request))
-    return {"type": "response.completed", "sequence_number": _next_sequence(state), "response": response}
+    event_type = "response.incomplete" if incomplete_reason else "response.completed"
+    return {"type": event_type, "sequence_number": _next_sequence(state), "response": response}
 
 
 def _build_output_items(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -977,7 +1007,7 @@ def _build_output_items(state: dict[str, Any]) -> list[dict[str, Any]]:
                         {
                             "type": "output_text",
                             "annotations": [],
-                            "logprobs": [],
+                            "logprobs": copy_logprobs(message_state.get("logprobs")),
                             "text": str(message_state.get("content") or ""),
                         }
                     ],
@@ -1057,6 +1087,7 @@ def convert_openai_chat_response_to_responses(
         return payload
 
     message: dict[str, Any] = {}
+    choice_logprobs: list[dict[str, Any]] = []
     finish_reason = None
     for choice in payload.get("choices") or []:
         if not isinstance(choice, dict):
@@ -1064,6 +1095,9 @@ def convert_openai_chat_response_to_responses(
         if isinstance(choice.get("message"), dict):
             message = choice.get("message") or {}
             finish_reason = choice.get("finish_reason")
+            logprobs = choice.get("logprobs")
+            if isinstance(logprobs, dict):
+                choice_logprobs = copy_logprobs(logprobs.get("content"))
             break
 
     response_id = payload.get("id") or f"resp_{model_name}_{int(time.time() * 1000)}"
@@ -1082,8 +1116,14 @@ def convert_openai_chat_response_to_responses(
     if isinstance(refusal, str) and refusal:
         message_content = [{"type": "refusal", "refusal": refusal}]
     else:
+        annotations = chat_annotations_to_responses(message.get("annotations"))
         message_content = [
-            {"type": "output_text", "annotations": [], "logprobs": [], "text": str(message.get("content") or "")}
+            {
+                "type": "output_text",
+                "annotations": annotations,
+                "logprobs": choice_logprobs,
+                "text": str(message.get("content") or ""),
+            }
         ]
     if message.get("content") not in (None, "") or refusal:
         output_items.append(
@@ -1097,6 +1137,29 @@ def convert_openai_chat_response_to_responses(
         )
     for index, tool_call in enumerate(message.get("tool_calls") or []):
         if not isinstance(tool_call, dict):
+            continue
+        tool_type = str(tool_call.get("type") or "").strip().lower()
+        if tool_type == "custom":
+            custom = tool_call.get("custom")
+            if not isinstance(custom, dict) or not custom.get("name"):
+                continue
+            qualified_name = str(custom.get("name") or "")
+            call_id = str(tool_call.get("id") or "")
+            name, namespace, _ = _responses_tool_identities(original_request, filter_apply_patch=False).get(
+                qualified_name,
+                (qualified_name, "", "custom"),
+            )
+            item = {
+                "id": f"ctc_{call_id or index}",
+                "type": "custom_tool_call",
+                "status": "completed",
+                "input": str(custom.get("input") or ""),
+                "call_id": call_id,
+                "name": name,
+            }
+            if namespace:
+                item["namespace"] = namespace
+            output_items.append(item)
             continue
         function = tool_call.get("function") or {}
         if not isinstance(function, dict):
@@ -1142,16 +1205,19 @@ def convert_openai_chat_response_to_responses(
             }
         )
 
+    incomplete_reason = _responses_incomplete_reason(finish_reason)
     response = {
         "id": response_id,
         "object": "response",
         "created_at": int(payload.get("created") or time.time()),
-        "status": "completed",
+        "status": "incomplete" if incomplete_reason else "completed",
         "background": False,
         "error": None,
         "model": response_model,
         "output": output_items,
     }
+    if incomplete_reason:
+        response["incomplete_details"] = {"reason": incomplete_reason}
     if isinstance(payload.get("usage"), dict):
         usage = payload["usage"]
         input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
@@ -1215,3 +1281,12 @@ def _unwrap_custom_tool_arguments(arguments: str) -> str:
         value = parsed["input"]
         return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     return arguments
+
+
+def _responses_incomplete_reason(finish_reason: Any) -> str | None:
+    normalized = str(finish_reason or "").strip().lower()
+    if normalized == "length":
+        return "max_output_tokens"
+    if normalized == "content_filter":
+        return "content_filter"
+    return None

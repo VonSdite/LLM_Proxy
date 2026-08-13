@@ -607,7 +607,7 @@ class ProxyResponseBuilder:
                 self._update_meta_from_payload(
                     meta,
                     translated_payload,
-                    source_format=translator.source_format,
+                    source_format=downstream_target_format,
                 )
             guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
             body_to_send = translated_payload if guarded_payload is None else guarded_payload
@@ -899,7 +899,7 @@ class ProxyResponseBuilder:
                 self._update_meta_from_payload(
                     meta,
                     translated_payload,
-                    source_format=translator.source_format,
+                    source_format=downstream_target_format,
                 )
             guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
             body_to_send = translated_payload if guarded_payload is None else guarded_payload

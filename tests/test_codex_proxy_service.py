@@ -166,8 +166,8 @@ class CodexProxyServiceTests(unittest.TestCase):
             ],
             body["input"],
         )
-        self.assertEqual(100, body["max_output_tokens"])
         for field in (
+            "max_output_tokens",
             "max_completion_tokens",
             "temperature",
             "top_p",

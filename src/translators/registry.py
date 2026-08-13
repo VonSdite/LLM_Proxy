@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from ..proxy_core.contracts import DownstreamChunk, StreamEvent
 from ..proxy_core.usage import claude_usage_to_openai
+from .annotation_utils import copy_logprobs, responses_annotations_to_chat
 from .claude_bridge import (
     convert_claude_request_to_openai_chat_request as _convert_claude_request_to_openai_chat_request,
 )
@@ -194,9 +195,21 @@ class OpenAIResponsesTranslator:
             translated["include"] = body.get("include")
         if body.get("parallel_tool_calls") is not None:
             translated["parallel_tool_calls"] = body.get("parallel_tool_calls")
+        for field in ("top_logprobs", "prompt_cache_key", "safety_identifier"):
+            if body.get(field) is not None:
+                translated[field] = copy.deepcopy(body[field])
         reasoning = openai_reasoning_effort_to_responses_reasoning(body.get("reasoning_effort"))
         if reasoning is not None:
             translated["reasoning"] = reasoning
+
+        text: dict[str, Any] = {}
+        text_format = _to_openai_responses_text_format(body.get("response_format"))
+        if text_format is not None:
+            text["format"] = text_format
+        if body.get("verbosity") is not None:
+            text["verbosity"] = body["verbosity"]
+        if text:
+            translated["text"] = text
 
         tools = _to_openai_responses_tools(body.get("tools"))
         if tools:
@@ -265,6 +278,7 @@ class OpenAIResponsesTranslator:
                         accumulator = {
                             "id": call_id,
                             "name": _qualified_responses_tool_name(item),
+                            "custom": item_type == "custom_tool_call",
                             "tool_index": tool_index,
                             "delta_emitted": False,
                             "arguments": [],
@@ -325,6 +339,7 @@ class OpenAIResponsesTranslator:
                 accumulator = {
                     "id": str(item.get("call_id") or item_id),
                     "name": _qualified_responses_tool_name(item),
+                    "custom": item_type == "custom_tool_call",
                     "tool_index": tool_index,
                     "delta_emitted": False,
                     "arguments": [],
@@ -386,6 +401,7 @@ class OpenAIResponsesTranslator:
                             response_id=response_id,
                             created=created,
                             content=delta,
+                            choice_fields=_chat_choice_logprobs(payload.get("logprobs")),
                         ),
                     )
                 )
@@ -508,7 +524,7 @@ class OpenAIResponsesTranslator:
                     )
             return outputs
 
-        if event_type in {"response.completed", "response.done"}:
+        if event_type in {"response.completed", "response.done", "response.incomplete"}:
             response = payload.get("response") or {}
             if isinstance(response, dict):
                 if response.get("model") is not None:
@@ -517,6 +533,7 @@ class OpenAIResponsesTranslator:
                 finish_reason = _resolve_openai_responses_finish_reason(
                     saw_text=bool(state.get("saw_text")),
                     saw_tool_call=bool(state.get("saw_tool_call")),
+                    response=response,
                 )
                 outputs.append(
                     DownstreamChunk(
@@ -597,19 +614,22 @@ class OpenAIResponsesTranslator:
         finish_reason = _resolve_openai_responses_finish_reason(
             saw_text=bool(message.get("content")),
             saw_tool_call=bool(tool_calls),
+            response=response,
         )
+        choice: dict[str, Any] = {
+            "index": 0,
+            "message": message,
+            "finish_reason": finish_reason,
+        }
+        logprobs = _extract_openai_responses_logprobs(response.get("output"))
+        if logprobs:
+            choice["logprobs"] = {"content": logprobs}
         result = {
             "id": response.get("id") or f"chatcmpl_{response_model}",
             "object": "chat.completion",
             "created": int(response.get("created_at") or 0),
             "model": response_model,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": message,
-                    "finish_reason": finish_reason,
-                }
-            ],
+            "choices": [choice],
         }
         usage = _extract_openai_responses_usage(response.get("usage"))
         if usage:
@@ -774,12 +794,16 @@ class ClaudeChatTranslator:
             else:
                 translated["system"] = system_parts
 
-        tools = _to_claude_tools(body.get("tools"))
-        if tools:
-            translated["tools"] = tools
-        tool_choice = _to_claude_tool_choice(body.get("tool_choice"))
-        if tool_choice:
-            translated["tool_choice"] = tool_choice
+        if not _tool_choice_disables_tools(body.get("tool_choice")):
+            tools = _to_claude_tools(body.get("tools"))
+            if tools:
+                translated["tools"] = tools
+            tool_choice = _to_claude_tool_choice(body.get("tool_choice"))
+            if body.get("parallel_tool_calls") is not None and tools:
+                tool_choice = tool_choice or {"type": "auto"}
+                tool_choice["disable_parallel_tool_use"] = not bool(body["parallel_tool_calls"])
+            if tool_choice:
+                translated["tool_choice"] = tool_choice
         return translated
 
     def translate_stream_event(
@@ -923,15 +947,12 @@ class ClaudeChatTranslator:
             usage_chunk = None
             if isinstance(payload.get("usage"), dict):
                 merged_usage = _merge_claude_usage_state(state, payload["usage"])
-                if not state.get("claude_usage_emitted"):
-                    usage_chunk = _build_openai_usage_chunk_from_usage(
-                        _extract_claude_usage(merged_usage),
-                        response_model,
-                        response_id=response_id,
-                        created=created,
-                    )
-                    if usage_chunk is not None:
-                        state["claude_usage_emitted"] = True
+                usage_chunk = _build_openai_usage_chunk_from_usage(
+                    _extract_claude_usage(merged_usage),
+                    response_model,
+                    response_id=response_id,
+                    created=created,
+                )
             if isinstance(delta, dict):
                 finish_reason = _map_claude_stop_reason(delta.get("stop_reason"))
                 if finish_reason:
@@ -978,13 +999,14 @@ class ClaudeChatTranslator:
         translated_request: dict[str, Any],
         payload: Any,
     ) -> Any:
-        del original_request, translated_request
+        del translated_request
         if not isinstance(payload, dict):
             return payload
 
         response_model = str(payload.get("model") or model_name)
         message: dict[str, Any] = {"role": "assistant", "content": ""}
         tool_calls = []
+        custom_tool_names = _chat_custom_tool_names(original_request)
         reasoning_parts: list[str] = []
         for block in payload.get("content", []) or []:
             if not isinstance(block, dict):
@@ -995,16 +1017,36 @@ class ClaudeChatTranslator:
             elif block_type == "thinking" and isinstance(block.get("thinking"), str):
                 reasoning_parts.append(block["thinking"])
             elif block_type == "tool_use":
-                tool_calls.append(
-                    {
-                        "id": str(block.get("id") or ""),
-                        "type": "function",
-                        "function": {
-                            "name": str(block.get("name") or ""),
-                            "arguments": json.dumps(block.get("input") or {}, ensure_ascii=False),
-                        },
-                    }
-                )
+                name = str(block.get("name") or "")
+                if name in custom_tool_names:
+                    tool_input = block.get("input")
+                    if isinstance(tool_input, dict) and "input" in tool_input:
+                        custom_input = tool_input["input"]
+                    else:
+                        custom_input = tool_input
+                    tool_calls.append(
+                        {
+                            "id": str(block.get("id") or ""),
+                            "type": "custom",
+                            "custom": {
+                                "name": name,
+                                "input": custom_input
+                                if isinstance(custom_input, str)
+                                else json.dumps(custom_input, ensure_ascii=False),
+                            },
+                        }
+                    )
+                else:
+                    tool_calls.append(
+                        {
+                            "id": str(block.get("id") or ""),
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(block.get("input") or {}, ensure_ascii=False),
+                            },
+                        }
+                    )
         if tool_calls:
             message["tool_calls"] = tool_calls
         if reasoning_parts:
@@ -1294,6 +1336,20 @@ def _to_claude_tool_use_blocks(tool_calls: Any) -> list[dict[str, Any]]:
     for item in tool_calls:
         if not isinstance(item, dict):
             continue
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type == "custom":
+            custom = item.get("custom")
+            if not isinstance(custom, dict) or not custom.get("name"):
+                continue
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": str(item.get("id") or f"toolu_{custom['name']}"),
+                    "name": str(custom["name"]),
+                    "input": {"input": str(custom.get("input") or "")},
+                }
+            )
+            continue
         function = item.get("function")
         if not isinstance(function, dict) or not function.get("name"):
             continue
@@ -1323,7 +1379,26 @@ def _to_claude_tools(tools: Any) -> list[dict[str, Any]]:
         return []
     translated = []
     for tool in tools:
-        if not isinstance(tool, dict) or str(tool.get("type") or "").strip().lower() != "function":
+        if not isinstance(tool, dict):
+            continue
+        tool_type = str(tool.get("type") or "").strip().lower()
+        if tool_type == "custom":
+            custom = tool.get("custom")
+            if not isinstance(custom, dict) or not custom.get("name"):
+                continue
+            translated_tool = {
+                "name": str(custom["name"]),
+                "description": str(custom.get("description") or ""),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"input": {"type": "string"}},
+                    "required": ["input"],
+                },
+            }
+            _copy_cache_control(tool, translated_tool)
+            translated.append(translated_tool)
+            continue
+        if tool_type != "function":
             continue
         function = tool.get("function")
         if not isinstance(function, dict) or not function.get("name"):
@@ -1345,12 +1420,13 @@ def _to_claude_tool_choice(tool_choice: Any) -> dict[str, Any] | None:
         normalized = tool_choice.strip().lower()
         if normalized == "auto":
             return {"type": "auto"}
-        if normalized == "none":
-            return {"type": "auto", "disable_parallel_tool_use": True}
         if normalized in {"required", "any"}:
             return {"type": "any"}
         return None
     if isinstance(tool_choice, dict):
+        custom = tool_choice.get("custom")
+        if isinstance(custom, dict) and custom.get("name"):
+            return {"type": "tool", "name": str(custom.get("name"))}
         function = tool_choice.get("function")
         if isinstance(function, dict) and function.get("name"):
             return {"type": "tool", "name": str(function.get("name"))}
@@ -1377,6 +1453,15 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]
 
     instructions: list[str] = []
     items: list[dict[str, Any]] = []
+    custom_call_ids = {
+        str(tool_call.get("id") or "")
+        for message in messages
+        if isinstance(message, dict)
+        for tool_call in message.get("tool_calls") or []
+        if isinstance(tool_call, dict)
+        and str(tool_call.get("type") or "").strip().lower() == "custom"
+        and str(tool_call.get("id") or "")
+    }
     for message in messages:
         if not isinstance(message, dict):
             continue
@@ -1391,7 +1476,9 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]
             if tool_call_id:
                 items.append(
                     {
-                        "type": "function_call_output",
+                        "type": "custom_tool_call_output"
+                        if tool_call_id in custom_call_ids
+                        else "function_call_output",
                         "call_id": tool_call_id,
                         "output": normalize_tool_result_content(message.get("content")),
                     }
@@ -1411,6 +1498,20 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]
         if role == "assistant":
             for tool_call in message.get("tool_calls") or []:
                 if not isinstance(tool_call, dict):
+                    continue
+                tool_type = str(tool_call.get("type") or "").strip().lower()
+                if tool_type == "custom":
+                    custom = tool_call.get("custom")
+                    if not isinstance(custom, dict) or not custom.get("name"):
+                        continue
+                    items.append(
+                        {
+                            "type": "custom_tool_call",
+                            "call_id": str(tool_call.get("id") or ""),
+                            "name": str(custom.get("name")),
+                            "input": str(custom.get("input") or ""),
+                        }
+                    )
                     continue
                 function = tool_call.get("function")
                 if not isinstance(function, dict) or not function.get("name"):
@@ -1444,7 +1545,24 @@ def _to_openai_responses_message_content(content: Any, role: str) -> list[dict[s
         elif item_type == "image_url":
             image_url = item.get("image_url")
             if isinstance(image_url, dict) and isinstance(image_url.get("url"), str):
-                translated.append({"type": "input_image", "image_url": image_url["url"]})
+                image_part: dict[str, Any] = {"type": "input_image", "image_url": image_url["url"]}
+                if image_url.get("detail") is not None:
+                    image_part["detail"] = image_url["detail"]
+                translated.append(image_part)
+        elif item_type in {"file", "input_file"}:
+            file_payload = item.get("file") if isinstance(item.get("file"), dict) else item
+            if not isinstance(file_payload, dict):
+                continue
+            file_part = {
+                "type": "input_file",
+                **{
+                    key: copy.deepcopy(file_payload[key])
+                    for key in ("file_id", "file_data", "filename", "file_url", "detail")
+                    if file_payload.get(key) is not None
+                },
+            }
+            if len(file_part) > 1:
+                translated.append(file_part)
     return translated
 
 
@@ -1453,19 +1571,33 @@ def _to_openai_responses_tools(tools: Any) -> list[dict[str, Any]]:
         return []
     translated: list[dict[str, Any]] = []
     for tool in tools:
-        if not isinstance(tool, dict) or str(tool.get("type") or "").strip().lower() != "function":
+        if not isinstance(tool, dict):
+            continue
+        tool_type = str(tool.get("type") or "").strip().lower()
+        if tool_type == "custom":
+            custom = tool.get("custom") if isinstance(tool.get("custom"), dict) else tool
+            if not custom.get("name"):
+                continue
+            translated_tool = {"type": "custom", "name": str(custom["name"])}
+            for field in ("description", "format"):
+                if custom.get(field) is not None:
+                    translated_tool[field] = copy.deepcopy(custom[field])
+            translated.append(translated_tool)
+            continue
+        if tool_type != "function":
             continue
         function = tool.get("function")
         if not isinstance(function, dict) or not function.get("name"):
             continue
-        translated.append(
-            {
-                "type": "function",
-                "name": str(function.get("name")),
-                "description": str(function.get("description") or ""),
-                "parameters": function.get("parameters") or {"type": "object", "properties": {}},
-            }
-        )
+        translated_tool = {
+            "type": "function",
+            "name": str(function.get("name")),
+            "description": str(function.get("description") or ""),
+            "parameters": function.get("parameters") or {"type": "object", "properties": {}},
+        }
+        if function.get("strict") is not None:
+            translated_tool["strict"] = bool(function["strict"])
+        translated.append(translated_tool)
     return translated
 
 
@@ -1475,6 +1607,12 @@ def _to_openai_responses_tool_choice(tool_choice: Any) -> Any:
     if isinstance(tool_choice, str):
         return tool_choice
     if isinstance(tool_choice, dict):
+        choice_type = str(tool_choice.get("type") or "").strip().lower()
+        if choice_type == "custom":
+            custom = tool_choice.get("custom")
+            name = custom.get("name") if isinstance(custom, dict) else tool_choice.get("name")
+            if name:
+                return {"type": "custom", "name": str(name)}
         function = tool_choice.get("function")
         if isinstance(function, dict) and function.get("name"):
             return {
@@ -1482,6 +1620,46 @@ def _to_openai_responses_tool_choice(tool_choice: Any) -> Any:
                 "name": str(function.get("name")),
             }
     return tool_choice
+
+
+def _to_openai_responses_text_format(response_format: Any) -> dict[str, Any] | None:
+    if not isinstance(response_format, dict):
+        return None
+    format_type = str(response_format.get("type") or "").strip().lower()
+    if format_type in {"text", "json_object"}:
+        return {"type": format_type}
+    if format_type != "json_schema":
+        return None
+    json_schema = response_format.get("json_schema")
+    if not isinstance(json_schema, dict):
+        return None
+    return {
+        "type": "json_schema",
+        **{
+            key: copy.deepcopy(json_schema[key])
+            for key in ("name", "description", "strict", "schema")
+            if json_schema.get(key) is not None
+        },
+    }
+
+
+def _tool_choice_disables_tools(tool_choice: Any) -> bool:
+    if isinstance(tool_choice, str):
+        return tool_choice.strip().lower() == "none"
+    return isinstance(tool_choice, dict) and str(tool_choice.get("type") or "").strip().lower() == "none"
+
+
+def _chat_custom_tool_names(body: Any) -> set[str]:
+    if not isinstance(body, dict):
+        return set()
+    names: set[str] = set()
+    for tool in body.get("tools") or []:
+        if not isinstance(tool, dict) or str(tool.get("type") or "").strip().lower() != "custom":
+            continue
+        custom = tool.get("custom")
+        if isinstance(custom, dict) and custom.get("name"):
+            names.add(str(custom["name"]))
+    return names
 
 
 def _extract_openai_responses_usage(usage: Any) -> dict[str, Any]:
@@ -1564,26 +1742,49 @@ def _extract_openai_responses_message_and_tool_calls(outputs: Any) -> tuple[dict
                 part_type = str(part.get("type") or "").strip().lower()
                 if part_type in {"output_text", "text"} and isinstance(part.get("text"), str):
                     message["content"] += part["text"]
+                    annotations = responses_annotations_to_chat(part.get("annotations"))
+                    if annotations:
+                        message.setdefault("annotations", []).extend(annotations)
                 elif part_type == "refusal" and isinstance(part.get("refusal"), str):
                     message["refusal"] = str(message.get("refusal") or "") + part["refusal"]
         elif item_type in {"function_call", "custom_tool_call"}:
-            arguments = (
-                json.dumps({"input": str(item.get("input") or "")}, ensure_ascii=False)
-                if item_type == "custom_tool_call"
-                else str(item.get("arguments") or "{}")
-            )
-            tool_calls.append(
-                {
-                    "id": str(item.get("call_id") or item.get("id") or ""),
-                    "type": "function",
-                    "function": {
-                        "name": _qualified_responses_tool_name(item),
-                        "arguments": arguments,
-                    },
-                }
-            )
+            if item_type == "custom_tool_call":
+                tool_calls.append(
+                    {
+                        "id": str(item.get("call_id") or item.get("id") or ""),
+                        "type": "custom",
+                        "custom": {
+                            "name": _qualified_responses_tool_name(item),
+                            "input": str(item.get("input") or ""),
+                        },
+                    }
+                )
+            else:
+                tool_calls.append(
+                    {
+                        "id": str(item.get("call_id") or item.get("id") or ""),
+                        "type": "function",
+                        "function": {
+                            "name": _qualified_responses_tool_name(item),
+                            "arguments": str(item.get("arguments") or "{}"),
+                        },
+                    }
+                )
 
     return message, tool_calls
+
+
+def _extract_openai_responses_logprobs(outputs: Any) -> list[dict[str, Any]]:
+    if not isinstance(outputs, list):
+        return []
+    logprobs: list[dict[str, Any]] = []
+    for item in outputs:
+        if not isinstance(item, dict) or str(item.get("type") or "").strip().lower() != "message":
+            continue
+        for part in item.get("content") or []:
+            if isinstance(part, dict):
+                logprobs.extend(copy_logprobs(part.get("logprobs")))
+    return logprobs
 
 
 def _qualified_responses_tool_name(item: dict[str, Any]) -> str:
@@ -1609,10 +1810,27 @@ def _extract_openai_responses_reasoning_content(outputs: Any) -> str:
     return "".join(parts)
 
 
-def _resolve_openai_responses_finish_reason(*, saw_text: bool, saw_tool_call: bool) -> str:
+def _resolve_openai_responses_finish_reason(
+    *,
+    saw_text: bool,
+    saw_tool_call: bool,
+    response: Any = None,
+) -> str:
+    if isinstance(response, dict):
+        incomplete = response.get("incomplete_details")
+        reason = str(incomplete.get("reason") or "").strip().lower() if isinstance(incomplete, dict) else ""
+        if reason == "max_output_tokens":
+            return "length"
+        if reason == "content_filter":
+            return "content_filter"
     if saw_tool_call and not saw_text:
         return "tool_calls"
     return "stop"
+
+
+def _chat_choice_logprobs(value: Any) -> dict[str, Any]:
+    logprobs = copy_logprobs(value)
+    return {"logprobs": {"content": logprobs}} if logprobs else {}
 
 
 def _build_openai_delta_chunk(
@@ -1625,6 +1843,7 @@ def _build_openai_delta_chunk(
     response_id: str | None = None,
     created: int = 0,
     delta_fields: dict[str, Any] | None = None,
+    choice_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     delta: dict[str, Any] = {}
     if content is not None:
@@ -1633,18 +1852,19 @@ def _build_openai_delta_chunk(
         delta["tool_calls"] = [tool_call]
     if delta_fields:
         delta.update(delta_fields)
+    choice = {
+        "index": index,
+        "delta": delta,
+        "finish_reason": finish_reason,
+    }
+    if choice_fields:
+        choice.update(choice_fields)
     return {
         "id": response_id or f"chatcmpl_{model}",
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
-        "choices": [
-            {
-                "index": index,
-                "delta": delta,
-                "finish_reason": finish_reason,
-            }
-        ],
+        "choices": [choice],
     }
 
 
@@ -1684,7 +1904,7 @@ def _merge_claude_usage_state(state: dict[str, Any], payload: Any) -> dict[str, 
     if not isinstance(payload, dict):
         return usage
     for field, value in payload.items():
-        if value is not None and (usage.get(field) in (None, 0, "") or value not in (0, "")):
+        if value is not None:
             usage[field] = copy.deepcopy(value)
     return usage
 

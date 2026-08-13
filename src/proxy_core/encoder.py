@@ -51,7 +51,13 @@ def is_terminal_chunk(chunk: DownstreamChunk, target_format: str) -> bool:
         if chunk.kind != "json" or not isinstance(chunk.payload, dict):
             return False
         payload_type = str(chunk.payload.get("type") or chunk.event or "").strip().lower()
-        return payload_type in {"response.completed", "response.done", "response.failed", "response.cancelled"}
+        return payload_type in {
+            "response.completed",
+            "response.done",
+            "response.incomplete",
+            "response.failed",
+            "response.cancelled",
+        }
     return chunk.kind == "done"
 
 
