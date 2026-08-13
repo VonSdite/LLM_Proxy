@@ -5,10 +5,18 @@
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
+from sys import platform
 
-import pysqlite3 as sqlite3
+if platform == "linux":
+    import pysqlite3 as sqlite3
+else:
+    import sqlite3
 
-ConnectionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
+SQLiteConnection = sqlite3.Connection
+SQLiteCursor = sqlite3.Cursor
+SQLiteRow = sqlite3.Row
+
+ConnectionFactory = Callable[[], AbstractContextManager[SQLiteConnection]]
 
 
 def create_connection_factory(db_path: Path) -> ConnectionFactory:
@@ -17,7 +25,7 @@ def create_connection_factory(db_path: Path) -> ConnectionFactory:
     resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
 
     @contextmanager
-    def connection_context() -> Iterator[sqlite3.Connection]:
+    def connection_context() -> Iterator[SQLiteConnection]:
         conn = sqlite3.connect(str(resolved_db_path))
         conn.row_factory = sqlite3.Row
         try:
