@@ -169,7 +169,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
     def test_priority_and_cooldown_reject_negative_values(self) -> None:
         with self.assertRaisesRegex(ValueError, "目标优先级必须是非负整数"):
             ModelMappingSchema.from_mapping({"id": "public", "targets": [{"model_id": "alpha/fast", "priority": -1}]})
-        with self.assertRaisesRegex(ValueError, "429 冷却时间必须是非负整数"):
+        with self.assertRaisesRegex(ValueError, "故障冷却时间必须是非负整数"):
             ModelMappingSchema.from_mapping(
                 {
                     "id": "public",
@@ -184,7 +184,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
         settings_template = (project_root / "src/presentation/templates/settings.html").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260807-8", template)
+        self.assertIn("model_mappings.css?v=20260813-1", template)
         self.assertIn('id="mappingStrategySelect"', template)
         self.assertIn('<option value="highest_priority">最高优先级</option>', template)
         self.assertIn('<option value="sticky_failover">粘滞故障切换</option>', template)
@@ -192,6 +192,16 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertNotIn("粘滞故障切换（保持当前目标）", template)
         self.assertIn('aria-describedby="mappingStrategyHelp"', template)
         self.assertIn("高优先级目标恢复后自动切回", template)
+        self.assertIn("mapping-help-tooltip", template)
+        self.assertIn("粘滞故障切换", template)
+        self.assertIn('class="mapping-table-heading"', template)
+        self.assertIn('aria-describedby="mappingPriorityHelp"', template)
+        self.assertIn("401/403/408/425 会进入冷却", template)
+        self.assertIn("其他 4xx 只切换本次请求，不改变目标状态", template)
+        target_label_markup = template.split('<div class="mapping-target-label">', 1)[1].split("</div>", 1)[0]
+        priority_header_markup = template.split('<span class="mapping-table-heading">', 1)[1].split("</span>", 1)[0]
+        self.assertNotIn("mapping-help-button", target_label_markup)
+        self.assertIn("mapping-priority-help", priority_header_markup)
         self.assertIn('strategy: document.getElementById("mappingStrategySelect").value', template)
         self.assertIn('mapping.strategy || "highest_priority"', template)
         self.assertIn('class="mapping-strategy-badge">${strategyLabel}</span>', template)
@@ -205,6 +215,8 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertNotIn("<span>策略</span>", template)
         self.assertNotIn("target-enabled", template)
         self.assertIn('id="mappingCooldownInput" min="0"', template)
+        self.assertIn("故障冷却秒数", template)
+        self.assertIn("<th>目标模型</th><th>故障冷却</th><th>操作</th>", template)
         self.assertIn('class="form-control target-priority" aria-label="优先级" min="0"', template)
         self.assertIn("mapping-help-button", template)
         self.assertIn("mapping-target-unavailable", template)
@@ -218,6 +230,8 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn("最后一次调用失败", template)
         self.assertIn("width: 72px", stylesheet)
         self.assertIn("border-radius: 999px", stylesheet)
+        self.assertIn(".mapping-help-tooltip", stylesheet)
+        self.assertIn("width: min(380px, calc(100vw - 40px))", stylesheet)
         self.assertIn(".mapping-strategy-badge", stylesheet)
         self.assertIn("min-height: 24px", stylesheet)
         self.assertIn("background: rgba(58, 127, 237, 0.08)", stylesheet)
@@ -670,12 +684,12 @@ class ModelMappingServiceTests(unittest.TestCase):
             recovered_target = self.service.acquire_target("public_model")
         self.assertEqual("alpha/fast", recovered_target.target_model_id)
 
-    def test_non_429_failure_auto_disables_until_manual_enable(self) -> None:
+    def test_long_lived_target_failure_auto_disables_until_manual_enable(self) -> None:
         self.service.create_mapping(self._mapping_payload())
         selected = self.service.acquire_target("public_model")
         self.service.record_failure(
             selected,
-            status_code=500,
+            status_code=404,
             error_type="upstream_error",
             error_message="failed",
         )
@@ -690,6 +704,52 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.assertEqual("available", target["status"])
         self.assertEqual("alpha/fast", self.service.acquire_target("public_model").target_model_id)
 
+    def test_server_failure_cools_target_then_retries_after_configured_delay(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        selected = self.service.acquire_target("public_model")
+
+        with patch(
+            "src.services.model_mapping_service.now_local_datetime", return_value=datetime(2099, 8, 5, 10, 0, 0)
+        ):
+            self.service.record_failure(
+                selected,
+                status_code=500,
+                error_type="upstream_error",
+                error_message="failed",
+            )
+
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+        failed_target = mapping["targets"][0]
+        self.assertFalse(failed_target["auto_disabled"])
+        self.assertEqual("cooldown", failed_target["status"])
+        self.assertEqual(datetime(2099, 8, 5, 10, 1, 0), parse_local_datetime(failed_target["cooldown_until"]))
+        self.assertEqual("alpha/stable", self.service.acquire_target("public_model").target_model_id)
+
+        with patch(
+            "src.services.model_mapping_service.now_local_datetime", return_value=datetime(2099, 8, 5, 10, 1, 1)
+        ):
+            recovered_target = self.service.acquire_target("public_model")
+        self.assertEqual("alpha/fast", recovered_target.target_model_id)
+
+    def test_request_error_switches_current_request_without_changing_target_state(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        selected = self.service.acquire_target("public_model")
+        self.service.record_failure(
+            selected,
+            status_code=400,
+            error_type="invalid_request_error",
+            error_message="invalid request",
+        )
+
+        mapping = self.service.get_mapping("public_model")
+        assert mapping is not None
+        failed_target = mapping["targets"][0]
+        self.assertEqual("available", failed_target["status"])
+        self.assertEqual(400, failed_target["last_status_code"])
+        self.assertEqual("alpha/stable", self.service.acquire_target("public_model", {"alpha/fast"}).target_model_id)
+        self.assertEqual("alpha/fast", self.service.acquire_target("public_model").target_model_id)
+
     def test_automatically_disabled_targets_retry_when_no_normal_candidate_remains(self) -> None:
         self.service.create_mapping(self._mapping_payload())
         excluded_targets: set[str] = set()
@@ -698,7 +758,7 @@ class ModelMappingServiceTests(unittest.TestCase):
             excluded_targets.add(selected.target_model_id)
             self.service.record_failure(
                 selected,
-                status_code=500,
+                status_code=404,
                 error_type="upstream_error",
                 error_message="failed",
             )
@@ -727,7 +787,7 @@ class ModelMappingServiceTests(unittest.TestCase):
         selected = self.service.acquire_target("public_model")
         self.service.record_failure(
             selected,
-            status_code=500,
+            status_code=404,
             error_type="upstream_error",
             error_message="failed",
         )
@@ -797,7 +857,7 @@ class ModelMappingServiceTests(unittest.TestCase):
         selected = self.service.acquire_target("public_model")
         self.service.record_failure(
             selected,
-            status_code=500,
+            status_code=404,
             error_type="upstream_error",
             error_message="failed",
         )
@@ -991,7 +1051,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self.assertEqual("claude_text", mapping["current_target_model_id"])
         self.assertEqual("claude_text", completed[0]["response_model"])
 
-    def test_provider_403_disables_target_records_response_message_and_switches(self) -> None:
+    def test_provider_403_cools_target_records_response_message_and_switches(self) -> None:
         calls: list[str] = []
         completed: list[dict[str, Any]] = []
         outcomes = {
@@ -1017,7 +1077,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
 
         self.assertEqual(["alpha/fast", "gpt_text"], calls)
         self.assertEqual(b"ok", response.get_data())
-        self.assertEqual("auto_disabled", targets["alpha/fast"]["status"])
+        self.assertEqual("cooldown", targets["alpha/fast"]["status"])
         self.assertEqual(403, targets["alpha/fast"]["last_status_code"])
         self.assertEqual("API key has no model access", targets["alpha/fast"]["last_error_message"])
         self.assertEqual("gpt_text", mapping["current_target_model_id"])
@@ -1084,7 +1144,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self.assertEqual(["alpha/fast"], calls)
         self.assertEqual("gpt-5.6-2026-08-08", completed[0]["response_model"])
 
-    def test_target_exception_disables_and_switches(self) -> None:
+    def test_target_exception_cools_and_switches(self) -> None:
         calls: list[str] = []
         completed: list[dict[str, Any]] = []
         outcomes = {
@@ -1100,7 +1160,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         assert mapping is not None
 
         self.assertEqual(["alpha/fast", "gpt_text"], calls)
-        self.assertEqual("auto_disabled", mapping["targets"][0]["status"])
+        self.assertEqual("cooldown", mapping["targets"][0]["status"])
 
     def test_all_manually_disabled_targets_use_highest_priority_once_per_request(self) -> None:
         calls: list[str] = []

@@ -41,6 +41,8 @@ class ModelMappingService:
 
     EXPORT_KIND = "llm_proxy.model_mappings"
     EXPORT_VERSION = 1
+    _AUTO_DISABLE_STATUS_CODES = frozenset({404, 405, 410})
+    _COOLDOWN_STATUS_CODES = frozenset({401, 403, 408, 425, 429})
 
     def __init__(
         self,
@@ -308,21 +310,30 @@ class ModelMappingService:
         error_message: str | None,
         response_headers: Mapping[str, Any] | None = None,
     ) -> None:
-        """429 进入冷却，其他失败自动禁用，并让下一次选择推进目标。"""
+        """按失败类型更新目标状态，并让下一次选择推进目标。"""
         mapping = self._repository.get_mapping(selection.mapping_id)
         if mapping is None:
             return
         if not any(target["model_id"] == selection.target_model_id for target in mapping["targets"]):
             return
-        cooldown_until: str | None = None
-        auto_disabled = status_code != 429
-        disabled_reason = error_type or (f"http_{status_code}" if status_code is not None else "upstream_error")
-        if status_code == 429:
+        runtime = self._repository.list_target_runtime_states(selection.mapping_id).get(selection.target_model_id, {})
+        failure_action = self._classify_failure_action(status_code)
+        failure_reason = error_type or (f"http_{status_code}" if status_code is not None else "upstream_error")
+        auto_disabled = bool(runtime.get("auto_disabled"))
+        disabled_reason = runtime.get("disabled_reason")
+        cooldown_until = runtime.get("cooldown_until")
+        if failure_action == "auto_disable":
+            auto_disabled = True
+            disabled_reason = failure_reason
+            cooldown_until = None
+        elif failure_action == "cooldown" and not auto_disabled:
             cooldown_seconds = self._parse_retry_after_seconds(response_headers)
             if cooldown_seconds is None:
                 cooldown_seconds = int(mapping["cooldown_seconds_on_429"])
             cooldown_until = format_local_datetime(now_local_datetime() + timedelta(seconds=cooldown_seconds))
-            disabled_reason = "http_429"
+            disabled_reason = failure_reason
+        elif not auto_disabled and not cooldown_until:
+            disabled_reason = None
         self._repository.save_target_runtime_state(
             selection.mapping_id,
             selection.target_model_id,
@@ -334,6 +345,17 @@ class ModelMappingService:
             last_error_message=error_message,
         )
         self._repository.set_current_target(selection.mapping_id, None)
+
+    @classmethod
+    def _classify_failure_action(cls, status_code: int | None) -> str:
+        """区分永久故障、可恢复故障和请求级失败。"""
+        if status_code is None or status_code >= 500:
+            return "cooldown"
+        if 300 <= status_code < 400 or status_code in cls._AUTO_DISABLE_STATUS_CODES:
+            return "auto_disable"
+        if status_code in cls._COOLDOWN_STATUS_CODES:
+            return "cooldown"
+        return "record_only"
 
     def _build_mapping(self, payload: Mapping[str, Any]) -> ModelMappingSchema:
         return ModelMappingSchema.from_mapping(payload)

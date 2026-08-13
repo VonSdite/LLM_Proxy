@@ -132,7 +132,7 @@ class ModelMappingSchema:
             cooldown_seconds_on_429=_parse_non_negative_int(
                 payload.get("cooldown_seconds_on_429"),
                 default=DEFAULT_MODEL_MAPPING_COOLDOWN_SECONDS_ON_429,
-                field_label="429 冷却时间",
+                field_label="故障冷却时间",
             ),
             targets=targets,
         )
