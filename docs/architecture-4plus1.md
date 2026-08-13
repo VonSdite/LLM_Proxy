@@ -931,7 +931,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 
 缓存命中率按 `SUM(cache_read_input_tokens) / SUM(cache_known_prompt_tokens)` 计算。`cache_known_prompt_tokens` 只包含缓存 usage 已知请求的完整 prompt/input Token，混合已知和未知请求时未知请求不进入分母；没有有效分母时命中率为空，已知且缓存读取为零时命中率为 `0%`。
 
-统计管理页面与 Excel 导出显示 Token 状态、缓存读取 Token、缓存写入 Token 和缓存命中率：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 3 并保留原始 `usage_status`、缓存 Token 和 `cache_usage_status` 值；版本 2 包中的缓存状态按 `unknown` 导入。
+统计管理页面显示缓存读取 Token 和缓存命中率。Excel 导出同时显示 Token 状态和缓存写入 Token：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 3 并保留原始 `usage_status`、缓存 Token 和 `cache_usage_status` 值；版本 2 包中的缓存状态按 `unknown` 导入。
 
 ## 4. Development View
 
