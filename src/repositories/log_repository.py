@@ -8,9 +8,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-import pysqlite3 as sqlite3
-
-from ..utils.database import ConnectionFactory
+from ..utils.database import ConnectionFactory, SQLiteCursor, SQLiteRow
 from ..utils.local_time import (
     ensure_local_datetime,
     format_local_date,
@@ -382,7 +380,7 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
-    ) -> list[sqlite3.Row]:
+    ) -> list[SQLiteRow]:
         """按条件查询聚合统计。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -455,7 +453,7 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
-    ) -> list[sqlite3.Row]:
+    ) -> list[SQLiteRow]:
         """按用户名查询用量汇总。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -601,7 +599,7 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
-    ) -> list[sqlite3.Row]:
+    ) -> list[SQLiteRow]:
         """按条件查询完整请求日志列表。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -1056,7 +1054,7 @@ class LogRepository:
         return cls._normalize_usage_status(value)
 
     @staticmethod
-    def _daily_stat_exists(cursor: sqlite3.Cursor, row: dict[str, Any]) -> bool:
+    def _daily_stat_exists(cursor: SQLiteCursor, row: dict[str, Any]) -> bool:
         if row["ip_address"] is None:
             cursor.execute(
                 """
@@ -1078,7 +1076,7 @@ class LogRepository:
         return cursor.fetchone() is not None
 
     @staticmethod
-    def _request_log_exists(cursor: sqlite3.Cursor, row: dict[str, Any]) -> bool:
+    def _request_log_exists(cursor: SQLiteCursor, row: dict[str, Any]) -> bool:
         cursor.execute(
             """
             SELECT 1 FROM request_logs
@@ -1114,7 +1112,7 @@ class LogRepository:
         return cursor.fetchone() is not None
 
     @staticmethod
-    def _update_daily_stat(cursor: sqlite3.Cursor, row: dict[str, Any], now_text: str) -> None:
+    def _update_daily_stat(cursor: SQLiteCursor, row: dict[str, Any], now_text: str) -> None:
         params: tuple[Any, ...]
         if row["ip_address"] is None:
             where_clause = "stat_date = ? AND ip_address IS NULL AND request_model = ? AND response_model = ?"

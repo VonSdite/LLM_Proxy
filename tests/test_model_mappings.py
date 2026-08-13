@@ -1,14 +1,15 @@
 import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-import pysqlite3 as sqlite3
 from flask import Flask, Response
 from src.application.app_context import AppContext
 from src.config.model_mapping_config import ModelMappingSchema
@@ -532,7 +533,7 @@ class ModelMappingServiceTests(unittest.TestCase):
 
     def test_existing_mapping_table_migrates_enabled_and_sort_order(self) -> None:
         database_path = Path(self.temp_dir.name) / "legacy.db"
-        with sqlite3.connect(database_path) as conn:
+        with closing(sqlite3.connect(database_path)) as conn, conn:
             conn.executescript(
                 """
                 CREATE TABLE model_mappings (
