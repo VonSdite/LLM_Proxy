@@ -100,6 +100,40 @@ class Hook:
             self.assertIsNotNone(provider.hook)
             self.assertEqual({"helper_value": "loaded"}, provider.apply_request_guard(hook_context, {}))
 
+    def test_loads_hook_with_project_root_dependency(self) -> None:
+        module_name = "project_root_dependency_for_hook"
+        sys.modules.pop(module_name, None)
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root_path = Path(temp_dir)
+                hook_dir = root_path / "hooks" / "custom"
+                hook_dir.mkdir(parents=True)
+                (root_path / f"{module_name}.py").write_text('VALUE = "root-loaded"\n', encoding="utf-8")
+                (hook_dir / "demo_hook.py").write_text(
+                    f"""
+from {module_name} import VALUE
+
+
+class Hook:
+    def request_guard(self, ctx, body):
+        del ctx
+        guarded = dict(body)
+        guarded["root_value"] = VALUE
+        return guarded
+""".lstrip(),
+                    encoding="utf-8",
+                )
+                logger = FakeLogger()
+                factory = self._build_factory(root_path, logger)
+
+                provider = factory.build_provider_from_schema(self._provider_config("custom/demo_hook.py"))
+                hook_context = self._hook_context(root_path, logger)
+
+                self.assertIsNotNone(provider.hook)
+                self.assertEqual({"root_value": "root-loaded"}, provider.apply_request_guard(hook_context, {}))
+        finally:
+            sys.modules.pop(module_name, None)
+
     def test_missing_hook_file_loads_after_file_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_path = Path(temp_dir)
