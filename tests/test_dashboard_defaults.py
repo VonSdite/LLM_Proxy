@@ -14,13 +14,14 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
             static_url_path="/static",
         )
 
-    def render_dashboard(self) -> str:
+    def render_dashboard(self, api_key_management_enabled: bool = False) -> str:
         with self.app.app_context():
             return render_template(
                 "index.html",
                 active_page="index",
                 current_username="",
                 auth_enabled=False,
+                api_key_management_enabled=api_key_management_enabled,
             )
 
     def test_dashboard_shows_today_preset_button(self) -> None:
@@ -47,11 +48,11 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
         self.assertIn("时间范围不能超过一年", html)
         self.assertIn("syncDateRangeInputLimits();", html)
 
-    def test_dashboard_hides_token_usage_status_and_displays_cache_usage(self) -> None:
-        html = self.render_dashboard()
+    def test_api_key_usage_hides_key_status_and_cache_write_columns(self) -> None:
+        html = self.render_dashboard(api_key_management_enabled=True)
 
-        self.assertNotIn("<th>Token 状态</th>", html)
-        self.assertNotIn("function renderUsageStatus(value)", html)
+        self.assertNotIn("toggleApiKeyUsageSort('status', 'string')", html)
+        self.assertNotIn("function renderApiKeyUsageStatus(status)", html)
         self.assertIn("缓存读取 Token", html)
         self.assertNotIn("缓存写入 Token", html)
         self.assertIn("缓存命中率", html)
