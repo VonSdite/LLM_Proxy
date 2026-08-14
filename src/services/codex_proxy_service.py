@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Callable, Iterator
@@ -46,6 +47,7 @@ CODEX_PROXY_WARNING_ERROR_CODE = PROXY_WARNING_ERROR_CODE
 CODEX_PROXY_WARNING_STATUS_CODE = PROXY_WARNING_STATUS_CODE
 CODEX_RESPONSES_LITE_HEADER = "X-OpenAI-Internal-Codex-Responses-Lite"
 CODEX_UPSTREAM_REDIRECT_ERROR_CODE = "codex_upstream_redirect"
+CODEX_TOOL_IDENTIFIER_MAX_LENGTH = 64
 
 
 class CodexProxyService:
@@ -176,7 +178,7 @@ class CodexProxyService:
         client_ip: str | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """把 OpenAI Images 请求包装成 Codex image_generation 工具调用。"""
-        del trace_id, route_name, client_ip
+        del trace_id
         normalized_action = self._normalize_image_action(action)
         if not normalized_action:
             return (
@@ -283,6 +285,8 @@ class CodexProxyService:
                 image_model=image_model,
                 main_model=main_model,
                 on_complete=on_complete,
+                route_name=route_name,
+                client_ip=client_ip,
             )
             if failure is not None:
                 if failure.error_code in {
@@ -324,6 +328,9 @@ class CodexProxyService:
             dict(request_data),
             True,
         )
+        if target_format == "claude_chat":
+            self._sanitize_codex_claude_compat_body(upstream_body)
+        responses_lite = self._is_codex_responses_lite_request(upstream_body, request_headers)
         self._apply_codex_body_defaults(
             upstream_body,
             model_name,
@@ -334,6 +341,7 @@ class CodexProxyService:
                 model_name=model_name,
                 candidate=candidate,
             ),
+            responses_lite=responses_lite,
         )
         upstream_headers = self._build_codex_headers(
             request_headers,
@@ -409,6 +417,16 @@ class CodexProxyService:
                 body,
                 fallback=f"Codex upstream returned {upstream_response.status_code}",
             )
+            self._log_codex_upstream_error(
+                response=upstream_response,
+                error_message=error_message,
+                error_type=error_type,
+                auth_file_name=candidate.name,
+                route_name=route_name,
+                client_ip=client_ip,
+                model_name=model_name,
+                target_format=target_format,
+            )
             if (
                 allow_auth_refresh_retry
                 and str(candidate.payload.get("refresh_token") or "").strip()
@@ -458,6 +476,28 @@ class CodexProxyService:
                         response_headers={"Retry-After": retry_after} if retry_after is not None else None,
                     ),
                 )
+            if self._is_model_capacity_response(upstream_response.status_code, body):
+                self._codex_oauth_service.record_auth_file_failure(
+                    candidate.name,
+                    error_message,
+                    status_code=429,
+                    error_type=error_type or "model_capacity",
+                )
+                return (
+                    None,
+                    429,
+                    ProxyErrorInfo(
+                        message=error_message,
+                        status_code=429,
+                        error_type="upstream_error",
+                        error_code="codex_model_capacity",
+                        details=self._build_codex_upstream_error_details(
+                            upstream_response.status_code,
+                            error_type=error_type,
+                        ),
+                        response_headers=dict(upstream_response.headers),
+                    ),
+                )
             self._codex_oauth_service.record_auth_file_failure(
                 candidate.name,
                 error_message,
@@ -472,6 +512,10 @@ class CodexProxyService:
                     status_code=upstream_response.status_code,
                     error_type="upstream_error",
                     error_code=error_type or "codex_upstream_error",
+                    details=self._build_codex_upstream_error_details(
+                        upstream_response.status_code,
+                        error_type=error_type,
+                    ),
                     response_headers=dict(upstream_response.headers),
                 ),
             )
@@ -536,6 +580,8 @@ class CodexProxyService:
         image_model: str,
         main_model: str,
         on_complete: Callable[[dict[str, Any]], None] | None,
+        route_name: str | None,
+        client_ip: str | None,
         allow_auth_refresh_retry: bool = True,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         upstream_body = self._build_image_responses_body(
@@ -616,6 +662,16 @@ class CodexProxyService:
                 body,
                 fallback=f"Codex upstream returned {upstream_response.status_code}",
             )
+            self._log_codex_upstream_error(
+                response=upstream_response,
+                error_message=error_message,
+                error_type=error_type,
+                auth_file_name=candidate.name,
+                route_name=route_name,
+                client_ip=client_ip,
+                model_name=image_model,
+                target_format="openai_images",
+            )
             if (
                 allow_auth_refresh_retry
                 and str(candidate.payload.get("refresh_token") or "").strip()
@@ -634,6 +690,8 @@ class CodexProxyService:
                         image_model=image_model,
                         main_model=main_model,
                         on_complete=on_complete,
+                        route_name=route_name,
+                        client_ip=client_ip,
                         allow_auth_refresh_retry=False,
                     )
                 if refresh_failure is not None:
@@ -655,6 +713,27 @@ class CodexProxyService:
                         error_code="codex_quota_exhausted",
                     ),
                 )
+            if self._is_model_capacity_response(upstream_response.status_code, body):
+                self._codex_oauth_service.record_auth_file_failure(
+                    candidate.name,
+                    error_message,
+                    status_code=429,
+                    error_type=error_type or "model_capacity",
+                )
+                return (
+                    None,
+                    429,
+                    ProxyErrorInfo(
+                        message=error_message,
+                        status_code=429,
+                        error_type="upstream_error",
+                        error_code="codex_model_capacity",
+                        details=self._build_codex_upstream_error_details(
+                            upstream_response.status_code,
+                            error_type=error_type,
+                        ),
+                    ),
+                )
             self._codex_oauth_service.record_auth_file_failure(
                 candidate.name,
                 error_message,
@@ -669,6 +748,10 @@ class CodexProxyService:
                     status_code=upstream_response.status_code,
                     error_type="upstream_error",
                     error_code=error_type or "codex_upstream_error",
+                    details=self._build_codex_upstream_error_details(
+                        upstream_response.status_code,
+                        error_type=error_type,
+                    ),
                 ),
             )
 
@@ -741,11 +824,12 @@ class CodexProxyService:
         *,
         image_generation_model: str | None = None,
         allow_image_generation: bool = True,
+        responses_lite: bool = False,
     ) -> None:
         body["model"] = model_name
         body["stream"] = True
         body["store"] = False
-        body["parallel_tool_calls"] = True
+        body["parallel_tool_calls"] = False if responses_lite else True
         body["include"] = ["reasoning.encrypted_content"]
         if isinstance(body.get("input"), str):
             body["input"] = [
@@ -774,13 +858,144 @@ class CodexProxyService:
             "truncation",
             "context_management",
             "user",
+            "generate",
+            "prompt_cache_retention",
+            "safety_identifier",
+            "stream_options",
         ):
             body.pop(field, None)
         body.pop("previous_response_id", None)
         CodexProxyService._normalize_codex_builtin_tools(body)
         if allow_image_generation:
             CodexProxyService._ensure_image_generation_tool(body, image_generation_model)
+        if not responses_lite and not CodexProxyService._has_codex_tools(body):
+            body.pop("parallel_tool_calls", None)
         body.setdefault("instructions", "")
+
+    @classmethod
+    def _sanitize_codex_claude_compat_body(cls, body: dict[str, Any]) -> None:
+        """清理 Claude 请求中 Codex Responses 不接受的历史上下文细节。"""
+        cls._strip_codex_claude_cache_control(body)
+
+        tool_name_map: dict[str, str] = {}
+        tools = body.get("tools")
+        if isinstance(tools, list):
+            for tool in tools:
+                if isinstance(tool, dict):
+                    cls._sanitize_codex_claude_tool(tool, tool_name_map)
+
+        call_id_map: dict[str, str] = {}
+        input_items = body.get("input")
+        if isinstance(input_items, list):
+            sanitized_items: list[Any] = []
+            for item in input_items:
+                if not isinstance(item, dict):
+                    sanitized_items.append(item)
+                    continue
+                item_type = str(item.get("type") or "").strip().lower()
+                if item_type == "reasoning":
+                    continue
+                if item_type in {"function_call", "custom_tool_call"}:
+                    cls._apply_codex_tool_name_map(item, tool_name_map)
+                    cls._apply_codex_call_id_map(item, call_id_map)
+                elif item_type in {"function_call_output", "custom_tool_call_output"}:
+                    cls._apply_codex_call_id_map(item, call_id_map)
+                sanitized_items.append(item)
+            body["input"] = sanitized_items
+
+        cls._sanitize_codex_tool_choice(body.get("tool_choice"), tool_name_map)
+
+    @classmethod
+    def _sanitize_codex_claude_tool(cls, tool: dict[str, Any], tool_name_map: dict[str, str]) -> None:
+        original_name = str(tool.get("name") or "").strip()
+        if original_name:
+            shortened_name = cls._shorten_codex_identifier(original_name, prefer_mcp_leaf=True)
+            tool_name_map[original_name] = shortened_name
+            tool["name"] = shortened_name
+        tool.pop("input_schema", None)
+        tool.pop("cache_control", None)
+        tool.pop("defer_loading", None)
+        parameters = tool.get("parameters")
+        if isinstance(parameters, dict):
+            parameters.pop("$schema", None)
+        if str(tool.get("type") or "").strip().lower() == "function":
+            tool["strict"] = False
+
+    @classmethod
+    def _sanitize_codex_tool_choice(cls, tool_choice: Any, tool_name_map: dict[str, str]) -> None:
+        if not isinstance(tool_choice, dict):
+            return
+        cls._apply_codex_tool_name_map(tool_choice, tool_name_map)
+        function_choice = tool_choice.get("function")
+        if isinstance(function_choice, dict):
+            cls._apply_codex_tool_name_map(function_choice, tool_name_map)
+        choice_type = str(tool_choice.get("type") or "").strip()
+        nested_choice = tool_choice.get(choice_type)
+        if isinstance(nested_choice, dict):
+            cls._apply_codex_tool_name_map(nested_choice, tool_name_map)
+        nested_tools = tool_choice.get("tools")
+        if isinstance(nested_tools, list):
+            for nested_tool in nested_tools:
+                if isinstance(nested_tool, dict):
+                    cls._apply_codex_tool_name_map(nested_tool, tool_name_map)
+
+    @classmethod
+    def _apply_codex_tool_name_map(cls, payload: dict[str, Any], tool_name_map: dict[str, str]) -> None:
+        if "name" not in payload:
+            return
+        original_name = str(payload.get("name") or "").strip()
+        if not original_name:
+            return
+        shortened_name = tool_name_map.get(original_name)
+        if shortened_name is None:
+            shortened_name = cls._shorten_codex_identifier(original_name, prefer_mcp_leaf=True)
+            tool_name_map[original_name] = shortened_name
+        payload["name"] = shortened_name
+
+    @classmethod
+    def _apply_codex_call_id_map(cls, payload: dict[str, Any], call_id_map: dict[str, str]) -> None:
+        if "call_id" not in payload:
+            return
+        original_call_id = str(payload.get("call_id") or "").strip()
+        if not original_call_id:
+            return
+        shortened_call_id = call_id_map.get(original_call_id)
+        if shortened_call_id is None:
+            shortened_call_id = cls._shorten_codex_identifier(original_call_id)
+            call_id_map[original_call_id] = shortened_call_id
+        payload["call_id"] = shortened_call_id
+
+    @staticmethod
+    def _shorten_codex_identifier(value: str, *, prefer_mcp_leaf: bool = False) -> str:
+        text = str(value or "").strip()
+        if len(text) <= CODEX_TOOL_IDENTIFIER_MAX_LENGTH:
+            return text
+        if prefer_mcp_leaf and text.startswith("mcp__"):
+            separator_index = text.rfind("__")
+            if separator_index > 0:
+                candidate = f"mcp__{text[separator_index + 2 :]}"
+                if len(candidate) <= CODEX_TOOL_IDENTIFIER_MAX_LENGTH:
+                    return candidate
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        suffix = f"_{digest}"
+        prefix_length = max(CODEX_TOOL_IDENTIFIER_MAX_LENGTH - len(suffix), 0)
+        return f"{text[:prefix_length]}{suffix}"[:CODEX_TOOL_IDENTIFIER_MAX_LENGTH]
+
+    @staticmethod
+    def _strip_codex_claude_cache_control(value: Any) -> None:
+        if isinstance(value, dict):
+            value.pop("cache_control", None)
+            for child in value.values():
+                CodexProxyService._strip_codex_claude_cache_control(child)
+            return
+        if isinstance(value, list):
+            for child in value:
+                CodexProxyService._strip_codex_claude_cache_control(child)
+
+    @staticmethod
+    def _has_codex_tools(body: dict[str, Any]) -> bool:
+        tools = body.get("tools")
+        return isinstance(tools, list) and any(isinstance(tool, dict) for tool in tools)
 
     @staticmethod
     def _normalize_codex_builtin_tools(body: dict[str, Any]) -> None:
@@ -1056,6 +1271,43 @@ class CodexProxyService:
             "proxies": build_module_request_proxies(proxy_settings),
             "verify": self._config_manager.is_oauth_verify_ssl_enabled(),
         }
+
+    def _log_codex_upstream_error(
+        self,
+        *,
+        response: requests.Response,
+        error_message: str,
+        error_type: str,
+        auth_file_name: str,
+        route_name: str | None,
+        client_ip: str | None,
+        model_name: str,
+        target_format: str,
+    ) -> None:
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        self._logger.warning(
+            "Codex upstream error: route=%s client_ip=%s target_format=%s model=%s auth_file=%s "
+            "status=%s error_type=%s error=%s",
+            route_name or "<none>",
+            client_ip or "<none>",
+            target_format or "<none>",
+            model_name,
+            auth_file_name,
+            status_code,
+            error_type or "<none>",
+            error_message,
+        )
+
+    @staticmethod
+    def _build_codex_upstream_error_details(
+        status_code: int,
+        *,
+        error_type: str,
+    ) -> dict[str, Any]:
+        details: dict[str, Any] = {"upstream_status": status_code}
+        if error_type:
+            details["upstream_error_type"] = error_type
+        return details
 
     def _get_oauth_proxy_mode(self) -> str | None:
         getter = getattr(self._config_manager, "get_oauth_proxy_mode", None)
@@ -1748,27 +2000,47 @@ class CodexProxyService:
             return code
         return "Codex stream closed before response.completed"
 
-    @staticmethod
-    def _extract_response_error_info(body: bytes, *, fallback: str) -> tuple[str, str]:
-        text = body.decode("utf-8", errors="replace").strip()
+    @classmethod
+    def _extract_response_error_info(cls, body: bytes, *, fallback: str) -> tuple[str, str]:
+        raw_text = body.decode("utf-8", errors="replace").strip()
         try:
-            payload = json.loads(text) if text else {}
+            payload = json.loads(raw_text) if raw_text else {}
         except json.JSONDecodeError:
-            return (text[:1000] if text else fallback, "")
+            return fallback, ""
 
         if not isinstance(payload, dict):
-            return (text[:1000] if text else fallback, "")
+            return fallback, ""
 
         error = payload.get("error")
         if isinstance(error, dict):
-            message = str(error.get("message") or error.get("type") or fallback).strip()
-            error_type = str(error.get("type") or "").strip()
+            message = cls._first_text_field(
+                error,
+                ("message", "detail", "error_description", "code", "type"),
+            )
+            if not message:
+                message = cls._first_text_field(payload, ("message", "detail", "error_description", "code"))
+            error_type = str(error.get("type") or error.get("code") or "").strip()
+            if not message:
+                message = fallback
             return message, error_type
         if isinstance(error, str) and error.strip():
             return error.strip(), ""
 
-        message = str(payload.get("message") or fallback).strip()
+        message = cls._first_text_field(payload, ("message", "detail", "error_description", "code", "type"))
+        if not message:
+            message = fallback
         return message, ""
+
+    @staticmethod
+    def _first_text_field(payload: dict[str, Any], field_names: tuple[str, ...]) -> str:
+        for field_name in field_names:
+            value = payload.get(field_name)
+            if value in (None, ""):
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
 
     def _refresh_candidate_after_auth_error(
         self,
@@ -1832,16 +2104,49 @@ class CodexProxyService:
 
     @staticmethod
     def _is_quota_exhausted_response(status_code: int, body: bytes) -> bool:
-        if status_code != 429:
+        if status_code not in {400, 429}:
             return False
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return True
+            return status_code == 429
         error = payload.get("error") if isinstance(payload, dict) else None
         if not isinstance(error, dict):
+            if isinstance(payload, dict) and str(payload.get("type") or "").strip() == "usage_limit_reached":
+                return True
+            return status_code == 429
+        error_type = str(error.get("type") or payload.get("type") or "").strip()
+        if error_type == "usage_limit_reached":
             return True
-        return str(error.get("type") or "").strip() in {"usage_limit_reached", "rate_limit_exceeded", ""}
+        return status_code == 429 and error_type in {"rate_limit_exceeded", ""}
+
+    @staticmethod
+    def _is_model_capacity_response(status_code: int, body: bytes) -> bool:
+        if status_code != 400:
+            return False
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = None
+
+        candidates: list[str] = []
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                candidates.append(str(error.get("message") or ""))
+            candidates.append(str(payload.get("message") or ""))
+        candidates.append(body.decode("utf-8", errors="replace"))
+
+        for candidate in candidates:
+            normalized = str(candidate or "").strip().lower()
+            if not normalized:
+                continue
+            if (
+                "selected model is at capacity" in normalized
+                or "model is at capacity. please try a different model" in normalized
+            ):
+                return True
+        return False
 
     @staticmethod
     def _is_authentication_error_response(status_code: int, error_type: str, error_message: str) -> bool:
@@ -1877,15 +2182,19 @@ class CodexProxyService:
         except (UnicodeDecodeError, json.JSONDecodeError):
             return None
         error = payload.get("error") if isinstance(payload, dict) else None
-        if not isinstance(error, dict):
+        if isinstance(error, dict):
+            retry_source = error
+        elif isinstance(payload, dict):
+            retry_source = payload
+        else:
             return None
-        resets_in_seconds = error.get("resets_in_seconds") or error.get("resetsInSeconds")
+        resets_in_seconds = retry_source.get("resets_in_seconds") or retry_source.get("resetsInSeconds")
         try:
             if resets_in_seconds is not None:
                 return float(resets_in_seconds)
         except (TypeError, ValueError):
             return None
-        resets_at = error.get("resets_at") or error.get("resetsAt")
+        resets_at = retry_source.get("resets_at") or retry_source.get("resetsAt")
         try:
             if resets_at is not None:
                 return max(float(resets_at) - time.time(), 1.0)

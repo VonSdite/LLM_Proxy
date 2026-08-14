@@ -26,17 +26,27 @@ from src.services.codex_proxy_service import (
 
 
 class FakeLogger:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def _record(self, level: str, msg: str, *args: Any) -> None:
+        try:
+            message = msg % args if args else msg
+        except TypeError:
+            message = f"{msg} {args}"
+        self.records.append((level, message))
+
     def info(self, msg: str, *args: Any) -> None:
-        del msg, args
+        self._record("info", msg, *args)
 
     def warning(self, msg: str, *args: Any) -> None:
-        del msg, args
+        self._record("warning", msg, *args)
 
     def error(self, msg: str, *args: Any) -> None:
-        del msg, args
+        self._record("error", msg, *args)
 
     def debug(self, msg: str, *args: Any) -> None:
-        del msg, args
+        self._record("debug", msg, *args)
 
 
 class FakeConfigManager:
@@ -101,9 +111,10 @@ class FakeSession:
 def build_context(
     root_path: Path,
     config_manager: FakeConfigManager | None = None,
+    logger: FakeLogger | None = None,
 ) -> AppContext:
     return AppContext(
-        logger=FakeLogger(),
+        logger=logger or FakeLogger(),
         config_manager=config_manager or FakeConfigManager(),  # type: ignore[arg-type]
         root_path=root_path,
         flask_app=Flask(__name__),
@@ -178,7 +189,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(field, body)
 
-    def test_codex_body_defaults_keep_allowed_tiers_fields_and_developer_role(self) -> None:
+    def test_codex_body_defaults_keep_allowed_tier_and_drop_unsupported_fields(self) -> None:
         body: dict[str, Any] = {
             "input": [
                 {
@@ -190,14 +201,18 @@ class CodexProxyServiceTests(unittest.TestCase):
             "service_tier": "fast",
             "prompt_cache_retention": "24h",
             "safety_identifier": "user-123",
+            "generate": {"summary": "auto"},
+            "stream_options": {"include_usage": True},
         }
 
         CodexProxyService._apply_codex_body_defaults(body, "gpt-5.4")
 
         self.assertEqual("developer", body["input"][0]["role"])
         self.assertEqual("fast", body["service_tier"])
-        self.assertEqual("24h", body["prompt_cache_retention"])
-        self.assertEqual("user-123", body["safety_identifier"])
+        self.assertNotIn("prompt_cache_retention", body)
+        self.assertNotIn("safety_identifier", body)
+        self.assertNotIn("generate", body)
+        self.assertNotIn("stream_options", body)
 
         priority_body: dict[str, Any] = {"service_tier": "priority"}
         CodexProxyService._apply_codex_body_defaults(priority_body, "gpt-5.4")
@@ -347,6 +362,179 @@ class CodexProxyServiceTests(unittest.TestCase):
             auth_entries["codex-first.json"]["usage_status_message"],
         )
         self.assertEqual("success", auth_entries["codex-second.json"]["usage_status"])
+
+    def test_upstream_400_logs_error_summary_for_claude_downstream(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-only.json", "access-only", mtime=2000)
+            logger = FakeLogger()
+            ctx = build_context(root, logger=logger)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del headers, json, timeout, kwargs
+                self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
+                self.assertTrue(stream)
+                return FakeHTTPResponse(
+                    status_code=400,
+                    body=b'{"detail":"model is not available for this Codex account"}',
+                    headers={"Content-Type": "application/json", "X-Request-Id": "req_123"},
+                )
+
+            with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {
+                        "model": "gpt-5.4",
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "stream": False,
+                    },
+                    {"Authorization": "Bearer downstream-token"},
+                    resolved_target_format="claude_chat",
+                    trace_id="trace-codex-400",
+                    route_name="messages",
+                    client_ip="203.0.113.9",
+                )
+
+        self.assertIsNone(response)
+        self.assertEqual(400, status_code)
+        self.assertIsNotNone(failure)
+        self.assertEqual("model is not available for this Codex account", failure.message)
+        self.assertEqual(
+            {"upstream_status": 400},
+            failure.details,
+        )
+
+        warning_logs = "\n".join(message for level, message in logger.records if level == "warning")
+        self.assertIn("Codex upstream error", warning_logs)
+        self.assertIn("route=messages", warning_logs)
+        self.assertIn("target_format=claude_chat", warning_logs)
+        self.assertIn("model=gpt-5.4", warning_logs)
+        self.assertIn("auth_file=codex-only.json", warning_logs)
+        self.assertIn("model is not available for this Codex account", warning_logs)
+        self.assertNotIn('{"detail"', warning_logs)
+
+    def test_claude_downstream_codex_request_sanitizes_thinking_and_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-only.json", "access-only", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            long_tool_name = "mcp__server__" + ("tool_" * 20)
+            long_call_id = "toolu_" + ("a" * 90)
+            captured_body: dict[str, Any] = {}
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del headers, timeout, kwargs
+                self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
+                self.assertTrue(stream)
+                captured_body.update(dict(json or {}))
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n'
+                    ],
+                )
+
+            with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {
+                        "model": "gpt-5.4",
+                        "system": [{"type": "text", "text": "rules", "cache_control": {"type": "ephemeral"}}],
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}],
+                            },
+                            {
+                                "role": "assistant",
+                                "content": [
+                                    {"type": "thinking", "thinking": "hidden", "signature": "Eclaude-signature"},
+                                    {"type": "tool_use", "id": long_call_id, "name": long_tool_name, "input": {"x": 1}},
+                                ],
+                            },
+                            {
+                                "role": "user",
+                                "content": [{"type": "tool_result", "tool_use_id": long_call_id, "content": "ok"}],
+                            },
+                        ],
+                        "tools": [
+                            {
+                                "name": long_tool_name,
+                                "description": "lookup",
+                                "input_schema": {
+                                    "$schema": "http://json-schema.org/draft-07/schema#",
+                                    "type": "object",
+                                    "properties": {"x": {"type": "number"}},
+                                },
+                                "cache_control": {"type": "ephemeral"},
+                                "defer_loading": True,
+                            }
+                        ],
+                        "tool_choice": {"type": "tool", "name": long_tool_name},
+                        "stream": False,
+                    },
+                    {"Authorization": "Bearer downstream-token"},
+                    resolved_target_format="claude_chat",
+                )
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+
+        input_items = captured_body["input"]
+        self.assertFalse(any(item.get("type") == "reasoning" for item in input_items if isinstance(item, dict)))
+        function_call = next(item for item in input_items if item.get("type") == "function_call")
+        function_output = next(item for item in input_items if item.get("type") == "function_call_output")
+        self.assertLessEqual(len(function_call["call_id"]), 64)
+        self.assertEqual(function_call["call_id"], function_output["call_id"])
+        self.assertLessEqual(len(function_call["name"]), 64)
+        self.assertEqual(function_call["name"], captured_body["tools"][0]["name"])
+        self.assertEqual(function_call["name"], captured_body["tool_choice"]["name"])
+        self.assertFalse(captured_body["tools"][0]["strict"])
+        self.assertNotIn("$schema", captured_body["tools"][0]["parameters"])
+        self.assertNotIn("cache_control", json.dumps(captured_body))
+
+    def test_upstream_400_usage_limit_is_treated_as_quota_exhausted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-only.json", "access-only", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del headers, json, timeout, kwargs
+                self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
+                self.assertTrue(stream)
+                return FakeHTTPResponse(
+                    status_code=400,
+                    body=b'{"error":{"type":"usage_limit_reached","message":"usage limit","resets_in_seconds":120}}',
+                    headers={"Content-Type": "application/json"},
+                )
+
+            with patch.object(oauth_service, "refresh_auth_file_quota_snapshot") as refresh_mock:
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                    response, status_code, failure = proxy_service.proxy_request(
+                        {
+                            "model": "gpt-5.4",
+                            "messages": [{"role": "user", "content": "hi"}],
+                            "stream": False,
+                        },
+                        {"Authorization": "Bearer downstream-token"},
+                        resolved_target_format="claude_chat",
+                    )
+                refresh_mock.assert_called_once_with("codex-only.json")
+
+        self.assertIsNone(response)
+        self.assertEqual(429, status_code)
+        self.assertIsNotNone(failure)
+        self.assertEqual("codex_quota_exhausted", failure.error_code)
+        self.assertEqual({"Retry-After": 120.0}, failure.response_headers)
 
     def test_nonstream_request_falls_back_to_next_account_after_quota_429(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
