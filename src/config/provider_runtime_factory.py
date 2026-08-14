@@ -205,12 +205,16 @@ class ProviderRuntimeFactory:
             self._logger.warning("Hook file not found: %s", hook_file)
             return None
 
+        root_dir = str(self._base_dir)
         hook_dir = str(hook_file.parent)
-        path_inserted = False
+        inserted_paths: list[str] = []
         try:
+            if root_dir not in sys.path:
+                sys.path.insert(0, root_dir)
+                inserted_paths.append(root_dir)
             if hook_dir not in sys.path:
                 sys.path.insert(0, hook_dir)
-                path_inserted = True
+                inserted_paths.append(hook_dir)
 
             hook_name = hook_file.stem
             normalized_path = hook_file.resolve().as_posix().lower()
@@ -236,9 +240,9 @@ class ProviderRuntimeFactory:
         except Exception as exc:
             self._logger.error("Failed to load hook %s: %s", hook_file, exc)
         finally:
-            if path_inserted:
+            for inserted_path in reversed(inserted_paths):
                 try:
-                    sys.path.remove(hook_dir)
+                    sys.path.remove(inserted_path)
                 except ValueError:
                     pass
 
