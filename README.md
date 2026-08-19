@@ -585,6 +585,30 @@ from src.hooks import BaseHook, HookContext
 - GLM / Z.AI：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`，历史 assistant 消息含 `reasoning_content` 时设置 `clear_thinking=false`
 - Qwen / DashScope：`enable_thinking`、`thinking_budget`，历史 assistant 消息含 `reasoning_content` 时设置 `preserve_thinking=true`
 
+内置 Responses 旧工具方言 Hook：
+
+- `responses_legacy_tools_compat.py` 只处理下游和上游均为 `openai_responses` 的 Provider
+- `namespace` 子工具和 `input[].additional_tools` 会展开成普通 `function` 工具
+- `custom` 工具、历史 `custom_tool_call` 和 `custom_tool_call_output` 会转换为旧式 function 结构
+- `tool_choice.allowed_tools` 会收敛工具列表，并转换为 `auto` 或 `required`
+- 非流式响应和 SSE 工具调用会恢复原始 `namespace`、工具名和 `custom_tool_call` 结构
+- `function`、`mcp`、`knowledge_search` 保持可用；其他上游不支持的内置工具类型会从请求中移除并写入英文日志
+- Hook 实例最多保留 1024 个活跃请求的工具别名映射；Responses 终止事件和非流式响应会释放对应映射
+
+旧式 Responses 上游按 Provider 显式启用这个 Hook：
+
+```yaml
+providers:
+  - name: legacy-responses
+    api: https://example.com/v1/responses
+    source_format: openai_responses
+    model_list:
+      - upstream-model
+    hook: responses_legacy_tools_compat.py
+```
+
+这个 Hook 处理工具协议方言，不模拟上游缺失的服务端工具能力。未配置该 Hook 的 Responses Provider 继续原样接收 Codex 请求。
+
 `HookContext` 会提供这些上下文信息：
 
 - `retry`：当前是第几次尝试，从 `0` 开始
