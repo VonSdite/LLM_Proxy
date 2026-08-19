@@ -293,6 +293,9 @@ decoder
   - `request_guard` 运行在协议转换之后，用于上游前的厂商私有参数适配
   - `fetch_models` 运行在控制平面的 Provider 模型拉取链路中
   - 内置上游思考参数 Hook 位于 `hooks/openai_reasoning_compat.py`
+  - 内置旧式 Responses 工具方言 Hook 位于 `hooks/responses_legacy_tools_compat.py`
+  - 旧式 Responses 工具方言 Hook 在请求侧展开 namespace、additional tools 和 custom tool，在成功响应侧恢复 Codex 工具身份
+  - 旧式 Responses 工具方言 Hook 在实例内维护最多 1024 个请求的工具别名映射，非流式响应或 Responses 终止事件会释放对应映射
   - MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope 各有独立处理类和单厂商入口文件
 
 Hook 组件除了 header / guard / 模型拉取 payload，还会收到最小重试上下文：

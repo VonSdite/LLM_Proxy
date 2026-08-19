@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.external import LLMProvider
 from src.hooks import BaseHook, HookAbortError, HookContext
+from src.proxy_core import DownstreamChunk
 
 
 class FakeLogger:
@@ -380,6 +381,255 @@ class HookContractsTests(unittest.TestCase):
             provider_target_format="openai_chat",
         )
         body = {"model": "qwen-plus", "reasoning_effort": "high"}
+
+        self.assertEqual(body, hook.request_guard(ctx, body))
+
+    def test_responses_legacy_tools_hook_downgrades_namespaces_custom_tools_and_history(self) -> None:
+        module = self._load_hook_module("responses_legacy_tools_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_name="legacy-responses",
+            provider_source_format="openai_responses",
+            provider_target_format="openai_responses",
+        )
+
+        rewritten = hook.request_guard(
+            ctx,
+            {
+                "model": "gpt-5",
+                "input": [
+                    {
+                        "type": "custom_tool_call",
+                        "call_id": "call_1",
+                        "namespace": "ops",
+                        "name": "shell",
+                        "input": "pwd",
+                    },
+                    {"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"},
+                    {
+                        "type": "additional_tools",
+                        "tools": [{"type": "custom", "name": "apply_patch", "description": "Apply patch"}],
+                    },
+                ],
+                "tools": [
+                    {"type": "function", "name": "lookup", "parameters": {"type": "object"}},
+                    {
+                        "type": "namespace",
+                        "name": "ops",
+                        "tools": [
+                            {"type": "custom", "name": "shell", "description": "Run command"},
+                            {"type": "function", "name": "read", "parameters": {"type": "object"}},
+                        ],
+                    },
+                    {"type": "web_search"},
+                ],
+            },
+        )
+
+        self.assertEqual(
+            ["function", "function", "function", "function"], [tool["type"] for tool in rewritten["tools"]]
+        )
+        self.assertEqual(
+            ["lookup", "ops__shell", "ops__read", "apply_patch"],
+            [tool["name"] for tool in rewritten["tools"]],
+        )
+        self.assertEqual("string", rewritten["tools"][1]["parameters"]["properties"]["input"]["type"])
+        self.assertFalse(any(item.get("type") == "additional_tools" for item in rewritten["input"]))
+        self.assertEqual("function_call", rewritten["input"][0]["type"])
+        self.assertEqual("ops__shell", rewritten["input"][0]["name"])
+        self.assertEqual('{"input":"pwd"}', rewritten["input"][0]["arguments"])
+        self.assertEqual("function_call_output", rewritten["input"][1]["type"])
+
+    def test_responses_legacy_tools_hook_downgrades_allowed_tools_choice(self) -> None:
+        module = self._load_hook_module("responses_legacy_tools_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_source_format="openai_responses",
+            provider_target_format="openai_responses",
+        )
+
+        rewritten = hook.request_guard(
+            ctx,
+            {
+                "tools": [
+                    {"type": "function", "name": "lookup", "parameters": {"type": "object"}},
+                    {
+                        "type": "namespace",
+                        "name": "ops",
+                        "tools": [{"type": "custom", "name": "shell"}],
+                    },
+                ],
+                "tool_choice": {
+                    "type": "allowed_tools",
+                    "mode": "required",
+                    "tools": [{"type": "custom", "namespace": "ops", "name": "shell"}],
+                },
+            },
+        )
+
+        self.assertEqual("required", rewritten["tool_choice"])
+        self.assertEqual(["ops__shell"], [tool["name"] for tool in rewritten["tools"]])
+
+    def test_responses_legacy_tools_hook_avoids_alias_collisions_and_long_names(self) -> None:
+        module = self._load_hook_module("responses_legacy_tools_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_source_format="openai_responses",
+            provider_target_format="openai_responses",
+        )
+        long_name = "long_tool_" + "x" * 80
+
+        rewritten = hook.request_guard(
+            ctx,
+            {
+                "tools": [
+                    {"type": "function", "name": "ops__shell", "parameters": {"type": "object"}},
+                    {
+                        "type": "namespace",
+                        "name": "ops",
+                        "tools": [{"type": "custom", "name": "shell"}],
+                    },
+                    {"type": "custom", "name": long_name},
+                ]
+            },
+        )
+
+        aliases = [tool["name"] for tool in rewritten["tools"]]
+        self.assertEqual(3, len(set(aliases)))
+        self.assertTrue(all(len(alias) <= 64 for alias in aliases))
+        self.assertNotEqual("ops__shell", aliases[1])
+
+        restored = hook.response_guard(
+            ctx,
+            {
+                "output": [
+                    {
+                        "id": "fc_1",
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": aliases[1],
+                        "arguments": '{"input":"pwd"}',
+                    }
+                ]
+            },
+        )
+        self.assertEqual("ops", restored["output"][0]["namespace"])
+        self.assertEqual("shell", restored["output"][0]["name"])
+
+    def test_responses_legacy_tools_hook_restores_nonstream_tool_calls(self) -> None:
+        module = self._load_hook_module("responses_legacy_tools_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_source_format="openai_responses",
+            provider_target_format="openai_responses",
+        )
+        hook.request_guard(
+            ctx,
+            {
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "ops",
+                        "tools": [
+                            {"type": "custom", "name": "shell"},
+                            {"type": "function", "name": "read"},
+                        ],
+                    }
+                ]
+            },
+        )
+
+        restored = hook.response_guard(
+            ctx,
+            {
+                "id": "resp_1",
+                "object": "response",
+                "output": [
+                    {
+                        "id": "fc_1",
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "ops__shell",
+                        "arguments": '{"input":"pwd"}',
+                    },
+                    {
+                        "id": "fc_2",
+                        "type": "function_call",
+                        "call_id": "call_2",
+                        "name": "ops__read",
+                        "arguments": '{"path":"README.md"}',
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual("custom_tool_call", restored["output"][0]["type"])
+        self.assertEqual("ops", restored["output"][0]["namespace"])
+        self.assertEqual("shell", restored["output"][0]["name"])
+        self.assertEqual("pwd", restored["output"][0]["input"])
+        self.assertEqual("function_call", restored["output"][1]["type"])
+        self.assertEqual("ops", restored["output"][1]["namespace"])
+        self.assertEqual("read", restored["output"][1]["name"])
+
+    def test_responses_legacy_tools_hook_restores_stream_custom_tool_events(self) -> None:
+        module = self._load_hook_module("responses_legacy_tools_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_source_format="openai_responses",
+            provider_target_format="openai_responses",
+            stream=True,
+        )
+        hook.request_guard(
+            ctx,
+            {
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "ops",
+                        "tools": [{"type": "custom", "name": "shell"}],
+                    }
+                ]
+            },
+        )
+
+        added = hook.response_guard(
+            ctx,
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "ops__shell",
+                    "arguments": "",
+                },
+            },
+        )
+        done = hook.response_guard(
+            ctx,
+            {
+                "type": "response.function_call_arguments.done",
+                "item_id": "fc_1",
+                "output_index": 0,
+                "arguments": '{"input":"pwd"}',
+            },
+        )
+
+        self.assertEqual("custom_tool_call", added["item"]["type"])
+        self.assertEqual("ops", added["item"]["namespace"])
+        self.assertIsInstance(done, DownstreamChunk)
+        self.assertEqual("response.custom_tool_call_input.done", done.event)
+        self.assertEqual("pwd", done.payload["input"])
+
+    def test_responses_legacy_tools_hook_ignores_cross_protocol_requests(self) -> None:
+        module = self._load_hook_module("responses_legacy_tools_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_source_format="openai_chat",
+            provider_target_format="openai_responses",
+        )
+        body = {"tools": [{"type": "namespace", "name": "ops", "tools": []}]}
 
         self.assertEqual(body, hook.request_guard(ctx, body))
 
