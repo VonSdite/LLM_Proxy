@@ -4,7 +4,7 @@ from typing import Any
 
 from src.hooks import HookContext
 
-from openai_reasoning_common import (
+from claude_responses_to_chat_compat_common import (
     OPENAI_REASONING_FALLBACK_EFFORT,
     SingleVendorReasoningHook,
     VendorReasoningAdapter,
@@ -22,7 +22,7 @@ _THINKING_BUDGET_BY_EFFORT = {
 
 
 class QwenReasoningAdapter(VendorReasoningAdapter):
-    """Qwen / DashScope OpenAI 兼容参数适配。"""
+    """Qwen / DashScope OpenAI Chat 兼容参数适配。"""
 
     match_terms = ("qwen",)
 
@@ -59,4 +59,4 @@ class QwenHook(SingleVendorReasoningHook):
 
 
 class Hook(QwenHook):
-    """Qwen / DashScope OpenAI 兼容参数 Hook。"""
+    """Qwen / DashScope OpenAI Chat 兼容参数 Hook。"""

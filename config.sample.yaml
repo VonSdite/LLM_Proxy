@@ -90,8 +90,8 @@ providers:
     api: https://api.openai.com/v1/responses
     source_format: openai_responses
     auth_group: openai-shared
-    # 只支持 function、mcp、knowledge_search 的旧式 Responses 上游使用此 Hook。
-    # hook: responses_legacy_tools_compat.py
+    # 不接受 input[].role=developer 的 Responses 上游使用此 Hook。
+    # hook: chat_claude_to_response_compat.py
     verify_ssl: true
     timeout_seconds: 1200
     max_retries: 3

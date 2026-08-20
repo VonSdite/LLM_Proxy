@@ -570,44 +570,42 @@ from src.hooks import BaseHook, HookContext
 - 对成功响应做字段清洗、补全或内容改写
 - 通过 `HookAbortError` 主动中止当前请求
 
-内置上游思考参数 Hook：
+内置 Claude / Responses 转 OpenAI Chat 上游兼容 Hook 使用 `claude_responses_to_chat` 文件名前缀：
 
-- `openai_reasoning_compat.py`：汇总 Hook，按真实上游模型名和请求体 `model` 自动匹配 MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope
-- `minimax_openai_compat.py`：MiniMax 专用 Hook
-- `deepseek_openai_compat.py`：DeepSeek 专用 Hook
-- `glm_openai_compat.py`：GLM / Z.AI 专用 Hook
-- `qwen_openai_compat.py`：Qwen / DashScope 专用 Hook
+- `claude_responses_to_chat_compat.py`：汇总 Hook，按真实上游模型名和请求体 `model` 自动匹配 MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope
+- `claude_responses_to_chat_minimax_compat.py`：MiniMax 专用 Hook
+- `claude_responses_to_chat_deepseek_compat.py`：DeepSeek 专用 Hook
+- `claude_responses_to_chat_glm_compat.py`：GLM / Z.AI 专用 Hook
+- `claude_responses_to_chat_qwen_compat.py`：Qwen / DashScope 专用 Hook
 
-这些 Hook 只处理 OpenAI Chat 风格上游请求，会把 `reasoning_effort`、Responses 风格 `reasoning.effort`、Claude 风格 `thinking` 和 `enable_thinking` 规整成对应厂商参数：
+这些 Hook 面向 OpenAI Chat 风格上游。角色兼容处理覆盖所有下游格式，把 `developer` 消息映射为语义最接近且厂商普遍支持的 `system` 消息。只有 Claude / Responses 下游跨协议进入 OpenAI Chat 上游时，才会把 `reasoning_effort`、Responses 风格 `reasoning.effort`、Claude 风格 `thinking` 和 `enable_thinking` 规整成对应厂商参数；OpenAI Chat 下游的 reasoning 参数保持原样。
 
 - MiniMax：`reasoning_split=true`；MiniMax-M3 使用 `thinking.type`
 - DeepSeek V4：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`
 - GLM / Z.AI：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`，历史 assistant 消息含 `reasoning_content` 时设置 `clear_thinking=false`
 - Qwen / DashScope：`enable_thinking`、`thinking_budget`，历史 assistant 消息含 `reasoning_content` 时设置 `preserve_thinking=true`
 
-内置 Responses 旧工具方言 Hook：
+内置 Chat / Claude 转 OpenAI Responses 上游角色兼容 Hook 使用 `chat_claude_to_response` 文件名前缀：
 
-- `responses_legacy_tools_compat.py` 只处理下游和上游均为 `openai_responses` 的 Provider
-- `namespace` 子工具和 `input[].additional_tools` 会展开成普通 `function` 工具
-- `custom` 工具、历史 `custom_tool_call` 和 `custom_tool_call_output` 会转换为旧式 function 结构
-- `tool_choice.allowed_tools` 会收敛工具列表，并转换为 `auto` 或 `required`
-- 非流式响应和 SSE 工具调用会恢复原始 `namespace`、工具名和 `custom_tool_call` 结构
-- `function`、`mcp`、`knowledge_search` 保持可用；其他上游不支持的内置工具类型会从请求中移除并写入英文日志
-- Hook 实例最多保留 1024 个活跃请求的工具别名映射；Responses 终止事件和非流式响应会释放对应映射
+- `chat_claude_to_response_compat.py` 面向 `source_format=openai_responses` 的 Provider
+- `input[].role=developer` 映射为 `system`，其他输入项、工具和请求字段保持不变
+- 角色映射覆盖 Chat、Responses、Claude 三种下游格式
+- Chat 下游的 `system` / `developer` 已由标准 translator 合并到 Responses 顶层 `instructions`，不会以 `developer` 角色发送给上游
+- Responses 直传和 Claude 转 Responses 产生的 `developer` 消息会执行角色映射
 
-旧式 Responses 上游按 Provider 显式启用这个 Hook：
+不接受 `developer` 角色的 Responses 上游按 Provider 显式启用这个 Hook：
 
 ```yaml
 providers:
-  - name: legacy-responses
+  - name: responses-compat
     api: https://example.com/v1/responses
     source_format: openai_responses
     model_list:
       - upstream-model
-    hook: responses_legacy_tools_compat.py
+    hook: chat_claude_to_response_compat.py
 ```
 
-这个 Hook 处理工具协议方言，不模拟上游缺失的服务端工具能力。未配置该 Hook 的 Responses Provider 继续原样接收 Codex 请求。
+这个 Hook 只处理消息角色方言，不改写工具协议。未配置该 Hook 的 Responses Provider 继续接收标准 translator 生成的请求。
 
 `HookContext` 会提供这些上下文信息：
 
