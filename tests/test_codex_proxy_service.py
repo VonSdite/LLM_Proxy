@@ -474,6 +474,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                                 "defer_loading": True,
                             }
                         ],
+                        "metadata": {"user_id": "claude-code-user"},
                         "tool_choice": {"type": "tool", "name": long_tool_name},
                         "stream": False,
                     },
@@ -496,6 +497,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual(function_call["name"], captured_body["tool_choice"]["name"])
         self.assertFalse(captured_body["tools"][0]["strict"])
         self.assertNotIn("$schema", captured_body["tools"][0]["parameters"])
+        self.assertNotIn("metadata", captured_body)
         self.assertNotIn("cache_control", json.dumps(captured_body))
 
     def test_upstream_400_usage_limit_is_treated_as_quota_exhausted(self) -> None:
