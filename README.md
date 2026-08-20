@@ -585,9 +585,9 @@ from src.hooks import BaseHook, HookContext
 - GLM / Z.AI：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`，历史 assistant 消息含 `reasoning_content` 时设置 `clear_thinking=false`
 - Qwen / DashScope：`enable_thinking`、`thinking_budget`，历史 assistant 消息含 `reasoning_content` 时设置 `preserve_thinking=true`
 
-内置 Chat / Claude 转 OpenAI Responses 上游角色兼容 Hook 使用 `chat_claude_to_response` 文件名前缀：
+内置 OpenAI Responses 上游角色兼容 Hook 使用 `responses_upstream_role` 文件名前缀：
 
-- `chat_claude_to_response_compat.py` 面向 `source_format=openai_responses` 的 Provider
+- `responses_upstream_role_compat.py` 面向 `source_format=openai_responses` 的 Provider
 - `input[].role=developer` 映射为 `system`，其他输入项、工具和请求字段保持不变
 - 角色映射覆盖 Chat、Responses、Claude 三种下游格式
 - Chat 下游的 `system` / `developer` 已由标准 translator 合并到 Responses 顶层 `instructions`，不会以 `developer` 角色发送给上游
@@ -602,7 +602,7 @@ providers:
     source_format: openai_responses
     model_list:
       - upstream-model
-    hook: chat_claude_to_response_compat.py
+    hook: responses_upstream_role_compat.py
 ```
 
 这个 Hook 只处理消息角色方言，不改写工具协议。未配置该 Hook 的 Responses Provider 继续接收标准 translator 生成的请求。

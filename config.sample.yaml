@@ -91,7 +91,7 @@ providers:
     source_format: openai_responses
     auth_group: openai-shared
     # 不接受 input[].role=developer 的 Responses 上游使用此 Hook。
-    # hook: chat_claude_to_response_compat.py
+    # hook: responses_upstream_role_compat.py
     verify_ssl: true
     timeout_seconds: 1200
     max_retries: 3

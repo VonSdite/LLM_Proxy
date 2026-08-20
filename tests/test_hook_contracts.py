@@ -437,8 +437,8 @@ class HookContractsTests(unittest.TestCase):
 
         self.assertEqual(body, hook.request_guard(ctx, body))
 
-    def test_chat_claude_to_response_hook_normalizes_developer_for_all_downstream_formats(self) -> None:
-        module = self._load_hook_module("chat_claude_to_response_compat.py")
+    def test_responses_upstream_role_hook_normalizes_developer_for_all_downstream_formats(self) -> None:
+        module = self._load_hook_module("responses_upstream_role_compat.py")
         hook = module.Hook()
         registry = build_default_translator_registry()
 
@@ -513,8 +513,8 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual("Follow project rules", rewritten_chat["instructions"])
         self.assertFalse(any(item.get("role") == "developer" for item in rewritten_chat["input"]))
 
-    def test_chat_claude_to_response_hook_ignores_other_upstreams_and_string_input(self) -> None:
-        module = self._load_hook_module("chat_claude_to_response_compat.py")
+    def test_responses_upstream_role_hook_ignores_other_upstreams_and_string_input(self) -> None:
+        module = self._load_hook_module("responses_upstream_role_compat.py")
         hook = module.Hook()
         responses_ctx = self._ctx(provider_source_format="openai_responses")
         chat_ctx = self._ctx(provider_source_format="openai_chat")
