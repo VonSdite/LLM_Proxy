@@ -585,13 +585,15 @@ from src.hooks import BaseHook, HookContext
 - GLM / Z.AI：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`，历史 assistant 消息含 `reasoning_content` 时设置 `clear_thinking=false`
 - Qwen / DashScope：`enable_thinking`、`thinking_budget`，历史 assistant 消息含 `reasoning_content` 时设置 `preserve_thinking=true`
 
-内置 OpenAI Responses 上游角色兼容 Hook 使用 `responses_upstream_role` 文件名前缀：
+内置 OpenAI Responses 上游兼容 Hook 使用 `responses_upstream` 文件名前缀：
 
-- `responses_upstream_role_compat.py` 面向 `source_format=openai_responses` 的 Provider
-- `input[].role=developer` 映射为 `system`，其他输入项、工具和请求字段保持不变
+- `responses_upstream_compat.py` 面向 `source_format=openai_responses` 的 Provider
+- `input[].role=developer` 映射为 `system`；跨协议请求的其他输入项和请求字段保持不变
 - 角色映射覆盖 Chat、Responses、Claude 三种下游格式
 - Chat 下游的 `system` / `developer` 已由标准 translator 合并到 Responses 顶层 `instructions`，不会以 `developer` 角色发送给上游
 - Responses 直传和 Claude 转 Responses 产生的 `developer` 消息会执行角色映射
+- Responses → Responses 请求还会把 `namespace`、`custom` 和 `additional_tools` 降级为旧上游支持的 `function` 工具；`mcp`、`knowledge_search` 保持不变，其他不支持的工具会移除
+- Responses → Responses 响应会恢复 namespace、custom tool call 和对应的流式终止事件
 
 不接受 `developer` 角色的 Responses 上游按 Provider 显式启用这个 Hook：
 
@@ -602,10 +604,10 @@ providers:
     source_format: openai_responses
     model_list:
       - upstream-model
-    hook: responses_upstream_role_compat.py
+    hook: responses_upstream_compat.py
 ```
 
-这个 Hook 只处理消息角色方言，不改写工具协议。未配置该 Hook 的 Responses Provider 继续接收标准 translator 生成的请求。
+未配置该 Hook 的 Responses Provider 继续接收标准 translator 生成的请求，不会执行旧工具方言降级。
 
 `HookContext` 会提供这些上下文信息：
 
