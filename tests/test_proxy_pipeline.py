@@ -4205,6 +4205,39 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual("Hello", hook.bodies[0]["messages"][0]["content"])
         self.assertEqual(hook.bodies[0]["messages"], built_request.translated_body["messages"])
 
+    def test_build_upstream_request_drops_claude_metadata_for_openai_responses_provider(self) -> None:
+        provider = LLMProvider(
+            name="responses-upstream",
+            api="https://example.com/v1/responses",
+            source_format="openai_responses",
+            target_formats=("claude_chat",),
+        )
+
+        built_request = build_upstream_request(
+            root_path=Path(__file__).resolve().parents[1],
+            logger=FakeLogger(),
+            provider=provider,
+            request_model="responses-upstream/gpt-5.4",
+            upstream_model="gpt-5.4",
+            provider_target_format="claude_chat",
+            request_data={
+                "model": "responses-upstream/gpt-5.4",
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
+                "metadata": {"user_id": "claude-code-user"},
+                "stream": True,
+            },
+            request_headers={"content-type": "application/json"},
+            translator=ClaudeOpenAIResponsesTranslator(),
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+            auth_group_name=None,
+            auth_entry_id=None,
+        )
+
+        self.assertEqual({"user_id": "claude-code-user"}, built_request.original_body["metadata"])
+        self.assertNotIn("metadata", built_request.translated_body)
+
     def test_build_upstream_request_uses_stream_rewritten_by_request_guard(self) -> None:
         provider = LLMProvider(
             name="demo",

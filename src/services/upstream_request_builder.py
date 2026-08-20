@@ -71,6 +71,8 @@ def build_upstream_request(
     )
 
     upstream_body = provider.apply_request_guard(request_ctx, dict(translated_body))
+    if str(provider.source_format or "").strip().lower() == "openai_responses":
+        upstream_body.pop("metadata", None)
     if force_upstream_stream and not initial_stream:
         upstream_body["stream"] = True
     final_upstream_model = _resolve_final_upstream_model(upstream_body, upstream_model)

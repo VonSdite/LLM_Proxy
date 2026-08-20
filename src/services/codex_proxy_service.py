@@ -865,6 +865,7 @@ class CodexProxyService:
         ):
             body.pop(field, None)
         body.pop("previous_response_id", None)
+        body.pop("metadata", None)
         CodexProxyService._normalize_codex_builtin_tools(body)
         if allow_image_generation:
             CodexProxyService._ensure_image_generation_tool(body, image_generation_model)
