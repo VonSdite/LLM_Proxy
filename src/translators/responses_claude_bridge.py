@@ -52,7 +52,6 @@ def convert_claude_request_to_openai_responses(
             if not isinstance(block, dict) or not isinstance(block.get("text"), str):
                 continue
             part = {"type": "input_text", "text": block["text"]}
-            _copy_cache_control(block, part)
             translated["input"].append({"type": "message", "role": "developer", "content": [part]})
 
     custom_tool_names = _claude_custom_tool_names(body.get("tools"))
@@ -878,7 +877,6 @@ def _claude_content_to_responses(block: dict[str, Any], role: str) -> dict[str, 
             "type": "output_text" if role == "assistant" else "input_text",
             "text": str(block.get("text") or ""),
         }
-        _copy_cache_control(block, part)
         return part
     if block_type == "image":
         source = block.get("source") or {}
@@ -891,7 +889,6 @@ def _claude_content_to_responses(block: dict[str, Any], role: str) -> dict[str, 
         else:
             return None
         part = {"type": "input_image", "image_url": url}
-        _copy_cache_control(block, part)
         return part
     if block_type == "document":
         source = block.get("source") or {}
@@ -901,7 +898,6 @@ def _claude_content_to_responses(block: dict[str, Any], role: str) -> dict[str, 
             "type": "input_file",
             "file_data": f"data:{source.get('media_type') or 'application/octet-stream'};base64,{source['data']}",
         }
-        _copy_cache_control(block, part)
         return part
     return None
 

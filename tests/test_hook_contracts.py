@@ -492,7 +492,7 @@ class HookContractsTests(unittest.TestCase):
         rewritten_claude = hook.request_guard(claude_ctx, claude_body)
 
         self.assertEqual("system", rewritten_claude["input"][0]["role"])
-        self.assertEqual({"type": "ephemeral"}, rewritten_claude["input"][0]["content"][0]["cache_control"])
+        self.assertNotIn("cache_control", rewritten_claude["input"][0]["content"][0])
         self.assertEqual("developer", claude_body["input"][0]["role"])
 
         chat_body = registry.get("openai_responses", "openai_chat").translate_request(

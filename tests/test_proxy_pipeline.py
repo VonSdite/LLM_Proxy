@@ -1815,6 +1815,53 @@ class TranslatorTests(unittest.TestCase):
 
         self.assertEqual({"effort": "xhigh"}, translated["reasoning"])
 
+    def test_direct_claude_to_responses_drops_cache_control(self) -> None:
+        translator = build_default_translator_registry().get("openai_responses", "claude_chat")
+        request = {
+            "system": [
+                {
+                    "type": "text",
+                    "text": "Follow project rules",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Inspect these files",
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "aGVsbG8=",
+                            },
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": "cGRm",
+                            },
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                    ],
+                }
+            ],
+        }
+
+        translated = translator.translate_request("deepseek-v4-flash", request, False)
+
+        self.assertNotIn("cache_control", json.dumps(translated))
+        self.assertEqual({"type": "ephemeral"}, request["system"][0]["cache_control"])
+
     def test_direct_responses_to_claude_maps_reasoning_effort(self) -> None:
         translator = build_default_translator_registry().get("claude_chat", "openai_responses")
 
