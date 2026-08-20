@@ -145,6 +145,55 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertIsNotNone(self.log_service.calls[0]["start_time"])
         self.assertIsNotNone(self.log_service.calls[0]["end_time"])
 
+    def test_glm_claude_test_enables_reasoning_by_default(self) -> None:
+        provider = self.service._build_provider(
+            {
+                "name": "zai",
+                "api": "https://example.com/v1/messages",
+                "source_format": "claude_chat",
+            },
+            ["glm-5.3"],
+        )
+        translator = self.service._translator_registry.get("claude_chat", "openai_chat")
+
+        _, _, translated_request, _ = self.service._build_upstream_request(
+            provider,
+            "glm-5.3",
+            request_headers={},
+            auth_entry_id=None,
+            translator=translator,
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+        )
+
+        self.assertEqual({"type": "enabled", "budget_tokens": 2048}, translated_request["thinking"])
+        self.assertEqual(2049, translated_request["max_tokens"])
+
+    def test_non_glm_claude_test_does_not_force_reasoning(self) -> None:
+        provider = self.service._build_provider(
+            {
+                "name": "anthropic",
+                "api": "https://example.com/v1/messages",
+                "source_format": "claude_chat",
+            },
+            ["claude-sonnet-4-5"],
+        )
+        translator = self.service._translator_registry.get("claude_chat", "openai_chat")
+
+        _, _, translated_request, _ = self.service._build_upstream_request(
+            provider,
+            "claude-sonnet-4-5",
+            request_headers={},
+            auth_entry_id=None,
+            translator=translator,
+            attempt=0,
+            previous_status_code=None,
+            previous_error_type=None,
+        )
+
+        self.assertNotIn("thinking", translated_request)
+
     def test_provider_named_like_model_prefix_keeps_full_upstream_model_id(self) -> None:
         captured: dict[str, object] = {}
         fake_response = FakeBufferedResponse(

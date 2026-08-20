@@ -261,7 +261,7 @@ class ProviderModelTestService:
         previous_status_code: int | None,
         previous_error_type: HookErrorType | None,
     ) -> tuple[dict[str, str], dict[str, Any], dict[str, Any], HookContext]:
-        request_data = self._build_benchmark_request(model_name)
+        request_data = self._build_benchmark_request(provider, model_name)
         headers = {"content-type": "application/json"}
         if request_headers:
             headers = merge_http_headers(headers, request_headers)
@@ -291,11 +291,11 @@ class ProviderModelTestService:
         )
 
     @staticmethod
-    def _build_benchmark_request(model_name: str) -> dict[str, Any]:
+    def _build_benchmark_request(provider, model_name: str) -> dict[str, Any]:
         benchmark_block = "\n".join(
             f"{index:02d}: the quick brown fox jumps over the lazy dog" for index in range(1, 13)
         )
-        return {
+        request: dict[str, Any] = {
             "model": model_name,
             "stream": True,
             "temperature": 0,
@@ -315,6 +315,13 @@ class ProviderModelTestService:
                 },
             ],
         }
+        if (
+            str(getattr(provider, "source_format", "") or "").strip().lower() == "claude_chat"
+            and "glm" in model_name.lower()
+        ):
+            # GLM Claude 接口要求始终开启思考；模型测试使用最小的 low 档位。
+            request["reasoning_effort"] = "low"
+        return request
 
     def _open_upstream_response(
         self,
