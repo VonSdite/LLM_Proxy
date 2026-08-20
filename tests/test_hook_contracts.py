@@ -437,8 +437,8 @@ class HookContractsTests(unittest.TestCase):
 
         self.assertEqual(body, hook.request_guard(ctx, body))
 
-    def test_responses_upstream_role_hook_normalizes_developer_for_all_downstream_formats(self) -> None:
-        module = self._load_hook_module("responses_upstream_role_compat.py")
+    def test_responses_upstream_hook_normalizes_developer_for_all_downstream_formats(self) -> None:
+        module = self._load_hook_module("responses_upstream_compat.py")
         hook = module.Hook()
         registry = build_default_translator_registry()
 
@@ -454,7 +454,7 @@ class HookContractsTests(unittest.TestCase):
                     },
                     {"type": "function_call_output", "call_id": "call_1", "output": "ok"},
                 ],
-                "tools": [{"type": "namespace", "name": "ops", "tools": []}],
+                "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}],
             },
             False,
         )
@@ -467,7 +467,8 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual("system", rewritten_responses["input"][0]["role"])
         self.assertEqual("msg_policy", rewritten_responses["input"][0]["id"])
         self.assertEqual("function_call_output", rewritten_responses["input"][1]["type"])
-        self.assertEqual(responses_body["tools"], rewritten_responses["tools"])
+        self.assertEqual("function", rewritten_responses["tools"][0]["type"])
+        self.assertEqual("lookup", rewritten_responses["tools"][0]["name"])
         self.assertEqual("developer", responses_body["input"][0]["role"])
 
         claude_body = registry.get("openai_responses", "claude_chat").translate_request(
@@ -513,8 +514,85 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual("Follow project rules", rewritten_chat["instructions"])
         self.assertFalse(any(item.get("role") == "developer" for item in rewritten_chat["input"]))
 
-    def test_responses_upstream_role_hook_ignores_other_upstreams_and_string_input(self) -> None:
-        module = self._load_hook_module("responses_upstream_role_compat.py")
+    def test_responses_upstream_hook_downgrades_namespace_tools(self) -> None:
+        module = self._load_hook_module("responses_upstream_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_source_format="openai_responses",
+            provider_target_format="openai_responses",
+        )
+
+        rewritten = hook.request_guard(
+            ctx,
+            {
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "ops",
+                        "tools": [
+                            {"type": "custom", "name": "shell", "description": "Run command"},
+                            {"type": "function", "name": "read", "parameters": {"type": "object"}},
+                        ],
+                    }
+                ],
+                "input": [
+                    {
+                        "type": "custom_tool_call",
+                        "namespace": "ops",
+                        "name": "shell",
+                        "input": "pwd",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(["function", "function"], [tool["type"] for tool in rewritten["tools"]])
+        self.assertEqual(["ops__shell", "ops__read"], [tool["name"] for tool in rewritten["tools"]])
+        self.assertEqual("function_call", rewritten["input"][0]["type"])
+        self.assertEqual("ops__shell", rewritten["input"][0]["name"])
+        self.assertEqual('{"input":"pwd"}', rewritten["input"][0]["arguments"])
+
+    def test_responses_upstream_hook_restores_namespace_and_custom_tool_response(self) -> None:
+        module = self._load_hook_module("responses_upstream_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_source_format="openai_responses",
+            provider_target_format="openai_responses",
+        )
+        hook.request_guard(
+            ctx,
+            {
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "ops",
+                        "tools": [{"type": "custom", "name": "shell"}],
+                    }
+                ]
+            },
+        )
+
+        restored = hook.response_guard(
+            ctx,
+            {
+                "output": [
+                    {
+                        "id": "fc_1",
+                        "type": "function_call",
+                        "name": "ops__shell",
+                        "arguments": '{"input":"pwd"}',
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual("custom_tool_call", restored["output"][0]["type"])
+        self.assertEqual("ops", restored["output"][0]["namespace"])
+        self.assertEqual("shell", restored["output"][0]["name"])
+        self.assertEqual("pwd", restored["output"][0]["input"])
+
+    def test_responses_upstream_hook_ignores_other_upstreams_and_string_input(self) -> None:
+        module = self._load_hook_module("responses_upstream_compat.py")
         hook = module.Hook()
         responses_ctx = self._ctx(provider_source_format="openai_responses")
         chat_ctx = self._ctx(provider_source_format="openai_chat")
