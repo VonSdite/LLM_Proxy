@@ -12,7 +12,7 @@ from src.translators.reasoning_utils import (
 
 
 class VendorReasoningAdapter:
-    """把统一思考意图改写成单个厂商的 OpenAI 兼容参数。"""
+    """适配单个厂商的 OpenAI Chat 请求字段。"""
 
     # 子类填写上游模型关键词，汇总 Hook 用这些关键词选择对应处理器。
     match_terms: tuple[str, ...] = ()
@@ -20,7 +20,7 @@ class VendorReasoningAdapter:
     thinking_control_terms: tuple[str, ...] = ()
 
     def matches(self, ctx: HookContext, body: dict[str, Any]) -> bool:
-        if not should_apply_openai_chat_vendor_adapter(ctx):
+        if not is_openai_chat_upstream(ctx):
             return False
         # 自动识别只看模型信号，避免 Provider 命名或下游路由别名把匹配范围放大；匹配前统一转小写。
         # upstream_model：进入 hook 前由路由 key 解析出的真实上游模型名。
@@ -42,9 +42,9 @@ class VendorReasoningAdapter:
         return _matches_any(candidate_values, self.thinking_control_terms)
 
     def request_guard(self, ctx: HookContext, body: dict[str, Any]) -> dict[str, Any]:
-        if not should_apply_openai_chat_vendor_adapter(ctx):
-            return body
-        updated = dict(body)
+        updated = normalize_openai_chat_message_roles(ctx, body)
+        if not should_apply_cross_protocol_reasoning_adapter(ctx):
+            return updated
         effort = extract_reasoning_effort(updated)
         return self.apply(ctx, updated, effort)
 
@@ -68,11 +68,45 @@ class SingleVendorReasoningHook(BaseHook):
         return self._adapter.request_guard(ctx, body)
 
 
-def should_apply_openai_chat_vendor_adapter(ctx: HookContext) -> bool:
-    # 厂商兼容参数用于跨协议进入 OpenAI Chat 上游；OpenAI Chat 原生下游保持原样透传。
+def is_openai_chat_upstream(ctx: HookContext) -> bool:
     source_format = str(ctx.provider_source_format or "").strip().lower()
+    return source_format == "openai_chat"
+
+
+def should_apply_cross_protocol_reasoning_adapter(ctx: HookContext) -> bool:
+    """判断当前请求是否需要跨协议适配厂商 reasoning 参数。"""
     target_format = str(ctx.provider_target_format or "").strip().lower()
-    return source_format == "openai_chat" and target_format != "openai_chat"
+    return is_openai_chat_upstream(ctx) and target_format in {"openai_responses", "claude_chat"}
+
+
+def normalize_openai_chat_message_roles(ctx: HookContext, body: dict[str, Any]) -> dict[str, Any]:
+    """归一化 OpenAI Chat 兼容上游不支持的消息角色。"""
+    if not is_openai_chat_upstream(ctx):
+        return body
+    updated = dict(body)
+    normalize_developer_messages(updated)
+    return updated
+
+
+def normalize_developer_messages(body: dict[str, Any]) -> None:
+    """把厂商不支持的 developer 消息映射为 system 消息。"""
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return
+
+    normalized_messages: list[Any] = []
+    changed = False
+    for message in messages:
+        if not isinstance(message, dict) or str(message.get("role") or "").strip().lower() != "developer":
+            normalized_messages.append(message)
+            continue
+        normalized_message = dict(message)
+        normalized_message["role"] = "system"
+        normalized_messages.append(normalized_message)
+        changed = True
+
+    if changed:
+        body["messages"] = normalized_messages
 
 
 def _matches_any(values: tuple[Any, ...], terms: tuple[str, ...]) -> bool:

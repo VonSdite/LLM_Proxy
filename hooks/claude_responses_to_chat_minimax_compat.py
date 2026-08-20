@@ -4,7 +4,7 @@ from typing import Any
 
 from src.hooks import HookContext
 
-from openai_reasoning_common import (
+from claude_responses_to_chat_compat_common import (
     SingleVendorReasoningHook,
     VendorReasoningAdapter,
     remove_generic_reasoning_fields,
@@ -12,7 +12,7 @@ from openai_reasoning_common import (
 
 
 class MiniMaxReasoningAdapter(VendorReasoningAdapter):
-    """MiniMax M3 OpenAI 兼容参数适配。"""
+    """MiniMax M3 OpenAI Chat 兼容参数适配。"""
 
     match_terms = ("minimax",)
     thinking_control_terms = ("minimax-m3",)
@@ -42,4 +42,4 @@ class MiniMaxHook(SingleVendorReasoningHook):
 
 
 class Hook(MiniMaxHook):
-    """MiniMax OpenAI 兼容参数 Hook。"""
+    """MiniMax OpenAI Chat 兼容参数 Hook。"""

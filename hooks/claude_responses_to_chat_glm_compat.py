@@ -4,7 +4,7 @@ from typing import Any
 
 from src.hooks import HookContext
 
-from openai_reasoning_common import (
+from claude_responses_to_chat_compat_common import (
     OPENAI_REASONING_FALLBACK_EFFORT,
     SingleVendorReasoningHook,
     VendorReasoningAdapter,
@@ -14,7 +14,7 @@ from openai_reasoning_common import (
 
 
 class GlmReasoningAdapter(VendorReasoningAdapter):
-    """GLM / Z.AI OpenAI 兼容参数适配。"""
+    """GLM / Z.AI OpenAI Chat 兼容参数适配。"""
 
     match_terms = ("glm",)
 
@@ -47,4 +47,4 @@ class GlmHook(SingleVendorReasoningHook):
 
 
 class Hook(GlmHook):
-    """GLM / Z.AI OpenAI 兼容参数 Hook。"""
+    """GLM / Z.AI OpenAI Chat 兼容参数 Hook。"""

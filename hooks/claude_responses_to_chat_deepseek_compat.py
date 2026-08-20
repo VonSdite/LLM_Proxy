@@ -4,7 +4,7 @@ from typing import Any
 
 from src.hooks import HookContext
 
-from openai_reasoning_common import (
+from claude_responses_to_chat_compat_common import (
     OPENAI_REASONING_FALLBACK_EFFORT,
     SingleVendorReasoningHook,
     VendorReasoningAdapter,
@@ -13,7 +13,7 @@ from openai_reasoning_common import (
 
 
 class DeepSeekReasoningAdapter(VendorReasoningAdapter):
-    """DeepSeek OpenAI 兼容参数适配。"""
+    """DeepSeek OpenAI Chat 兼容参数适配。"""
 
     match_terms = ("deepseek",)
     thinking_control_terms = ("deepseek-v4",)
@@ -47,4 +47,4 @@ class DeepSeekHook(SingleVendorReasoningHook):
 
 
 class Hook(DeepSeekHook):
-    """DeepSeek OpenAI 兼容参数 Hook。"""
+    """DeepSeek OpenAI Chat 兼容参数 Hook。"""

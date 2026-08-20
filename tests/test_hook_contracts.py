@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.external import LLMProvider
 from src.hooks import BaseHook, HookAbortError, HookContext
-from src.proxy_core import DownstreamChunk
+from src.translators import build_default_translator_registry
 
 
 class FakeLogger:
@@ -186,7 +186,7 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual("example_hook_abort", caught.exception.error_type)
 
     def test_minimax_hook_adds_reasoning_split_and_thinking(self) -> None:
-        module = self._load_hook_module("minimax_openai_compat.py")
+        module = self._load_hook_module("claude_responses_to_chat_minimax_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="minimax",
@@ -211,7 +211,7 @@ class HookContractsTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", rewritten)
 
     def test_minimax_hook_keeps_non_m3_thinking_control_off(self) -> None:
-        module = self._load_hook_module("minimax_openai_compat.py")
+        module = self._load_hook_module("claude_responses_to_chat_minimax_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="minimax",
@@ -233,7 +233,7 @@ class HookContractsTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", rewritten)
 
     def test_deepseek_hook_maps_xhigh_to_max(self) -> None:
-        module = self._load_hook_module("deepseek_openai_compat.py")
+        module = self._load_hook_module("claude_responses_to_chat_deepseek_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="deepseek",
@@ -254,7 +254,7 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual("max", rewritten["reasoning_effort"])
 
     def test_deepseek_hook_keeps_compat_model_thinking_control_off(self) -> None:
-        module = self._load_hook_module("deepseek_openai_compat.py")
+        module = self._load_hook_module("claude_responses_to_chat_deepseek_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="deepseek",
@@ -275,7 +275,7 @@ class HookContractsTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", rewritten)
 
     def test_glm_hook_sets_preserved_thinking_when_reasoning_history_exists(self) -> None:
-        module = self._load_hook_module("glm_openai_compat.py")
+        module = self._load_hook_module("claude_responses_to_chat_glm_compat.py")
         hook = module.Hook()
         ctx = self._ctx(provider_name="zai", upstream_model="glm-4.5", provider_target_format="claude_chat")
 
@@ -292,7 +292,7 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual("high", rewritten["reasoning_effort"])
 
     def test_qwen_hook_maps_budget_and_keeps_vendor_parameters(self) -> None:
-        module = self._load_hook_module("qwen_openai_compat.py")
+        module = self._load_hook_module("claude_responses_to_chat_qwen_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="dashscope",
@@ -316,8 +316,39 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual(20, rewritten["top_k"])
         self.assertNotIn("reasoning_effort", rewritten)
 
-    def test_aggregate_reasoning_hook_dispatches_by_model(self) -> None:
-        module = self._load_hook_module("openai_reasoning_compat.py")
+    def test_vendor_hooks_map_developer_messages_without_reasoning_parameters(self) -> None:
+        cases = (
+            ("claude_responses_to_chat_minimax_compat.py", "minimax-m3"),
+            ("claude_responses_to_chat_deepseek_compat.py", "deepseek-v4-pro"),
+            ("claude_responses_to_chat_glm_compat.py", "glm-4.5"),
+            ("claude_responses_to_chat_qwen_compat.py", "qwen-plus"),
+            ("claude_responses_to_chat_compat.py", "deepseek-v4-pro"),
+        )
+        for hook_file, upstream_model in cases:
+            with self.subTest(hook_file=hook_file):
+                module = self._load_hook_module(hook_file)
+                hook = module.Hook()
+                ctx = self._ctx(
+                    upstream_model=upstream_model,
+                    provider_source_format="openai_chat",
+                    provider_target_format="openai_responses",
+                )
+                body = {
+                    "model": upstream_model,
+                    "messages": [
+                        {"role": "developer", "content": "Follow project rules", "name": "policy"},
+                        {"role": "user", "content": "Hello"},
+                    ],
+                }
+
+                rewritten = hook.request_guard(ctx, body)
+
+                self.assertEqual(["system", "user"], [message["role"] for message in rewritten["messages"]])
+                self.assertEqual("policy", rewritten["messages"][0]["name"])
+                self.assertEqual("developer", body["messages"][0]["role"])
+
+    def test_aggregate_openai_chat_hook_dispatches_by_model(self) -> None:
+        module = self._load_hook_module("claude_responses_to_chat_compat.py")
         hook = module.Hook()
         ctx = self._ctx(provider_name="generic", upstream_model="qwen-plus", provider_target_format="claude_chat")
 
@@ -334,16 +365,29 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual(2048, rewritten["thinking_budget"])
         self.assertNotIn("reasoning", rewritten)
 
-    def test_aggregate_reasoning_hook_does_not_match_provider_name(self) -> None:
-        module = self._load_hook_module("openai_reasoning_compat.py")
+    def test_aggregate_hook_applies_common_roles_without_vendor_reasoning(self) -> None:
+        module = self._load_hook_module("claude_responses_to_chat_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(provider_name="dashscope", upstream_model="plain-model")
-        body = {"model": "plain-model", "messages": [], "reasoning_effort": "high"}
+        ctx = self._ctx(
+            provider_name="dashscope",
+            upstream_model="plain-model",
+            provider_target_format="openai_responses",
+        )
+        body = {
+            "model": "plain-model",
+            "messages": [{"role": "developer", "content": "Keep this role"}],
+            "reasoning_effort": "high",
+        }
 
-        self.assertEqual(body, hook.request_guard(ctx, body))
+        rewritten = hook.request_guard(ctx, body)
 
-    def test_reasoning_hooks_follow_upstream_format_when_downstream_is_claude(self) -> None:
-        module = self._load_hook_module("openai_reasoning_compat.py")
+        self.assertEqual("system", rewritten["messages"][0]["role"])
+        self.assertEqual("high", rewritten["reasoning_effort"])
+        self.assertNotIn("thinking", rewritten)
+        self.assertEqual("developer", body["messages"][0]["role"])
+
+    def test_openai_chat_hooks_follow_upstream_format_when_downstream_is_claude(self) -> None:
+        module = self._load_hook_module("claude_responses_to_chat_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="dashscope",
@@ -358,8 +402,8 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual(True, rewritten["enable_thinking"])
         self.assertEqual(8192, rewritten["thinking_budget"])
 
-    def test_reasoning_hooks_ignore_openai_chat_to_openai_chat(self) -> None:
-        module = self._load_hook_module("openai_reasoning_compat.py")
+    def test_openai_chat_hooks_map_roles_without_adapting_chat_reasoning(self) -> None:
+        module = self._load_hook_module("claude_responses_to_chat_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="dashscope",
@@ -367,12 +411,21 @@ class HookContractsTests(unittest.TestCase):
             provider_source_format="openai_chat",
             provider_target_format="openai_chat",
         )
-        body = {"model": "qwen-plus", "reasoning_effort": "high"}
+        body = {
+            "model": "qwen-plus",
+            "messages": [{"role": "developer", "content": "Keep this role"}],
+            "reasoning_effort": "high",
+        }
 
-        self.assertEqual(body, hook.request_guard(ctx, body))
+        rewritten = hook.request_guard(ctx, body)
 
-    def test_reasoning_hooks_ignore_non_openai_chat_upstream(self) -> None:
-        module = self._load_hook_module("openai_reasoning_compat.py")
+        self.assertEqual("system", rewritten["messages"][0]["role"])
+        self.assertEqual("high", rewritten["reasoning_effort"])
+        self.assertNotIn("enable_thinking", rewritten)
+        self.assertEqual("developer", body["messages"][0]["role"])
+
+    def test_openai_chat_hooks_ignore_non_openai_chat_upstream(self) -> None:
+        module = self._load_hook_module("claude_responses_to_chat_compat.py")
         hook = module.Hook()
         ctx = self._ctx(
             provider_name="dashscope",
@@ -384,254 +437,92 @@ class HookContractsTests(unittest.TestCase):
 
         self.assertEqual(body, hook.request_guard(ctx, body))
 
-    def test_responses_legacy_tools_hook_downgrades_namespaces_custom_tools_and_history(self) -> None:
-        module = self._load_hook_module("responses_legacy_tools_compat.py")
+    def test_chat_claude_to_response_hook_normalizes_developer_for_all_downstream_formats(self) -> None:
+        module = self._load_hook_module("chat_claude_to_response_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(
-            provider_name="legacy-responses",
-            provider_source_format="openai_responses",
-            provider_target_format="openai_responses",
-        )
+        registry = build_default_translator_registry()
 
-        rewritten = hook.request_guard(
-            ctx,
+        responses_body = registry.get("openai_responses", "openai_responses").translate_request(
+            "upstream-model",
             {
-                "model": "gpt-5",
                 "input": [
                     {
-                        "type": "custom_tool_call",
-                        "call_id": "call_1",
-                        "namespace": "ops",
-                        "name": "shell",
-                        "input": "pwd",
+                        "type": "message",
+                        "role": "developer",
+                        "content": [{"type": "input_text", "text": "Follow project rules"}],
+                        "id": "msg_policy",
                     },
-                    {"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"},
-                    {
-                        "type": "additional_tools",
-                        "tools": [{"type": "custom", "name": "apply_patch", "description": "Apply patch"}],
-                    },
+                    {"type": "function_call_output", "call_id": "call_1", "output": "ok"},
                 ],
-                "tools": [
-                    {"type": "function", "name": "lookup", "parameters": {"type": "object"}},
-                    {
-                        "type": "namespace",
-                        "name": "ops",
-                        "tools": [
-                            {"type": "custom", "name": "shell", "description": "Run command"},
-                            {"type": "function", "name": "read", "parameters": {"type": "object"}},
-                        ],
-                    },
-                    {"type": "web_search"},
-                ],
+                "tools": [{"type": "namespace", "name": "ops", "tools": []}],
             },
+            False,
         )
-
-        self.assertEqual(
-            ["function", "function", "function", "function"], [tool["type"] for tool in rewritten["tools"]]
-        )
-        self.assertEqual(
-            ["lookup", "ops__shell", "ops__read", "apply_patch"],
-            [tool["name"] for tool in rewritten["tools"]],
-        )
-        self.assertEqual("string", rewritten["tools"][1]["parameters"]["properties"]["input"]["type"])
-        self.assertFalse(any(item.get("type") == "additional_tools" for item in rewritten["input"]))
-        self.assertEqual("function_call", rewritten["input"][0]["type"])
-        self.assertEqual("ops__shell", rewritten["input"][0]["name"])
-        self.assertEqual('{"input":"pwd"}', rewritten["input"][0]["arguments"])
-        self.assertEqual("function_call_output", rewritten["input"][1]["type"])
-
-    def test_responses_legacy_tools_hook_downgrades_allowed_tools_choice(self) -> None:
-        module = self._load_hook_module("responses_legacy_tools_compat.py")
-        hook = module.Hook()
-        ctx = self._ctx(
+        responses_ctx = self._ctx(
             provider_source_format="openai_responses",
             provider_target_format="openai_responses",
         )
+        rewritten_responses = hook.request_guard(responses_ctx, responses_body)
 
-        rewritten = hook.request_guard(
-            ctx,
+        self.assertEqual("system", rewritten_responses["input"][0]["role"])
+        self.assertEqual("msg_policy", rewritten_responses["input"][0]["id"])
+        self.assertEqual("function_call_output", rewritten_responses["input"][1]["type"])
+        self.assertEqual(responses_body["tools"], rewritten_responses["tools"])
+        self.assertEqual("developer", responses_body["input"][0]["role"])
+
+        claude_body = registry.get("openai_responses", "claude_chat").translate_request(
+            "upstream-model",
             {
-                "tools": [
-                    {"type": "function", "name": "lookup", "parameters": {"type": "object"}},
+                "system": [
                     {
-                        "type": "namespace",
-                        "name": "ops",
-                        "tools": [{"type": "custom", "name": "shell"}],
-                    },
-                ],
-                "tool_choice": {
-                    "type": "allowed_tools",
-                    "mode": "required",
-                    "tools": [{"type": "custom", "namespace": "ops", "name": "shell"}],
-                },
-            },
-        )
-
-        self.assertEqual("required", rewritten["tool_choice"])
-        self.assertEqual(["ops__shell"], [tool["name"] for tool in rewritten["tools"]])
-
-    def test_responses_legacy_tools_hook_avoids_alias_collisions_and_long_names(self) -> None:
-        module = self._load_hook_module("responses_legacy_tools_compat.py")
-        hook = module.Hook()
-        ctx = self._ctx(
-            provider_source_format="openai_responses",
-            provider_target_format="openai_responses",
-        )
-        long_name = "long_tool_" + "x" * 80
-
-        rewritten = hook.request_guard(
-            ctx,
-            {
-                "tools": [
-                    {"type": "function", "name": "ops__shell", "parameters": {"type": "object"}},
-                    {
-                        "type": "namespace",
-                        "name": "ops",
-                        "tools": [{"type": "custom", "name": "shell"}],
-                    },
-                    {"type": "custom", "name": long_name},
-                ]
-            },
-        )
-
-        aliases = [tool["name"] for tool in rewritten["tools"]]
-        self.assertEqual(3, len(set(aliases)))
-        self.assertTrue(all(len(alias) <= 64 for alias in aliases))
-        self.assertNotEqual("ops__shell", aliases[1])
-
-        restored = hook.response_guard(
-            ctx,
-            {
-                "output": [
-                    {
-                        "id": "fc_1",
-                        "type": "function_call",
-                        "call_id": "call_1",
-                        "name": aliases[1],
-                        "arguments": '{"input":"pwd"}',
+                        "type": "text",
+                        "text": "Follow project rules",
+                        "cache_control": {"type": "ephemeral"},
                     }
-                ]
-            },
-        )
-        self.assertEqual("ops", restored["output"][0]["namespace"])
-        self.assertEqual("shell", restored["output"][0]["name"])
-
-    def test_responses_legacy_tools_hook_restores_nonstream_tool_calls(self) -> None:
-        module = self._load_hook_module("responses_legacy_tools_compat.py")
-        hook = module.Hook()
-        ctx = self._ctx(
-            provider_source_format="openai_responses",
-            provider_target_format="openai_responses",
-        )
-        hook.request_guard(
-            ctx,
-            {
-                "tools": [
-                    {
-                        "type": "namespace",
-                        "name": "ops",
-                        "tools": [
-                            {"type": "custom", "name": "shell"},
-                            {"type": "function", "name": "read"},
-                        ],
-                    }
-                ]
-            },
-        )
-
-        restored = hook.response_guard(
-            ctx,
-            {
-                "id": "resp_1",
-                "object": "response",
-                "output": [
-                    {
-                        "id": "fc_1",
-                        "type": "function_call",
-                        "call_id": "call_1",
-                        "name": "ops__shell",
-                        "arguments": '{"input":"pwd"}',
-                    },
-                    {
-                        "id": "fc_2",
-                        "type": "function_call",
-                        "call_id": "call_2",
-                        "name": "ops__read",
-                        "arguments": '{"path":"README.md"}',
-                    },
                 ],
+                "messages": [{"role": "user", "content": "Hello"}],
             },
+            False,
         )
-
-        self.assertEqual("custom_tool_call", restored["output"][0]["type"])
-        self.assertEqual("ops", restored["output"][0]["namespace"])
-        self.assertEqual("shell", restored["output"][0]["name"])
-        self.assertEqual("pwd", restored["output"][0]["input"])
-        self.assertEqual("function_call", restored["output"][1]["type"])
-        self.assertEqual("ops", restored["output"][1]["namespace"])
-        self.assertEqual("read", restored["output"][1]["name"])
-
-    def test_responses_legacy_tools_hook_restores_stream_custom_tool_events(self) -> None:
-        module = self._load_hook_module("responses_legacy_tools_compat.py")
-        hook = module.Hook()
-        ctx = self._ctx(
+        claude_ctx = self._ctx(
             provider_source_format="openai_responses",
-            provider_target_format="openai_responses",
-            stream=True,
+            provider_target_format="claude_chat",
         )
-        hook.request_guard(
-            ctx,
+        rewritten_claude = hook.request_guard(claude_ctx, claude_body)
+
+        self.assertEqual("system", rewritten_claude["input"][0]["role"])
+        self.assertEqual({"type": "ephemeral"}, rewritten_claude["input"][0]["content"][0]["cache_control"])
+        self.assertEqual("developer", claude_body["input"][0]["role"])
+
+        chat_body = registry.get("openai_responses", "openai_chat").translate_request(
+            "upstream-model",
             {
-                "tools": [
-                    {
-                        "type": "namespace",
-                        "name": "ops",
-                        "tools": [{"type": "custom", "name": "shell"}],
-                    }
+                "messages": [
+                    {"role": "developer", "content": "Follow project rules"},
+                    {"role": "user", "content": "Hello"},
                 ]
             },
+            False,
         )
-
-        added = hook.response_guard(
-            ctx,
-            {
-                "type": "response.output_item.added",
-                "output_index": 0,
-                "item": {
-                    "id": "fc_1",
-                    "type": "function_call",
-                    "call_id": "call_1",
-                    "name": "ops__shell",
-                    "arguments": "",
-                },
-            },
+        chat_ctx = self._ctx(
+            provider_source_format="openai_responses",
+            provider_target_format="openai_chat",
         )
-        done = hook.response_guard(
-            ctx,
-            {
-                "type": "response.function_call_arguments.done",
-                "item_id": "fc_1",
-                "output_index": 0,
-                "arguments": '{"input":"pwd"}',
-            },
-        )
+        rewritten_chat = hook.request_guard(chat_ctx, chat_body)
 
-        self.assertEqual("custom_tool_call", added["item"]["type"])
-        self.assertEqual("ops", added["item"]["namespace"])
-        self.assertIsInstance(done, DownstreamChunk)
-        self.assertEqual("response.custom_tool_call_input.done", done.event)
-        self.assertEqual("pwd", done.payload["input"])
+        self.assertEqual("Follow project rules", rewritten_chat["instructions"])
+        self.assertFalse(any(item.get("role") == "developer" for item in rewritten_chat["input"]))
 
-    def test_responses_legacy_tools_hook_ignores_cross_protocol_requests(self) -> None:
-        module = self._load_hook_module("responses_legacy_tools_compat.py")
+    def test_chat_claude_to_response_hook_ignores_other_upstreams_and_string_input(self) -> None:
+        module = self._load_hook_module("chat_claude_to_response_compat.py")
         hook = module.Hook()
-        ctx = self._ctx(
-            provider_source_format="openai_chat",
-            provider_target_format="openai_responses",
-        )
-        body = {"tools": [{"type": "namespace", "name": "ops", "tools": []}]}
+        responses_ctx = self._ctx(provider_source_format="openai_responses")
+        chat_ctx = self._ctx(provider_source_format="openai_chat")
+        string_body = {"input": "Hello"}
+        message_body = {"input": [{"type": "message", "role": "developer", "content": []}]}
 
-        self.assertEqual(body, hook.request_guard(ctx, body))
+        self.assertIs(string_body, hook.request_guard(responses_ctx, string_body))
+        self.assertIs(message_body, hook.request_guard(chat_ctx, message_body))
 
 
 if __name__ == "__main__":

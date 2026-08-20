@@ -16,6 +16,7 @@ providers:
   enabled: true
   api: https://api.deepseek.com/chat/completions
   source_format: openai_chat
+  hook: claude_responses_to_chat_compat.py
   api_key: sk-1234
   verify_ssl: false
   model_list:
