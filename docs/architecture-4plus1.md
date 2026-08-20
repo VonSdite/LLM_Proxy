@@ -294,7 +294,7 @@ decoder
   - `fetch_models` 运行在控制平面的 Provider 模型拉取链路中
   - 内置 Claude / Responses 转 OpenAI Chat 上游兼容 Hook 位于 `hooks/claude_responses_to_chat_compat.py`
   - OpenAI Chat 上游的角色兼容覆盖所有下游格式；厂商 reasoning 参数适配只处理 Claude / Responses 跨协议请求
-  - 内置 Chat / Claude 转 OpenAI Responses 上游角色兼容 Hook 位于 `hooks/chat_claude_to_response_compat.py`
+  - 内置 OpenAI Responses 上游角色兼容 Hook 位于 `hooks/responses_upstream_role_compat.py`
   - OpenAI Responses 上游的 `input[].role=developer` 统一映射为 `system`，其他请求字段和工具协议保持不变
   - MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope 各有独立处理类和单厂商入口文件
 
