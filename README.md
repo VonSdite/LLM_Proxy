@@ -588,7 +588,8 @@ from src.hooks import BaseHook, HookContext
 内置 OpenAI Responses 上游兼容 Hook 使用 `responses_upstream` 文件名前缀：
 
 - `responses_upstream_compat.py` 面向 `source_format=openai_responses` 的 Provider
-- `input[].role=developer` 映射为 `system`；跨协议请求的其他输入项和请求字段保持不变
+- `input[].role=developer` 映射为 `system`；跨协议请求的其他输入项保持不变
+- `text` 对象缺少 `format.type` 或该值为空时补为 `text`，显式的 `text`、`json_object`、`json_schema` 保持不变
 - 角色映射覆盖 Chat、Responses、Claude 三种下游格式
 - Chat 下游的 `system` / `developer` 已由标准 translator 合并到 Responses 顶层 `instructions`，不会以 `developer` 角色发送给上游
 - Responses 直传和 Claude 转 Responses 产生的 `developer` 消息会执行角色映射

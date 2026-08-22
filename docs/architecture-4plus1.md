@@ -295,7 +295,7 @@ decoder
   - 内置 Claude / Responses 转 OpenAI Chat 上游兼容 Hook 位于 `hooks/claude_responses_to_chat_compat.py`
   - OpenAI Chat 上游的角色兼容覆盖所有下游格式；厂商 reasoning 参数适配只处理 Claude / Responses 跨协议请求
   - 内置 OpenAI Responses 上游兼容 Hook 位于 `hooks/responses_upstream_compat.py`
-  - OpenAI Responses 上游的 `input[].role=developer` 统一映射为 `system`，跨协议请求的其他请求字段保持不变
+  - OpenAI Responses 上游的 `input[].role=developer` 统一映射为 `system`；`text.format.type` 缺少或为空时补为 `text`；其他跨协议请求字段保持不变
   - Responses → Responses 请求会按上游能力降级 namespace、custom 和 additional_tools 工具，响应侧恢复原始工具身份与流式事件
   - MiniMax、DeepSeek、GLM / Z.AI、Qwen / DashScope 各有独立处理类和单厂商入口文件
 

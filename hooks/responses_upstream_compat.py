@@ -53,6 +53,7 @@ class Hook(BaseHook):
             return body
 
         normalized_body = _normalize_developer_roles(body)
+        normalized_body = _normalize_text_format(normalized_body)
         if not _should_apply_legacy_tools(ctx):
             return normalized_body
 
@@ -115,6 +116,30 @@ class Hook(BaseHook):
 def _is_responses_upstream(ctx: HookContext) -> bool:
     source_format = str(ctx.provider_source_format or "").strip().lower()
     return source_format == "openai_responses"
+
+
+def _normalize_text_format(body: dict[str, Any]) -> dict[str, Any]:
+    """为要求显式文本格式的 Responses 上游补齐默认类型。"""
+    text_config = body.get("text")
+    if not isinstance(text_config, dict):
+        return body
+
+    format_config = text_config.get("format")
+    if isinstance(format_config, dict):
+        if str(format_config.get("type") or "").strip():
+            return body
+        normalized_format = dict(format_config)
+    elif format_config is None:
+        normalized_format = {}
+    else:
+        return body
+
+    normalized_format["type"] = "text"
+    normalized_text = dict(text_config)
+    normalized_text["format"] = normalized_format
+    updated = dict(body)
+    updated["text"] = normalized_text
+    return updated
 
 
 def _normalize_developer_roles(body: dict[str, Any]) -> dict[str, Any]:
