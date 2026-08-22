@@ -274,6 +274,115 @@ class HookContractsTests(unittest.TestCase):
         self.assertNotIn("thinking", rewritten)
         self.assertNotIn("reasoning_effort", rewritten)
 
+    def test_deepseek_hooks_downgrade_responses_custom_tools_to_functions(self) -> None:
+        registry = build_default_translator_registry()
+        translator = registry.get("openai_chat", "openai_responses")
+        original_request = {
+            "input": [
+                {
+                    "type": "additional_tools",
+                    "role": "developer",
+                    "tools": [
+                        {
+                            "type": "custom",
+                            "name": "exec",
+                            "description": "Run shell commands",
+                            "format": {"type": "grammar", "syntax": "lark", "definition": "start: /.+/"},
+                        }
+                    ],
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_1",
+                    "name": "exec",
+                    "input": "pwd",
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_1",
+                    "output": "/repo",
+                },
+            ],
+            "tool_choice": {"type": "custom", "name": "exec"},
+        }
+
+        for hook_file in (
+            "claude_responses_to_chat_deepseek_compat.py",
+            "claude_responses_to_chat_compat.py",
+        ):
+            with self.subTest(hook_file=hook_file):
+                module = self._load_hook_module(hook_file)
+                hook = module.Hook()
+                ctx = self._ctx(
+                    provider_name="deepseek",
+                    upstream_model="deepseek-v4-pro",
+                    provider_source_format="openai_chat",
+                    provider_target_format="openai_responses",
+                )
+                translated = translator.translate_request("deepseek-v4-pro", original_request, False)
+
+                rewritten = hook.request_guard(ctx, translated)
+
+                self.assertEqual("custom", translated["tools"][0]["type"])
+                self.assertEqual(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "exec",
+                            "description": "Run shell commands",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"input": {"type": "string"}},
+                                "required": ["input"],
+                            },
+                        },
+                    },
+                    rewritten["tools"][0],
+                )
+                self.assertEqual(
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "exec", "arguments": '{"input":"pwd"}'},
+                    },
+                    rewritten["messages"][0]["tool_calls"][0],
+                )
+                self.assertEqual(
+                    {"type": "function", "function": {"name": "exec"}},
+                    rewritten["tool_choice"],
+                )
+
+                downstream_response = translator.translate_nonstream_response(
+                    "deepseek-v4-pro",
+                    original_request,
+                    rewritten,
+                    {
+                        "id": "chatcmpl_1",
+                        "model": "deepseek-v4-pro",
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "tool_calls": [
+                                        {
+                                            "id": "call_2",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "exec",
+                                                "arguments": '{"input":"ls"}',
+                                            },
+                                        }
+                                    ],
+                                },
+                                "finish_reason": "tool_calls",
+                            }
+                        ],
+                    },
+                )
+                custom_call = next(item for item in downstream_response["output"] if item["type"] == "custom_tool_call")
+                self.assertEqual("exec", custom_call["name"])
+                self.assertEqual("ls", custom_call["input"])
+
     def test_glm_hook_sets_preserved_thinking_when_reasoning_history_exists(self) -> None:
         module = self._load_hook_module("claude_responses_to_chat_glm_compat.py")
         hook = module.Hook()

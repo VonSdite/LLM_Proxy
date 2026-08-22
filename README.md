@@ -582,6 +582,7 @@ from src.hooks import BaseHook, HookContext
 
 - MiniMax：`reasoning_split=true`；MiniMax-M3 使用 `thinking.type`
 - DeepSeek V4：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`
+- DeepSeek 的 Responses → Chat 请求会把不受上游支持的 `custom` 工具、强制工具选择和历史 custom 调用降级为 `function`；响应转换按原始 Responses 工具定义恢复 custom tool call
 - GLM / Z.AI：`thinking.type`，开启思考时使用 `reasoning_effort=high|max`，历史 assistant 消息含 `reasoning_content` 时设置 `clear_thinking=false`
 - Qwen / DashScope：`enable_thinking`、`thinking_budget`，历史 assistant 消息含 `reasoning_content` 时设置 `preserve_thinking=true`
 
