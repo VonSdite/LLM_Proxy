@@ -294,6 +294,7 @@ decoder
   - `fetch_models` 运行在控制平面的 Provider 模型拉取链路中
   - 内置 Claude / Responses 转 OpenAI Chat 上游兼容 Hook 位于 `hooks/claude_responses_to_chat_compat.py`
   - OpenAI Chat 上游的角色兼容覆盖所有下游格式；厂商 reasoning 参数适配只处理 Claude / Responses 跨协议请求
+  - DeepSeek 的 Responses → Chat 请求会把 Chat `custom` 工具、强制工具选择和历史 custom 调用降级为 `function`，响应 translator 根据原始 Responses 请求恢复 custom 工具身份
   - 内置 OpenAI Responses 上游兼容 Hook 位于 `hooks/responses_upstream_compat.py`
   - OpenAI Responses 上游的 `input[].role=developer` 统一映射为 `system`；`text.format.type` 缺少或为空时补为 `text`；其他跨协议请求字段保持不变
   - Responses → Responses 请求会按上游能力降级 namespace、custom 和 additional_tools 工具，响应侧恢复原始工具身份与流式事件
