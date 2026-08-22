@@ -90,7 +90,7 @@ providers:
     api: https://api.openai.com/v1/responses
     source_format: openai_responses
     auth_group: openai-shared
-    # 不接受 developer 角色或只支持 function/mcp/knowledge_search 工具的 Responses 上游使用此 Hook。
+    # 不接受 developer 角色、要求显式 text.format.type 或只支持 function/mcp/knowledge_search 工具的 Responses 上游使用此 Hook。
     # hook: responses_upstream_compat.py
     verify_ssl: true
     timeout_seconds: 1200

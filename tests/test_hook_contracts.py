@@ -514,6 +514,42 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual("Follow project rules", rewritten_chat["instructions"])
         self.assertFalse(any(item.get("role") == "developer" for item in rewritten_chat["input"]))
 
+    def test_responses_upstream_hook_defaults_missing_text_format(self) -> None:
+        module = self._load_hook_module("responses_upstream_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(provider_source_format="openai_responses")
+        body = {"text": {"verbosity": "low"}}
+
+        rewritten = hook.request_guard(ctx, body)
+
+        self.assertEqual({"type": "text"}, rewritten["text"]["format"])
+        self.assertEqual("low", rewritten["text"]["verbosity"])
+        self.assertNotIn("format", body["text"])
+
+    def test_responses_upstream_hook_defaults_blank_text_format_type(self) -> None:
+        module = self._load_hook_module("responses_upstream_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(provider_source_format="openai_responses")
+        body = {"text": {"format": {"type": " ", "name": "plain"}}}
+
+        rewritten = hook.request_guard(ctx, body)
+
+        self.assertEqual({"type": "text", "name": "plain"}, rewritten["text"]["format"])
+        self.assertEqual(" ", body["text"]["format"]["type"])
+
+    def test_responses_upstream_hook_preserves_explicit_text_format_types(self) -> None:
+        module = self._load_hook_module("responses_upstream_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(provider_source_format="openai_responses")
+
+        for format_type in ("text", "json_object", "json_schema"):
+            with self.subTest(format_type=format_type):
+                body = {"text": {"format": {"type": format_type, "name": "result"}}}
+
+                rewritten = hook.request_guard(ctx, body)
+
+                self.assertEqual(body, rewritten)
+
     def test_responses_upstream_hook_downgrades_namespace_tools(self) -> None:
         module = self._load_hook_module("responses_upstream_compat.py")
         hook = module.Hook()
