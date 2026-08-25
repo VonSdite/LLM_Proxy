@@ -710,7 +710,7 @@
 .dashboard-page .model-flow {
     display: flex;
     align-items: center;
-    column-gap: 7px;
+    column-gap: 8px;
     row-gap: 6px;
     min-width: 0;
     max-width: 100%;
@@ -720,9 +720,19 @@
 .dashboard-page .model-flow-step {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     min-width: 0;
     max-width: 100%;
+}
+
+.dashboard-page .model-flow-step + .model-flow-step::before {
+    content: "";
+    display: block;
+    flex: 0 0 20px;
+    width: 20px;
+    height: 9px;
+    background: rgba(100, 116, 139, 0.42);
+    clip-path: polygon(0 44%, 14px 44%, 14px 18%, 100% 50%, 14px 82%, 14px 56%, 0 56%);
 }
 
 .dashboard-page .model-flow-node {
@@ -751,14 +761,6 @@
     color: #0f766e;
 }
 
-.dashboard-page .model-flow-arrow {
-    color: #94a3b8;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1;
-    white-space: nowrap;
-}
-
 :root[data-theme="dark"] .dashboard-page .ip-address {
     border-color: rgba(148, 163, 184, 0.22);
     background: rgba(148, 163, 184, 0.08);
@@ -777,8 +779,8 @@
     color: #99f6e4;
 }
 
-:root[data-theme="dark"] .dashboard-page .model-flow-arrow {
-    color: #64748b;
+:root[data-theme="dark"] .dashboard-page .model-flow-step + .model-flow-step::before {
+    background: rgba(148, 163, 184, 0.52);
 }
 :root[data-theme="dark"] .dashboard-page .custom-select-trigger-chip {
     border-color: #355a84;
