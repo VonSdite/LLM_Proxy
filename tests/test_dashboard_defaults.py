@@ -65,6 +65,7 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
         self.assertIn("function renderModelFlow(item)", html)
         self.assertIn("model-flow-step", html)
         self.assertIn("映射目标", html)
+        self.assertNotIn("model-flow-arrow", html)
         self.assertIn("statsSortIndicator_model_flow", html)
         self.assertIn("logsSortIndicator_model_flow", html)
         self.assertNotIn("statsSortIndicator_response_model", html)

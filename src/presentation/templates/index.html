@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}LLM使用统计{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260825-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/index.css?v=20260825-2">{% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
 {% block header_title %}LLM使用统计{% endblock %}
 {% block header_subtitle %}监控 API 请求和 Token 消耗{% endblock %}
@@ -570,7 +570,7 @@
                 const safeStageTitle = escapeHtml(stageTitles[part.role] || '模型');
                 const node = `<span class="model-flow-node${tone}" title="${safeStageTitle}: ${safePart}">${safePart}</span>`;
                 if (index === 0) return `<span class="model-flow-step">${node}</span>`;
-                return `<span class="model-flow-step"><span class="model-flow-arrow" aria-hidden="true">-&gt;</span>${node}</span>`;
+                return `<span class="model-flow-step">${node}</span>`;
             });
             return `<div class="model-flow" title="${title}">${steps.join('')}</div>`;
         }
