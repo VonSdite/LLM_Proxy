@@ -2845,7 +2845,7 @@ class DashboardTemplateTests(unittest.TestCase):
         index_css = (root / "static" / "css" / "index.css").read_text(encoding="utf-8")
         admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
 
-        self.assertIn("/static/css/index.css?v=20260813-1", index_html)
+        self.assertIn("/static/css/index.css?v=20260825-1", index_html)
         self.assertIn("dashboard-tabs-section", index_html)
         self.assertIn('id="dashboardTabBtn_stats"', index_html)
         self.assertIn('id="dashboardTabBtn_userUsage"', index_html)
@@ -2858,6 +2858,9 @@ class DashboardTemplateTests(unittest.TestCase):
         self.assertIn("缓存读取 Token", index_html)
         self.assertNotIn("缓存写入 Token", index_html)
         self.assertIn("缓存命中率", index_html)
+        self.assertIn("模型流向", index_html)
+        self.assertIn("function renderModelFlow(item)", index_html)
+        self.assertIn("model-flow-node", index_html)
         self.assertNotIn("function renderApiKeyUsageStatus(status)", index_html)
         self.assertNotIn("用户用量汇总</button>", index_html)
         self.assertNotIn("userUsageSortIndicator_request_model", index_html)

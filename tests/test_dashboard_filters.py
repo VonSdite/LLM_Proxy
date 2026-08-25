@@ -149,6 +149,7 @@ class DashboardFilterApiTests(unittest.TestCase):
         ip_address: str,
         start_time: datetime,
         api_key_id: int | None = None,
+        target_model_id: str | None = None,
         cache_read_input_tokens: int = 0,
         cache_creation_input_tokens: int = 0,
         cache_usage_status: str | None = None,
@@ -163,6 +164,7 @@ class DashboardFilterApiTests(unittest.TestCase):
             end_time=start_time,
             ip_address=ip_address,
             api_key_id=api_key_id,
+            target_model_id=target_model_id,
             cache_read_input_tokens=cache_read_input_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
             cache_usage_status=cache_usage_status,
@@ -179,7 +181,47 @@ class DashboardFilterApiTests(unittest.TestCase):
         assert key_id is not None
         return key_id
 
+    def test_model_flow_formatter_keeps_all_present_stages(self) -> None:
+        self.assertEqual(
+            "public-model -> target/model -> actual-model",
+            WebController._format_model_flow(
+                {
+                    "request_model": "public-model",
+                    "target_model_id": "target/model",
+                    "response_model": "actual-model",
+                }
+            ),
+        )
+        self.assertEqual(
+            "public-model -> target/model -> target/model",
+            WebController._format_model_flow(
+                {
+                    "request_model": "public-model",
+                    "target_model_id": "target/model",
+                    "response_model": "target/model",
+                }
+            ),
+        )
+        self.assertEqual(
+            "plain-model -> actual-model",
+            WebController._format_model_flow(
+                {
+                    "request_model": "plain-model",
+                    "response_model": "actual-model",
+                }
+            ),
+        )
+
     def test_statistics_api_supports_multi_value_filters(self) -> None:
+        self._log_request(
+            "mapped-model",
+            "actual-upstream-model",
+            16,
+            "10.0.0.1",
+            datetime(2026, 4, 8, 13, 0, 0),
+            target_model_id="target/provider-model",
+        )
+
         response = self.client.get(
             "/api/statistics",
             query_string=[
@@ -198,6 +240,20 @@ class DashboardFilterApiTests(unittest.TestCase):
             {("alice", "model-a"), ("bob", "model-b")},
             {(item["username"], item["request_model"]) for item in payload},
         )
+
+        mapped_response = self.client.get(
+            "/api/statistics",
+            query_string={
+                **self.DATE_FILTER,
+                "username": "alice",
+                "request_model": "mapped-model",
+            },
+        )
+        self.assertEqual(200, mapped_response.status_code)
+        mapped_payload = mapped_response.get_json()
+        self.assertEqual(1, len(mapped_payload))
+        self.assertEqual("target/provider-model", mapped_payload[0]["target_model_id"])
+        self.assertEqual("actual-upstream-model", mapped_payload[0]["response_model"])
 
     def test_usage_status_distinguishes_known_and_unknown_counts(self) -> None:
         self.log_service.log_request(
@@ -307,6 +363,15 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.assertNotIn("last_used_at", payload[0])
 
     def test_request_logs_api_supports_multi_value_filters(self) -> None:
+        self._log_request(
+            "mapped-model",
+            "actual-upstream-model",
+            16,
+            "10.0.0.1",
+            datetime(2026, 4, 8, 13, 0, 0),
+            target_model_id="target/provider-model",
+        )
+
         response = self.client.get(
             "/api/request-logs",
             query_string=[
@@ -329,7 +394,31 @@ class DashboardFilterApiTests(unittest.TestCase):
             {(item["username"], item["request_model"]) for item in payload["logs"]},
         )
 
+        mapped_response = self.client.get(
+            "/api/request-logs",
+            query_string={
+                "page": "1",
+                "page_size": "50",
+                **self.DATE_FILTER,
+                "username": "alice",
+                "request_model": "mapped-model",
+            },
+        )
+        self.assertEqual(200, mapped_response.status_code)
+        mapped_payload = mapped_response.get_json()
+        self.assertEqual("target/provider-model", mapped_payload["logs"][0]["target_model_id"])
+        self.assertEqual("actual-upstream-model", mapped_payload["logs"][0]["response_model"])
+
     def test_statistics_export_logs_returns_full_xlsx_without_pagination(self) -> None:
+        self._log_request(
+            "mapped-model",
+            "actual-upstream-model",
+            16,
+            "10.0.0.1",
+            datetime(2026, 4, 8, 13, 0, 0),
+            target_model_id="target/provider-model",
+        )
+
         response = self.client.get(
             "/api/statistics/export",
             query_string={
@@ -350,14 +439,25 @@ class DashboardFilterApiTests(unittest.TestCase):
         with ZipFile(BytesIO(response.data)) as archive:
             sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
 
-        self.assertIn("请求模型", sheet_xml)
+        self.assertIn("模型流向", sheet_xml)
+        self.assertNotIn("请求模型", sheet_xml)
         self.assertIn("Token 状态", sheet_xml)
         self.assertIn("完整", sheet_xml)
         self.assertIn("model-a", sheet_xml)
         self.assertIn("model-b", sheet_xml)
         self.assertIn("model-c", sheet_xml)
+        self.assertIn("mapped-model -&gt; target/provider-model -&gt; actual-upstream-model", sheet_xml)
 
     def test_statistics_export_summary_returns_xlsx(self) -> None:
+        self._log_request(
+            "mapped-model",
+            "actual-upstream-model",
+            16,
+            "10.0.0.1",
+            datetime(2026, 4, 8, 13, 0, 0),
+            target_model_id="target/provider-model",
+        )
+
         response = self.client.get(
             "/api/statistics/export",
             query_string={
@@ -374,12 +474,14 @@ class DashboardFilterApiTests(unittest.TestCase):
             sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
 
         self.assertIn("调用汇总", workbook_xml)
-        self.assertIn("响应模型", sheet_xml)
+        self.assertIn("模型流向", sheet_xml)
+        self.assertNotIn("响应模型", sheet_xml)
         self.assertIn("Token 状态", sheet_xml)
         self.assertIn("缓存读取 Token", sheet_xml)
         self.assertIn("缓存写入 Token", sheet_xml)
         self.assertIn("缓存命中率", sheet_xml)
         self.assertIn("resp-a", sheet_xml)
+        self.assertIn("mapped-model -&gt; target/provider-model -&gt; actual-upstream-model", sheet_xml)
 
     def test_statistics_export_user_usage_summary_returns_xlsx(self) -> None:
         response = self.client.get(
@@ -455,22 +557,31 @@ class DashboardFilterApiTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
-        self.assertEqual(3, payload["version"])
+        self.assertEqual(4, payload["version"])
         self.assertEqual("llm_proxy.statistics", payload["kind"])
         self.assertEqual("known", payload["request_logs"][0]["usage_status"])
         self.assertEqual("known", payload["daily_request_stats"][0]["usage_status"])
         self.assertEqual("unknown", payload["request_logs"][0]["cache_usage_status"])
         self.assertEqual("unknown", payload["daily_request_stats"][0]["cache_usage_status"])
         self.assertEqual(
-            {("10.0.0.1", "model-a", "resp-a", 10)},
+            {("10.0.0.1", "model-a", None, "resp-a", 10)},
             {
-                (item["ip_address"], item["request_model"], item["response_model"], item["total_tokens"])
+                (
+                    item["ip_address"],
+                    item["request_model"],
+                    item["target_model_id"],
+                    item["response_model"],
+                    item["total_tokens"],
+                )
                 for item in payload["request_logs"]
             },
         )
         self.assertEqual(
-            {("2026-04-08", "10.0.0.1", "model-a")},
-            {(item["stat_date"], item["ip_address"], item["request_model"]) for item in payload["daily_request_stats"]},
+            {("2026-04-08", "10.0.0.1", "model-a", "")},
+            {
+                (item["stat_date"], item["ip_address"], item["request_model"], item["target_model_id"])
+                for item in payload["daily_request_stats"]
+            },
         )
 
     def test_daily_stats_import_merges_duplicate_keys(self) -> None:
@@ -526,6 +637,54 @@ class DashboardFilterApiTests(unittest.TestCase):
         self.assertEqual(10, merged_row["prompt_tokens"])
         self.assertEqual(12, merged_row["completion_tokens"])
         self.assertEqual("known", merged_row["usage_status"])
+
+    def test_daily_stats_target_model_id_is_a_statistics_dimension(self) -> None:
+        payload = {
+            "version": 4,
+            "kind": "llm_proxy.statistics",
+            "daily_request_stats": [
+                {
+                    "stat_date": "2026-04-11",
+                    "ip_address": "10.0.0.1",
+                    "request_model": "mapped-model",
+                    "target_model_id": "target-a",
+                    "response_model": "actual-model",
+                    "request_count": 1,
+                    "total_tokens": 10,
+                    "prompt_tokens": 4,
+                    "completion_tokens": 6,
+                },
+                {
+                    "stat_date": "2026-04-11",
+                    "ip_address": "10.0.0.1",
+                    "request_model": "mapped-model",
+                    "target_model_id": "target-b",
+                    "response_model": "actual-model",
+                    "request_count": 1,
+                    "total_tokens": 20,
+                    "prompt_tokens": 8,
+                    "completion_tokens": 12,
+                },
+            ],
+        }
+        response = self.client.post("/api/statistics/daily-stats/import", json=payload)
+
+        self.assertEqual(201, response.status_code)
+        stats_response = self.client.get(
+            "/api/statistics",
+            query_string={
+                "start_date": "2026-04-11",
+                "end_date": "2026-04-11",
+                "username": "alice",
+                "request_model": "mapped-model",
+            },
+        )
+        self.assertEqual(200, stats_response.status_code)
+        rows = stats_response.get_json()
+        self.assertEqual(
+            {("target-a", 10), ("target-b", 20)},
+            {(row["target_model_id"], row["total_tokens"]) for row in rows},
+        )
 
     def test_statistics_v2_import_preserves_usage_status(self) -> None:
         payload = {
@@ -816,6 +975,45 @@ class DashboardFilterApiTests(unittest.TestCase):
             sum(1 for item in logs_payload["logs"] if item["request_model"] == "model-imported-log"),
         )
 
+    def test_request_logs_import_distinguishes_target_model_id(self) -> None:
+        base_log = {
+            "api_key_id": None,
+            "ip_address": "10.0.0.2",
+            "request_model": "mapped-imported-log",
+            "response_model": "actual-imported-model",
+            "total_tokens": 18,
+            "prompt_tokens": 8,
+            "completion_tokens": 10,
+            "start_time": "2026-04-12 09:00:00.000000",
+            "end_time": "2026-04-12 09:00:01.000000",
+            "created_at": "2026-04-12 09:00:01.000000",
+        }
+
+        response = self.client.post(
+            "/api/statistics/daily-stats/import",
+            json={
+                "request_logs": [
+                    {**base_log, "target_model_id": "target-a"},
+                    {**base_log, "target_model_id": "target-b"},
+                ]
+            },
+        )
+
+        self.assertEqual(201, response.status_code)
+        logs_response = self.client.get(
+            "/api/request-logs",
+            query_string={
+                "page": "1",
+                "page_size": "50",
+                "start_date": "2026-04-12",
+                "end_date": "2026-04-12",
+                "request_model": "mapped-imported-log",
+            },
+        )
+        self.assertEqual(200, logs_response.status_code)
+        logs_payload = logs_response.get_json()
+        self.assertEqual({"target-a", "target-b"}, {item["target_model_id"] for item in logs_payload["logs"]})
+
     def test_statistics_api_sorts_on_server(self) -> None:
         response = self.client.get(
             "/api/statistics",
@@ -982,6 +1180,60 @@ class LogRepositoryUsageStatusMigrationTests(unittest.TestCase):
         self.assertIn("usage_status", daily_columns)
         self.assertEqual({"known-log": "known", "unknown-log": "unknown"}, request_statuses)
         self.assertEqual({"known-stat": "known", "unknown-stat": "unknown"}, daily_statuses)
+
+    def test_legacy_daily_stats_rebuilds_target_model_dimension(self) -> None:
+        connection_factory = create_connection_factory(self.db_path)
+
+        repository = LogRepository(connection_factory)
+        UserRepository(connection_factory)
+        repository.insert(
+            request_model="mapped-model",
+            target_model_id="target-a",
+            response_model="actual-model",
+            total_tokens=10,
+            prompt_tokens=4,
+            completion_tokens=6,
+            start_time=datetime(2026, 4, 2, 9, 0, 0),
+            end_time=datetime(2026, 4, 2, 9, 0, 1),
+            ip_address="10.0.0.3",
+        )
+        repository.insert(
+            request_model="mapped-model",
+            target_model_id="target-b",
+            response_model="actual-model",
+            total_tokens=20,
+            prompt_tokens=8,
+            completion_tokens=12,
+            start_time=datetime(2026, 4, 2, 9, 1, 0),
+            end_time=datetime(2026, 4, 2, 9, 1, 1),
+            ip_address="10.0.0.3",
+        )
+
+        with connection_factory() as conn:
+            unique_columns = [
+                [
+                    row["name"]
+                    for row in conn.execute(
+                        f"PRAGMA index_info({LogRepository._quote_identifier(index_row['name'])})"
+                    ).fetchall()
+                ]
+                for index_row in conn.execute("PRAGMA index_list(daily_request_stats)").fetchall()
+                if index_row["unique"]
+            ]
+        stats = repository.get_statistics(
+            start_date="2026-04-02",
+            end_date="2026-04-02",
+            request_model="mapped-model",
+        )
+
+        self.assertIn(
+            ["stat_date", "ip_address", "request_model", "target_model_id", "response_model"],
+            unique_columns,
+        )
+        self.assertEqual(
+            {("target-a", 10), ("target-b", 20)},
+            {(row["target_model_id"], row["total_tokens"]) for row in stats},
+        )
 
 
 if __name__ == "__main__":

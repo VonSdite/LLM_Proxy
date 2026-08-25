@@ -351,6 +351,16 @@ class WebController:
         except (TypeError, ValueError):
             return "未知"
 
+    @staticmethod
+    def _format_model_flow(item: dict[str, Any]) -> str:
+        """将请求模型、映射目标和响应模型格式化为展示链路。"""
+        parts = [
+            str(item.get("request_model") or "").strip(),
+            str(item.get("target_model_id") or "").strip(),
+            str(item.get("response_model") or "").strip(),
+        ]
+        return " -> ".join(part for part in parts if part)
+
     def get_statistics(self) -> ResponseReturnValue:
         try:
             self._validate_dashboard_date_range(
@@ -550,8 +560,7 @@ class WebController:
                 headers = [
                     "IP",
                     "用户名",
-                    "请求模型",
-                    "响应模型",
+                    "模型流向",
                     "输入token",
                     "输出token",
                     "总 Token",
@@ -567,8 +576,7 @@ class WebController:
                     [
                         item["ip_address"],
                         item["username"],
-                        item["request_model"],
-                        item["response_model"],
+                        self._format_model_flow(item),
                         item["prompt_tokens"],
                         item["completion_tokens"],
                         item["total_tokens"],
@@ -596,8 +604,7 @@ class WebController:
                 headers = [
                     "IP",
                     "用户名",
-                    "请求模型",
-                    "响应模型",
+                    "模型流向",
                     "输入token",
                     "输出token",
                     "总 Token",
@@ -611,8 +618,7 @@ class WebController:
                     [
                         item["ip_address"],
                         item["username"],
-                        item["request_model"],
-                        item["response_model"],
+                        self._format_model_flow(item),
                         item["prompt_tokens"],
                         item["completion_tokens"],
                         item["total_tokens"],

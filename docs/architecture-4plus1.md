@@ -143,7 +143,7 @@ decoder
 - `LogService`
   - 读取请求日志、统计汇总、用户用量汇总和筛选项
   - 支持按筛选条件导出统计迁移 JSON，迁移包包含请求明细和日聚合统计
-  - 导入请求明细时按明细业务字段识别重复行；导入日聚合统计时按日期、IP、请求模型和响应模型累加数值
+  - 导入请求明细时按明细业务字段识别重复行；导入日聚合统计时按日期、IP、请求模型、映射目标模型和响应模型累加数值
 - `ApiKeyController`
   - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限和 token 上限更新接口
 - `ApiKeyService`
@@ -925,8 +925,10 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - `/v1/models` 只返回两者交集
 - 统计完成回调执行后：
   - `request_logs.api_key_id` 记录本次使用的 key
+  - `request_logs.target_model_id` 记录模型映射实际命中的目标模型，未经过模型映射的请求为空
   - `request_logs.usage_status` 与 `daily_request_stats.usage_status` 标记 usage 为 `known`、`partial` 或 `unknown`
   - `request_logs` 记录缓存读取 Token、缓存写入 Token 和缓存 usage 状态
+  - `daily_request_stats` 按日期、IP、请求模型、映射目标模型和响应模型聚合
   - `daily_request_stats` 累加缓存读取 Token、缓存写入 Token，以及缓存 usage 已知请求的完整输入 Token
   - `api_keys.total_request_count`
   - `api_keys.prompt_tokens`
@@ -939,7 +941,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 
 缓存命中率按 `SUM(cache_read_input_tokens) / SUM(cache_known_prompt_tokens)` 计算。`cache_known_prompt_tokens` 只包含缓存 usage 已知请求的完整 prompt/input Token，混合已知和未知请求时未知请求不进入分母；没有有效分母时命中率为空，已知且缓存读取为零时命中率为 `0%`。
 
-统计管理页面显示缓存读取 Token 和缓存命中率。Excel 导出同时显示 Token 状态和缓存写入 Token：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 3 并保留原始 `usage_status`、缓存 Token 和 `cache_usage_status` 值；版本 2 包中的缓存状态按 `unknown` 导入。
+统计管理页面在调用汇总和请求明细中使用“模型流向”展示请求模型、映射目标模型和响应模型；未经过模型映射的记录展示请求模型到响应模型。统计管理页面显示缓存读取 Token 和缓存命中率。Excel 导出同时显示 Token 状态和缓存写入 Token：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 4 并保留原始 `usage_status`、映射目标模型、缓存 Token 和 `cache_usage_status` 值；版本 2 包中的缓存状态按 `unknown` 导入，旧版本没有映射目标模型时按空值导入。
 
 ## 4. Development View
 
