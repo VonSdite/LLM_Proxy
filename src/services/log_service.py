@@ -44,11 +44,13 @@ class LogService:
         end_time: datetime | None = None,
         ip_address: str | None = None,
         api_key_id: int | None = None,
+        target_model_id: str | None = None,
     ) -> int | None:
         """记录一次请求日志。"""
         try:
             log_id = self._repository.insert(
                 request_model=request_model,
+                target_model_id=target_model_id,
                 response_model=response_model,
                 total_tokens=total_tokens,
                 prompt_tokens=prompt_tokens,
@@ -63,9 +65,11 @@ class LogService:
                 api_key_id=api_key_id,
             )
             self._logger.info(
-                "Request log saved: id=%s model=%s response_model=%s total_tokens=%s ip=%s api_key_id=%s",
+                "Request log saved: id=%s model=%s target_model_id=%s response_model=%s total_tokens=%s "
+                "ip=%s api_key_id=%s",
                 log_id,
                 request_model,
+                target_model_id,
                 response_model,
                 total_tokens,
                 ip_address,
@@ -98,6 +102,7 @@ class LogService:
             result = [
                 {
                     "request_model": row["request_model"],
+                    "target_model_id": row["target_model_id"],
                     "response_model": row["response_model"],
                     "ip_address": row["ip_address"],
                     "username": row["username"],
@@ -312,7 +317,7 @@ class LogService:
             len(daily_stats),
         )
         return {
-            "version": 3,
+            "version": 4,
             "kind": "llm_proxy.statistics",
             "request_logs": request_logs,
             "daily_request_stats": daily_stats,

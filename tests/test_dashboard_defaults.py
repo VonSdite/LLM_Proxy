@@ -58,6 +58,18 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
         self.assertIn("缓存命中率", html)
         self.assertIn("function renderCacheHitRate(value, status)", html)
 
+    def test_model_columns_are_rendered_as_model_flow(self) -> None:
+        html = self.render_dashboard()
+
+        self.assertIn("模型流向", html)
+        self.assertIn("function renderModelFlow(item)", html)
+        self.assertIn("model-flow-step", html)
+        self.assertIn("映射目标", html)
+        self.assertIn("statsSortIndicator_model_flow", html)
+        self.assertIn("logsSortIndicator_model_flow", html)
+        self.assertNotIn("statsSortIndicator_response_model", html)
+        self.assertNotIn("logsSortIndicator_response_model", html)
+
 
 if __name__ == "__main__":
     unittest.main()

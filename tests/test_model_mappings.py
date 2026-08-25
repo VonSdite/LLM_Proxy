@@ -1065,6 +1065,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self.assertEqual("auto_disabled", targets["gpt_text"]["status"])
         self.assertEqual("claude_text", mapping["current_target_model_id"])
         self.assertEqual("claude_text", completed[0]["response_model"])
+        self.assertEqual("claude_text", completed[0]["target_model_id"])
 
     def test_provider_403_cools_target_records_response_message_and_switches(self) -> None:
         calls: list[str] = []
@@ -1096,6 +1097,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self.assertEqual(403, targets["alpha/fast"]["last_status_code"])
         self.assertEqual("API key has no model access", targets["alpha/fast"]["last_error_message"])
         self.assertEqual("gpt_text", mapping["current_target_model_id"])
+        self.assertEqual("gpt_text", completed[0]["target_model_id"])
 
     def test_image_mapping_uses_codex_image_target(self) -> None:
         calls: list[str] = []
@@ -1137,6 +1139,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self.assertEqual(b"ok", response.get_data())
         self.assertEqual(["gpt_image"], calls)
         self.assertEqual("gpt-image-2-2026-08-08", completed[0]["response_model"])
+        self.assertEqual("gpt_image", completed[0]["target_model_id"])
 
     def test_successful_target_does_not_switch(self) -> None:
         calls: list[str] = []
@@ -1158,6 +1161,7 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
 
         self.assertEqual(["alpha/fast"], calls)
         self.assertEqual("gpt-5.6-2026-08-08", completed[0]["response_model"])
+        self.assertEqual("alpha/fast", completed[0]["target_model_id"])
 
     def test_target_exception_cools_and_switches(self) -> None:
         calls: list[str] = []

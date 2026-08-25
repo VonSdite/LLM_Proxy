@@ -676,8 +676,7 @@
     white-space: nowrap;
 }
 
-.dashboard-page .ip-address,
-.dashboard-page .table-model-tag {
+.dashboard-page .ip-address {
     display: inline-flex;
     align-items: center;
     max-width: 100%;
@@ -704,8 +703,60 @@
     letter-spacing: 0.01em;
 }
 
-.dashboard-page .table-model-tag {
+.dashboard-page .model-flow-col {
+    min-width: 260px;
+}
+
+.dashboard-page .model-flow {
+    display: flex;
+    align-items: center;
+    column-gap: 7px;
+    row-gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+}
+
+.dashboard-page .model-flow-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.dashboard-page .model-flow-node {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    max-width: min(220px, 100%);
+    min-height: 26px;
+    padding: 0 10px;
+    border: 1px solid rgba(95, 143, 190, 0.2);
+    border-radius: 8px;
+    background: rgba(95, 143, 190, 0.08);
     color: var(--primary-active);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dashboard-page .model-flow-node.is-target {
+    border-color: rgba(20, 132, 118, 0.26);
+    background: rgba(20, 132, 118, 0.1);
+    color: #0f766e;
+}
+
+.dashboard-page .model-flow-arrow {
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
 }
 
 :root[data-theme="dark"] .dashboard-page .ip-address {
@@ -714,10 +765,20 @@
     color: #cbd5e1;
 }
 
-:root[data-theme="dark"] .dashboard-page .table-model-tag {
+:root[data-theme="dark"] .dashboard-page .model-flow-node {
     border-color: rgba(47, 129, 247, 0.26);
     background: rgba(47, 129, 247, 0.1);
     color: #c7e0ff;
+}
+
+:root[data-theme="dark"] .dashboard-page .model-flow-node.is-target {
+    border-color: rgba(45, 212, 191, 0.3);
+    background: rgba(45, 212, 191, 0.11);
+    color: #99f6e4;
+}
+
+:root[data-theme="dark"] .dashboard-page .model-flow-arrow {
+    color: #64748b;
 }
 :root[data-theme="dark"] .dashboard-page .custom-select-trigger-chip {
     border-color: #355a84;

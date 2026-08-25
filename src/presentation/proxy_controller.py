@@ -135,6 +135,7 @@ class LogServiceLike(Protocol):
         end_time: Any = None,
         ip_address: str | None = None,
         api_key_id: int | None = None,
+        target_model_id: str | None = None,
     ) -> int | None: ...
 
 
@@ -457,6 +458,7 @@ class ProxyController:
             error_text = str(exc)
             compatibility_fields = {
                 "api_key_id",
+                "target_model_id",
                 "usage_status",
                 "cache_read_input_tokens",
                 "cache_creation_input_tokens",
@@ -660,6 +662,7 @@ class ProxyController:
             def on_proxy_complete(response_meta: dict[str, Any]) -> None:
                 log_kwargs = {
                     "request_model": model_name,
+                    "target_model_id": response_meta.get("target_model_id"),
                     "response_model": response_meta.get("response_model"),
                     "total_tokens": response_meta.get("total_tokens", 0),
                     "prompt_tokens": response_meta.get("prompt_tokens", 0),
@@ -907,15 +910,17 @@ class ProxyController:
 
             def on_proxy_complete(response_meta: dict[str, Any]) -> None:
                 self._logger.info(
-                    "Proxy completed: route=%s model=%s response_model=%s total_tokens=%s ip=%s",
+                    "Proxy completed: route=%s model=%s target_model_id=%s response_model=%s total_tokens=%s ip=%s",
                     route_name,
                     model_name,
+                    response_meta.get("target_model_id"),
                     response_meta.get("response_model"),
                     response_meta.get("total_tokens", 0),
                     client_ip,
                 )
                 log_kwargs = {
                     "request_model": model_name,
+                    "target_model_id": response_meta.get("target_model_id"),
                     "response_model": response_meta.get("response_model"),
                     "total_tokens": response_meta.get("total_tokens", 0),
                     "prompt_tokens": response_meta.get("prompt_tokens", 0),
@@ -1268,7 +1273,9 @@ class ProxyController:
 
             def complete_mapped_image_request(meta: dict[str, Any]) -> None:
                 self._model_mapping_service.record_success(selection)
-                on_complete(dict(meta))
+                completion_meta = dict(meta)
+                completion_meta["target_model_id"] = target_model_id
+                on_complete(completion_meta)
 
             try:
                 if self._codex_proxy_service is not None and self._codex_proxy_service.has_image_model(target_model_id):
@@ -1397,7 +1404,9 @@ class ProxyController:
                 if stream_failed:
                     return
                 self._model_mapping_service.record_success(selection)
-                on_complete(dict(meta))
+                completion_meta = dict(meta)
+                completion_meta["target_model_id"] = target_model_id
+                on_complete(completion_meta)
 
             try:
                 result, status_code, failure_info = self._dispatch_completion_target(

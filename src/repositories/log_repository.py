@@ -23,7 +23,10 @@ class LogRepository:
     _STATISTICS_SORT_COLUMNS = {
         "ip_address": "COALESCE(d.ip_address, '')",
         "username": "COALESCE(u.username, '-')",
+        "model_flow": "d.request_model || ' ' || COALESCE(NULLIF(d.target_model_id, ''), '') || ' ' "
+        "|| COALESCE(NULLIF(d.response_model, ''), '')",
         "request_model": "d.request_model",
+        "target_model_id": "NULLIF(d.target_model_id, '')",
         "response_model": "NULLIF(d.response_model, '')",
         "request_count": "COALESCE(SUM(d.request_count), 0)",
         "total_tokens": "COALESCE(SUM(d.total_tokens), 0)",
@@ -67,7 +70,10 @@ class LogRepository:
     _LOG_SORT_COLUMNS = {
         "ip_address": "COALESCE(l.ip_address, '')",
         "username": "COALESCE(u.username, '-')",
+        "model_flow": "l.request_model || ' ' || COALESCE(l.target_model_id, '') || ' ' "
+        "|| COALESCE(l.response_model, '')",
         "request_model": "l.request_model",
+        "target_model_id": "COALESCE(l.target_model_id, '')",
         "response_model": "COALESCE(l.response_model, '')",
         "total_tokens": "COALESCE(l.total_tokens, 0)",
         "prompt_tokens": "COALESCE(l.prompt_tokens, 0)",
@@ -96,6 +102,7 @@ class LogRepository:
                     api_key_id INTEGER,
                     ip_address TEXT,
                     request_model TEXT NOT NULL,
+                    target_model_id TEXT,
                     response_model TEXT,
                     total_tokens INTEGER,
                     prompt_tokens INTEGER DEFAULT 0,
@@ -115,6 +122,8 @@ class LogRepository:
             }
             if "api_key_id" not in request_log_columns:
                 cursor.execute("ALTER TABLE request_logs ADD COLUMN api_key_id INTEGER")
+            if "target_model_id" not in request_log_columns:
+                cursor.execute("ALTER TABLE request_logs ADD COLUMN target_model_id TEXT")
             if "usage_status" not in request_log_columns:
                 cursor.execute("ALTER TABLE request_logs ADD COLUMN usage_status TEXT NOT NULL DEFAULT 'unknown'")
                 cursor.execute(
@@ -141,6 +150,7 @@ class LogRepository:
                     stat_date TEXT NOT NULL,
                     ip_address TEXT,
                     request_model TEXT NOT NULL,
+                    target_model_id TEXT NOT NULL DEFAULT '',
                     response_model TEXT NOT NULL DEFAULT '',
                     request_count INTEGER NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL DEFAULT 0,
@@ -153,7 +163,7 @@ class LogRepository:
                     cache_usage_status TEXT NOT NULL DEFAULT 'unknown',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    UNIQUE(stat_date, ip_address, request_model, response_model)
+                    UNIQUE(stat_date, ip_address, request_model, target_model_id, response_model)
                 )
                 """
             )
@@ -162,6 +172,9 @@ class LogRepository:
             daily_stat_columns = {
                 str(row["name"]).strip() for row in cursor.execute("PRAGMA table_info(daily_request_stats)").fetchall()
             }
+            if "target_model_id" not in daily_stat_columns:
+                cursor.execute("ALTER TABLE daily_request_stats ADD COLUMN target_model_id TEXT NOT NULL DEFAULT ''")
+                daily_stat_columns.add("target_model_id")
             if "usage_status" not in daily_stat_columns:
                 cursor.execute(
                     "ALTER TABLE daily_request_stats ADD COLUMN usage_status TEXT NOT NULL DEFAULT 'unknown'"
@@ -186,6 +199,77 @@ class LogRepository:
                 cursor.execute(
                     "ALTER TABLE daily_request_stats ADD COLUMN cache_usage_status TEXT NOT NULL DEFAULT 'unknown'"
                 )
+            self._ensure_daily_stats_target_model_dimension(cursor)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_request_stats(stat_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_ip ON daily_request_stats(ip_address)")
+
+    def _ensure_daily_stats_target_model_dimension(self, cursor: SQLiteCursor) -> None:
+        """确保日聚合唯一维度包含映射目标模型。"""
+        unique_columns: list[list[str]] = []
+        for index_row in cursor.execute("PRAGMA index_list(daily_request_stats)").fetchall():
+            if not int(index_row["unique"]):
+                continue
+            index_name = str(index_row["name"])
+            quoted_index_name = self._quote_identifier(index_name)
+            columns = [str(row["name"]) for row in cursor.execute(f"PRAGMA index_info({quoted_index_name})").fetchall()]
+            unique_columns.append(columns)
+
+        expected_columns = ["stat_date", "ip_address", "request_model", "target_model_id", "response_model"]
+        if expected_columns in unique_columns:
+            return
+
+        self._rebuild_daily_request_stats_with_target_model(cursor)
+
+    @staticmethod
+    def _quote_identifier(value: str) -> str:
+        escaped = value.replace('"', '""')
+        return f'"{escaped}"'
+
+    @staticmethod
+    def _rebuild_daily_request_stats_with_target_model(cursor: SQLiteCursor) -> None:
+        """重建日聚合表，保留旧统计并启用新的唯一维度。"""
+        cursor.execute("ALTER TABLE daily_request_stats RENAME TO daily_request_stats_old")
+        cursor.execute(
+            """
+            CREATE TABLE daily_request_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stat_date TEXT NOT NULL,
+                ip_address TEXT,
+                request_model TEXT NOT NULL,
+                target_model_id TEXT NOT NULL DEFAULT '',
+                response_model TEXT NOT NULL DEFAULT '',
+                request_count INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                usage_status TEXT NOT NULL DEFAULT 'unknown',
+                cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_known_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_usage_status TEXT NOT NULL DEFAULT 'unknown',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(stat_date, ip_address, request_model, target_model_id, response_model)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO daily_request_stats (
+                id, stat_date, ip_address, request_model, target_model_id, response_model,
+                request_count, total_tokens, prompt_tokens, completion_tokens, usage_status,
+                cache_read_input_tokens, cache_creation_input_tokens, cache_known_prompt_tokens,
+                cache_usage_status, created_at, updated_at
+            )
+            SELECT
+                id, stat_date, ip_address, request_model, COALESCE(target_model_id, ''), response_model,
+                request_count, total_tokens, prompt_tokens, completion_tokens, usage_status,
+                cache_read_input_tokens, cache_creation_input_tokens, cache_known_prompt_tokens,
+                cache_usage_status, created_at, updated_at
+            FROM daily_request_stats_old
+            """
+        )
+        cursor.execute("DROP TABLE daily_request_stats_old")
 
     def insert(
         self,
@@ -202,6 +286,7 @@ class LogRepository:
         end_time: object | None = None,
         ip_address: str | None = None,
         api_key_id: int | None = None,
+        target_model_id: str | None = None,
     ) -> int | None:
         """写入单条请求日志，并同步更新日聚合统计。"""
         start_time_value = ensure_local_datetime(start_time)
@@ -223,20 +308,22 @@ class LogRepository:
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            target_model_key = target_model_id or ""
             response_model_key = response_model or ""
             cursor.execute(
                 """
                 INSERT INTO request_logs
-                (api_key_id, ip_address, request_model, response_model, total_tokens,
+                (api_key_id, ip_address, request_model, target_model_id, response_model, total_tokens,
                  prompt_tokens, completion_tokens, usage_status,
                  cache_read_input_tokens, cache_creation_input_tokens, cache_usage_status,
                  start_time, end_time, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     api_key_id,
                     ip_address,
                     request_model,
+                    target_model_id,
                     response_model,
                     safe_total_tokens,
                     safe_prompt_tokens,
@@ -256,14 +343,14 @@ class LogRepository:
                 """
                 INSERT INTO daily_request_stats
                 (
-                    stat_date, ip_address, request_model, response_model,
+                    stat_date, ip_address, request_model, target_model_id, response_model,
                     request_count, total_tokens, prompt_tokens, completion_tokens, usage_status,
                     cache_read_input_tokens, cache_creation_input_tokens,
                     cache_known_prompt_tokens, cache_usage_status,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(stat_date, ip_address, request_model, response_model)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(stat_date, ip_address, request_model, target_model_id, response_model)
                 DO UPDATE SET
                     request_count = request_count + 1,
                     total_tokens = total_tokens + excluded.total_tokens,
@@ -288,6 +375,7 @@ class LogRepository:
                     stat_date,
                     ip_address,
                     request_model,
+                    target_model_key,
                     response_model_key,
                     safe_total_tokens,
                     safe_prompt_tokens,
@@ -418,13 +506,15 @@ class LogRepository:
                 sort_key,
                 sort_direction,
                 "total_tokens",
-                "COALESCE(d.ip_address, '') ASC, d.request_model ASC, NULLIF(d.response_model, '') ASC",
+                "COALESCE(d.ip_address, '') ASC, d.request_model ASC, "
+                "NULLIF(d.target_model_id, '') ASC, NULLIF(d.response_model, '') ASC",
             )
             query = f"""
                 SELECT
                     d.ip_address,
                     COALESCE(u.username, '-') as username,
                     d.request_model,
+                    NULLIF(d.target_model_id, '') as target_model_id,
                     NULLIF(d.response_model, '') as response_model,
                     COALESCE(SUM(d.request_count), 0) as request_count,
                     COALESCE(SUM(d.total_tokens), 0) as total_tokens,
@@ -454,7 +544,7 @@ class LogRepository:
                 FROM daily_request_stats d
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
-                GROUP BY d.ip_address, u.username, d.request_model, d.response_model
+                GROUP BY d.ip_address, u.username, d.request_model, d.target_model_id, d.response_model
                 {order_clause}
             """
             cursor.execute(query, params)
@@ -662,7 +752,8 @@ class LogRepository:
                 "l.id DESC",
             )
             data_query = f"""
-                SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
+                SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username,
+                       l.request_model, l.target_model_id, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
                        l.cache_read_input_tokens, l.cache_creation_input_tokens, l.cache_usage_status,
                        CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
@@ -723,7 +814,8 @@ class LogRepository:
                 "l.id DESC",
             )
             query = f"""
-                SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
+                SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username,
+                       l.request_model, l.target_model_id, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
                        l.cache_read_input_tokens, l.cache_creation_input_tokens, l.cache_usage_status,
                        CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
@@ -772,6 +864,7 @@ class LogRepository:
                     l.api_key_id,
                     l.ip_address,
                     l.request_model,
+                    l.target_model_id,
                     l.response_model,
                     l.total_tokens,
                     l.prompt_tokens,
@@ -823,6 +916,7 @@ class LogRepository:
                     d.stat_date,
                     d.ip_address,
                     d.request_model,
+                    d.target_model_id,
                     d.response_model,
                     d.request_count,
                     d.total_tokens,
@@ -837,7 +931,7 @@ class LogRepository:
                 LEFT JOIN users u ON d.ip_address = u.ip_address
                 WHERE {where_clause}
                 ORDER BY d.stat_date ASC, COALESCE(d.ip_address, '') ASC,
-                    d.request_model ASC, d.response_model ASC
+                    d.request_model ASC, d.target_model_id ASC, d.response_model ASC
                 """,
                 params,
             )
@@ -864,14 +958,14 @@ class LogRepository:
                     """
                     INSERT INTO daily_request_stats
                     (
-                        stat_date, ip_address, request_model, response_model,
+                        stat_date, ip_address, request_model, target_model_id, response_model,
                         request_count, total_tokens, prompt_tokens, completion_tokens, usage_status,
                         cache_read_input_tokens, cache_creation_input_tokens,
                         cache_known_prompt_tokens, cache_usage_status,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(stat_date, ip_address, request_model, response_model)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(stat_date, ip_address, request_model, target_model_id, response_model)
                     DO UPDATE SET
                         request_count = request_count + excluded.request_count,
                         total_tokens = total_tokens + excluded.total_tokens,
@@ -898,6 +992,7 @@ class LogRepository:
                         row["stat_date"],
                         row["ip_address"],
                         row["request_model"],
+                        row["target_model_id"],
                         row["response_model"],
                         row["request_count"],
                         row["total_tokens"],
@@ -938,17 +1033,18 @@ class LogRepository:
                     """
                     INSERT INTO request_logs
                     (
-                        api_key_id, ip_address, request_model, response_model, total_tokens,
+                        api_key_id, ip_address, request_model, target_model_id, response_model, total_tokens,
                         prompt_tokens, completion_tokens, usage_status,
                         cache_read_input_tokens, cache_creation_input_tokens, cache_usage_status,
                         start_time, end_time, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         row["api_key_id"],
                         row["ip_address"],
                         row["request_model"],
+                        row["target_model_id"],
                         row["response_model"],
                         row["total_tokens"],
                         row["prompt_tokens"],
@@ -1057,6 +1153,10 @@ class LogRepository:
             "request_model": cls._normalize_stat_text(
                 row.get("request_model"), field_name="request_model", required=True
             ),
+            "target_model_id": cls._normalize_stat_text(
+                row.get("target_model_id"), field_name="target_model_id", required=False
+            )
+            or "",
             "response_model": response_model or "",
             "request_count": cls._normalize_stat_int(row.get("request_count"), field_name="request_count"),
             "total_tokens": total_tokens,
@@ -1091,6 +1191,9 @@ class LogRepository:
             "ip_address": cls._normalize_stat_text(row.get("ip_address"), field_name="ip_address", required=False),
             "request_model": cls._normalize_stat_text(
                 row.get("request_model"), field_name="request_model", required=True
+            ),
+            "target_model_id": cls._normalize_stat_text(
+                row.get("target_model_id"), field_name="target_model_id", required=False
             ),
             "response_model": cls._normalize_stat_text(
                 row.get("response_model"), field_name="response_model", required=False
@@ -1158,19 +1261,27 @@ class LogRepository:
             cursor.execute(
                 """
                 SELECT 1 FROM daily_request_stats
-                WHERE stat_date = ? AND ip_address IS NULL AND request_model = ? AND response_model = ?
+                WHERE stat_date = ? AND ip_address IS NULL AND request_model = ?
+                  AND target_model_id = ? AND response_model = ?
                 LIMIT 1
                 """,
-                (row["stat_date"], row["request_model"], row["response_model"]),
+                (row["stat_date"], row["request_model"], row["target_model_id"], row["response_model"]),
             )
         else:
             cursor.execute(
                 """
                 SELECT 1 FROM daily_request_stats
-                WHERE stat_date = ? AND ip_address = ? AND request_model = ? AND response_model = ?
+                WHERE stat_date = ? AND ip_address = ? AND request_model = ?
+                  AND target_model_id = ? AND response_model = ?
                 LIMIT 1
                 """,
-                (row["stat_date"], row["ip_address"], row["request_model"], row["response_model"]),
+                (
+                    row["stat_date"],
+                    row["ip_address"],
+                    row["request_model"],
+                    row["target_model_id"],
+                    row["response_model"],
+                ),
             )
         return cursor.fetchone() is not None
 
@@ -1181,6 +1292,7 @@ class LogRepository:
             SELECT 1 FROM request_logs
             WHERE ip_address IS ?
               AND request_model IS ?
+              AND target_model_id IS ?
               AND response_model IS ?
               AND total_tokens IS ?
               AND prompt_tokens IS ?
@@ -1196,6 +1308,7 @@ class LogRepository:
             (
                 row["ip_address"],
                 row["request_model"],
+                row["target_model_id"],
                 row["response_model"],
                 row["total_tokens"],
                 row["prompt_tokens"],
@@ -1214,7 +1327,10 @@ class LogRepository:
     def _update_daily_stat(cursor: SQLiteCursor, row: dict[str, Any], now_text: str) -> None:
         params: tuple[Any, ...]
         if row["ip_address"] is None:
-            where_clause = "stat_date = ? AND ip_address IS NULL AND request_model = ? AND response_model = ?"
+            where_clause = (
+                "stat_date = ? AND ip_address IS NULL AND request_model = ? "
+                "AND target_model_id = ? AND response_model = ?"
+            )
             params = (
                 row["request_count"],
                 row["total_tokens"],
@@ -1230,10 +1346,13 @@ class LogRepository:
                 now_text,
                 row["stat_date"],
                 row["request_model"],
+                row["target_model_id"],
                 row["response_model"],
             )
         else:
-            where_clause = "stat_date = ? AND ip_address = ? AND request_model = ? AND response_model = ?"
+            where_clause = (
+                "stat_date = ? AND ip_address = ? AND request_model = ? AND target_model_id = ? AND response_model = ?"
+            )
             params = (
                 row["request_count"],
                 row["total_tokens"],
@@ -1250,6 +1369,7 @@ class LogRepository:
                 row["stat_date"],
                 row["ip_address"],
                 row["request_model"],
+                row["target_model_id"],
                 row["response_model"],
             )
 
