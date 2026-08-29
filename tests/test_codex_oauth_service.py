@@ -8,7 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -177,6 +177,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
             ),
             spawned[0][1],
         )
+        self.assertEqual(60 * 60, CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS)
 
     def test_refresh_all_auth_file_quota_snapshots_skips_invalid_files_and_delays_between_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -259,6 +260,127 @@ class CodexOAuthServiceTests(unittest.TestCase):
             },
             {item["name"]: item["reason"] for item in result["skipped"]},
         )
+
+    def test_refresh_due_auth_file_quota_snapshots_only_refreshes_elapsed_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            now = datetime.now(timezone.utc)
+            for name in ("codex-due.json", "codex-future.json", "codex-attempted.json"):
+                (auth_dir / name).write_text(
+                    json.dumps(
+                        {
+                            "type": "codex",
+                            "email": f"{name}@example.com",
+                            "access_token": f"access-{name}",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            state_file = auth_dir / ".state" / "auth_files.json"
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "files": {
+                            "codex-due.json": {
+                                "quota": {
+                                    "windows": [
+                                        {
+                                            "label": "Codex 5 小时",
+                                            "reset_at": (now - timedelta(minutes=1)).isoformat(),
+                                        }
+                                    ]
+                                },
+                                "quota_refreshed_at": (now - timedelta(hours=1)).isoformat(),
+                            },
+                            "codex-future.json": {
+                                "quota": {
+                                    "windows": [
+                                        {
+                                            "label": "Codex 5 小时",
+                                            "reset_at": (now + timedelta(hours=1)).isoformat(),
+                                        }
+                                    ]
+                                },
+                                "quota_refreshed_at": now.isoformat(),
+                            },
+                            "codex-attempted.json": {
+                                "quota": {
+                                    "windows": [
+                                        {
+                                            "label": "Codex 5 小时",
+                                            "reset_at": (now - timedelta(minutes=2)).isoformat(),
+                                        }
+                                    ]
+                                },
+                                "quota_refreshed_at": now.isoformat(),
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            refreshed_names: list[str] = []
+
+            with patch.object(
+                service,
+                "get_auth_file_quota",
+                side_effect=lambda name: refreshed_names.append(name) or {"status": "ok"},
+            ):
+                result = service.refresh_due_auth_file_quota_snapshots(file_delay_seconds=0)
+
+        self.assertEqual(["codex-due.json"], refreshed_names)
+        self.assertEqual(["codex-due.json"], result["refreshed"])
+        self.assertEqual([], result["failed"])
+
+    def test_next_quota_snapshot_refresh_delay_uses_earliest_window_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            now = datetime.now(timezone.utc)
+            state_file = auth_dir / ".state" / "auth_files.json"
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "files": {
+                            "codex-demo.json": {
+                                "quota": {
+                                    "windows": [
+                                        {
+                                            "label": "Codex 5 小时",
+                                            "reset_at": (now + timedelta(minutes=2)).isoformat(),
+                                        }
+                                    ]
+                                },
+                                "quota_refreshed_at": now.isoformat(),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+
+            delay_seconds = service._seconds_until_next_quota_snapshot_refresh(60 * 60)
+
+        self.assertGreater(delay_seconds, 0)
+        self.assertLessEqual(delay_seconds, 2 * 60)
 
     def test_start_login_builds_codex_pkce_authorization_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -48,7 +48,7 @@ CODEX_MODEL_REFERENCE_URLS = (
 )
 CODEX_USER_AGENT = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.135.0)"
 CODEX_QUOTA_USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
-CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS = 5 * 60 * 60
+CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS = 60 * 60
 CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS = 10
 OAUTH_SESSION_TTL_SECONDS = 10 * 60
 DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = (
@@ -252,6 +252,38 @@ class CodexOAuthService:
     ) -> dict[str, Any]:
         """刷新全部可查询认证文件的配额快照。"""
         auth_file_names, skipped = self._list_quota_auto_refresh_auth_file_names()
+        return self._refresh_auth_file_quota_snapshots(
+            auth_file_names,
+            skipped=skipped,
+            file_delay_seconds=file_delay_seconds,
+            sleep_func=sleep_func,
+        )
+
+    def refresh_due_auth_file_quota_snapshots(
+        self,
+        *,
+        file_delay_seconds: float = CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS,
+        sleep_func: Callable[[float], None] | None = None,
+    ) -> dict[str, Any]:
+        """刷新已经到达额度窗口重置时间的认证文件。"""
+        auth_file_names, skipped = self._list_quota_auto_refresh_auth_file_names()
+        due_auth_file_names = [name for name in auth_file_names if self._is_auth_file_quota_snapshot_refresh_due(name)]
+        return self._refresh_auth_file_quota_snapshots(
+            due_auth_file_names,
+            skipped=skipped,
+            file_delay_seconds=file_delay_seconds,
+            sleep_func=sleep_func,
+        )
+
+    def _refresh_auth_file_quota_snapshots(
+        self,
+        auth_file_names: list[str],
+        *,
+        skipped: list[dict[str, str]],
+        file_delay_seconds: float,
+        sleep_func: Callable[[float], None] | None,
+    ) -> dict[str, Any]:
+        """按给定认证文件列表刷新配额快照。"""
         refreshed: list[str] = []
         failed: list[dict[str, str]] = []
         delay_seconds = max(float(file_delay_seconds), 0.0)
@@ -710,20 +742,34 @@ class CodexOAuthService:
         interval_seconds: float,
         file_delay_seconds: float,
     ) -> None:
-        """按固定间隔循环刷新 Codex 认证文件配额。"""
+        """按固定间隔与额度窗口重置时间刷新 Codex 认证文件配额。"""
         from gevent import sleep
 
         normalized_interval_seconds = max(float(interval_seconds), 1.0)
         normalized_file_delay_seconds = max(float(file_delay_seconds), 0.0)
+        next_periodic_refresh_at = time.monotonic() + normalized_interval_seconds
         while True:
-            sleep(normalized_interval_seconds)
+            periodic_delay_seconds = max(next_periodic_refresh_at - time.monotonic(), 0.0)
+            reset_delay_seconds = self._seconds_until_next_quota_snapshot_refresh(periodic_delay_seconds)
+            sleep(max(min(periodic_delay_seconds, reset_delay_seconds), 1.0))
             try:
-                result = self.refresh_all_auth_file_quota_snapshots(
-                    file_delay_seconds=normalized_file_delay_seconds,
-                    sleep_func=sleep,
-                )
+                now = time.monotonic()
+                if now >= next_periodic_refresh_at:
+                    trigger = "interval"
+                    result = self.refresh_all_auth_file_quota_snapshots(
+                        file_delay_seconds=normalized_file_delay_seconds,
+                        sleep_func=sleep,
+                    )
+                    next_periodic_refresh_at = time.monotonic() + normalized_interval_seconds
+                else:
+                    trigger = "quota_reset"
+                    result = self.refresh_due_auth_file_quota_snapshots(
+                        file_delay_seconds=normalized_file_delay_seconds,
+                        sleep_func=sleep,
+                    )
                 self._logger.info(
-                    "Codex quota auto refresh finished: refreshed=%s failed=%s skipped=%s",
+                    "Codex quota auto refresh finished: trigger=%s refreshed=%s failed=%s skipped=%s",
+                    trigger,
                     len(result["refreshed"]),
                     len(result["failed"]),
                     len(result["skipped"]),
@@ -1019,25 +1065,64 @@ class CodexOAuthService:
         quota = file_state.get("quota")
         if not isinstance(quota, dict):
             return False
-        return self._is_quota_snapshot_refresh_due(quota)
+        return self._is_quota_snapshot_refresh_due(
+            quota,
+            refreshed_at=file_state.get("quota_refreshed_at"),
+        )
 
-    def _is_quota_snapshot_refresh_due(self, quota: dict[str, Any]) -> bool:
+    def _is_quota_snapshot_refresh_due(self, quota: dict[str, Any], *, refreshed_at: Any = None) -> bool:
         """根据配额窗口 reset_at 判断前端展示快照是否过期。"""
+        now = datetime.now(timezone.utc)
+        snapshot_refreshed_at = self._parse_epoch_or_datetime(refreshed_at or quota.get("refreshed_at"))
+        for reset_at in self._get_quota_snapshot_reset_times(quota):
+            if reset_at <= now and (snapshot_refreshed_at is None or snapshot_refreshed_at <= reset_at):
+                return True
+        return False
+
+    def _seconds_until_next_quota_snapshot_refresh(self, max_delay_seconds: float) -> float:
+        """返回下一额度窗口重置与固定刷新周期之间的较短等待时间。"""
+        normalized_max_delay = max(float(max_delay_seconds), 0.0)
+        auth_file_names, _ = self._list_quota_auto_refresh_auth_file_names()
+        state = self._load_auth_file_state()
+        state_files = state.get("files")
+        if not isinstance(state_files, dict):
+            return normalized_max_delay
+
+        now = datetime.now(timezone.utc)
+        next_delay_seconds = normalized_max_delay
+        for name in auth_file_names:
+            file_state = state_files.get(name)
+            if not isinstance(file_state, dict):
+                continue
+            quota = file_state.get("quota")
+            if not isinstance(quota, dict):
+                continue
+            snapshot_refreshed_at = self._parse_epoch_or_datetime(
+                file_state.get("quota_refreshed_at") or quota.get("refreshed_at")
+            )
+            for reset_at in self._get_quota_snapshot_reset_times(quota):
+                if snapshot_refreshed_at is not None and snapshot_refreshed_at > reset_at:
+                    continue
+                next_delay_seconds = min(next_delay_seconds, max((reset_at - now).total_seconds(), 0.0))
+        return next_delay_seconds
+
+    def _get_quota_snapshot_reset_times(self, quota: dict[str, Any]) -> list[datetime]:
+        """读取 Codex 配额窗口的重置时间。"""
         windows = quota.get("windows")
         if not isinstance(windows, list):
-            return False
+            return []
 
         quota_windows = [window for window in windows if isinstance(window, dict)]
         codex_windows = [
             window for window in quota_windows if str(window.get("label") or "").strip().lower().startswith("codex")
         ]
         target_windows = codex_windows or quota_windows
-        now = datetime.now(timezone.utc)
+        reset_times: list[datetime] = []
         for window in target_windows:
             reset_at = self._parse_epoch_or_datetime(window.get("reset_at") or window.get("resetAt"))
-            if reset_at is not None and reset_at <= now:
-                return True
-        return False
+            if reset_at is not None:
+                reset_times.append(reset_at)
+        return reset_times
 
     def get_auth_file_quota_refreshed_at(self, name: str) -> str:
         """读取认证文件最近一次配额刷新时间。"""
