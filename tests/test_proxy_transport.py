@@ -1889,6 +1889,13 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("<span>上次刷新：</span>", html)
         self.assertIn("formatCodexQuotaRefreshedAt(file, quota)", html)
         self.assertIn("quota_refreshed_at", html)
+        self.assertIn("const CODEX_AUTH_FILE_SYNC_INTERVAL_MS = 60 * 1000;", html)
+        self.assertIn("async function syncCodexAuthFiles()", html)
+        self.assertIn("function isCodexAuthFileQuotaRefreshDue(file, now = Date.now())", html)
+        self.assertIn("getCodexAuthFileQuotaRefreshDueNames(codexAuthState.authFiles)", html)
+        self.assertIn("await refreshCodexQuotaByName(name, { silent: true });", html)
+        self.assertIn("await loadCodexAuthFiles({ showLoading: false });", html)
+        self.assertIn("startCodexAuthFileAutoSync();", html)
         self.assertNotIn('class="btn btn-secondary btn-sm oauth-quota-reset-button"', html)
         self.assertNotIn(">重置</button>", html)
         self.assertNotIn(">重置选中</button>", html)
@@ -2009,6 +2016,14 @@ process.stdout.write(JSON.stringify([
   sandbox.formatCodexQuotaPercent({{ remaining_percent: 100 }}),
   sandbox.formatCodexQuotaPercent({{ remaining_percent: null }}),
   sandbox.formatCodexQuotaPercent({{ remaining_percent: 0 }}),
+  sandbox.isCodexAuthFileQuotaRefreshDue({{
+    quota: {{ windows: [{{ label: "Codex 5 小时", reset_at: "2026-08-29T10:00:00Z" }}] }},
+    quota_refreshed_at: "2026-08-29T09:00:00Z",
+  }}, Date.parse("2026-08-29T11:00:00Z")),
+  sandbox.isCodexAuthFileQuotaRefreshDue({{
+    quota: {{ windows: [{{ label: "Codex 5 小时", reset_at: "2026-08-29T10:00:00Z" }}] }},
+    quota_refreshed_at: "2026-08-29T11:00:00Z",
+  }}, Date.parse("2026-08-29T12:00:00Z")),
 ]));
 """
         completed = subprocess.run(
@@ -2017,11 +2032,15 @@ process.stdout.write(JSON.stringify([
             check=True,
             capture_output=True,
         )
-        full_quota, unknown_quota, empty_quota = json.loads(completed.stdout.decode("utf-8"))
+        full_quota, unknown_quota, empty_quota, due_quota, already_refreshed_quota = json.loads(
+            completed.stdout.decode("utf-8")
+        )
 
         self.assertEqual({"value": 100, "text": "100%", "known": True}, full_quota)
         self.assertEqual({"value": 0, "text": "--", "known": False}, unknown_quota)
         self.assertEqual({"value": 0, "text": "0%", "known": True}, empty_quota)
+        self.assertTrue(due_quota)
+        self.assertFalse(already_refreshed_quota)
 
     def test_settings_template_contains_oauth_network_settings(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"

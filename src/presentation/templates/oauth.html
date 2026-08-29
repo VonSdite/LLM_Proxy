@@ -543,13 +543,16 @@
 {% block page_scripts %}
     <script src="/static/js/ui-message.js?v=20260630-1"></script>
     <script>
+        const CODEX_AUTH_FILE_SYNC_INTERVAL_MS = 60 * 1000;
         let activeOAuthTab = 'codex';
+        let codexAuthFileSyncTimer = null;
         let codexAuthState = {
             authorizationUrl: '',
             state: '',
             loading: false,
             submitting: false,
             authFiles: [],
+            authFilesLoading: false,
             quotaByFile: {},
             quotaLoadingByFile: {},
             batchQuotaRefreshing: false,
@@ -621,6 +624,9 @@
             document.querySelectorAll('.oauth-tab-panel').forEach(panel => {
                 panel.hidden = panel.id !== `oauthTopTabPanel_${tabName}`;
             });
+            if (tabName === 'codex' && codexAuthFileSyncTimer !== null) {
+                void syncCodexAuthFiles();
+            }
         }
 
         function renderOAuthToolbarSummary() {
@@ -2747,6 +2753,43 @@
             };
         }
 
+        function parseCodexQuotaTimestamp(value) {
+            if (value === null || value === undefined || String(value).trim() === '') {
+                return null;
+            }
+            const numericValue = Number(value);
+            if (Number.isFinite(numericValue)) {
+                const milliseconds = numericValue > 100000000000 ? numericValue : numericValue * 1000;
+                return Number.isFinite(milliseconds) ? milliseconds : null;
+            }
+            const parsed = Date.parse(String(value));
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function getCodexQuotaResetTimes(quota) {
+            const windows = Array.isArray(quota?.windows) ? quota.windows : [];
+            const codexWindows = windows.filter(window => String(window?.label || '').toLowerCase().startsWith('codex'));
+            const targetWindows = codexWindows.length ? codexWindows : windows;
+            return targetWindows
+                .map(window => parseCodexQuotaTimestamp(window?.reset_at ?? window?.resetAt))
+                .filter(resetAt => resetAt !== null);
+        }
+
+        function isCodexAuthFileQuotaRefreshDue(file, now = Date.now()) {
+            const quota = file?.quota;
+            if (!quota || typeof quota !== 'object') return false;
+            const refreshedAt = parseCodexQuotaTimestamp(file?.quota_refreshed_at || quota.refreshed_at);
+            return getCodexQuotaResetTimes(quota).some(resetAt => {
+                return resetAt <= now && (refreshedAt === null || refreshedAt <= resetAt);
+            });
+        }
+
+        function getCodexAuthFileQuotaRefreshDueNames(files, now = Date.now()) {
+            return (Array.isArray(files) ? files : [])
+                .filter(file => file?.name && isCodexAuthFileQuotaRefreshDue(file, now))
+                .map(file => file.name);
+        }
+
         function renderCodexQuotaSummary(quota, isLoadingQuota = false) {
             if (isLoadingQuota) {
                 return '刷新中...';
@@ -3099,9 +3142,12 @@
             delete codexAuthState.quotaLoadingByFile[name];
         }
 
-        async function loadCodexAuthFiles() {
+        async function loadCodexAuthFiles(options = {}) {
+            const showLoading = options.showLoading !== false;
+            if (codexAuthState.authFilesLoading) return false;
+            codexAuthState.authFilesLoading = true;
             const container = document.getElementById('codexAuthFileList');
-            if (container) {
+            if (showLoading && container) {
                 container.innerHTML = '<div class="empty-state">正在加载认证文件...</div>';
             }
             try {
@@ -3113,12 +3159,51 @@
                 codexAuthState.authFiles = Array.isArray(result.files) ? result.files : [];
                 codexAuthState.quotaByFile = {};
                 renderCodexAuthFiles();
+                return true;
             } catch (error) {
                 console.error('加载 Codex 认证文件失败:', error);
-                if (container) {
+                if (showLoading && container) {
                     container.innerHTML = `<div class="error">${escapeHtml(error?.message || '加载认证文件失败')}</div>`;
                 }
+                return false;
+            } finally {
+                codexAuthState.authFilesLoading = false;
             }
+        }
+
+        function isCodexAuthFileSyncBusy() {
+            return codexAuthState.authFilesLoading
+                || codexAuthState.batchQuotaRefreshing
+                || codexAuthState.batchDeleting
+                || codexAuthState.batchExporting
+                || codexAuthState.batchImporting
+                || codexAuthState.batchToggling
+                || Boolean(codexAuthState.togglingAuthFileName)
+                || Boolean(codexAuthState.deletingAuthFileName)
+                || Object.values(codexAuthState.quotaLoadingByFile).some(Boolean);
+        }
+
+        async function syncCodexAuthFiles() {
+            if (document.hidden || activeOAuthTab !== 'codex' || isCodexAuthFileSyncBusy()) return;
+            const loaded = await loadCodexAuthFiles({ showLoading: false });
+            if (!loaded || document.hidden || activeOAuthTab !== 'codex' || isCodexAuthFileSyncBusy()) return;
+            const dueNames = getCodexAuthFileQuotaRefreshDueNames(codexAuthState.authFiles);
+            for (const name of dueNames) {
+                if (document.hidden || activeOAuthTab !== 'codex' || isCodexAuthFileSyncBusy()) return;
+                await refreshCodexQuotaByName(name, { silent: true });
+            }
+        }
+
+        function startCodexAuthFileAutoSync() {
+            if (codexAuthFileSyncTimer !== null) return;
+            codexAuthFileSyncTimer = window.setInterval(() => {
+                void syncCodexAuthFiles();
+            }, CODEX_AUTH_FILE_SYNC_INTERVAL_MS);
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    void syncCodexAuthFiles();
+                }
+            });
         }
 
         async function loadCodexQuota(encodedName) {
@@ -3210,6 +3295,7 @@
                 loadClaudeModels();
             loadCodexAuthFiles();
             loadClaudeAuthFiles();
+            startCodexAuthFileAutoSync();
         }
 
         initOAuthPage();

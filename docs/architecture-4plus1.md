@@ -180,7 +180,7 @@ decoder
   - token 交换、token 刷新与配额查询遇到代理风险确认页时，会走统一自动确认重试流程
   - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
   - 持久化认证文件人工禁用状态、最近一次配额快照、配额刷新错误、最近成功认证文件与 Codex 模型代理使用状态
-  - 启动 Codex 配额后台刷新任务，每 5 小时刷新一轮可查询认证文件，认证文件之间间隔 10 秒
+  - 启动 Codex 配额后台刷新任务，每小时刷新一轮可查询认证文件，并在已知 Codex 额度窗口到达 `reset_at` 时刷新对应认证文件；认证文件之间间隔 10 秒
   - 维护本地 Codex OAuth 文本模型目录、图片模型目录和默认图片模型
   - 内置常用 Codex 文本模型和图片模型 ID；添加内置模型只把缺失的内置 ID 加回本地目录，保留用户自行添加的模型 ID
   - 按本地模型目录、人工禁用状态、本地冷却、认证失败状态和最近成功认证文件提供 Codex 请求候选账号
@@ -497,7 +497,7 @@ OAuth 模型是数据平面的例外路由：
   - 正常候选为空时忽略目标的人工禁用、自动禁用和冷却状态，按最高优先级选择运行时目标；兜底目标在当前请求失败后不重复调用
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
-  - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet
+  - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet；后台任务按每小时周期和已知额度窗口重置时间调度
   - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件人工禁用状态、配额、最近一次模型代理状态与最近成功认证文件
   - 在 `data/oauth/codex/models.json`、`data/oauth/codex/image_models.json` 和 `data/oauth/codex/image_settings.json` 持久化本地文本模型目录、图片模型目录和默认图片模型
 - `ClaudeOAuthService`
@@ -773,6 +773,7 @@ OAuth Codex tab
   -> optional quota refresh with current access token to chatgpt.com/backend-api/wham/usage
   -> skip duplicate quota refresh when the same auth file is already refreshing
   -> persist quota snapshot or quota error
+  -> check reset_at on the open page every minute, refresh due windows through the quota API, and render the updated snapshot
   -> optional reset local quota snapshot and cooldown state
 ```
 
