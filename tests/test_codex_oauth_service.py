@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -951,11 +952,59 @@ class CodexOAuthServiceTests(unittest.TestCase):
             with patch_requests_session(get=fake_get):
                 exhausted_quota = service.get_auth_file_quota("codex-demo.json")
                 self.assertIn("codex-demo.json", service._quota_cooldowns)
+                self.assertGreater(service._quota_cooldowns["codex-demo.json"] - time.time(), 3500)
                 available_quota = service.get_auth_file_quota("codex-demo.json")
 
         self.assertEqual(0.0, exhausted_quota["windows"][0]["remaining_percent"])
         self.assertEqual(75.0, available_quota["windows"][0]["remaining_percent"])
         self.assertNotIn("codex-demo.json", service._quota_cooldowns)
+
+    def test_quota_retry_after_uses_earliest_exhausted_codex_window_reset(self) -> None:
+        now = datetime.now(timezone.utc)
+        retry_after = CodexOAuthService._quota_retry_after_seconds(
+            {
+                "windows": [
+                    {
+                        "label": "Codex 5 小时",
+                        "remaining_percent": 0,
+                        "reset_at": (now + timedelta(seconds=180)).isoformat(),
+                    },
+                    {
+                        "label": "Codex 7 天",
+                        "used_percent": 100,
+                        "reset_at": (now + timedelta(hours=2)).isoformat(),
+                    },
+                    {
+                        "label": "Code Review 5 小时",
+                        "used_percent": 100,
+                        "reset_at": (now + timedelta(seconds=30)).isoformat(),
+                    },
+                ]
+            }
+        )
+
+        assert retry_after is not None
+        self.assertGreater(retry_after, 170)
+        self.assertLessEqual(retry_after, 180)
+
+    def test_quota_refresh_does_not_replace_existing_cooldown_when_reset_is_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = self._build_service(Path(tmp_dir))
+            service._quota_cooldowns["codex-demo.json"] = time.time() + 3600
+
+            service._sync_quota_cooldown_from_quota(
+                "codex-demo.json",
+                {
+                    "windows": [
+                        {
+                            "label": "Codex 5 小时",
+                            "remaining_percent": 0,
+                        }
+                    ]
+                },
+            )
+
+        self.assertGreater(service._quota_cooldowns["codex-demo.json"] - time.time(), 3500)
 
     def test_record_success_refreshes_stale_quota_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
