@@ -1171,9 +1171,12 @@ class CodexOAuthService:
         if not normalized_name:
             return
         if self._is_quota_exhausted(quota):
+            retry_after_seconds = self._quota_retry_after_seconds(quota)
+            if retry_after_seconds is None and self._is_quota_cooling_down(normalized_name):
+                return
             self.mark_auth_file_quota_exhausted(
                 normalized_name,
-                retry_after_seconds=self._quota_retry_after_seconds(quota),
+                retry_after_seconds=retry_after_seconds,
             )
             return
         self._quota_cooldowns.pop(normalized_name, None)
@@ -1372,19 +1375,33 @@ class CodexOAuthService:
 
     @staticmethod
     def _quota_retry_after_seconds(quota: dict[str, Any]) -> float | None:
+        """返回已耗尽窗口中最早的下次重查时间。"""
         windows = quota.get("windows")
         if not isinstance(windows, list):
             return None
-        for window in windows:
-            if not isinstance(window, dict):
-                continue
+        codex_windows = [
+            window
+            for window in windows
+            if isinstance(window, dict) and str(window.get("label") or "").strip().lower().startswith("codex")
+        ]
+        if not codex_windows:
+            return None
+
+        now = datetime.now(timezone.utc)
+        retry_after_values: list[float] = []
+        for window in codex_windows:
             remaining_percent = CodexOAuthService._parse_float(window.get("remaining_percent"))
             used_percent = CodexOAuthService._parse_float(window.get("used_percent"))
-            if (remaining_percent is not None and remaining_percent <= 0) or (
+            is_exhausted = (remaining_percent is not None and remaining_percent <= 0) or (
                 used_percent is not None and used_percent >= 100
-            ):
-                return None
-        return None
+            )
+            if not is_exhausted:
+                continue
+            reset_at = CodexOAuthService._parse_epoch_or_datetime(window.get("reset_at") or window.get("resetAt"))
+            if reset_at is None:
+                continue
+            retry_after_values.append(max((reset_at - now).total_seconds(), 1.0))
+        return min(retry_after_values) if retry_after_values else None
 
     def _purge_quota_cooldowns(self) -> None:
         now = time.time()
