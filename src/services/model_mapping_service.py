@@ -147,6 +147,13 @@ class ModelMappingService:
         """删除模型映射及其运行状态。"""
         self._repository.delete_mapping(normalize_model_mapping_id(mapping_id))
 
+    def delete_mappings(self, mapping_ids: Iterable[str]) -> int:
+        """批量删除模型映射及其运行状态。"""
+        normalized_ids = [normalize_model_mapping_id(mapping_id) for mapping_id in mapping_ids]
+        if not normalized_ids:
+            raise ValueError("模型映射 ID 必须是非空数组")
+        return self._repository.delete_mappings(normalized_ids)
+
     def copy_mapping(self, mapping_id: str) -> dict[str, Any]:
         """复制模型映射定义，并把副本插入到源映射下方。"""
         normalized_mapping_id = normalize_model_mapping_id(mapping_id)
@@ -236,7 +243,7 @@ class ModelMappingService:
         }
 
     def import_mappings(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        """事务导入模型映射定义；同名映射拒绝导入。"""
+        """事务导入模型映射定义；同名映射和重复 ID 拒绝导入。"""
         if not isinstance(payload, Mapping):
             raise ValueError("模型映射导入内容必须是 JSON 对象")
         if payload.get("kind") != self.EXPORT_KIND:
@@ -250,8 +257,6 @@ class ModelMappingService:
         mapping_ids = [mapping.id for mapping in mappings]
         if len(mapping_ids) != len(set(mapping_ids)):
             raise ValueError("模型映射导入内容包含重复 ID")
-        for mapping in mappings:
-            self._validate_target_ids(mapping)
         self._repository.import_mappings(mappings)
         self._group_mapping_order()
         return {"count": len(mappings), "ids": mapping_ids}
@@ -392,7 +397,7 @@ class ModelMappingService:
         current_mapping: Mapping[str, Any],
         updated_mapping: ModelMappingSchema,
     ) -> None:
-        """不可用目标保留时维持原配置，只允许从映射中删除。"""
+        """不可用目标保留时维持原配置，编辑器支持替换模型 ID 或删除目标。"""
         runtime_ids = set(self._list_runtime_target_model_ids())
         current_targets = {target["model_id"]: target for target in current_mapping["targets"]}
         for target in updated_mapping.targets:
@@ -405,7 +410,7 @@ class ModelMappingService:
                     or int(current_target["priority"]) != target.priority
                 )
             ):
-                raise ValueError(f"目标模型当前不可用，只能删除: {target.model_id}")
+                raise ValueError(f"目标模型当前不可用，请更换模型 ID 或删除此目标: {target.model_id}")
 
     def _enrich_mapping(
         self,

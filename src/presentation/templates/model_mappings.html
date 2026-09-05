@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260814-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260905-1">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -86,6 +86,9 @@
                                     <col class="mapping-target-drag-column">
                                     <col class="mapping-target-model-column">
                                     <col class="mapping-target-priority-column">
+                                    <col class="mapping-target-status-column">
+                                    <col class="mapping-target-metric-column">
+                                    <col class="mapping-target-metric-column">
                                     <col class="mapping-target-actions-column">
                                 </colgroup>
                                 <thead>
@@ -108,13 +111,16 @@
                                             </span>
                                             <span class="visually-hidden" id="mappingPriorityHelp">优先级数字越大越先选择，相同时按列表顺序选择。没有正常候选时，仍尝试运行时存在的最高优先级目标。</span>
                                         </th>
+                                        <th>可用性</th>
+                                        <th title="从测试请求发出到首个正文或推理增量到达的时间">首字延迟</th>
+                                        <th title="completion_tokens / 本次流式请求端到端耗时">TPS</th>
                                         <th>操作</th>
                                     </tr>
                                 </thead>
                                 <tbody class="mapping-target-list" id="mappingTargetList"></tbody>
                                 <tfoot>
                                     <tr class="mapping-target-add-row">
-                                        <td colspan="4">
+                                        <td colspan="7">
                                             <button type="button" class="mapping-target-add-button" id="addTargetBtn">
                                                 <span class="mapping-target-add-icon" aria-hidden="true">+</span>
                                                 <span>新增目标模型</span>
@@ -140,11 +146,11 @@
             <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteMappingBtn" onclick="confirmDeleteMapping(event)">确认</button>
         </div>
     </div>
-    <div class="inline-confirm-popover mapping-confirm-popover" id="mappingTargetDeletePopover" data-placement="bottom" hidden>
-        <div class="inline-confirm-text">确认删除这个目标模型？</div>
+    <div class="inline-confirm-popover mapping-confirm-popover mapping-batch-confirm-popover" id="mappingBatchDeletePopover" data-placement="bottom" hidden>
+        <div class="inline-confirm-text" id="mappingBatchDeleteConfirmText">确认删除已选模型映射？</div>
         <div class="inline-confirm-actions">
-            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelDeleteTargetConfirm(event)">取消</button>
-            <button type="button" class="btn-action btn-delete inline-confirm-action" onclick="confirmDeleteTarget(event)">确认</button>
+            <button type="button" class="btn-action btn-edit inline-confirm-action" onclick="cancelMappingBatchDeleteConfirm(event)">取消</button>
+            <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmMappingBatchDeleteBtn" onclick="confirmMappingBatchDelete(event)">确认</button>
         </div>
     </div>
     <div class="mapping-help-popover" id="mappingHelpPopover" data-placement="bottom" hidden>
@@ -166,7 +172,9 @@
         let mappingEditorModal = null;
         let pendingDeleteMappingId = null;
         let deletingMappingId = null;
-        let pendingDeleteTargetRow = null;
+        let pendingBatchDeleteMappingIds = [];
+        let pendingBatchDeleteMappingGroupKey = null;
+        let mappingBatchDeleteInFlight = false;
         let mappingDragState = null;
         let targetDragRow = null;
         let mappingOrderActionInFlight = false;
@@ -293,7 +301,7 @@
 
         function updateMappingSelectionUi() {
             const interactionLocked = mappingOrderActionInFlight || mappingCopyActionInFlight
-                || togglingMappingIds.size > 0 || deletingMappingId !== null;
+                || togglingMappingIds.size > 0 || deletingMappingId !== null || mappingBatchDeleteInFlight;
             document.querySelectorAll("[data-mapping-group-select]").forEach(checkbox => {
                 const groupKey = checkbox.dataset.mappingGroupSelect;
                 const groupIds = getMappingGroupIds(groupKey);
@@ -305,6 +313,21 @@
             document.querySelectorAll("[data-mapping-export-button]").forEach(button => {
                 button.disabled = interactionLocked || getSelectedMappingIdsForGroup(button.dataset.mappingExportButton).length === 0;
             });
+            document.querySelectorAll("[data-mapping-batch-delete-button]").forEach(button => {
+                const groupKey = button.dataset.mappingBatchDeleteButton;
+                button.disabled = interactionLocked || getSelectedMappingIdsForGroup(groupKey).length === 0;
+                button.textContent = mappingBatchDeleteInFlight ? "删除中..." : "删除";
+                button.classList.toggle("is-active", pendingBatchDeleteMappingGroupKey === groupKey && pendingBatchDeleteMappingIds.length > 0);
+            });
+            if (!getNormalizedSelectedMappingIds().length) {
+                closeMappingBatchDeleteConfirm(false);
+            } else {
+                pendingBatchDeleteMappingIds = pendingBatchDeleteMappingIds.filter(mappingId => selectedMappingIds.has(mappingId));
+                if (!pendingBatchDeleteMappingIds.length && !mappingBatchDeleteInFlight) {
+                    pendingBatchDeleteMappingGroupKey = null;
+                }
+                syncMappingBatchDeletePopover();
+            }
         }
 
         function buildDroppedMappingOrderIds(mappingId, targetId, placeAfter) {
@@ -418,6 +441,8 @@
                         <div class="mapping-group-heading">
                             <h4 class="mapping-group-title">${escapeHtml(title)}</h4>
                             <div class="mapping-group-actions">
+                                <button type="button" class="btn btn-toolbar-secondary mapping-group-data-btn"
+                                    data-mapping-batch-delete-button="${groupKey}" onclick="toggleMappingBatchDeleteConfirm(event, '${groupKey}')" disabled>删除</button>
                                 <button type="button" class="btn btn-toolbar-secondary mapping-group-data-btn"
                                     data-mapping-export-button="${groupKey}" onclick="exportMappings('${groupKey}')" disabled>导出</button>
                             </div>
@@ -557,7 +582,6 @@
         }
 
         function handleTargetRowDragStart(row, event) {
-            closeDeleteTargetConfirm();
             targetDragRow = row;
             event.dataTransfer?.setData("text/plain", row.querySelector(".target-model-id")?.value || "");
             if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
@@ -601,6 +625,7 @@
             row.dataset.autoDisabled = autoDisabled ? "true" : "false";
             row.dataset.available = unavailable ? "false" : "true";
             row.dataset.failureTooltip = failureTooltip;
+            row.dataset.modelId = String(target.model_id || "");
             row.innerHTML = `
                 <td class="mapping-target-drag-cell">
                     <button type="button" class="mapping-drag-handle mapping-target-drag-handle" draggable="true" aria-label="拖动调整目标模型顺序" title="拖动调整顺序">
@@ -614,17 +639,23 @@
                 <td class="mapping-target-model-cell">
                     <span class="mapping-target-mobile-label">模型 ID</span>
                     <div class="mapping-target-model-control">
-                        <div class="mapping-target-combobox"><input type="text" class="form-control target-model-search" value="${escapeHtml(target.model_id || "")}" autocomplete="off" placeholder="搜索并选择模型" aria-label="目标模型 ID" role="combobox" aria-expanded="false" ${unavailable ? "disabled" : ""}><input type="hidden" class="target-model-id" value="${escapeHtml(target.model_id || "")}"><div class="mapping-target-options" role="listbox" hidden></div></div>
+                        <div class="mapping-target-combobox"><input type="text" class="form-control target-model-search" value="${escapeAttribute(target.model_id || "")}" autocomplete="off" placeholder="搜索并选择模型" aria-label="目标模型 ID" role="combobox" aria-expanded="false"><input type="hidden" class="target-model-id" value="${escapeAttribute(target.model_id || "")}"><div class="mapping-target-options" role="listbox" hidden></div></div>
                     </div>
+                    <label class="mapping-target-test-auth" hidden>测试凭据
+                        <select class="form-select target-test-auth-entry" aria-label="模型测试 Auth Entry"></select>
+                    </label>
+                    <div class="mapping-target-test-error" hidden></div>
                 </td>
                 <td class="mapping-target-priority">
                     <span class="mapping-target-mobile-label">优先级</span>
                     <div class="mapping-target-priority-control">
                         <input type="number" class="form-control target-priority" aria-label="优先级" min="0" value="${Number(target.priority ?? 1)}" ${unavailable ? "disabled" : ""}>
-                        ${unavailable ? `<span class="mapping-target-unavailable">不可用</span>
+                        <span class="mapping-target-unavailable-status" ${unavailable ? "" : "hidden"}>
+                            <span class="mapping-target-unavailable">不可用</span>
                             <button type="button" class="mapping-help-button mapping-target-unavailable-help"
-                                aria-label="目标模型不可用：该模型已不在当前可用模型目录中，不能编辑或启停，只能删除"
-                                data-tooltip="该目标模型已不在当前可用模型目录中，不能编辑或启停，只能删除。">?</button>` : ""}
+                                aria-label="目标模型不可用，可重新选择模型 ID 或删除此行"
+                                data-tooltip="该目标模型已不在当前可用模型目录中，可重新选择模型 ID 或删除此行。更换前保留现有优先级和启停状态。">?</button>
+                        </span>
                         <span class="mapping-target-auto-disabled-status" ${autoDisabled || manuallyDisabled ? "" : "hidden"}>
                             <span class="mapping-target-auto-disabled">禁用</span>
                             <button type="button" class="mapping-help-button mapping-target-auto-disabled-help"
@@ -633,17 +664,26 @@
                         </span>
                     </div>
                 </td>
+                <td class="mapping-target-status-cell">
+                    <span class="mapping-target-mobile-label">可用性</span>
+                    <span class="mapping-target-test-status" aria-live="polite">未测试</span>
+                </td>
+                <td class="mapping-target-metric-cell">
+                    <span class="mapping-target-mobile-label">首字延迟</span>
+                    <span class="target-test-latency">--</span>
+                </td>
+                <td class="mapping-target-metric-cell">
+                    <span class="mapping-target-mobile-label">TPS</span>
+                    <span class="target-test-tps">--</span>
+                </td>
                 <td class="mapping-target-actions">
                     <div class="mapping-target-action-buttons">
+                        <button type="button" class="mapping-target-action is-primary mapping-test-target">测试</button>
                         <button type="button" class="mapping-target-action mapping-toggle-target"></button>
-                        <div class="inline-confirm-wrap">
-                            <button type="button" class="mapping-target-action is-delete mapping-target-delete-trigger mapping-remove-target">删除</button>
-                        </div>
+                        <button type="button" class="mapping-target-action is-delete mapping-remove-target">删除</button>
                     </div>
                 </td>`;
-            if (!unavailable) {
-                setupTargetCombobox(row);
-            }
+            setupTargetCombobox(row);
             syncTargetRowActions(row);
             const dragHandle = row.querySelector(".mapping-target-drag-handle");
             dragHandle.addEventListener("dragstart", event => handleTargetRowDragStart(row, event));
@@ -651,7 +691,9 @@
             row.addEventListener("dragover", event => handleTargetRowDragOver(row, event));
             row.addEventListener("drop", event => handleTargetRowDrop(row, event));
             row.querySelector(".mapping-toggle-target").addEventListener("click", () => toggleTargetRow(row));
-            row.querySelector(".mapping-remove-target").addEventListener("click", event => toggleDeleteTargetConfirm(row, event));
+            row.querySelector(".mapping-remove-target").addEventListener("click", () => removeTargetRow(row));
+            row.querySelector(".mapping-test-target").addEventListener("click", () => testTargetRow(row));
+            row.querySelector(".target-test-auth-entry").addEventListener("change", () => resetTargetTest(row));
             document.getElementById("mappingTargetList").appendChild(row);
         }
 
@@ -660,6 +702,9 @@
             const enabled = row.dataset.enabled !== "false";
             const autoDisabled = row.dataset.autoDisabled === "true";
             const available = row.dataset.available !== "false";
+            row.classList.toggle("is-unavailable", !available);
+            row.querySelector(".mapping-target-unavailable-status").hidden = available;
+            row.querySelector(".target-priority").disabled = !available;
             row.classList.toggle("is-disabled", available && !enabled);
             row.classList.toggle("is-auto-disabled", available && autoDisabled);
             row.querySelector(".mapping-target-auto-disabled-status").hidden = enabled && !autoDisabled;
@@ -667,6 +712,7 @@
             const disabledTooltip = enabled ? (row.dataset.failureTooltip || "最后一次调用失败") : "手动禁用";
             disabledHelp.setAttribute("aria-label", disabledTooltip);
             disabledHelp.dataset.tooltip = disabledTooltip;
+            renderTargetTestResult(row);
             if (row.dataset.available === "false") {
                 toggleButton.hidden = true;
                 return;
@@ -735,6 +781,7 @@
                 }
                 searchInput.value = modelId;
                 valueInput.value = modelId;
+                syncTargetModelSelection(row);
                 closeOptions();
             }
 
@@ -745,6 +792,7 @@
                 if (availableTargets.includes(candidate) && !selectedTargetIds().has(candidate)) {
                     valueInput.value = candidate;
                 }
+                syncTargetModelSelection(row);
                 activeIndex = 0;
                 renderOptions();
             });
@@ -768,7 +816,7 @@
         }
 
         function openCreateMapping() {
-            closeDeleteTargetConfirm();
+            clearTargetRows();
             editingMappingId = null;
             document.getElementById("mappingEditorTitle").textContent = "新增模型映射";
             document.getElementById("mappingIdInput").value = "";
@@ -779,10 +827,10 @@
         }
 
         function openEditMapping(encodedId) {
-            closeDeleteTargetConfirm();
             const mappingId = decodeURIComponent(encodedId);
             const mapping = modelMappings.find(item => item.id === mappingId);
             if (!mapping) return;
+            clearTargetRows();
             editingMappingId = mappingId;
             document.getElementById("mappingEditorTitle").textContent = "编辑模型映射";
             document.getElementById("mappingIdInput").value = mapping.id;
@@ -846,6 +894,108 @@
                 await loadMappings();
             } catch (error) {
                 showMessage(error.message, "error");
+            }
+        }
+
+        function getMappingBatchDeletePopoverElement() {
+            return document.getElementById("mappingBatchDeletePopover");
+        }
+
+        function getMappingBatchDeleteTrigger() {
+            const groupKey = String(pendingBatchDeleteMappingGroupKey || "").trim();
+            return Array.from(document.querySelectorAll("[data-mapping-batch-delete-button]"))
+                .find(element => element.dataset.mappingBatchDeleteButton === groupKey) || null;
+        }
+
+        function hideMappingBatchDeletePopover() {
+            const popover = getMappingBatchDeletePopoverElement();
+            if (!popover) return;
+            popover.hidden = true;
+            popover.style.removeProperty("top");
+            popover.style.removeProperty("left");
+            popover.style.removeProperty("--popover-arrow-left");
+            popover.dataset.placement = "bottom";
+        }
+
+        function syncMappingBatchDeletePopover() {
+            const popover = getMappingBatchDeletePopoverElement();
+            if (!popover) return;
+            if (!pendingBatchDeleteMappingIds.length || pendingBatchDeleteMappingGroupKey === null) {
+                hideMappingBatchDeletePopover();
+                return;
+            }
+            const trigger = getMappingBatchDeleteTrigger();
+            if (!trigger) {
+                pendingBatchDeleteMappingIds = [];
+                pendingBatchDeleteMappingGroupKey = null;
+                hideMappingBatchDeletePopover();
+                return;
+            }
+            popover.hidden = false;
+            const text = document.getElementById("mappingBatchDeleteConfirmText");
+            if (text) text.textContent = `确认删除 ${pendingBatchDeleteMappingIds.length} 个模型映射？`;
+            const confirmButton = document.getElementById("confirmMappingBatchDeleteBtn");
+            if (confirmButton) {
+                confirmButton.disabled = mappingBatchDeleteInFlight;
+                confirmButton.textContent = mappingBatchDeleteInFlight ? "删除中..." : "确认";
+            }
+            positionMappingConfirmPopover(popover, trigger);
+        }
+
+        function toggleMappingBatchDeleteConfirm(event, groupKey = "") {
+            event?.preventDefault();
+            event?.stopPropagation();
+            if (mappingBatchDeleteInFlight) return;
+            const selectedIds = getSelectedMappingIdsForGroup(groupKey);
+            if (!selectedIds.length) {
+                showMessage("请先选择至少一个模型映射", "error");
+                return;
+            }
+            const normalizedGroupKey = String(groupKey || "").trim();
+            const sameTrigger = pendingBatchDeleteMappingGroupKey === normalizedGroupKey
+                && pendingBatchDeleteMappingIds.length > 0;
+            pendingBatchDeleteMappingIds = sameTrigger ? [] : selectedIds;
+            pendingBatchDeleteMappingGroupKey = sameTrigger ? null : normalizedGroupKey;
+            closeDeleteMappingConfirm();
+            renderMappings();
+        }
+
+        function cancelMappingBatchDeleteConfirm(event) {
+            event?.stopPropagation();
+            closeMappingBatchDeleteConfirm(true);
+        }
+
+        function closeMappingBatchDeleteConfirm(shouldRender = true) {
+            if (mappingBatchDeleteInFlight) return;
+            pendingBatchDeleteMappingIds = [];
+            pendingBatchDeleteMappingGroupKey = null;
+            hideMappingBatchDeletePopover();
+            if (shouldRender) renderMappings();
+        }
+
+        async function confirmMappingBatchDelete(event) {
+            event?.stopPropagation();
+            const mappingIds = pendingBatchDeleteMappingIds.slice();
+            if (!mappingIds.length || mappingBatchDeleteInFlight) return;
+            closeMappingBatchDeleteConfirm(false);
+            mappingBatchDeleteInFlight = true;
+            renderMappings();
+            try {
+                const result = await requestJson("/api/model-mappings/batch", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "delete", mapping_ids: mappingIds })
+                });
+                selectedMappingIds = new Set(
+                    getNormalizedSelectedMappingIds().filter(mappingId => !mappingIds.includes(mappingId))
+                );
+                showMessage(`已删除 ${result.count || mappingIds.length} 个模型映射`, "success");
+                await loadMappings();
+            } catch (error) {
+                showMessage(error.message, "error");
+            } finally {
+                mappingBatchDeleteInFlight = false;
+                renderMappings();
             }
         }
 
@@ -923,7 +1073,6 @@
             if (deletingMappingId !== null) return;
             const mappingId = decodeURIComponent(encodedId);
             pendingDeleteMappingId = pendingDeleteMappingId === mappingId ? null : mappingId;
-            closeDeleteTargetConfirm();
             renderMappings();
             syncMappingDeletePopover();
         }
@@ -962,70 +1111,115 @@
             }
         }
 
-        function getTargetDeletePopoverElement() {
-            return document.getElementById("mappingTargetDeletePopover");
+        function formatTargetTestMetric(value, suffix) {
+            if (value === null || value === undefined || value === "") return "--";
+            const number = Number(value);
+            return Number.isFinite(number) ? `${number.toFixed(2)} ${suffix}` : "--";
         }
 
-        function hideTargetDeletePopover() {
-            const popover = getTargetDeletePopoverElement();
-            if (!popover) return;
-            popover.hidden = true;
-            popover.style.removeProperty("top");
-            popover.style.removeProperty("left");
-            popover.style.removeProperty("--popover-arrow-left");
-            popover.dataset.placement = "bottom";
+        function renderTargetTestResult(row) {
+            const testing = row.dataset.testing === "true";
+            const result = row.targetTestResult;
+            const status = row.querySelector(".mapping-target-test-status");
+            status.textContent = testing ? "测试中" : result?.available === true ? "可用" : result?.available === false ? "不可用" : "未测试";
+            status.dataset.state = testing ? "testing" : result?.available === true ? "success" : result?.available === false ? "error" : "idle";
+            row.querySelector(".target-test-latency").textContent = testing ? "测试中..." : formatTargetTestMetric(result?.first_token_latency_ms, "ms");
+            row.querySelector(".target-test-tps").textContent = testing ? "测试中..." : formatTargetTestMetric(result?.tps, "tok/s");
+            const error = row.querySelector(".mapping-target-test-error");
+            error.textContent = result?.error || "";
+            error.hidden = !error.textContent;
+            const button = row.querySelector(".mapping-test-target");
+            button.textContent = testing ? "测试中..." : "测试";
+            button.disabled = testing || row.dataset.available === "false" || !row.querySelector(".target-model-id").value.trim();
         }
 
-        function closeDeleteTargetConfirm() {
-            pendingDeleteTargetRow = null;
-            hideTargetDeletePopover();
-            document.querySelectorAll(".mapping-target-delete-trigger.is-active").forEach(element => element.classList.remove("is-active"));
+        function resetTargetTest(row) {
+            row.targetTestController?.abort();
+            row.targetTestController = null;
+            row.targetTestResult = null;
+            row.dataset.testing = "false";
+            renderTargetTestResult(row);
         }
 
-        function syncTargetDeletePopover() {
-            const popover = getTargetDeletePopoverElement();
-            if (!popover) return;
-            document.querySelectorAll(".mapping-target-delete-trigger.is-active").forEach(element => element.classList.remove("is-active"));
-            if (!pendingDeleteTargetRow || !document.body.contains(pendingDeleteTargetRow)) {
-                pendingDeleteTargetRow = null;
-                hideTargetDeletePopover();
-                return;
+        function syncTargetModelSelection(row) {
+            const modelId = row.querySelector(".target-model-id").value.trim();
+            if (modelId !== row.dataset.modelId) {
+                resetTargetTest(row);
+                row.dataset.modelId = modelId;
+                row.dataset.autoDisabled = "false";
+                row.dataset.failureTooltip = "";
+                row.querySelector(".mapping-target-test-auth").hidden = true;
+                const authSelect = row.querySelector(".target-test-auth-entry");
+                authSelect.innerHTML = "";
+                authSelect.dataset.authGroup = "";
             }
-            const trigger = pendingDeleteTargetRow.querySelector(".mapping-target-delete-trigger");
-            if (!trigger) {
-                closeDeleteTargetConfirm();
-                return;
-            }
-            trigger.classList.add("is-active");
-            popover.hidden = false;
-            positionMappingConfirmPopover(popover, trigger);
+            row.dataset.available = availableTargets.includes(modelId) ? "true" : "false";
+            syncTargetRowActions(row);
         }
 
-        function toggleDeleteTargetConfirm(row, event) {
-            event?.preventDefault();
-            event?.stopPropagation();
-            const modelId = row.querySelector(".target-model-id")?.value.trim() || "";
-            if (!modelId) {
-                closeDeleteTargetConfirm();
-                row.remove();
-                return;
-            }
-            pendingDeleteTargetRow = pendingDeleteTargetRow === row ? null : row;
-            closeDeleteMappingConfirm();
-            syncTargetDeletePopover();
-        }
-
-        function cancelDeleteTargetConfirm(event) {
-            event?.stopPropagation();
-            closeDeleteTargetConfirm();
-        }
-
-        function confirmDeleteTarget(event) {
-            event?.stopPropagation();
-            const row = pendingDeleteTargetRow;
-            if (!row) return;
-            closeDeleteTargetConfirm();
+        function removeTargetRow(row) {
+            resetTargetTest(row);
             row.remove();
+        }
+
+        function clearTargetRows() {
+            document.querySelectorAll(".mapping-target-row").forEach(removeTargetRow);
+        }
+
+        async function testTargetRow(row) {
+            const modelId = row.querySelector(".target-model-id").value.trim();
+            if (!modelId || row.dataset.available === "false" || row.dataset.testing === "true") return;
+            resetTargetTest(row);
+            const controller = new AbortController();
+            row.targetTestController = controller;
+            row.dataset.testing = "true";
+            renderTargetTestResult(row);
+            const isCurrent = () => row.isConnected && row.targetTestController === controller;
+            const options = { cache: "no-store", signal: controller.signal };
+            let submitted = false;
+            try {
+                const providers = await requestJson("/api/providers", options);
+                if (!isCurrent()) return;
+                const provider = providers.find(item => Array.isArray(item.model_list) && item.model_list.some(model => `${item.name}/${model}` === modelId));
+                if (!provider) throw new Error("当前性能测试支持 Provider 目标模型；OAuth 目标请使用对应的调用接口验证。");
+                const payload = { ...provider, models: [modelId.slice(provider.name.length + 1)], auth_entry_id: "" };
+                const authGroupName = String(provider.auth_group || "").trim();
+                const authSelect = row.querySelector(".target-test-auth-entry");
+                row.querySelector(".mapping-target-test-auth").hidden = !authGroupName;
+                if (authGroupName) {
+                    const authGroup = await requestJson(`/api/auth-groups/${encodeURIComponent(authGroupName)}`, options);
+                    if (!isCurrent()) return;
+                    const entries = Array.isArray(authGroup.entries) ? authGroup.entries : [];
+                    const previousId = authSelect.dataset.authGroup === authGroupName ? authSelect.value : "";
+                    const selectedEntry = entries.find(entry => entry.id === previousId) || entries.find(entry => entry.enabled !== false) || entries[0];
+                    if (!selectedEntry) throw new Error("该 Provider 的 Auth Group 中没有可测试的 Auth Entry");
+                    authSelect.innerHTML = entries.map(entry => `<option value="${escapeAttribute(entry.id)}">${escapeHtml(entry.name || entry.id)}</option>`).join("");
+                    authSelect.value = selectedEntry.id;
+                    authSelect.dataset.authGroup = authGroupName;
+                    payload.auth_entry_id = selectedEntry.id;
+                    payload.api_key = "";
+                }
+                submitted = true;
+                const data = await requestJson("/api/providers/test-models", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                });
+                if (!isCurrent()) return;
+                const result = Array.isArray(data.results) ? data.results[0] : null;
+                if (!result || typeof result !== "object") throw new Error("Missing model test result");
+                row.targetTestResult = result;
+            } catch (error) {
+                if (!isCurrent()) return;
+                row.targetTestResult = { available: submitted ? false : null, error: error.message || "模型测试失败" };
+            } finally {
+                if (isCurrent()) {
+                    row.targetTestController = null;
+                    row.dataset.testing = "false";
+                    renderTargetTestResult(row);
+                }
+            }
         }
 
         async function exportMappings(groupKey) {
@@ -1207,8 +1401,8 @@
                 if (pendingDeleteMappingId !== null && !event.target.closest("[data-mapping-delete-trigger]") && !event.target.closest("#mappingDeletePopover")) {
                     closeDeleteMappingConfirm();
                 }
-                if (pendingDeleteTargetRow && !event.target.closest(".mapping-target-delete-trigger") && !event.target.closest("#mappingTargetDeletePopover")) {
-                    closeDeleteTargetConfirm();
+                if (pendingBatchDeleteMappingIds.length && !event.target.closest("[data-mapping-batch-delete-button]") && !event.target.closest("#mappingBatchDeletePopover")) {
+                    closeMappingBatchDeleteConfirm();
                 }
                 if (!event.target.closest("[data-mapping-help-topic]") && !event.target.closest("#mappingHelpPopover")) {
                     hideMappingHelpPopover();
@@ -1217,25 +1411,25 @@
             document.addEventListener("keydown", event => {
                 if (event.key !== "Escape") return;
                 closeDeleteMappingConfirm();
-                closeDeleteTargetConfirm();
+                closeMappingBatchDeleteConfirm();
                 hideMappingHelpPopover();
             });
             window.addEventListener("resize", () => {
                 syncMappingDeletePopover();
-                syncTargetDeletePopover();
+                syncMappingBatchDeletePopover();
                 if (activeMappingHelpTrigger) {
                     positionMappingHelpPopover(activeMappingHelpTrigger, document.getElementById("mappingHelpPopover"));
                 }
             });
             window.addEventListener("scroll", () => {
                 syncMappingDeletePopover();
-                syncTargetDeletePopover();
+                syncMappingBatchDeletePopover();
                 if (activeMappingHelpTrigger) {
                     positionMappingHelpPopover(activeMappingHelpTrigger, document.getElementById("mappingHelpPopover"));
                 }
             }, true);
             document.getElementById("mappingEditorModal").addEventListener("hidden.bs.modal", () => {
-                closeDeleteTargetConfirm();
+                document.querySelectorAll(".mapping-target-row").forEach(resetTargetTest);
                 hideMappingHelpPopover();
             });
             loadMappings();

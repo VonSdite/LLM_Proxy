@@ -736,10 +736,9 @@
 }
 
 .dashboard-page .model-flow-node {
-    display: inline-flex;
-    align-items: center;
+    display: block;
     min-width: 0;
-    max-width: min(220px, 100%);
+    max-width: 220px;
     min-height: 26px;
     padding: 0 10px;
     border: 1px solid rgba(95, 143, 190, 0.2);
@@ -749,7 +748,7 @@
     font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 650;
-    line-height: 1;
+    line-height: 24px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

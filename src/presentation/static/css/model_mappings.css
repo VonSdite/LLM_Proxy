@@ -702,7 +702,7 @@
 }
 
 .mapping-target-table col.mapping-target-drag-column {
-    width: 56px;
+    width: 44px;
 }
 
 .mapping-target-table col.mapping-target-model-column {
@@ -714,7 +714,15 @@
 }
 
 .mapping-target-table col.mapping-target-actions-column {
-    width: 170px;
+    width: 212px;
+}
+
+.mapping-target-table col.mapping-target-status-column {
+    width: 100px;
+}
+
+.mapping-target-table col.mapping-target-metric-column {
+    width: 128px;
 }
 
 .mapping-target-table th,
@@ -794,15 +802,13 @@
 }
 
 .mapping-target-row.is-disabled td,
-.mapping-target-row.is-auto-disabled td,
-.mapping-target-row.is-unavailable td {
+.mapping-target-row.is-auto-disabled td {
     background: #e8ebef;
     color: #667085;
 }
 
 .model-mappings-page .mapping-target-row.is-disabled .form-control,
-.model-mappings-page .mapping-target-row.is-auto-disabled .form-control,
-.model-mappings-page .mapping-target-row.is-unavailable .form-control {
+.model-mappings-page .mapping-target-row.is-auto-disabled .form-control {
     border-color: #b8c0ca;
     background: #dfe3e8;
     color: #596579;
@@ -864,6 +870,7 @@
     color: #a23b46;
 }
 
+.mapping-target-unavailable-status,
 .mapping-target-auto-disabled-status {
     display: inline-flex;
     align-items: center;
@@ -900,6 +907,71 @@
     text-align: center;
 }
 
+.model-mappings-page .mapping-target-row [hidden] {
+    display: none !important;
+}
+
+.mapping-target-test-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.mapping-target-test-status[data-state="success"] {
+    border-color: rgba(26, 127, 55, 0.2);
+    background: rgba(26, 127, 55, 0.08);
+    color: #1a7f37;
+}
+
+.mapping-target-test-status[data-state="error"] {
+    border-color: rgba(207, 34, 46, 0.2);
+    background: rgba(207, 34, 46, 0.08);
+    color: #cf222e;
+}
+
+.mapping-target-test-status[data-state="testing"] {
+    border-color: rgba(58, 127, 237, 0.2);
+    background: rgba(58, 127, 237, 0.08);
+    color: var(--primary-active);
+}
+
+.mapping-target-metric-cell {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.mapping-target-test-error {
+    margin-top: 8px;
+    color: #b42318;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.mapping-target-test-auth {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.mapping-target-test-auth .form-select {
+    flex: 1;
+    min-width: 0;
+}
+
 .mapping-target-action-buttons {
     display: flex;
     align-items: center;
@@ -922,6 +994,11 @@
     transition: background-color var(--transition), border-color var(--transition), color var(--transition);
 }
 
+.mapping-target-action:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 .model-mappings-page .inline-confirm-wrap {
     position: relative;
     display: inline-flex;
@@ -937,6 +1014,10 @@
     border-radius: 10px;
     background: #fff;
     box-shadow: var(--shadow-soft);
+}
+
+.model-mappings-page .mapping-batch-confirm-popover {
+    max-width: min(300px, calc(100vw - 24px));
 }
 
 .model-mappings-page .mapping-confirm-popover[hidden] {
@@ -1112,7 +1193,7 @@
 }
 
 .model-mappings-page .modal-dialog {
-    max-width: min(1040px, calc(100vw - 32px));
+    max-width: min(1280px, calc(100vw - 32px));
 }
 
 .model-mappings-page .modal-content {
@@ -1474,15 +1555,13 @@
 }
 
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled td,
-:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td,
-:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td {
     background: #29313b;
     color: #a9b4c3;
 }
 
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled .form-control,
-:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled .form-control,
-:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable .form-control {
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled .form-control {
     border-color: #4b5664;
     background: #1b222b;
     color: #aeb9c7;
@@ -1520,8 +1599,7 @@
     color: var(--danger-hover);
 }
 
-:root[data-theme="dark"] .model-mappings-page .mapping-target-action.is-delete:hover,
-:root[data-theme="dark"] .model-mappings-page .mapping-target-action.is-delete.is-active {
+:root[data-theme="dark"] .model-mappings-page .mapping-target-action.is-delete:hover {
     border-color: var(--danger-hover);
     background: var(--danger-hover);
     color: #fff;
@@ -1541,6 +1619,28 @@
 :root[data-theme="dark"] .model-mappings-page .mapping-target-add-icon {
     border-color: rgba(88, 166, 255, 0.28);
     background: rgba(88, 166, 255, 0.12);
+}
+
+:root[data-theme="dark"] .mapping-target-test-status[data-state="success"] {
+    border-color: rgba(35, 134, 54, 0.3);
+    background: rgba(35, 134, 54, 0.16);
+    color: #6fdd8b;
+}
+
+:root[data-theme="dark"] .mapping-target-test-status[data-state="error"] {
+    border-color: rgba(248, 81, 73, 0.3);
+    background: rgba(248, 81, 73, 0.14);
+    color: #ff9b93;
+}
+
+:root[data-theme="dark"] .mapping-target-test-status[data-state="testing"] {
+    border-color: rgba(88, 166, 255, 0.28);
+    background: rgba(88, 166, 255, 0.12);
+    color: #9bc7ff;
+}
+
+:root[data-theme="dark"] .mapping-target-test-error {
+    color: #ffb4ab;
 }
 
 @media (max-width: 760px) {
@@ -1568,7 +1668,9 @@
     .mapping-editor-fields {
         grid-template-columns: 1fr;
     }
+}
 
+@media (max-width: 1000px) {
     .mapping-target-table colgroup,
     .mapping-target-table thead {
         display: none;
@@ -1601,23 +1703,19 @@
     }
 
     .mapping-target-row.is-disabled,
-    .mapping-target-row.is-auto-disabled,
-    .mapping-target-row.is-unavailable {
+    .mapping-target-row.is-auto-disabled {
         background: rgba(90, 102, 120, 0.08);
     }
 
     .mapping-target-row.is-disabled td,
     .mapping-target-row.is-auto-disabled td,
-    .mapping-target-row.is-unavailable td,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled td,
-    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td,
-    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td {
         background: transparent;
     }
 
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled,
-    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled,
-    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable {
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled {
         background: rgba(45, 52, 62, 0.78);
     }
 

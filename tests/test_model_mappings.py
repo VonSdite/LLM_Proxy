@@ -184,7 +184,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
         settings_template = (project_root / "src/presentation/templates/settings.html").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260814-1", template)
+        self.assertIn("model_mappings.css?v=20260905-1", template)
         self.assertIn('id="mappingStrategySelect"', template)
         self.assertIn('<option value="highest_priority">最高优先级</option>', template)
         self.assertIn('<option value="sticky_failover">粘滞故障切换</option>', template)
@@ -255,9 +255,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('class="mapping-target-add-button" id="addTargetBtn"', template)
         self.assertIn("<span>新增目标模型</span>", template)
         self.assertIn('class="mapping-target-action mapping-toggle-target"', template)
-        self.assertIn(
-            'class="mapping-target-action is-delete mapping-target-delete-trigger mapping-remove-target">删除', template
-        )
+        self.assertIn('class="mapping-target-action is-delete mapping-remove-target">删除', template)
         self.assertIn('class="mapping-targets-cell"', template)
         self.assertIn("const targets = Array.isArray(mapping.targets)", template)
         self.assertIn("function getTargetPreview(targets, limit = 5)", template)
@@ -266,8 +264,16 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertNotIn('mapping.current_target_model_id || "-"', template)
         self.assertIn("data-mapping-delete-trigger=", template)
         self.assertIn("mappingDeletePopover", template)
-        self.assertIn("mappingTargetDeletePopover", template)
-        self.assertIn("toggleDeleteTargetConfirm", template)
+        self.assertNotIn("mappingTargetDeletePopover", template)
+        self.assertNotIn("toggleDeleteTargetConfirm", template)
+        self.assertIn('addEventListener("click", () => removeTargetRow(row))', template)
+        self.assertIn("function testTargetRow(row)", template)
+        self.assertIn('requestJson("/api/providers/test-models"', template)
+        self.assertIn("首字延迟", template)
+        self.assertIn(">TPS</th>", template)
+        model_search_markup = template.split('class="form-control target-model-search"', 1)[1].split(">", 1)[0]
+        self.assertNotIn("disabled", model_search_markup)
+        self.assertNotIn("if (!unavailable)", template)
         self.assertNotIn("window.confirm", template)
         self.assertIn("function selectedTargetIds()", template)
         self.assertIn("!selectedIds.has(modelId)", template)
@@ -294,6 +300,9 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('buildMappingTable("disabled"', template)
         self.assertIn('data-mapping-group-select="${groupKey}"', template)
         self.assertIn('data-mapping-export-button="${groupKey}"', template)
+        self.assertIn('data-mapping-batch-delete-button="${groupKey}"', template)
+        self.assertIn("/api/model-mappings/batch", template)
+        self.assertIn("mappingBatchDeletePopover", template)
         self.assertIn("body: JSON.stringify({ mapping_ids: mappingIds })", template)
         self.assertIn('class="btn btn-primary" id="importMappingsBtn"', template)
         self.assertIn('class="mapping-group-actions"', template)
@@ -609,6 +618,26 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.assertEqual("second_1", copy_response.get_json()["id"])
         self.assertEqual(3, len(catalog_syncs))
 
+    def test_mapping_batch_delete_route(self) -> None:
+        self.service.create_mapping(self._mapping_payload("first"))
+        self.service.create_mapping(self._mapping_payload("second"))
+        catalog_syncs = []
+        ModelMappingController(
+            self.ctx,
+            self.service,
+            AuthenticationService(self.ctx),
+            model_catalog_changed_callback=lambda: catalog_syncs.append(True),
+        )
+        response = self.ctx.flask_app.test_client().post(
+            "/api/model-mappings/batch",
+            json={"action": "delete", "mapping_ids": ["first", "second"]},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(2, response.get_json()["count"])
+        self.assertEqual([], self.service.list_mappings())
+        self.assertEqual(1, len(catalog_syncs))
+
     def test_image_model_is_available_as_mapping_target(self) -> None:
         self.assertIn("gpt_image", self.service.list_available_target_model_ids())
         mapping = self.service.create_mapping(
@@ -830,11 +859,26 @@ class ModelMappingServiceTests(unittest.TestCase):
             self.service.set_target_enabled("public_model", "alpha/fast", enabled=False)
         changed = self._mapping_payload()
         changed["targets"][0]["priority"] = 99
-        with self.assertRaisesRegex(ValueError, "只能删除"):
+        with self.assertRaisesRegex(ValueError, "更换模型 ID 或删除"):
             self.service.update_mapping("public_model", changed)
 
         self.service.delete_mapping("public_model")
         self.assertIsNone(self.service.get_mapping("public_model"))
+
+    def test_unavailable_target_can_be_replaced_with_an_available_model(self) -> None:
+        self.service.create_mapping(self._mapping_payload())
+        self.provider_manager.model_ids = ("alpha/replacement", "alpha/stable")
+        changed = self._mapping_payload()
+        changed["targets"][0]["model_id"] = "alpha/replacement"
+        changed["targets"][0]["priority"] = 20
+
+        mapping = self.service.update_mapping("public_model", changed)
+
+        self.assertEqual("alpha/replacement", mapping["targets"][0]["model_id"])
+        self.assertEqual(20, mapping["targets"][0]["priority"])
+        self.assertTrue(mapping["targets"][0]["available_model"])
+        self.assertEqual("available", mapping["targets"][0]["status"])
+        self.assertEqual("alpha/stable", mapping["targets"][1]["model_id"])
 
     def test_export_import_excludes_runtime_state_and_rejects_duplicates(self) -> None:
         self.service.create_mapping(self._mapping_payload())
@@ -866,6 +910,35 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.assertEqual(1, result["count"])
         self.assertEqual("available", imported["targets"][0]["status"])
         self.assertIsNone(imported["current_target_model_id"])
+
+    def test_import_allows_target_model_ids_missing_from_current_catalog(self) -> None:
+        imported_repository = ModelMappingRepository(create_connection_factory(Path(self.temp_dir.name) / "missing-target.db"))
+        imported_service = ModelMappingService(
+            self.ctx,
+            imported_repository,
+            provider_manager=self.provider_manager,
+            codex_oauth_service=self.codex_service,
+            claude_oauth_service=self.claude_service,
+        )
+
+        result = imported_service.import_mappings(
+            {
+                "version": 1,
+                "kind": "llm_proxy.model_mappings",
+                "model_mappings": [
+                    {
+                        "id": "future-model",
+                        "targets": [{"model_id": "provider/not-yet-configured"}],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(["future-model"], result["ids"])
+        mapping = imported_service.get_mapping("future-model")
+        assert mapping is not None
+        self.assertEqual("provider/not-yet-configured", mapping["targets"][0]["model_id"])
+        self.assertEqual("unavailable", mapping["targets"][0]["status"])
 
     def test_runtime_failure_state_survives_service_recreation(self) -> None:
         self.service.create_mapping(self._mapping_payload())

@@ -38,6 +38,7 @@ class ModelMappingController:
         self._app.route("/api/model-mappings", methods=["GET"])(auth(self.list_mappings))
         self._app.route("/api/model-mappings", methods=["POST"])(auth(self.create_mapping))
         self._app.route("/api/model-mappings/order", methods=["PUT"])(auth(self.reorder_mappings))
+        self._app.route("/api/model-mappings/batch", methods=["POST"])(auth(self.batch_action))
         self._app.route("/api/model-mappings/targets", methods=["GET"])(auth(self.list_targets))
         self._app.route("/api/model-mappings/export", methods=["POST"])(auth(self.export_mappings))
         self._app.route("/api/model-mappings/import", methods=["POST"])(auth(self.import_mappings))
@@ -115,6 +116,27 @@ class ModelMappingController:
             return build_value_error_response(exc)
         except Exception as exc:
             self._logger.error("Error deleting model mapping: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def batch_action(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            action = str(payload.get("action") or "").strip()
+            if action != "delete":
+                raise ValueError("不支持的模型映射批量操作")
+            count = self._service.delete_mappings(
+                coerce_string_list(
+                    payload.get("mapping_ids"),
+                    error_message="模型映射 ID 必须是非空数组",
+                )
+            )
+            self._sync_model_catalog()
+            self._logger.info("Model mappings deleted: count=%s", count)
+            return jsonify({"count": count})
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error deleting model mappings: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def copy_mapping(self, mapping_id: str) -> ResponseReturnValue:
