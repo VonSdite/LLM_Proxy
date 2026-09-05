@@ -71,6 +71,18 @@ class DashboardDefaultDateRangeTests(unittest.TestCase):
         self.assertNotIn("statsSortIndicator_response_model", html)
         self.assertNotIn("logsSortIndicator_response_model", html)
 
+    def test_model_flow_nodes_keep_truncation_within_their_layout_width(self) -> None:
+        css_path = Path(__file__).resolve().parents[1] / "src/presentation/static/css/index.css"
+        css = css_path.read_text(encoding="utf-8")
+        node_styles = css.split(".dashboard-page .model-flow-node {", 1)[1].split("}", 1)[0]
+
+        self.assertIn("max-width: 220px;", node_styles)
+        self.assertIn("display: block;", node_styles)
+        self.assertIn("min-width: 0;", node_styles)
+        self.assertIn("white-space: nowrap;", node_styles)
+        self.assertIn("overflow: hidden;", node_styles)
+        self.assertIn("text-overflow: ellipsis;", node_styles)
+
 
 if __name__ == "__main__":
     unittest.main()

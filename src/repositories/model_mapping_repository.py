@@ -185,6 +185,24 @@ class ModelMappingRepository:
                 raise ValueError(f"模型映射不存在: {mapping_id}")
             self._delete_mapping_rows(conn, mapping_id)
 
+    def delete_mappings(self, mapping_ids: Sequence[str]) -> int:
+        """批量删除模型映射及其运行状态。"""
+        normalized_ids = list(dict.fromkeys(mapping_ids))
+        with self._get_connection() as conn:
+            existing_ids = {
+                row["id"]
+                for row in conn.execute(
+                    f"SELECT id FROM model_mappings WHERE id IN ({','.join('?' for _ in normalized_ids)})",
+                    normalized_ids,
+                ).fetchall()
+            }
+            missing_id = next((mapping_id for mapping_id in normalized_ids if mapping_id not in existing_ids), None)
+            if missing_id is not None:
+                raise ValueError(f"模型映射不存在: {missing_id}")
+            for mapping_id in normalized_ids:
+                self._delete_mapping_rows(conn, mapping_id)
+        return len(normalized_ids)
+
     def set_mapping_enabled(self, mapping_id: str, *, enabled: bool) -> None:
         """更新一个映射的启用状态。"""
         now_text = now_local_datetime_text()
