@@ -107,7 +107,7 @@ class ModelMappingService:
 
     def list_mappings(self) -> list[dict[str, Any]]:
         """返回包含运行状态的模型映射列表。"""
-        available_targets = set(self._list_runtime_target_model_ids())
+        available_targets = set(self.list_available_target_model_ids())
         conflicts = self._list_oauth_catalog_conflicts()
         return [
             self._enrich_mapping(mapping, available_targets, conflicts) for mapping in self._repository.list_mappings()
@@ -218,7 +218,7 @@ class ModelMappingService:
         target = next((item for item in mapping["targets"] if item["model_id"] == target_model_id), None)
         if target is None:
             raise ValueError(f"模型映射目标不存在: {target_model_id}")
-        if target_model_id not in set(self._list_runtime_target_model_ids()):
+        if target_model_id not in set(self.list_available_target_model_ids()):
             raise ValueError(f"目标模型当前不可用: {target_model_id}")
         self._repository.set_target_enabled(normalized_mapping_id, target_model_id, enabled=enabled)
         if enabled:
@@ -243,7 +243,7 @@ class ModelMappingService:
         }
 
     def import_mappings(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        """事务导入模型映射定义；同名映射和重复 ID 拒绝导入。"""
+        """事务导入模型映射定义，并为冲突 ID 生成唯一后缀。"""
         if not isinstance(payload, Mapping):
             raise ValueError("模型映射导入内容必须是 JSON 对象")
         if payload.get("kind") != self.EXPORT_KIND:
@@ -254,10 +254,20 @@ class ModelMappingService:
         if not isinstance(raw_mappings, list) or not raw_mappings:
             raise ValueError("模型映射导入内容不能为空")
         mappings = [self._build_mapping(item) for item in raw_mappings]
-        mapping_ids = [mapping.id for mapping in mappings]
-        if len(mapping_ids) != len(set(mapping_ids)):
-            raise ValueError("模型映射导入内容包含重复 ID")
-        self._repository.import_mappings(mappings)
+        existing_ids = {mapping["id"] for mapping in self._repository.list_mappings()}
+        imported_ids: set[str] = set()
+        normalized_mappings = []
+        mapping_ids = []
+        for mapping in mappings:
+            mapping_id = mapping.id
+            occupied_ids = existing_ids | imported_ids
+            if mapping_id in occupied_ids:
+                mapping_id = self._build_unique_mapping_id(mapping_id, occupied_ids)
+                mapping = self._build_mapping({**mapping.to_mapping(), "id": mapping_id})
+            imported_ids.add(mapping_id)
+            mapping_ids.append(mapping_id)
+            normalized_mappings.append(mapping)
+        self._repository.import_mappings(normalized_mappings)
         self._group_mapping_order()
         return {"count": len(mappings), "ids": mapping_ids}
 
@@ -398,13 +408,13 @@ class ModelMappingService:
         updated_mapping: ModelMappingSchema,
     ) -> None:
         """不可用目标保留时维持原配置，编辑器支持替换模型 ID 或删除目标。"""
-        runtime_ids = set(self._list_runtime_target_model_ids())
+        available_ids = set(self.list_available_target_model_ids())
         current_targets = {target["model_id"]: target for target in current_mapping["targets"]}
         for target in updated_mapping.targets:
             current_target = current_targets.get(target.model_id)
             if (
                 current_target is not None
-                and target.model_id not in runtime_ids
+                and target.model_id not in available_ids
                 and (
                     bool(current_target["enabled"]) != target.enabled
                     or int(current_target["priority"]) != target.priority

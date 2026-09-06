@@ -184,7 +184,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
         settings_template = (project_root / "src/presentation/templates/settings.html").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260905-1", template)
+        self.assertIn("model_mappings.css?v=20260905-2", template)
         self.assertIn('id="mappingStrategySelect"', template)
         self.assertIn('<option value="highest_priority">最高优先级</option>', template)
         self.assertIn('<option value="sticky_failover">粘滞故障切换</option>', template)
@@ -232,7 +232,10 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('class="form-control target-priority" aria-label="优先级" min="0"', template)
         self.assertIn("mapping-help-button", template)
         self.assertIn("mapping-target-unavailable", template)
+        self.assertIn("mapping-target-duplicate", template)
+        self.assertIn("该目标模型已在其他目标行中使用", template)
         self.assertIn('class="mapping-target-priority-control"', template)
+        self.assertIn('class="mapping-target-status-stack"', template)
         self.assertIn("mapping-target-unavailable-help", template)
         self.assertIn("该目标模型已不在当前可用模型目录中", template)
         self.assertIn("mapping-target-auto-disabled", template)
@@ -294,6 +297,13 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertNotIn('data-resizable-columns="model-mapping-targets"', template)
         self.assertIn('row.classList.toggle("is-disabled"', template)
         self.assertIn(".mapping-target-row.is-disabled td", stylesheet)
+        self.assertIn(".mapping-target-row.is-unavailable td", stylesheet)
+        self.assertIn(".mapping-target-duplicate", stylesheet)
+        self.assertIn(".mapping-target-status-stack", stylesheet)
+        enabled_group_markup = template.split('buildMappingTable(\n                    "enabled",', 1)[1].split(
+            "enabledMappings", 1
+        )[0]
+        self.assertIn('"",', enabled_group_markup)
         self.assertIn('class="mapping-drag-handle mapping-target-drag-handle"', template)
         self.assertIn("function handleTargetRowDrop", template)
         self.assertIn("function buildDroppedMappingOrderIds", template)
@@ -666,6 +676,24 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.assertIn("gpt_image", targets)
         self.assertIn("claude_text", targets)
 
+    def test_oauth_catalog_target_is_not_marked_unavailable_without_runtime_auth_file(self) -> None:
+        self.codex_service.catalog_ids = ("gpt_text", "gpt-5.6-sol")
+        self.codex_service.runtime_ids = ()
+        mapping = self.service.create_mapping(
+            {
+                "id": "gpt-5.6-sol-mapping",
+                "targets": [{"model_id": "gpt-5.6-sol"}],
+            }
+        )
+
+        target = mapping["targets"][0]
+        self.assertTrue(target["available_model"])
+        self.assertEqual("available", target["status"])
+
+        self.service.set_target_enabled("gpt-5.6-sol-mapping", "gpt-5.6-sol", enabled=False)
+        with self.assertRaisesRegex(ValueError, "没有可用目标"):
+            self.service.acquire_target("gpt-5.6-sol-mapping")
+
     def test_highest_priority_strategy_reselects_recovered_target(self) -> None:
         self.service.create_mapping(self._mapping_payload())
         self.provider_manager.model_ids = ("alpha/stable",)
@@ -880,7 +908,7 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.assertEqual("available", mapping["targets"][0]["status"])
         self.assertEqual("alpha/stable", mapping["targets"][1]["model_id"])
 
-    def test_export_import_excludes_runtime_state_and_rejects_duplicates(self) -> None:
+    def test_export_import_excludes_runtime_state_and_suffixes_duplicate_ids(self) -> None:
         self.service.create_mapping(self._mapping_payload())
         selected = self.service.acquire_target("public_model")
         self.service.record_failure(
@@ -893,8 +921,9 @@ class ModelMappingServiceTests(unittest.TestCase):
 
         self.assertEqual("llm_proxy.model_mappings", exported["kind"])
         self.assertNotIn("auto_disabled", exported["model_mappings"][0]["targets"][0])
-        with self.assertRaisesRegex(ValueError, "已存在"):
-            self.service.import_mappings(exported)
+        duplicate_result = self.service.import_mappings(exported)
+        self.assertEqual(["public_model_1"], duplicate_result["ids"])
+        self.assertIsNotNone(self.service.get_mapping("public_model_1"))
 
         second_repository = ModelMappingRepository(create_connection_factory(Path(self.temp_dir.name) / "imported.db"))
         imported_service = ModelMappingService(
@@ -911,8 +940,25 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.assertEqual("available", imported["targets"][0]["status"])
         self.assertIsNone(imported["current_target_model_id"])
 
+    def test_import_suffixes_duplicate_ids_within_same_file(self) -> None:
+        result = self.service.import_mappings(
+            {
+                "version": 1,
+                "kind": "llm_proxy.model_mappings",
+                "model_mappings": [
+                    {"id": "same", "targets": [{"model_id": "alpha/fast"}]},
+                    {"id": "same", "targets": [{"model_id": "alpha/stable"}]},
+                ],
+            }
+        )
+
+        self.assertEqual(["same", "same_1"], result["ids"])
+        self.assertEqual("alpha/stable", self.service.get_mapping("same_1")["targets"][0]["model_id"])
+
     def test_import_allows_target_model_ids_missing_from_current_catalog(self) -> None:
-        imported_repository = ModelMappingRepository(create_connection_factory(Path(self.temp_dir.name) / "missing-target.db"))
+        imported_repository = ModelMappingRepository(
+            create_connection_factory(Path(self.temp_dir.name) / "missing-target.db")
+        )
         imported_service = ModelMappingService(
             self.ctx,
             imported_repository,

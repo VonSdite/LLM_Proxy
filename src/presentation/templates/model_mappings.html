@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260905-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260905-2">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -439,12 +439,12 @@
                 <section class="mapping-group-card">
                     <div class="mapping-group-header">
                         <div class="mapping-group-heading">
-                            <h4 class="mapping-group-title">${escapeHtml(title)}</h4>
+                            ${title ? `<h4 class="mapping-group-title">${escapeHtml(title)}</h4>` : ""}
                             <div class="mapping-group-actions">
                                 <button type="button" class="btn btn-toolbar-secondary mapping-group-data-btn"
-                                    data-mapping-batch-delete-button="${groupKey}" onclick="toggleMappingBatchDeleteConfirm(event, '${groupKey}')" disabled>删除</button>
-                                <button type="button" class="btn btn-toolbar-secondary mapping-group-data-btn"
                                     data-mapping-export-button="${groupKey}" onclick="exportMappings('${groupKey}')" disabled>导出</button>
+                                <button type="button" class="btn btn-toolbar-secondary mapping-group-data-btn"
+                                    data-mapping-batch-delete-button="${groupKey}" onclick="toggleMappingBatchDeleteConfirm(event, '${groupKey}')" disabled>删除</button>
                             </div>
                         </div>
                     </div>`;
@@ -551,9 +551,9 @@
             const groups = [
                 buildMappingTable(
                     "enabled",
-                    "已启用",
+                    "",
                     enabledMappings,
-                    modelMappings.length ? "当前没有已启用模型映射" : "当前没有模型映射"
+                    "当前没有模型映射"
                 )
             ];
             if (disabledMappings.length) {
@@ -650,18 +650,26 @@
                     <span class="mapping-target-mobile-label">优先级</span>
                     <div class="mapping-target-priority-control">
                         <input type="number" class="form-control target-priority" aria-label="优先级" min="0" value="${Number(target.priority ?? 1)}" ${unavailable ? "disabled" : ""}>
-                        <span class="mapping-target-unavailable-status" ${unavailable ? "" : "hidden"}>
-                            <span class="mapping-target-unavailable">不可用</span>
-                            <button type="button" class="mapping-help-button mapping-target-unavailable-help"
-                                aria-label="目标模型不可用，可重新选择模型 ID 或删除此行"
-                                data-tooltip="该目标模型已不在当前可用模型目录中，可重新选择模型 ID 或删除此行。更换前保留现有优先级和启停状态。">?</button>
-                        </span>
-                        <span class="mapping-target-auto-disabled-status" ${autoDisabled || manuallyDisabled ? "" : "hidden"}>
-                            <span class="mapping-target-auto-disabled">禁用</span>
-                            <button type="button" class="mapping-help-button mapping-target-auto-disabled-help"
-                                aria-label="${escapeAttribute(manuallyDisabled ? "手动禁用" : failureTooltip)}"
-                                data-tooltip="${escapeAttribute(manuallyDisabled ? "手动禁用" : failureTooltip)}">?</button>
-                        </span>
+                        <div class="mapping-target-status-stack">
+                            <span class="mapping-target-duplicate-status" hidden>
+                                <span class="mapping-target-duplicate">已重复</span>
+                                <button type="button" class="mapping-help-button mapping-target-duplicate-help"
+                                    aria-label="该目标模型已在其他目标行中使用，请选择其他模型 ID 或删除此行"
+                                    data-tooltip="该目标模型已在其他目标行中使用，请选择其他模型 ID 或删除此行。">?</button>
+                            </span>
+                            <span class="mapping-target-unavailable-status" ${unavailable ? "" : "hidden"}>
+                                <span class="mapping-target-unavailable">不可用</span>
+                                <button type="button" class="mapping-help-button mapping-target-unavailable-help"
+                                    aria-label="目标模型不可用，可重新选择模型 ID 或删除此行"
+                                    data-tooltip="该目标模型已不在当前可用模型目录中，可重新选择模型 ID 或删除此行。更换前保留现有优先级和启停状态。">?</button>
+                            </span>
+                            <span class="mapping-target-auto-disabled-status" ${autoDisabled || manuallyDisabled ? "" : "hidden"}>
+                                <span class="mapping-target-auto-disabled">禁用</span>
+                                <button type="button" class="mapping-help-button mapping-target-auto-disabled-help"
+                                    aria-label="${escapeAttribute(manuallyDisabled ? "手动禁用" : failureTooltip)}"
+                                    data-tooltip="${escapeAttribute(manuallyDisabled ? "手动禁用" : failureTooltip)}">?</button>
+                            </span>
+                        </div>
                     </div>
                 </td>
                 <td class="mapping-target-status-cell">
@@ -702,18 +710,21 @@
             const enabled = row.dataset.enabled !== "false";
             const autoDisabled = row.dataset.autoDisabled === "true";
             const available = row.dataset.available !== "false";
-            row.classList.toggle("is-unavailable", !available);
-            row.querySelector(".mapping-target-unavailable-status").hidden = available;
-            row.querySelector(".target-priority").disabled = !available;
+            const duplicate = row.dataset.duplicate === "true";
+            row.classList.toggle("is-unavailable", !available && !duplicate);
+            row.classList.toggle("is-duplicate", duplicate);
+            row.querySelector(".mapping-target-duplicate-status").hidden = !duplicate;
+            row.querySelector(".mapping-target-unavailable-status").hidden = available || duplicate;
+            row.querySelector(".target-priority").disabled = !available || duplicate;
             row.classList.toggle("is-disabled", available && !enabled);
             row.classList.toggle("is-auto-disabled", available && autoDisabled);
-            row.querySelector(".mapping-target-auto-disabled-status").hidden = enabled && !autoDisabled;
+            row.querySelector(".mapping-target-auto-disabled-status").hidden = !available || (enabled && !autoDisabled);
             const disabledHelp = row.querySelector(".mapping-target-auto-disabled-help");
             const disabledTooltip = enabled ? (row.dataset.failureTooltip || "最后一次调用失败") : "手动禁用";
             disabledHelp.setAttribute("aria-label", disabledTooltip);
             disabledHelp.dataset.tooltip = disabledTooltip;
             renderTargetTestResult(row);
-            if (row.dataset.available === "false") {
+            if (row.dataset.available === "false" || duplicate) {
                 toggleButton.hidden = true;
                 return;
             }
@@ -787,16 +798,15 @@
 
             searchInput.addEventListener("focus", renderOptions);
             searchInput.addEventListener("input", () => {
-                const candidate = searchInput.value.trim();
-                valueInput.value = "";
-                if (availableTargets.includes(candidate) && !selectedTargetIds().has(candidate)) {
-                    valueInput.value = candidate;
-                }
-                syncTargetModelSelection(row);
+                valueInput.value = searchInput.value.trim();
                 activeIndex = 0;
                 renderOptions();
             });
-            searchInput.addEventListener("blur", closeOptions);
+            searchInput.addEventListener("blur", () => {
+                valueInput.value = searchInput.value.trim();
+                syncTargetModelSelection(row);
+                closeOptions();
+            });
             searchInput.addEventListener("keydown", event => {
                 const targets = filteredTargets();
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -1130,7 +1140,8 @@
             error.hidden = !error.textContent;
             const button = row.querySelector(".mapping-test-target");
             button.textContent = testing ? "测试中..." : "测试";
-            button.disabled = testing || row.dataset.available === "false" || !row.querySelector(".target-model-id").value.trim();
+            button.disabled = testing || row.dataset.available === "false" || row.dataset.duplicate === "true"
+                || !row.querySelector(".target-model-id").value.trim();
         }
 
         function resetTargetTest(row) {
@@ -1153,6 +1164,10 @@
                 authSelect.innerHTML = "";
                 authSelect.dataset.authGroup = "";
             }
+            const valueInput = row.querySelector(".target-model-id");
+            const duplicate = modelId && Array.from(document.querySelectorAll(".mapping-target-row .target-model-id"))
+                .some(input => input !== valueInput && input.value.trim() === modelId);
+            row.dataset.duplicate = duplicate ? "true" : "false";
             row.dataset.available = availableTargets.includes(modelId) ? "true" : "false";
             syncTargetRowActions(row);
         }
