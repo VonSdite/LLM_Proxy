@@ -73,12 +73,78 @@ test("unavailable model IDs can be replaced through the combobox", () => {
     input.value = "alpha/replacement";
     input.listeners.input();
     assert.equal(row.querySelector(".target-model-id").value, "alpha/replacement");
+    assert.equal(row.dataset.available, "false");
+    assert.equal(classes.has("is-unavailable"), true);
+    assert.equal(row.querySelector(".mapping-target-unavailable-status").hidden, false);
+
+    input.listeners.blur();
+
     assert.equal(row.dataset.available, "true");
     assert.equal(classes.has("is-unavailable"), false);
     assert.equal(row.querySelector(".mapping-target-unavailable-status").hidden, true);
     assert.equal(row.querySelector(".target-priority").disabled, false);
     assert.equal(row.querySelector(".mapping-toggle-target").hidden, false);
     assert.equal(row.querySelector(".mapping-test-target").disabled, false);
+});
+
+test("renaming a manually disabled row to an unavailable model hides the disabled badge", () => {
+    const { context, row } = createHarness("alpha/missing", false);
+    row.dataset.enabled = "false";
+    context.setupTargetCombobox(row);
+    context.syncTargetRowActions(row);
+    assert.equal(row.querySelector(".mapping-target-unavailable-status").hidden, false);
+    assert.equal(row.querySelector(".mapping-target-auto-disabled-status").hidden, true);
+});
+
+test("a duplicate target model ID shows duplicate status instead of unavailable", () => {
+    const { context, row, classes } = createHarness("alpha/replacement");
+    const ownValueInput = row.querySelector(".target-model-id");
+    context.document.querySelectorAll = selector => {
+        if (selector === ".mapping-target-row .target-model-id") {
+            return [ownValueInput, { value: "alpha/fast" }];
+        }
+        return [row];
+    };
+
+    context.setupTargetCombobox(row);
+    context.syncTargetRowActions(row);
+    const searchInput = row.querySelector(".target-model-search");
+    searchInput.value = "alpha/fast";
+    searchInput.listeners.input();
+
+    assert.equal(row.dataset.duplicate, undefined);
+    assert.equal(row.querySelector(".mapping-target-duplicate-status").hidden, true);
+    assert.equal(row.querySelector(".target-model-id").value, "alpha/fast");
+
+    searchInput.listeners.blur();
+
+    assert.equal(row.dataset.duplicate, "true");
+    assert.equal(row.querySelector(".target-model-id").value, "alpha/fast");
+    assert.equal(classes.has("is-duplicate"), true);
+    assert.equal(row.querySelector(".mapping-target-duplicate-status").hidden, false);
+    assert.equal(row.querySelector(".mapping-target-unavailable-status").hidden, true);
+    assert.equal(row.querySelector(".target-priority").disabled, true);
+    assert.equal(row.querySelector(".mapping-toggle-target").hidden, true);
+    assert.equal(row.querySelector(".mapping-test-target").disabled, true);
+});
+
+test("an unavailable model status refreshes after the model ID input loses focus", () => {
+    const { context, row } = createHarness();
+    context.setupTargetCombobox(row);
+    context.syncTargetRowActions(row);
+    const searchInput = row.querySelector(".target-model-search");
+    searchInput.value = "1222";
+    searchInput.listeners.input();
+
+    assert.equal(row.dataset.available, "true");
+    assert.equal(row.querySelector(".mapping-target-unavailable-status").hidden, true);
+    assert.equal(row.querySelector(".target-model-id").value, "1222");
+
+    searchInput.listeners.blur();
+
+    assert.equal(row.dataset.available, "false");
+    assert.equal(row.querySelector(".mapping-target-unavailable-status").hidden, false);
+    assert.equal(row.querySelector(".target-model-id").value, "1222");
 });
 
 test("testing reuses the Provider configuration and metric format without toggling the target", async () => {

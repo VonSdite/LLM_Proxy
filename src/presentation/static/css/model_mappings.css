@@ -802,13 +802,15 @@
 }
 
 .mapping-target-row.is-disabled td,
-.mapping-target-row.is-auto-disabled td {
+.mapping-target-row.is-auto-disabled td,
+.mapping-target-row.is-unavailable td {
     background: #e8ebef;
     color: #667085;
 }
 
 .model-mappings-page .mapping-target-row.is-disabled .form-control,
-.model-mappings-page .mapping-target-row.is-auto-disabled .form-control {
+.model-mappings-page .mapping-target-row.is-auto-disabled .form-control,
+.model-mappings-page .mapping-target-row.is-unavailable .form-control {
     border-color: #b8c0ca;
     background: #dfe3e8;
     color: #596579;
@@ -853,6 +855,15 @@
     min-width: 0;
 }
 
+.mapping-target-status-stack {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.mapping-target-duplicate,
 .mapping-target-unavailable,
 .mapping-target-auto-disabled {
     flex: 0 0 auto;
@@ -865,11 +876,17 @@
     line-height: 1.2;
 }
 
+.mapping-target-duplicate {
+    border-color: #c87932;
+    color: #9a4f0b;
+}
+
 .mapping-target-auto-disabled {
     border-color: #bd5963;
     color: #a23b46;
 }
 
+.mapping-target-duplicate-status,
 .mapping-target-unavailable-status,
 .mapping-target-auto-disabled-status {
     display: inline-flex;
@@ -877,6 +894,7 @@
     gap: 6px;
 }
 
+.model-mappings-page .mapping-target-duplicate-help,
 .model-mappings-page .mapping-target-unavailable-help,
 .model-mappings-page .mapping-target-auto-disabled-help {
     width: 18px;
@@ -885,6 +903,7 @@
     font-size: 11px;
 }
 
+.model-mappings-page .mapping-target-duplicate-help::after,
 .model-mappings-page .mapping-target-unavailable-help::after,
 .model-mappings-page .mapping-target-auto-disabled-help::after {
     right: 0;
@@ -1555,13 +1574,15 @@
 }
 
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled td,
-:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td {
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td,
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
     background: #29313b;
     color: #a9b4c3;
 }
 
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled .form-control,
-:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled .form-control {
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled .form-control,
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable .form-control {
     border-color: #4b5664;
     background: #1b222b;
     color: #aeb9c7;
@@ -1570,6 +1591,11 @@
 :root[data-theme="dark"] .model-mappings-page .mapping-target-unavailable {
     border-color: #687383;
     color: #bcc8d8;
+}
+
+:root[data-theme="dark"] .model-mappings-page .mapping-target-duplicate {
+    border-color: #d29955;
+    color: #e3b341;
 }
 
 :root[data-theme="dark"] .model-mappings-page .mapping-target-auto-disabled {
@@ -1703,19 +1729,23 @@
     }
 
     .mapping-target-row.is-disabled,
-    .mapping-target-row.is-auto-disabled {
+    .mapping-target-row.is-auto-disabled,
+    .mapping-target-row.is-unavailable {
         background: rgba(90, 102, 120, 0.08);
     }
 
     .mapping-target-row.is-disabled td,
     .mapping-target-row.is-auto-disabled td,
+    .mapping-target-row.is-unavailable td,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled td,
-    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td {
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td,
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
         background: transparent;
     }
 
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled,
-    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled {
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled,
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable {
         background: rgba(45, 52, 62, 0.78);
     }
 
