@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}OAuth 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260801-2">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260906-3">{% endblock %}
 {% block body_class %}oauth-page{% endblock %}
 {% block header_title %}OAuth 管理{% endblock %}
 {% block header_subtitle %}管理 CLI/OAuth 类认证文件，并查看账号状态与配额。{% endblock %}
@@ -192,6 +192,9 @@
                                         <li><strong>认证失败</strong>：上游认证错误、缺少 access_token 或 refresh_token 刷新失败；会跳过，直到重新登录、刷新 token 成功或后续请求成功。</li>
                                         <li><strong>额度用完</strong>：上游返回配额限制，或最近一次配额刷新显示 Codex 窗口无剩余额度；请求时会优先跳过该文件。</li>
                                         <li><strong>已禁用</strong>：人工停止调度；重新启用后继续按认证和额度状态参与候选选择。</li>
+                                        <li>手动刷新额度或额度到期自动刷新时，会同时获取该账号的重置卡；页面加载不会请求重置卡。</li>
+                                        <li>下拉框在同一行显示重置卡名称和过期时间；已过期的卡会在本地自动隐藏。</li>
+                                        <li>选择一张卡后点击“使用”；上游确认消费成功后，系统自动刷新额度和重置卡列表。</li>
                                     </ul>
                                 </div>
                             </div>
@@ -546,6 +549,7 @@
         const CODEX_AUTH_FILE_SYNC_INTERVAL_MS = 60 * 1000;
         let activeOAuthTab = 'codex';
         let codexAuthFileSyncTimer = null;
+        let codexResetCardExpiryTimer = null;
         let codexAuthState = {
             authorizationUrl: '',
             state: '',
@@ -555,6 +559,12 @@
             authFilesLoading: false,
             quotaByFile: {},
             quotaLoadingByFile: {},
+            resetCardConsumingByFile: {},
+            resetCardsByFile: {},
+            resetCardsLoadedByFile: {},
+            resetCardLoadingByFile: {},
+            resetCardSelectionByFile: {},
+            resetCardErrorByFile: {},
             batchQuotaRefreshing: false,
             batchQuotaRefreshingCount: 0,
             authFileFilter: 'all',
@@ -1836,14 +1846,25 @@
                 const isToggling = Boolean(codexAuthState.togglingAuthFileName)
                     || codexAuthState.batchToggling
                     || codexAuthState.batchQuotaRefreshing;
-                const isQuotaActionDisabled = isLoadingQuota
-                    || codexAuthState.batchDeleting
+                const isResetCardLoading = codexAuthState.resetCardLoadingByFile[file.name || ''] === true;
+                const isResetCardConsuming = codexAuthState.resetCardConsumingByFile[file.name || ''] === true;
+                const isCommonActionDisabled = codexAuthState.batchDeleting
                     || codexAuthState.batchExporting
                     || codexAuthState.batchImporting
                     || isToggling;
+                const availabilityStatus = normalizeCodexAvailabilityStatus(file);
+                const isAuthenticationUnavailable = !isEnabled || availabilityStatus === 'auth_failed';
+                const isQuotaActionDisabled = isLoadingQuota
+                    || isResetCardLoading
+                    || isResetCardConsuming
+                    || isCommonActionDisabled;
+                const isResetCardActionDisabled = isLoadingQuota
+                    || isResetCardLoading
+                    || isResetCardConsuming
+                    || isCommonActionDisabled
+                    || isAuthenticationUnavailable;
                 const isConfirmingDelete = codexAuthState.deleteConfirmName === (file.name || '');
                 const isSelected = codexAuthState.selectedAuthFiles.has(file.name || '');
-                const availabilityStatus = normalizeCodexAvailabilityStatus(file);
                 const availabilityClass = availabilityStatus.replace(/_/g, '-');
                 const availabilityLabel = formatCodexAvailabilityStatusLabel(file, availabilityStatus);
                 const usageInfo = getCodexAuthFileInfo(file);
@@ -1913,6 +1934,7 @@
                                     <div class="oauth-quota-refreshed-at"><span>上次刷新：</span>${escapeHtml(quotaRefreshedAt)}</div>
                                     <div class="oauth-quota-text">${renderCodexQuotaSummary(quota, isLoadingQuota)}</div>
                                     ${renderCodexQuotaProgress(quota, isLoadingQuota)}
+                                    ${renderCodexResetCardControls(file, encodedName, isResetCardActionDisabled)}
                                 </div>
                             </div>
                         </div>
@@ -1921,6 +1943,7 @@
             }).join('');
             renderCodexAuthFilePagination(filteredFiles.length, pageCount);
             syncCodexAuthControls();
+            scheduleCodexResetCardExpiryRedraw();
         }
 
         function normalizeCodexAuthFileFilter(filter) {
@@ -2807,7 +2830,7 @@
             return visibleWindows.map(window => {
                 const percent = formatCodexQuotaPercent(window);
                 const resetAt = window.reset_at || window.resetAt || window.reset_label || '-';
-                return `${percent.text} 剩余，下次更新：${escapeHtml(formatTimestamp(resetAt))}`;
+                return `${escapeHtml(window.label || 'Codex')}：${percent.text} 剩余，下次重置：${escapeHtml(formatTimestamp(resetAt))}`;
             }).join('；');
         }
 
@@ -2838,6 +2861,101 @@
                     </div>
                 `;
             }).join('');
+        }
+
+        function getCodexAuthFileResetCards(file, now = Date.now()) {
+            const name = file?.name || '';
+            const cards = codexAuthState.resetCardsByFile[name];
+            if (!Array.isArray(cards)) return [];
+            return cards.filter(card => {
+                const expiresAt = parseCodexQuotaTimestamp(card?.expires_at ?? card?.expiresAt);
+                return expiresAt === null || expiresAt > now;
+            });
+        }
+
+        function scheduleCodexResetCardExpiryRedraw() {
+            if (codexResetCardExpiryTimer !== null) {
+                window.clearTimeout(codexResetCardExpiryTimer);
+                codexResetCardExpiryTimer = null;
+            }
+            const expiryTimes = Object.values(codexAuthState.resetCardsByFile)
+                .flatMap(cards => Array.isArray(cards) ? cards : [])
+                .map(card => parseCodexQuotaTimestamp(card?.expires_at ?? card?.expiresAt))
+                .filter(expiresAt => expiresAt !== null && expiresAt > Date.now());
+            if (!expiryTimes.length) return;
+            const nextExpiryAt = Math.min(...expiryTimes);
+            codexResetCardExpiryTimer = window.setTimeout(() => {
+                codexResetCardExpiryTimer = null;
+                renderCodexAuthFiles();
+            }, Math.max(nextExpiryAt - Date.now() + 100, 100));
+        }
+
+        function formatCodexResetCardExpiry(card) {
+            const expiresAt = card?.expires_at ?? card?.expiresAt;
+            return expiresAt ? formatTimestamp(expiresAt) : '不过期';
+        }
+
+        function renderCodexResetCardControls(file, encodedName, isDisabled) {
+            const name = file?.name || '';
+            const isLoading = codexAuthState.resetCardLoadingByFile[name] === true;
+            const isLoaded = codexAuthState.resetCardsLoadedByFile[name] === true;
+            const errorMessage = codexAuthState.resetCardErrorByFile[name] || '';
+            if (!isLoaded && !isLoading && !errorMessage) return '';
+            const cards = getCodexAuthFileResetCards(file);
+            const selectedId = codexAuthState.resetCardSelectionByFile[name] || '';
+            const selectedCard = cards.find(card => String(card.id || '') === selectedId) || null;
+            const options = cards.map(card => {
+                const id = String(card.id || '');
+                const title = String(card.title || '').trim() || '完整额度重置';
+                return `
+                    <label class="oauth-reset-card-option${id === selectedId ? ' is-selected' : ''}">
+                        <input
+                            type="radio"
+                            name="codexResetCard-${escapeHtml(name)}"
+                            value="${escapeHtml(id)}"
+                            ${id === selectedId ? 'checked' : ''}
+                            ${isDisabled ? 'disabled' : ''}
+                            onchange="selectCodexResetCard('${encodedName}', this.value)"
+                        >
+                        <span class="oauth-reset-card-radio" aria-hidden="true"></span>
+                        <span class="oauth-reset-card-option-copy">
+                            <strong>${escapeHtml(title)}</strong>
+                            <span>过期：${escapeHtml(formatCodexResetCardExpiry(card))}</span>
+                        </span>
+                    </label>
+                `;
+            }).join('');
+            const selectedTitle = String(selectedCard?.title || '').trim() || '完整额度重置';
+            const placeholder = isLoading
+                ? '正在获取重置卡…'
+                : (errorMessage ? '重置卡获取失败' : (isLoaded ? '没有可用重置卡' : '刷新额度后获取重置卡'));
+            return `
+                <section class="oauth-reset-card-panel" aria-label="${escapeHtml(name)} 的额度重置卡">
+                    <div class="oauth-reset-card-actions">
+                        <span class="oauth-reset-card-label">重置卡：</span>
+                        ${cards.length ? `
+                            <details class="oauth-reset-card-picker${isDisabled ? ' is-disabled' : ''}">
+                                <summary ${isDisabled ? 'tabindex="-1" aria-disabled="true"' : ''}>
+                                    <span class="oauth-reset-card-summary-copy">
+                                        <strong>${selectedCard ? escapeHtml(selectedTitle) : '选择一张重置卡'}</strong>
+                                        ${selectedCard ? `<span>过期：${escapeHtml(formatCodexResetCardExpiry(selectedCard))}</span>` : ''}
+                                    </span>
+                                    <span class="oauth-reset-card-chevron" aria-hidden="true"></span>
+                                </summary>
+                                <div class="oauth-reset-card-menu" role="radiogroup" aria-label="选择一张额度重置卡">
+                                    ${options}
+                                </div>
+                            </details>
+                        ` : `<div class="oauth-reset-card-placeholder${errorMessage ? ' is-error' : ''}" title="${escapeHtml(errorMessage)}">${escapeHtml(placeholder)}</div>`}
+                        <button
+                            type="button"
+                            class="oauth-icon-button oauth-reset-card-use-button"
+                            onclick="consumeCodexSelectedResetCard('${encodedName}')"
+                            ${isDisabled || !selectedCard ? 'disabled' : ''}
+                        >使用</button>
+                    </div>
+                </section>
+            `;
         }
 
         function renderCodexAuthFilePagination(total, pageCount) {
@@ -2897,7 +3015,10 @@
             if (codexAuthState.batchQuotaRefreshing || codexAuthState.batchToggling) {
                 return;
             }
-            if (names.some(name => codexAuthState.quotaLoadingByFile[name] === true)) {
+            if (names.some(name => (
+                codexAuthState.quotaLoadingByFile[name] === true
+                || codexAuthState.resetCardLoadingByFile[name] === true
+            ))) {
                 showMessage('选中的认证文件正在刷新，请稍后再试', 'warning');
                 return;
             }
@@ -2905,15 +3026,20 @@
             codexAuthState.batchQuotaRefreshingCount = names.length;
             names.forEach(name => {
                 codexAuthState.quotaLoadingByFile[name] = true;
+                codexAuthState.resetCardLoadingByFile[name] = true;
             });
             renderCodexAuthFiles();
-            showMessage(`正在刷新 ${names.length} 个认证文件额度`, 'success');
+            showMessage(`正在刷新 ${names.length} 个认证文件额度和重置卡`, 'success');
             let successCount = 0;
             let failedCount = 0;
             try {
                 for (const name of names) {
                     try {
-                        const ok = await refreshCodexQuotaByName(name, { silent: true, markLoading: false });
+                        const ok = await refreshCodexQuotaByName(name, {
+                            silent: true,
+                            markLoading: false,
+                            refreshResetCards: true,
+                        });
                         if (ok) {
                             successCount += 1;
                         } else {
@@ -2921,12 +3047,14 @@
                         }
                     } finally {
                         codexAuthState.quotaLoadingByFile[name] = false;
+                        codexAuthState.resetCardLoadingByFile[name] = false;
                         renderCodexAuthFiles();
                     }
                 }
             } finally {
                 names.forEach(name => {
                     codexAuthState.quotaLoadingByFile[name] = false;
+                    codexAuthState.resetCardLoadingByFile[name] = false;
                 });
                 codexAuthState.batchQuotaRefreshing = false;
                 codexAuthState.batchQuotaRefreshingCount = 0;
@@ -2935,7 +3063,7 @@
             if (failedCount) {
                 showMessage(`已刷新 ${successCount} 个，失败 ${failedCount} 个`, 'error');
             } else {
-                showMessage(`已刷新 ${successCount} 个认证文件额度`, 'success');
+                showMessage(`已刷新 ${successCount} 个认证文件额度和重置卡`, 'success');
             }
         }
 
@@ -3138,8 +3266,14 @@
         function removeCodexAuthFileFromState(name) {
             codexAuthState.authFiles = (codexAuthState.authFiles || []).filter(file => file.name !== name);
             codexAuthState.selectedAuthFiles.delete(name);
+            delete codexAuthState.resetCardsByFile[name];
+            delete codexAuthState.resetCardsLoadedByFile[name];
+            delete codexAuthState.resetCardLoadingByFile[name];
+            delete codexAuthState.resetCardSelectionByFile[name];
+            delete codexAuthState.resetCardErrorByFile[name];
             delete codexAuthState.quotaByFile[name];
             delete codexAuthState.quotaLoadingByFile[name];
+            delete codexAuthState.resetCardConsumingByFile[name];
         }
 
         async function loadCodexAuthFiles(options = {}) {
@@ -3157,6 +3291,25 @@
                     throw new Error(result.error || '加载认证文件失败');
                 }
                 codexAuthState.authFiles = Array.isArray(result.files) ? result.files : [];
+                codexAuthState.authFiles.forEach(file => {
+                    const name = file?.name || '';
+                    if (!name) return;
+                    if (file?.reset_cards_refreshed_at) {
+                        const nextCards = Array.isArray(file.reset_cards)
+                            ? file.reset_cards
+                            : [];
+                        const selectedId = codexAuthState.resetCardSelectionByFile[name] || '';
+                        codexAuthState.resetCardsByFile[name] = nextCards;
+                        codexAuthState.resetCardsLoadedByFile[name] = true;
+                        if (!nextCards.some(card => String(card?.id || '') === selectedId)) {
+                            codexAuthState.resetCardSelectionByFile[name] = '';
+                        }
+                        codexAuthState.resetCardErrorByFile[name] = '';
+                    } else if (!Object.prototype.hasOwnProperty.call(codexAuthState.resetCardsByFile, name)) {
+                        codexAuthState.resetCardsByFile[name] = [];
+                        codexAuthState.resetCardsLoadedByFile[name] = false;
+                    }
+                });
                 codexAuthState.quotaByFile = {};
                 renderCodexAuthFiles();
                 return true;
@@ -3180,6 +3333,8 @@
                 || codexAuthState.batchToggling
                 || Boolean(codexAuthState.togglingAuthFileName)
                 || Boolean(codexAuthState.deletingAuthFileName)
+                || Object.values(codexAuthState.resetCardLoadingByFile).some(Boolean)
+                || Object.values(codexAuthState.resetCardConsumingByFile).some(Boolean)
                 || Object.values(codexAuthState.quotaLoadingByFile).some(Boolean);
         }
 
@@ -3190,7 +3345,7 @@
             const dueNames = getCodexAuthFileQuotaRefreshDueNames(codexAuthState.authFiles);
             for (const name of dueNames) {
                 if (document.hidden || activeOAuthTab !== 'codex' || isCodexAuthFileSyncBusy()) return;
-                await refreshCodexQuotaByName(name, { silent: true });
+                await refreshCodexQuotaByName(name, { silent: true, refreshResetCards: true });
             }
         }
 
@@ -3209,50 +3364,207 @@
         async function loadCodexQuota(encodedName) {
             const name = decodeURIComponent(encodedName);
             if (!name || codexAuthState.quotaLoadingByFile[name] === true) return;
-            showMessage(`正在刷新 ${name} 的配额`, 'success');
-            await refreshCodexQuotaByName(name);
+            showMessage(`正在刷新 ${name} 的额度和重置卡`, 'success');
+            await refreshCodexQuotaByName(name, { refreshResetCards: true });
+        }
+
+        async function refreshCodexResetCardsByName(name) {
+            const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-cards`, {
+                cache: 'no-store',
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                const error = new Error(result.error || '获取重置卡失败');
+                error.authFailed = result.auth_failed === true || response.status === 401;
+                throw error;
+            }
+            codexAuthState.resetCardsByFile[name] = Array.isArray(result.reset_cards) ? result.reset_cards : [];
+            codexAuthState.resetCardsLoadedByFile[name] = true;
+            codexAuthState.resetCardSelectionByFile[name] = '';
+            codexAuthState.resetCardErrorByFile[name] = '';
+            return result;
+        }
+
+        function selectCodexResetCard(encodedName, cardId) {
+            const name = decodeURIComponent(encodedName);
+            if (!name) return;
+            codexAuthState.resetCardSelectionByFile[name] = String(cardId || '');
+            renderCodexAuthFiles();
+        }
+
+        function createCodexResetCardRequestId() {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return window.crypto.randomUUID();
+            }
+            return `reset-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        }
+
+        function markCodexAuthFileAuthenticationFailed(name, message = '') {
+            codexAuthState.authFiles = (codexAuthState.authFiles || []).map(file => {
+                if (file.name !== name) return file;
+                return {
+                    ...file,
+                    availability_status: 'auth_failed',
+                    availability_status_message: message || '认证失败：重置卡不可用，请重新登录',
+                };
+            });
+        }
+
+        async function consumeCodexSelectedResetCard(encodedName) {
+            const name = decodeURIComponent(encodedName);
+            const selectedId = codexAuthState.resetCardSelectionByFile[name] || '';
+            const file = (codexAuthState.authFiles || []).find(item => item.name === name);
+            const selectedCard = getCodexAuthFileResetCards(file).find(card => String(card.id || '') === selectedId);
+            if (!name || !selectedCard || codexAuthState.resetCardConsumingByFile[name] === true) return;
+            codexAuthState.resetCardConsumingByFile[name] = true;
+            codexAuthState.resetCardErrorByFile[name] = '';
+            renderCodexAuthFiles();
+            try {
+                const resetResponse = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-cards/consume`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        credit_id: selectedId,
+                        redeem_request_id: createCodexResetCardRequestId(),
+                    }),
+                    cache: 'no-store',
+                });
+                const resetResult = await resetResponse.json();
+                if (!resetResponse.ok) {
+                    const error = new Error(resetResult.error || '使用重置卡失败');
+                    error.authFailed = resetResult.auth_failed === true || resetResponse.status === 401;
+                    throw error;
+                }
+                const outcome = String(resetResult.outcome || '');
+                if (outcome === 'nothing_to_reset') {
+                    showMessage('当前额度不需要重置，未消费重置卡', 'info');
+                    return;
+                }
+                if (outcome === 'no_credit') {
+                    if (Array.isArray(resetResult.reset_cards)) {
+                        codexAuthState.resetCardsByFile[name] = resetResult.reset_cards;
+                        codexAuthState.resetCardsLoadedByFile[name] = true;
+                    }
+                    codexAuthState.resetCardSelectionByFile[name] = '';
+                    codexAuthState.resetCardErrorByFile[name] = '所选重置卡已不可用，请刷新额度重新获取。';
+                    showMessage('所选重置卡已不可用，请刷新额度', 'error');
+                    return;
+                }
+                if (!['reset', 'already_redeemed'].includes(outcome)) {
+                    throw new Error('上游返回了未知的重置结果');
+                }
+
+                if (resetResult.quota) {
+                    codexAuthState.quotaByFile[name] = resetResult.quota;
+                    updateCodexAuthFileQuotaState(name, resetResult.quota, '');
+                }
+                if (Array.isArray(resetResult.reset_cards)) {
+                    codexAuthState.resetCardsByFile[name] = resetResult.reset_cards;
+                    codexAuthState.resetCardsLoadedByFile[name] = true;
+                    codexAuthState.resetCardSelectionByFile[name] = '';
+                }
+                const resetCardsRefreshError = String(resetResult.reset_cards_error || '').trim();
+                if (resetCardsRefreshError) {
+                    codexAuthState.resetCardErrorByFile[name] = resetCardsRefreshError;
+                } else {
+                    codexAuthState.resetCardErrorByFile[name] = '';
+                }
+                await loadCodexAuthFiles({ showLoading: false });
+                if (resetResult.quota_error) {
+                    showMessage(`重置卡已使用，但额度刷新失败：${resetResult.quota_error}`, 'error');
+                } else if (resetCardsRefreshError) {
+                    showMessage('重置卡已使用，额度已刷新，但重置卡列表获取失败', 'error');
+                } else {
+                    showMessage(`重置卡已使用，已刷新额度${resetResult.windows_reset ? `（重置 ${resetResult.windows_reset} 个窗口）` : ''}`, 'success');
+                }
+            } catch (error) {
+                console.error('重置 Codex 重置卡失败:', error);
+                if (error?.authFailed) {
+                    markCodexAuthFileAuthenticationFailed(name, '认证失败：重置卡不可用，请重新登录');
+                }
+                codexAuthState.resetCardErrorByFile[name] = error?.message || '使用重置卡失败';
+                showActionError('使用 Codex 重置卡', error, { fallback: '使用重置卡失败' });
+            } finally {
+                codexAuthState.resetCardConsumingByFile[name] = false;
+                renderCodexAuthFiles();
+            }
         }
 
         async function refreshCodexQuotaByName(name, options = {}) {
             const silent = options.silent === true;
             const markLoading = options.markLoading !== false;
+            const refreshResetCards = options.refreshResetCards === true;
             if (!name) return false;
             if (markLoading) {
-                if (codexAuthState.quotaLoadingByFile[name] === true) return false;
+                if (
+                    codexAuthState.quotaLoadingByFile[name] === true
+                    || (refreshResetCards && codexAuthState.resetCardLoadingByFile[name] === true)
+                ) return false;
                 codexAuthState.quotaLoadingByFile[name] = true;
+                if (refreshResetCards) {
+                    codexAuthState.resetCardLoadingByFile[name] = true;
+                }
                 renderCodexAuthFiles();
             }
+            let quotaError = null;
+            let quotaSkipped = false;
+            let resetCardError = null;
             try {
-                const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/quota`, { cache: 'no-store' });
-                const result = await response.json();
-                if (!response.ok) {
-                    const error = new Error(result.error || '刷新配额失败');
-                    error.quotaRefreshedAt = result.quota_refreshed_at || result.refreshed_at || '';
-                    throw error;
+                try {
+                    const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/quota`, { cache: 'no-store' });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        const error = new Error(result.error || '刷新配额失败');
+                        error.quotaRefreshedAt = result.quota_refreshed_at || result.refreshed_at || '';
+                        error.authFailed = result.auth_failed === true || response.status === 401;
+                        throw error;
+                    }
+                    quotaSkipped = result?.skipped === true;
+                    codexAuthState.quotaByFile[name] = result;
+                    updateCodexAuthFileQuotaState(name, result, '');
+                } catch (error) {
+                    quotaError = error;
+                    console.error('刷新 Codex 配额失败:', error);
+                    if (error?.authFailed) {
+                        markCodexAuthFileAuthenticationFailed(name, '认证失败：额度和重置卡不可用，请重新登录');
+                    }
+                    const message = error?.message || '刷新配额失败';
+                    const refreshedAt = error?.quotaRefreshedAt || '';
+                    codexAuthState.quotaByFile[name] = { error: message, refreshed_at: refreshedAt };
+                    updateCodexAuthFileQuotaState(name, null, message, refreshedAt);
                 }
-                codexAuthState.quotaByFile[name] = result;
-                updateCodexAuthFileQuotaState(name, result, '');
-                if (!silent) {
-                    if (result?.skipped) {
-                        showMessage(`${name} 的配额正在刷新，已跳过重复请求`, 'info');
-                    } else {
-                        showMessage(`${name} 的配额已刷新`, 'success');
+
+                if (refreshResetCards) {
+                    try {
+                        await refreshCodexResetCardsByName(name);
+                    } catch (error) {
+                        resetCardError = error;
+                        console.error('获取 Codex 重置卡失败:', error);
+                        if (error?.authFailed) {
+                            markCodexAuthFileAuthenticationFailed(name, '认证失败：重置卡不可用，请重新登录');
+                        }
+                        codexAuthState.resetCardErrorByFile[name] = error?.message || '获取重置卡失败';
                     }
                 }
-                return true;
-            } catch (error) {
-                console.error('刷新 Codex 配额失败:', error);
-                const message = error?.message || '刷新配额失败';
-                const refreshedAt = error?.quotaRefreshedAt || '';
-                codexAuthState.quotaByFile[name] = { error: message, refreshed_at: refreshedAt };
-                updateCodexAuthFileQuotaState(name, null, message, refreshedAt);
+
                 if (!silent) {
-                    showActionError('刷新 Codex 配额', error, { fallback: '刷新配额失败' });
+                    if (quotaError) {
+                        showActionError('刷新 Codex 配额', quotaError, { fallback: '刷新配额失败' });
+                    } else if (resetCardError) {
+                        showMessage(`额度已刷新，重置卡获取失败：${resetCardError.message}`, 'error');
+                    } else if (quotaSkipped) {
+                        showMessage(`${name} 的额度正在刷新，已跳过重复请求`, 'info');
+                    } else {
+                        showMessage(`${name} 的额度和重置卡已刷新`, 'success');
+                    }
                 }
-                return false;
+                return quotaError === null && resetCardError === null;
             } finally {
                 if (markLoading) {
                     codexAuthState.quotaLoadingByFile[name] = false;
+                    if (refreshResetCards) {
+                        codexAuthState.resetCardLoadingByFile[name] = false;
+                    }
                     renderCodexAuthFiles();
                 }
             }

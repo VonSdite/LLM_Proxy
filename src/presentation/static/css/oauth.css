@@ -845,6 +845,212 @@
     margin-top: 8px;
 }
 
+.oauth-page .oauth-reset-card-panel {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+.oauth-page .oauth-reset-card-actions {
+    display: grid;
+    grid-template-columns: auto minmax(240px, 420px) auto;
+    align-items: center;
+    justify-content: start;
+    gap: 8px;
+}
+
+.oauth-page .oauth-reset-card-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.oauth-page .oauth-reset-card-picker {
+    position: relative;
+    min-width: 0;
+}
+
+.oauth-page .oauth-reset-card-picker summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text-primary);
+    cursor: pointer;
+    list-style: none;
+    transition: border-color var(--transition), box-shadow var(--transition), background-color var(--transition);
+}
+
+.oauth-page .oauth-reset-card-picker summary::-webkit-details-marker {
+    display: none;
+}
+
+.oauth-page .oauth-reset-card-picker summary:hover,
+.oauth-page .oauth-reset-card-picker summary:focus-visible,
+.oauth-page .oauth-reset-card-picker[open] summary {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(95, 143, 190, 0.12);
+    outline: none;
+}
+
+.oauth-page .oauth-reset-card-picker.is-disabled summary {
+    opacity: 0.55;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
+.oauth-page .oauth-reset-card-summary-copy {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.oauth-page .oauth-reset-card-summary-copy strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.oauth-page .oauth-reset-card-summary-copy span {
+    flex: 0 0 auto;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.oauth-page .oauth-reset-card-chevron {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    color: var(--text-secondary);
+    transform: translateY(-2px) rotate(45deg);
+    transition: transform var(--transition);
+}
+
+.oauth-page .oauth-reset-card-picker[open] .oauth-reset-card-chevron {
+    transform: translateY(2px) rotate(225deg);
+}
+
+.oauth-page .oauth-reset-card-menu {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+}
+
+.oauth-page .oauth-reset-card-option {
+    position: relative;
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 9px;
+    min-height: 34px;
+    padding: 7px 9px;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.oauth-page .oauth-reset-card-option:hover,
+.oauth-page .oauth-reset-card-option:focus-within {
+    background: var(--surface-hover);
+}
+
+.oauth-page .oauth-reset-card-option.is-selected {
+    background: rgba(95, 143, 190, 0.12);
+}
+
+.oauth-page .oauth-reset-card-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.oauth-page .oauth-reset-card-radio {
+    width: 15px;
+    height: 15px;
+    align-self: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: inset 0 0 0 3px var(--surface);
+}
+
+.oauth-page .oauth-reset-card-option input:checked + .oauth-reset-card-radio {
+    border-color: var(--primary);
+    background: var(--primary);
+}
+
+.oauth-page .oauth-reset-card-option input:focus-visible + .oauth-reset-card-radio {
+    outline: 2px solid rgba(95, 143, 190, 0.32);
+    outline-offset: 2px;
+}
+
+.oauth-page .oauth-reset-card-option-copy {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.oauth-page .oauth-reset-card-option-copy strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.oauth-page .oauth-reset-card-option-copy span {
+    flex: 0 0 auto;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.oauth-page .oauth-reset-card-placeholder {
+    display: flex;
+    align-items: center;
+    width: min(420px, 100%);
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.oauth-page .oauth-reset-card-placeholder.is-error {
+    border-color: rgba(214, 106, 118, 0.45);
+    color: var(--danger);
+}
+
+.oauth-page .oauth-icon-button.oauth-reset-card-use-button {
+    width: auto;
+    min-width: 52px;
+    height: 32px;
+    padding: 0 12px;
+    white-space: nowrap;
+}
+
 .oauth-page .oauth-quota-progress-meta {
     display: flex;
     justify-content: space-between;
@@ -1204,6 +1410,10 @@
     background: rgba(255, 255, 255, 0.03);
 }
 
+:root[data-theme="dark"] .oauth-page .oauth-reset-card-menu {
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.42);
+}
+
 :root[data-theme="dark"] .oauth-page .oauth-model-tag {
     border-color: #30363d;
     background: #0d1117;
@@ -1288,6 +1498,14 @@
 
     .oauth-page .oauth-auth-file-fields {
         grid-template-columns: 1fr;
+    }
+
+    .oauth-page .oauth-reset-card-actions {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .oauth-page .oauth-reset-card-label {
+        grid-column: 1 / -1;
     }
 
 }
