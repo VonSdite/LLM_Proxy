@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
 from src.presentation.oauth_controller import OAuthController
+from src.services.codex_oauth_service import CodexOAuthAuthenticationError
 
 
 class FakeLogger:
@@ -39,7 +40,31 @@ class FakeAuthService:
 class FakeOAuthService:
     def __init__(self) -> None:
         self.enabled_calls: list[tuple[str, bool]] = []
+        self.consume_calls: list[tuple[str, str, str]] = []
         self.error: Exception | None = None
+
+    def get_auth_file_reset_cards(self, name: str) -> dict[str, Any]:
+        if self.error is not None:
+            raise self.error
+        return {"status": "ok", "name": name, "reset_cards": []}
+
+    def consume_auth_file_reset_card(
+        self,
+        name: str,
+        credit_id: str,
+        redeem_request_id: str,
+    ) -> dict[str, Any]:
+        self.consume_calls.append((name, credit_id, redeem_request_id))
+        if self.error is not None:
+            raise self.error
+        return {
+            "status": "ok",
+            "name": name,
+            "credit_id": credit_id,
+            "redeem_request_id": redeem_request_id,
+            "outcome": "reset",
+            "quota": {"windows": []},
+        }
 
     def set_auth_file_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
         self.enabled_calls.append((name, enabled))
@@ -110,6 +135,39 @@ class OAuthControllerAuthFileEnabledRouteTests(unittest.TestCase):
 
         self.assertEqual(400, response.status_code)
         self.assertEqual({"error": "Auth file not found"}, response.get_json())
+
+    def test_codex_reset_cards_route_returns_current_cards(self) -> None:
+        response = self.client.get("/api/oauth/codex/auth-files/codex-demo.json/reset-cards")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([], response.get_json()["reset_cards"])
+
+    def test_codex_reset_card_consume_route_forwards_selected_card(self) -> None:
+        response = self.client.post(
+            "/api/oauth/codex/auth-files/codex-demo.json/reset-cards/consume",
+            json={"credit_id": "credit-123", "redeem_request_id": "redeem-456"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("reset", response.get_json()["outcome"])
+        self.assertEqual(
+            [("codex-demo.json", "credit-123", "redeem-456")],
+            self.codex_service.consume_calls,
+        )
+
+    def test_codex_reset_card_routes_return_401_for_authentication_failure(self) -> None:
+        self.codex_service.error = CodexOAuthAuthenticationError("认证失败")
+
+        cards_response = self.client.get("/api/oauth/codex/auth-files/codex-demo.json/reset-cards")
+        consume_response = self.client.post(
+            "/api/oauth/codex/auth-files/codex-demo.json/reset-cards/consume",
+            json={"credit_id": "credit-123"},
+        )
+
+        self.assertEqual(401, cards_response.status_code)
+        self.assertEqual({"error": "认证失败", "auth_failed": True}, cards_response.get_json())
+        self.assertEqual(401, consume_response.status_code)
+        self.assertEqual({"error": "认证失败", "auth_failed": True}, consume_response.get_json())
 
 
 if __name__ == "__main__":

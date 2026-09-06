@@ -10,7 +10,7 @@ from flask import jsonify, request, send_file
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
-from ..services import AuthenticationService, ClaudeOAuthService, CodexOAuthService
+from ..services import AuthenticationService, ClaudeOAuthService, CodexOAuthAuthenticationError, CodexOAuthService
 from .controller_utils import get_json_object
 from .decorators import require_authentication
 
@@ -48,6 +48,12 @@ class OAuthController:
         self._app.route("/api/oauth/codex/auth-files/<name>", methods=["DELETE"])(auth(self.delete_codex_auth_file))
         self._app.route("/api/oauth/codex/auth-files/<name>/quota", methods=["GET"])(
             auth(self.get_codex_auth_file_quota)
+        )
+        self._app.route("/api/oauth/codex/auth-files/<name>/reset-cards", methods=["GET"])(
+            auth(self.get_codex_auth_file_reset_cards)
+        )
+        self._app.route("/api/oauth/codex/auth-files/<name>/reset-cards/consume", methods=["POST"])(
+            auth(self.consume_codex_auth_file_reset_card)
         )
         self._app.route("/api/oauth/codex/auth-files/<name>/reset-quota", methods=["POST"])(
             auth(self.reset_codex_auth_file_quota)
@@ -172,11 +178,44 @@ class OAuthController:
     def get_codex_auth_file_quota(self, name: str) -> ResponseReturnValue:
         try:
             return jsonify(self._codex_oauth_service.get_auth_file_quota(name))
+        except CodexOAuthAuthenticationError as exc:
+            payload = self._build_codex_quota_error_payload(name, exc)
+            payload["auth_failed"] = True
+            return jsonify(payload), 401
         except ValueError as exc:
             return jsonify(self._build_codex_quota_error_payload(name, exc)), 400
         except Exception as exc:
             self._logger.error("Error fetching Codex OAuth quota: %s", exc)
             return jsonify(self._build_codex_quota_error_payload(name, exc)), 500
+
+    def get_codex_auth_file_reset_cards(self, name: str) -> ResponseReturnValue:
+        try:
+            return jsonify(self._codex_oauth_service.get_auth_file_reset_cards(name))
+        except CodexOAuthAuthenticationError as exc:
+            return jsonify({"error": str(exc), "auth_failed": True}), 401
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error fetching Codex OAuth reset cards: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def consume_codex_auth_file_reset_card(self, name: str) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            return jsonify(
+                self._codex_oauth_service.consume_auth_file_reset_card(
+                    name,
+                    str(payload.get("credit_id") or ""),
+                    str(payload.get("redeem_request_id") or ""),
+                )
+            )
+        except CodexOAuthAuthenticationError as exc:
+            return jsonify({"error": str(exc), "auth_failed": True}), 401
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error consuming Codex OAuth reset card: %s", exc)
+            return jsonify({"error": str(exc)}), 500
 
     def reset_codex_auth_file_quota(self, name: str) -> ResponseReturnValue:
         try:

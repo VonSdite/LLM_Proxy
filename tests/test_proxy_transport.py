@@ -1763,6 +1763,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn("codexRefreshAuthFilesBtn", html)
         self.assertIn('id="codexAuthFileToolbar"', html)
         self.assertIn('id="codexSelectAllAuthFiles"', html)
+        self.assertIn("resetCardSelectionByFile", html)
+        self.assertIn("function refreshCodexResetCardsByName", html)
+        self.assertIn("function consumeCodexSelectedResetCard", html)
+        self.assertNotIn("function loadCodexResetCards", html)
         self.assertIn('id="codexImportAuthFilesInput"', html)
         self.assertIn('id="codexImportAuthFilesBtn"', html)
         self.assertIn('id="codexRefreshSelectedQuotaBtn"', html)
@@ -1779,8 +1783,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertLess(codex_enable_index, codex_import_index)
         self.assertLess(codex_import_index, codex_export_index)
         self.assertNotIn('id="codexResetSelectedQuotaBtn"', html)
-        self.assertNotIn('aria-label="重置选中本地额度状态"', html)
-        self.assertNotIn('onclick="resetSelectedCodexQuotaStates()"', html)
+        self.assertNotIn('onclick="resetSelectedCodexQuotaState()"', html)
         self.assertIn('id="codexExportSelectedAuthFilesBtn"', html)
         self.assertIn('aria-label="导出选中认证文件"', html)
         self.assertIn('id="codexDeleteSelectedAuthFilesBtn"', html)
@@ -1789,6 +1792,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="codexAuthFilePagination"', html)
         self.assertIn("authFilePageSize: 50", html)
         self.assertIn("selectedAuthFiles: new Set()", html)
+        self.assertIn("resetCardsByFile: {}", html)
+        self.assertIn("reset_cards_refreshed_at", html)
+        self.assertIn("Array.isArray(file.reset_cards)", html)
         self.assertIn("batchDeleteConfirm: false", html)
         self.assertIn("batchDeleting: false", html)
         self.assertIn("batchExporting: false", html)
@@ -1796,13 +1802,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("batchToggling: false", html)
         self.assertIn("batchTogglingEnabled: null", html)
         self.assertIn("batchTogglingCount: 0", html)
-        self.assertNotIn("quotaResettingByFile", html)
+        self.assertIn("resetCardConsumingByFile", html)
         self.assertNotIn("batchQuotaResetting", html)
         self.assertNotIn("batchQuotaResettingCount", html)
-        self.assertIn(
-            "codexAuthState.quotaLoadingByFile[name] = false;\n                        renderCodexAuthFiles();",
-            html,
-        )
+        self.assertIn("codexAuthState.quotaLoadingByFile[name] = false;", html)
         self.assertIn("已选择 ${selectedSize} 个", html)
         self.assertNotIn("已选择 ${selectedSize} 个 / 共", html)
         self.assertIn("function renderCodexQuotaProgress", html)
@@ -1847,9 +1850,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function uploadAuthFiles", html)
         self.assertIn("function requestDeleteCodexAuthFile", html)
         self.assertIn("function deleteCodexAuthFile", html)
-        self.assertNotIn("function resetSelectedCodexQuotaStates", html)
-        self.assertNotIn("function resetCodexQuotaState", html)
-        self.assertNotIn("function resetCodexQuotaStateByName", html)
+        self.assertIn("function refreshCodexResetCardsByName", html)
+        self.assertIn("function consumeCodexSelectedResetCard", html)
+        self.assertNotIn("function loadCodexResetCards", html)
         self.assertIn("function replaceCodexAuthFileInState", html)
         self.assertIn("function setCodexAuthFileEnabled", html)
         self.assertIn("requestSetOAuthAuthFileEnabled('codex', name, enabled)", html)
@@ -1890,21 +1893,38 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("formatCodexQuotaRefreshedAt(file, quota)", html)
         self.assertIn("quota_refreshed_at", html)
         self.assertIn("const CODEX_AUTH_FILE_SYNC_INTERVAL_MS = 60 * 1000;", html)
+        self.assertIn("let codexResetCardExpiryTimer = null;", html)
         self.assertIn("async function syncCodexAuthFiles()", html)
+        self.assertIn("function scheduleCodexResetCardExpiryRedraw()", html)
         self.assertIn("function isCodexAuthFileQuotaRefreshDue(file, now = Date.now())", html)
         self.assertIn("getCodexAuthFileQuotaRefreshDueNames(codexAuthState.authFiles)", html)
-        self.assertIn("await refreshCodexQuotaByName(name, { silent: true });", html)
+        self.assertIn("await refreshCodexQuotaByName(name, { silent: true, refreshResetCards: true });", html)
         self.assertIn("await loadCodexAuthFiles({ showLoading: false });", html)
         self.assertIn("startCodexAuthFileAutoSync();", html)
-        self.assertNotIn('class="btn btn-secondary btn-sm oauth-quota-reset-button"', html)
-        self.assertNotIn(">重置</button>", html)
-        self.assertNotIn(">重置选中</button>", html)
+        self.assertIn("resetCardConsumingByFile", html)
+        self.assertIn("/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-cards", html)
+        self.assertIn("/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-cards/consume", html)
+        self.assertIn(">使用</button>", html)
+        self.assertNotIn("使用并刷新额度", html)
+        self.assertIn("refreshResetCards: true", html)
+        quota_refresh_script = html[
+            html.index("async function refreshCodexQuotaByName") : html.index("function updateCodexAuthFileQuotaState")
+        ]
+        self.assertNotIn("resetCardsByFile", quota_refresh_script)
+        self.assertNotIn("resetCardsLoadedByFile", quota_refresh_script)
         self.assertNotIn("formatCodexUsageStatusLabel", html)
         self.assertNotIn("oauth-auth-file-error", html)
         self.assertIn('class="oauth-icon-button"', html)
         self.assertNotIn("oauth-icon-button-primary", html)
-        self.assertIn("return `${percent.text} 剩余", html)
-        self.assertNotIn("return `${escapeHtml(window.label || 'Codex')}：${percent.text}", html)
+        self.assertIn("下次重置：${escapeHtml(formatTimestamp(resetAt))}", html)
+        self.assertIn("return `${escapeHtml(window.label || 'Codex')}：${percent.text}", html)
+        self.assertIn("function formatCodexResetCardExpiry", html)
+        self.assertIn("过期：${escapeHtml(formatCodexResetCardExpiry(card))}", html)
+        self.assertIn("const isAuthenticationUnavailable = !isEnabled || availabilityStatus === 'auth_failed';", html)
+        self.assertIn("${isDisabled ? 'disabled' : ''}", html)
+        self.assertIn("error.authFailed = result.auth_failed === true || response.status === 401;", html)
+        self.assertIn("error.authFailed = resetResult.auth_failed === true || resetResponse.status === 401;", html)
+        self.assertNotIn("oauth-reset-card-option-copy small", css)
         self.assertIn('class="btn btn-primary" id="codexSubmitCallbackBtn"', html)
         self.assertIn('id="codexCallbackSection" hidden', html)
         self.assertIn('id="codexCallbackUrlInput"', html)
@@ -1916,7 +1936,7 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("/api/oauth/codex/auth-files/import", html)
         self.assertIn("/api/oauth/${provider}/auth-files/${encodeURIComponent(name)}/${action}", html)
         self.assertNotIn("/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-quota", html)
-        self.assertNotIn("/reset-quota", html)
+        self.assertIn("/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-cards", html)
         self.assertIn("/api/oauth/codex/models", html)
         self.assertNotIn("/api/oauth/codex/models/refresh", html)
         self.assertIn("function refreshClaudeAuthLink", html)
@@ -1993,6 +2013,9 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".oauth-page .oauth-icon-button-enable", css)
         self.assertIn(".oauth-page .oauth-quota-refreshed-at", css)
         self.assertIn(".oauth-page .oauth-quota-progress", css)
+        self.assertIn(".oauth-page .oauth-reset-card-panel", css)
+        self.assertIn(".oauth-page .oauth-reset-card-picker", css)
+        self.assertIn(".oauth-page .oauth-reset-card-option", css)
         self.assertIn(".oauth-page .oauth-delete-popover", css)
         self.assertIn(".oauth-page .oauth-status-text", css)
         self.assertIn(".oauth-page .oauth-status-text.disabled", css)
@@ -2003,8 +2026,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
     def test_oauth_template_formats_codex_quota_without_coercing_null_to_zero(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "oauth.html"
         html = template_path.read_text(encoding="utf-8")
-        script_start = html.index("function formatCodexQuotaPercent")
-        script_end = html.index("function renderCodexQuotaSummary", script_start)
+        script_start = html.index("function getCodexQuotaVisibleWindows")
+        script_end = html.index("function formatCodexQuotaRefreshedAt", script_start)
         script = html[script_start:script_end]
 
         node_script = f"""
@@ -2024,6 +2047,13 @@ process.stdout.write(JSON.stringify([
     quota: {{ windows: [{{ label: "Codex 5 小时", reset_at: "2026-08-29T10:00:00Z" }}] }},
     quota_refreshed_at: "2026-08-29T11:00:00Z",
   }}, Date.parse("2026-08-29T12:00:00Z")),
+  sandbox.getCodexQuotaVisibleWindows({{
+    windows: [
+      {{ label: "Codex expired", reset_at: "2026-08-29T10:00:00Z" }},
+      {{ label: "Codex active", reset_at: "2026-08-29T12:00:00Z" }},
+      {{ label: "Codex unknown" }},
+    ],
+  }}, Date.parse("2026-08-29T11:00:00Z")),
 ]));
 """
         completed = subprocess.run(
@@ -2032,7 +2062,7 @@ process.stdout.write(JSON.stringify([
             check=True,
             capture_output=True,
         )
-        full_quota, unknown_quota, empty_quota, due_quota, already_refreshed_quota = json.loads(
+        full_quota, unknown_quota, empty_quota, due_quota, already_refreshed_quota, visible_windows = json.loads(
             completed.stdout.decode("utf-8")
         )
 
@@ -2041,6 +2071,10 @@ process.stdout.write(JSON.stringify([
         self.assertEqual({"value": 0, "text": "0%", "known": True}, empty_quota)
         self.assertTrue(due_quota)
         self.assertFalse(already_refreshed_quota)
+        self.assertEqual(
+            ["Codex expired", "Codex active", "Codex unknown"],
+            [window["label"] for window in visible_windows],
+        )
 
     def test_settings_template_contains_oauth_network_settings(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"

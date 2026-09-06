@@ -747,6 +747,8 @@ OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并�
   - `POST /api/oauth/codex/auth-files/<name>/enable`
   - `DELETE /api/oauth/codex/auth-files/<name>`
   - `GET /api/oauth/codex/auth-files/<name>/quota`
+  - `GET /api/oauth/codex/auth-files/<name>/reset-cards`
+  - `POST /api/oauth/codex/auth-files/<name>/reset-cards/consume`
   - `POST /api/oauth/codex/auth-files/<name>/reset-quota`
   - `POST /api/oauth/claude/session`
   - `POST /api/oauth/claude/callback`
@@ -774,10 +776,14 @@ OAuth Codex tab
   -> list / manage local Codex text model IDs
   -> list / manage local Codex image model IDs and default image model
   -> list auth file token/status/quota snapshot
-  -> optional quota refresh with current access token to chatgpt.com/backend-api/wham/usage
+  -> manually refresh quota to query wham/usage and wham/rate-limit-reset-credits with the auth file access token
+  -> render available reset-credit title and expiry time on one line in the card dropdown
+  -> select one reset card
+  -> click “使用” to consume the selected credit_id through wham/rate-limit-reset-credits/consume
+  -> clear the old local quota state and refresh quota and reset-credit details after a successful consume response
   -> skip duplicate quota refresh when the same auth file is already refreshing
   -> persist quota snapshot or quota error
-  -> check reset_at on the open page every minute, refresh due windows through the quota API, and render the updated snapshot
+  -> check reset_at on the open page every minute, hide expired windows, refresh due windows through the quota and reset-card APIs, and render the updated snapshot
   -> optional reset local quota snapshot and cooldown state
 ```
 
@@ -814,7 +820,12 @@ OAuth Claude tab
 - Claude 认证文件的人工禁用状态、最近一次数据面使用状态和最近成功认证文件保存在 `data/oauth/claude/.state/auth_files.json`
 - 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
 - OAuth 页面为启用的认证文件显示禁用按钮，为禁用的认证文件显示启用按钮；禁用文件块使用灰态显示，并可通过顶部“禁用”筛选快速定位
-- OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持多文件导入、全选后批量启用、批量禁用、批量刷新额度、ZIP 导出和批量归档删除
+- OAuth 页面认证文件列表按名称排序、每页最多展示 50 个，支持多文件导入、全选后批量启用、批量禁用、批量刷新额度和重置卡、卡片内选择并使用重置卡、ZIP 导出和批量归档删除
+- 手动刷新或额度到期自动刷新时，同时查询 `wham/usage` 和 `wham/rate-limit-reset-credits`；页面加载不获取重置卡
+- 重置卡下拉框在同一行显示名称和过期时间；过期卡由页面本地定时隐藏，不触发额外上游请求
+- “使用”提交所选重置卡 ID；上游返回 `reset` 或 `already_redeemed` 后刷新额度和重置卡明细
+- 最近一次成功获取的重置卡列表持久化到 `data/oauth/codex/.state/auth_files.json`；页面刷新只读取该快照，额度刷新才更新它
+- 认证失败状态下保留重置卡快照用于展示，前端禁用选择和消费，后端消费接口拒绝失效认证文件
 - OAuth 页面导入认证文件时支持选择多个 JSON 文件或多个 ZIP 包；ZIP 必须是导出 API 生成的根目录 JSON 文件结构；每个 JSON 都会校验 provider 类型、access token、email 和过期时间，合法才写入认证目录
 - OAuth 页面导入完成后按导入结果 toast 提示成功数量和失败数量
 - OAuth 页面导出选中认证文件时调用导出 API，单个文件也会以 ZIP 下载

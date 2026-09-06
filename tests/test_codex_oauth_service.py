@@ -29,10 +29,13 @@ from src.services.codex_oauth_service import (
     CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS,
     CODEX_QUOTA_USER_AGENT,
     CODEX_REDIRECT_URI,
+    CODEX_RESET_CREDIT_CONSUME_URL,
+    CODEX_RESET_CREDITS_URL,
     CODEX_USAGE_URL,
     DEFAULT_CODEX_IMAGE_MODEL_ID,
     DEFAULT_CODEX_IMAGE_MODEL_IDS,
     DEFAULT_CODEX_MODEL_IDS,
+    CodexOAuthAuthenticationError,
     CodexOAuthService,
 )
 
@@ -242,7 +245,10 @@ class CodexOAuthServiceTests(unittest.TestCase):
                 refreshed_names.append(name)
                 return {"status": "ok"}
 
-            with patch.object(service, "get_auth_file_quota", side_effect=fake_get_quota):
+            with (
+                patch.object(service, "get_auth_file_quota", side_effect=fake_get_quota),
+                patch.object(service, "get_auth_file_reset_cards", return_value={"status": "ok", "reset_cards": []}),
+            ):
                 result = service.refresh_all_auth_file_quota_snapshots(
                     file_delay_seconds=10,
                     sleep_func=sleep_calls.append,
@@ -327,10 +333,13 @@ class CodexOAuthServiceTests(unittest.TestCase):
             service = self._build_service(root)
             refreshed_names: list[str] = []
 
-            with patch.object(
-                service,
-                "get_auth_file_quota",
-                side_effect=lambda name: refreshed_names.append(name) or {"status": "ok"},
+            with (
+                patch.object(
+                    service,
+                    "get_auth_file_quota",
+                    side_effect=lambda name: refreshed_names.append(name) or {"status": "ok"},
+                ),
+                patch.object(service, "get_auth_file_reset_cards", return_value={"status": "ok", "reset_cards": []}),
             ):
                 result = service.refresh_due_auth_file_quota_snapshots(file_delay_seconds=0)
 
@@ -538,9 +547,11 @@ class CodexOAuthServiceTests(unittest.TestCase):
             )
             service = self._build_service(root)
 
-            result = service.list_auth_files()
+            with patch.object(service, "_request_auth_file_quota") as quota_request:
+                result = service.list_auth_files()
 
         self.assertEqual(1, result["total"])
+        quota_request.assert_not_called()
         self.assertEqual("expired", result["files"][0]["status"])
         self.assertEqual("auth_check_required", result["files"][0]["availability_status"])
         self.assertEqual(
@@ -704,6 +715,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
             quota_refreshed_at = service.get_auth_file_quota_refreshed_at("codex-demo.json")
 
         self.assertEqual("Bearer access-demo", captured["headers"]["Authorization"])
+        self.assertEqual(CODEX_USAGE_URL, captured["url"])
         self.assertEqual("account-123", captured["headers"]["Chatgpt-Account-Id"])
         self.assertEqual(CODEX_QUOTA_USER_AGENT, captured["headers"]["User-Agent"])
         self.assertEqual(20, captured["timeout"])
@@ -713,10 +725,256 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertFalse(result["refreshed"])
         self.assertEqual(75.0, result["windows"][0]["remaining_percent"])
         self.assertTrue(result["windows"][0]["reset_at"])
+        self.assertNotIn("reset_cards", result)
         self.assertEqual(75.0, auth_files[0]["quota"]["windows"][0]["remaining_percent"])
         self.assertEqual("", auth_files[0]["quota_error"])
         self.assertTrue(auth_files[0]["quota_refreshed_at"])
         self.assertEqual(auth_files[0]["quota_refreshed_at"], quota_refreshed_at)
+
+    def test_get_auth_file_reset_cards_uses_detail_endpoint_and_filters_unavailable_cards(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "account_id": "account-123",
+                        "access_token": "access-demo",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            captured: dict[str, Any] = {}
+
+            def fake_get(url, headers=None, **kwargs):
+                captured["url"] = url
+                captured["headers"] = dict(headers or {})
+                return FakeResponse(
+                    {
+                        "credits": [
+                            {
+                                "id": "credit-never-expires",
+                                "reset_type": "codex_rate_limits",
+                                "status": "available",
+                                "granted_at": "2026-09-01T00:00:00Z",
+                                "expires_at": None,
+                            },
+                            {
+                                "id": "credit-current",
+                                "reset_type": "codex_rate_limits",
+                                "status": "available",
+                                "granted_at": "2026-09-02T00:00:00Z",
+                                "expires_at": "2999-09-30T12:00:00Z",
+                                "title": "Full reset (Weekly + 5 hr)",
+                                "description": "Ready to redeem",
+                            },
+                            {
+                                "id": "credit-expired",
+                                "reset_type": "codex_rate_limits",
+                                "status": "available",
+                                "granted_at": "1999-01-01T00:00:00Z",
+                                "expires_at": "2000-01-01T00:00:00Z",
+                            },
+                            {
+                                "id": "credit-unsupported",
+                                "reset_type": "codex_rate_limits",
+                                "is_supported_by_plan": False,
+                                "status": "available",
+                                "granted_at": "2026-09-01T00:00:00Z",
+                                "expires_at": "2999-10-01T00:00:00Z",
+                            },
+                            {
+                                "id": "credit-redeemed",
+                                "reset_type": "codex_rate_limits",
+                                "status": "redeemed",
+                                "granted_at": "2026-09-01T00:00:00Z",
+                                "expires_at": "2999-10-01T00:00:00Z",
+                            },
+                        ],
+                        "available_count": 4,
+                        "total_earned_count": 5,
+                    }
+                )
+
+            with patch_requests_session(get=fake_get):
+                result = service.get_auth_file_reset_cards("codex-demo.json")
+            auth_file = service.list_auth_files()["files"][0]
+            reloaded_service = self._build_service(root)
+            with patch_requests_session(
+                get=lambda url, **kwargs: (_ for _ in ()).throw(AssertionError(f"Unexpected request: {url}"))
+            ):
+                reloaded_auth_file = reloaded_service.list_auth_files()["files"][0]
+
+        self.assertEqual(CODEX_RESET_CREDITS_URL, captured["url"])
+        self.assertEqual("Bearer access-demo", captured["headers"]["Authorization"])
+        self.assertEqual("account-123", captured["headers"]["Chatgpt-Account-Id"])
+        self.assertEqual(4, result["available_count"])
+        self.assertEqual(2, result["listed_count"])
+        self.assertEqual(
+            ["credit-current", "credit-never-expires"],
+            [card["id"] for card in result["reset_cards"]],
+        )
+        self.assertEqual("Full reset (Weekly + 5 hr)", result["reset_cards"][0]["title"])
+        self.assertEqual("2999-09-30T12:00:00Z", result["reset_cards"][0]["expires_at"])
+        self.assertEqual("", result["reset_cards"][1]["expires_at"])
+        self.assertIsNone(auth_file["quota"])
+        self.assertEqual(result["reset_cards"], auth_file["reset_cards"])
+        self.assertTrue(auth_file["reset_cards_refreshed_at"])
+        self.assertEqual(result["reset_cards"], reloaded_auth_file["reset_cards"])
+        self.assertEqual(auth_file["reset_cards_refreshed_at"], reloaded_auth_file["reset_cards_refreshed_at"])
+
+    def test_consume_auth_file_reset_card_forwards_selected_id_and_refreshes_quota(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "account_id": "account-123",
+                        "access_token": "access-demo",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            captured: dict[str, Any] = {}
+            get_urls: list[str] = []
+
+            def fake_post(url, headers=None, json=None, **kwargs):
+                captured["post_url"] = url
+                captured["post_headers"] = dict(headers or {})
+                captured["post_json"] = dict(json or {})
+                return FakeResponse({"code": "reset", "windows_reset": 2})
+
+            def fake_get(url, **kwargs):
+                get_urls.append(url)
+                return FakeResponse(
+                    {
+                        "plan_type": "plus",
+                        "rate_limit": {
+                            "primary_window": {
+                                "used_percent": 0,
+                                "reset_after_seconds": 3600,
+                            }
+                        },
+                    }
+                    if url == CODEX_USAGE_URL
+                    else {"credits": [], "available_count": 0}
+                )
+
+            with patch_requests_session(get=fake_get, post=fake_post):
+                result = service.consume_auth_file_reset_card(
+                    "codex-demo.json",
+                    "credit-123",
+                    "redeem-456",
+                )
+
+        self.assertEqual(CODEX_RESET_CREDIT_CONSUME_URL, captured["post_url"])
+        self.assertEqual("Bearer access-demo", captured["post_headers"]["Authorization"])
+        self.assertEqual("account-123", captured["post_headers"]["Chatgpt-Account-Id"])
+        self.assertEqual(
+            {"redeem_request_id": "redeem-456", "credit_id": "credit-123"},
+            captured["post_json"],
+        )
+        self.assertEqual([CODEX_USAGE_URL, CODEX_RESET_CREDITS_URL], get_urls)
+        self.assertEqual("reset", result["outcome"])
+        self.assertEqual(2, result["windows_reset"])
+        self.assertEqual(100.0, result["quota"]["windows"][0]["remaining_percent"])
+        self.assertEqual("", result["quota_error"])
+        self.assertEqual([], result["reset_cards"])
+        self.assertEqual("", result["reset_cards_error"])
+
+    def test_consume_no_credit_removes_card_from_persisted_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state_file = auth_dir / ".state" / "auth_files.json"
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "files": {
+                            "codex-demo.json": {
+                                "reset_cards": [
+                                    {"id": "credit-123", "title": "Full reset", "expires_at": "2999-01-01T00:00:00Z"},
+                                    {"id": "credit-456", "title": "Full reset", "expires_at": "2999-01-02T00:00:00Z"},
+                                ],
+                                "reset_cards_refreshed_at": "2026-09-06T00:00:00Z",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+
+            with patch_requests_session(post=lambda url, **kwargs: FakeResponse({"code": "no_credit"})):
+                result = service.consume_auth_file_reset_card("codex-demo.json", "credit-123")
+            reloaded_cards = service.list_auth_files()["files"][0]["reset_cards"]
+
+        self.assertEqual("no_credit", result["outcome"])
+        self.assertEqual(["credit-456"], [card["id"] for card in result["reset_cards"]])
+        self.assertEqual(["credit-456"], [card["id"] for card in reloaded_cards])
+
+    def test_consume_reset_card_rejects_auth_failed_snapshot_before_upstream_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state_file = auth_dir / ".state" / "auth_files.json"
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "files": {
+                            "codex-demo.json": {
+                                "usage_status": "error",
+                                "usage_status_code": 401,
+                                "usage_error_type": "authentication_error",
+                                "reset_cards": [{"id": "credit-123"}],
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+
+            with (
+                self.assertRaises(CodexOAuthAuthenticationError),
+                patch_requests_session(
+                    post=lambda url, **kwargs: (_ for _ in ()).throw(AssertionError(f"Unexpected request: {url}"))
+                ),
+            ):
+                service.consume_auth_file_reset_card("codex-demo.json", "credit-123")
 
     def test_get_auth_file_quota_prefers_id_token_account_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

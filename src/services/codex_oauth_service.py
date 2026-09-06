@@ -42,6 +42,8 @@ CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_REDIRECT_URI = "http://localhost:1455/auth/callback"
 CODEX_SCOPE = "openid email profile offline_access"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+CODEX_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+CODEX_RESET_CREDIT_CONSUME_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
 CODEX_MODEL_REFERENCE_URLS = (
     "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json",
     "https://models.router-for.me/models.json",
@@ -52,6 +54,7 @@ CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS = 60 * 60
 CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS = 10
 OAUTH_SESSION_TTL_SECONDS = 10 * 60
 DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = (
+    "gpt-6-astra",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -93,6 +96,10 @@ class _CodexOAuthSession:
     code_verifier: str
     code_challenge: str
     expires_at: float
+
+
+class CodexOAuthAuthenticationError(ValueError):
+    """表示 Codex OAuth 认证文件当前无法访问上游控制接口。"""
 
 
 class CodexOAuthService:
@@ -293,6 +300,11 @@ class CodexOAuthService:
                 sleep_func(delay_seconds)
             try:
                 self.get_auth_file_quota(name)
+                try:
+                    self.get_auth_file_reset_cards(name)
+                except Exception as exc:
+                    # 配额快照已经成功，重置卡失败时保留上一份卡片快照。
+                    self._logger.warning("Codex reset card auto refresh failed: file=%s error=%s", name, exc)
                 refreshed.append(name)
             except Exception as exc:
                 failed.append({"name": name, "error": str(exc)})
@@ -678,6 +690,146 @@ class CodexOAuthService:
         """查询指定认证文件的 Codex 使用配额。"""
         return self._get_auth_file_quota(name, record_auth_failure=True)
 
+    def get_auth_file_reset_cards(self, name: str) -> dict[str, Any]:
+        """查询指定认证文件当前可选择的额度重置卡明细。"""
+        auth_file = self._resolve_auth_file(name)
+        payload = self._read_auth_file(auth_file)
+        state = self._load_auth_file_state()
+        state_files = state.get("files")
+        file_state = state_files.get(auth_file.name) if isinstance(state_files, dict) else None
+        if not str(payload.get("access_token") or "").strip() or (
+            isinstance(file_state, dict) and self._is_auth_failure_state(file_state)
+        ):
+            raise CodexOAuthAuthenticationError("Codex auth file authentication failed; reset cards unavailable")
+        response = self._request_auth_file_reset_cards(payload)
+        if response.status_code >= 400:
+            if self._is_auth_error_response(response):
+                self.record_auth_file_failure(
+                    auth_file.name,
+                    self._response_error_text(response),
+                    status_code=response.status_code,
+                    error_type="authentication_error",
+                )
+                raise CodexOAuthAuthenticationError(
+                    f"Codex auth file authentication failed; reset cards unavailable: {self._response_error_text(response)}"
+                )
+            raise ValueError(f"Codex reset-credit request returned {response.status_code}: {response.text}")
+
+        reset_credit_payload = response.json()
+        if not isinstance(reset_credit_payload, dict):
+            raise ValueError("Codex reset-credit response must be a JSON object")
+
+        reset_cards = self._build_rate_limit_reset_cards(reset_credit_payload)
+        available_count = self._parse_non_negative_int(
+            reset_credit_payload.get("available_count") or reset_credit_payload.get("availableCount")
+        )
+        refreshed_at = self._now_iso()
+        self._store_auth_file_reset_cards(
+            auth_file.name,
+            reset_cards,
+            refreshed_at=refreshed_at,
+        )
+        self._clear_auth_file_auth_failure(auth_file.name)
+        return {
+            "status": "ok",
+            "name": auth_file.name,
+            "refreshed_at": refreshed_at,
+            "available_count": available_count,
+            "listed_count": len(reset_cards),
+            "reset_cards": reset_cards,
+        }
+
+    def consume_auth_file_reset_card(
+        self,
+        name: str,
+        credit_id: str,
+        redeem_request_id: str = "",
+    ) -> dict[str, Any]:
+        """消费指定额度重置卡，并在成功后刷新该认证文件的额度快照。"""
+        auth_file = self._resolve_auth_file(name)
+        normalized_credit_id = str(credit_id or "").strip()
+        if not normalized_credit_id:
+            raise ValueError("Reset credit id must not be empty")
+        if len(normalized_credit_id) > 1000:
+            raise ValueError("Reset credit id is too long")
+
+        normalized_request_id = str(redeem_request_id or "").strip() or secrets.token_urlsafe(24)
+        if len(normalized_request_id) > 200:
+            raise ValueError("Reset credit request id is too long")
+
+        payload = self._read_auth_file(auth_file)
+        state = self._load_auth_file_state()
+        state_files = state.get("files")
+        file_state = state_files.get(auth_file.name) if isinstance(state_files, dict) else None
+        if not str(payload.get("access_token") or "").strip() or (
+            isinstance(file_state, dict) and self._is_auth_failure_state(file_state)
+        ):
+            raise CodexOAuthAuthenticationError("Codex auth file authentication failed; reset card unavailable")
+        response = self._request_consume_auth_file_reset_card(
+            payload,
+            credit_id=normalized_credit_id,
+            redeem_request_id=normalized_request_id,
+        )
+        if response.status_code >= 400:
+            if self._is_auth_error_response(response):
+                self.record_auth_file_failure(
+                    auth_file.name,
+                    self._response_error_text(response),
+                    status_code=response.status_code,
+                    error_type="authentication_error",
+                )
+                raise CodexOAuthAuthenticationError(
+                    f"Codex auth file authentication failed; reset card unavailable: {self._response_error_text(response)}"
+                )
+            raise ValueError(f"Codex reset-credit consume returned {response.status_code}: {response.text}")
+
+        consume_payload = response.json()
+        if not isinstance(consume_payload, dict):
+            raise ValueError("Codex reset-credit consume response must be a JSON object")
+        outcome = self._normalize_text(consume_payload.get("code") or consume_payload.get("outcome")).lower()
+        if outcome not in {"reset", "nothing_to_reset", "no_credit", "already_redeemed"}:
+            raise ValueError("Codex reset-credit consume response contains an unknown outcome")
+
+        result: dict[str, Any] = {
+            "status": "ok",
+            "name": auth_file.name,
+            "credit_id": normalized_credit_id,
+            "redeem_request_id": normalized_request_id,
+            "outcome": outcome,
+            "windows_reset": self._parse_non_negative_int(
+                consume_payload.get("windows_reset") or consume_payload.get("windowsReset")
+            ),
+            "quota": None,
+            "quota_error": "",
+            "reset_cards": None,
+            "reset_cards_refreshed_at": "",
+            "reset_cards_error": "",
+        }
+        if outcome not in {"reset", "already_redeemed"}:
+            if outcome == "no_credit":
+                result["reset_cards"] = self._remove_auth_file_reset_card_from_snapshot(
+                    auth_file.name,
+                    normalized_credit_id,
+                )
+            return result
+
+        self.reset_auth_file_quota_state(auth_file.name)
+        try:
+            result["quota"] = self._get_auth_file_quota(auth_file.name, record_auth_failure=True)
+        except Exception as exc:
+            result["quota_error"] = str(exc)
+        try:
+            reset_cards_result = self.get_auth_file_reset_cards(auth_file.name)
+            result["reset_cards"] = reset_cards_result.get("reset_cards", [])
+            result["reset_cards_refreshed_at"] = str(reset_cards_result.get("refreshed_at") or "")
+        except Exception as exc:
+            result["reset_cards"] = self._remove_auth_file_reset_card_from_snapshot(
+                auth_file.name,
+                normalized_credit_id,
+            )
+            result["reset_cards_error"] = str(exc)
+        return result
+
     def refresh_auth_file_quota_snapshot(self, name: str) -> dict[str, Any] | None:
         """刷新认证文件配额快照，供数据面额度错误后更新前端展示。"""
         normalized_name = self._normalize_auth_file_name(name)
@@ -705,6 +857,9 @@ class CodexOAuthService:
                         self._response_error_text(response),
                         status_code=response.status_code,
                         error_type="authentication_error",
+                    )
+                    raise CodexOAuthAuthenticationError(
+                        f"Codex auth file authentication failed; quota unavailable: {self._response_error_text(response)}"
                     )
                 raise ValueError(f"Codex quota request returned {response.status_code}: {response.text}")
             usage_payload = response.json()
@@ -844,10 +999,49 @@ class CodexOAuthService:
         return result
 
     def _request_auth_file_quota(self, payload: dict[str, Any]) -> requests.Response:
+        return self._request_with_proxy_warning_retry(
+            "GET",
+            CODEX_USAGE_URL,
+            headers=self._build_codex_account_headers(payload),
+            timeout=20,
+            proxy_url_override=str(payload.get("proxy_url") or "").strip() or None,
+        )
+
+    def _request_auth_file_reset_cards(self, payload: dict[str, Any]) -> requests.Response:
+        """读取账号的额度重置卡明细。"""
+        return self._request_with_proxy_warning_retry(
+            "GET",
+            CODEX_RESET_CREDITS_URL,
+            headers=self._build_codex_account_headers(payload),
+            timeout=20,
+            proxy_url_override=str(payload.get("proxy_url") or "").strip() or None,
+        )
+
+    def _request_consume_auth_file_reset_card(
+        self,
+        payload: dict[str, Any],
+        *,
+        credit_id: str,
+        redeem_request_id: str,
+    ) -> requests.Response:
+        """消费账号的一张额度重置卡。"""
+        return self._request_with_proxy_warning_retry(
+            "POST",
+            CODEX_RESET_CREDIT_CONSUME_URL,
+            headers=self._build_codex_account_headers(payload),
+            json={
+                "redeem_request_id": redeem_request_id,
+                "credit_id": credit_id,
+            },
+            timeout=20,
+            proxy_url_override=str(payload.get("proxy_url") or "").strip() or None,
+        )
+
+    def _build_codex_account_headers(self, payload: dict[str, Any]) -> dict[str, str]:
+        """构造 Codex 账号控制接口共用的认证请求头。"""
         access_token = str(payload.get("access_token") or "").strip()
         if not access_token:
             raise ValueError("Auth file does not contain access_token")
-
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
@@ -856,14 +1050,7 @@ class CodexOAuthService:
         account_id = self._resolve_chatgpt_account_id(payload)
         if account_id:
             headers["Chatgpt-Account-Id"] = account_id
-
-        return self._request_with_proxy_warning_retry(
-            "GET",
-            CODEX_USAGE_URL,
-            headers=headers,
-            timeout=20,
-            proxy_url_override=str(payload.get("proxy_url") or "").strip() or None,
-        )
+        return headers
 
     def _iter_auth_file_paths(self) -> list[Path]:
         if not self._auth_dir.exists():
@@ -1044,6 +1231,42 @@ class CodexOAuthService:
                 "quota_refreshed_at": refreshed_at,
             },
         )
+
+    def _store_auth_file_reset_cards(
+        self,
+        name: str,
+        reset_cards: list[dict[str, Any]],
+        *,
+        refreshed_at: str | None = None,
+    ) -> None:
+        """保存最近一次成功获取的重置卡快照。"""
+        self._update_auth_file_state(
+            name,
+            {
+                "reset_cards": reset_cards,
+                "reset_cards_refreshed_at": refreshed_at or self._now_iso(),
+            },
+        )
+
+    def _remove_auth_file_reset_card_from_snapshot(self, name: str, credit_id: str) -> list[dict[str, Any]]:
+        """从本地重置卡快照中移除已经不可用的卡片。"""
+        state = self._load_auth_file_state()
+        files = state.get("files")
+        file_state = files.get(name) if isinstance(files, dict) else None
+        if not isinstance(file_state, dict):
+            return []
+        cards = file_state.get("reset_cards")
+        if not isinstance(cards, list):
+            return []
+        next_cards = [card for card in cards if not isinstance(card, dict) or str(card.get("id") or "") != credit_id]
+        if len(next_cards) == len(cards):
+            return [card for card in cards if isinstance(card, dict)]
+        file_state["reset_cards"] = next_cards
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Codex reset card snapshot update failed: file=%s error=%s", name, exc)
+        return [card for card in next_cards if isinstance(card, dict)]
 
     def _store_auth_file_quota_error(self, name: str, message: str) -> None:
         refreshed_at = self._now_iso()
@@ -1622,6 +1845,8 @@ class CodexOAuthService:
             "quota": quota,
             "quota_error": str(file_state.get("quota_error") or ""),
             "quota_refreshed_at": str(file_state.get("quota_refreshed_at") or ""),
+            "reset_cards": file_state.get("reset_cards") if isinstance(file_state.get("reset_cards"), list) else [],
+            "reset_cards_refreshed_at": str(file_state.get("reset_cards_refreshed_at") or ""),
             "expired": payload.get("expired") or "",
             "last_refresh": payload.get("last_refresh") or "",
             "size": path.stat().st_size,
@@ -1933,6 +2158,50 @@ class CodexOAuthService:
                 self._append_rate_limit_windows(windows, str(label), item.get("rate_limit") or item.get("rateLimit"))
         return windows
 
+    @classmethod
+    def _build_rate_limit_reset_cards(cls, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """规范化上游返回的有效额度重置卡明细。"""
+        raw_credits = payload.get("credits")
+        if not isinstance(raw_credits, list):
+            return []
+        now = datetime.now(timezone.utc)
+        cards: list[dict[str, Any]] = []
+        for credit in raw_credits:
+            if not isinstance(credit, dict):
+                continue
+            credit_id = cls._normalize_text(credit.get("id"))
+            status = cls._normalize_text(credit.get("status")).lower()
+            supported_by_plan = credit.get("is_supported_by_plan")
+            if not credit_id or status != "available" or supported_by_plan is False:
+                continue
+            raw_expires_at = credit.get("expires_at")
+            if raw_expires_at is None:
+                raw_expires_at = credit.get("expiresAt")
+            expires_at = cls._parse_epoch_or_datetime(raw_expires_at)
+            if expires_at is not None and expires_at <= now:
+                continue
+            cards.append(
+                {
+                    "id": credit_id,
+                    "reset_type": cls._normalize_text(credit.get("reset_type") or credit.get("resetType")),
+                    "status": status,
+                    "granted_at": cls._normalize_text(credit.get("granted_at") or credit.get("grantedAt")),
+                    "expires_at": (
+                        cls._format_datetime(expires_at)
+                        if expires_at is not None
+                        else cls._normalize_text(raw_expires_at)
+                    ),
+                    "title": cls._normalize_text(credit.get("title")),
+                    "description": cls._normalize_text(credit.get("description")),
+                }
+            )
+        return sorted(
+            cards,
+            key=lambda card: (
+                cls._parse_epoch_or_datetime(card.get("expires_at")) or datetime.max.replace(tzinfo=timezone.utc)
+            ),
+        )
+
     def _append_rate_limit_windows(self, windows: list[dict[str, Any]], label: str, rate_limit: Any) -> None:
         if not isinstance(rate_limit, dict):
             return
@@ -1985,6 +2254,13 @@ class CodexOAuthService:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _parse_non_negative_int(value: Any) -> int:
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            return 0
+
     def _format_reset_label(self, window: dict[str, Any]) -> str:
         reset_seconds = self._parse_float(
             window.get("reset_after_seconds")
@@ -1994,7 +2270,9 @@ class CodexOAuthService:
         )
         if reset_seconds is not None:
             return self._format_seconds(reset_seconds)
-        reset_at = self._normalize_text(window.get("resets_at") or window.get("resetsAt"))
+        reset_at = self._normalize_text(
+            window.get("resets_at") or window.get("resetsAt") or window.get("reset_at") or window.get("resetAt")
+        )
         return reset_at or "-"
 
     def _resolve_reset_at(self, window: dict[str, Any]) -> str:
@@ -2007,7 +2285,7 @@ class CodexOAuthService:
         if reset_seconds is not None:
             return self._format_datetime(datetime.now(timezone.utc) + timedelta(seconds=max(reset_seconds, 0.0)))
 
-        reset_at = window.get("resets_at") or window.get("resetsAt")
+        reset_at = window.get("resets_at") or window.get("resetsAt") or window.get("reset_at") or window.get("resetAt")
         parsed_reset = self._parse_epoch_or_datetime(reset_at)
         if parsed_reset is not None:
             return self._format_datetime(parsed_reset)
