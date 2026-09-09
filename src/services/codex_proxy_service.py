@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -122,6 +123,19 @@ class CodexProxyService:
 
         candidates = self._codex_oauth_service.iter_auth_candidates_for_model(model_name)
         if not candidates:
+            retry_after = self._codex_oauth_service.get_quota_retry_after_seconds()
+            if retry_after is not None:
+                return (
+                    None,
+                    429,
+                    ProxyErrorInfo(
+                        message=f"Codex OAuth account quota exhausted for model: {model_name}",
+                        status_code=429,
+                        error_type="upstream_error",
+                        error_code="codex_quota_exhausted",
+                        response_headers=self._build_retry_after_headers(retry_after),
+                    ),
+                )
             return (
                 None,
                 503,
@@ -262,6 +276,19 @@ class CodexProxyService:
             if not self._is_free_plan_candidate(candidate)
         ]
         if not candidates:
+            retry_after = self._codex_oauth_service.get_quota_retry_after_seconds()
+            if retry_after is not None:
+                return (
+                    None,
+                    429,
+                    ProxyErrorInfo(
+                        message="Codex OAuth account quota exhausted for image generation",
+                        status_code=429,
+                        error_type="upstream_error",
+                        error_code="codex_quota_exhausted",
+                        response_headers=self._build_retry_after_headers(retry_after),
+                    ),
+                )
             return (
                 None,
                 503,
@@ -454,7 +481,7 @@ class CodexProxyService:
                     return None, refresh_failure.status_code, refresh_failure
             if self._is_quota_exhausted_response(upstream_response.status_code, body):
                 retry_after = self._extract_retry_after_seconds(upstream_response, body)
-                self._record_quota_exhausted_response(
+                retry_after = self._record_quota_exhausted_response(
                     candidate.name,
                     error_message=error_message,
                     error_type=error_type,
@@ -473,7 +500,7 @@ class CodexProxyService:
                         status_code=429,
                         error_type="upstream_error",
                         error_code="codex_quota_exhausted",
-                        response_headers={"Retry-After": retry_after} if retry_after is not None else None,
+                        response_headers=self._build_retry_after_headers(retry_after),
                     ),
                 )
             if self._is_model_capacity_response(upstream_response.status_code, body):
@@ -697,7 +724,7 @@ class CodexProxyService:
                 if refresh_failure is not None:
                     return None, refresh_failure.status_code, refresh_failure
             if self._is_quota_exhausted_response(upstream_response.status_code, body):
-                self._record_quota_exhausted_response(
+                retry_after = self._record_quota_exhausted_response(
                     candidate.name,
                     error_message=error_message,
                     error_type=error_type,
@@ -711,6 +738,7 @@ class CodexProxyService:
                         status_code=429,
                         error_type="upstream_error",
                         error_code="codex_quota_exhausted",
+                        response_headers=self._build_retry_after_headers(retry_after),
                     ),
                 )
             if self._is_model_capacity_response(upstream_response.status_code, body):
@@ -2088,7 +2116,7 @@ class CodexProxyService:
         error_message: str,
         error_type: str,
         retry_after_seconds: float | None,
-    ) -> None:
+    ) -> float | None:
         """记录额度耗尽，并立即刷新配额快照供前端展示。"""
         self._codex_oauth_service.mark_auth_file_quota_exhausted(
             auth_file_name,
@@ -2102,6 +2130,14 @@ class CodexProxyService:
             retry_after_seconds=retry_after_seconds,
         )
         self._codex_oauth_service.refresh_auth_file_quota_snapshot(auth_file_name)
+        return self._codex_oauth_service.get_quota_retry_after_seconds() or retry_after_seconds
+
+    @staticmethod
+    def _build_retry_after_headers(retry_after_seconds: float | None) -> dict[str, str] | None:
+        """构造符合 HTTP Retry-After 语义的整数秒响应头。"""
+        if retry_after_seconds is None:
+            return None
+        return {"Retry-After": str(max(math.ceil(retry_after_seconds), 1))}
 
     @staticmethod
     def _is_quota_exhausted_response(status_code: int, body: bytes) -> bool:

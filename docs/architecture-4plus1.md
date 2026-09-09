@@ -90,7 +90,7 @@ decoder
 - `sticky_failover` 保存当前成功目标；该目标保持正常候选状态时，后续请求继续使用它
 - 目标按优先级从高到低选择，同优先级按配置顺序选择；未提供策略或策略为空时使用 `highest_priority`
 - 目标自身的 Provider 最大尝试次数、Auth Group Auth Entry 或 OAuth 认证文件候选先耗尽，映射层才切换到下一个目标
-- `429` 优先采用 `Retry-After` 进入冷却；`401`、`403`、`408`、`425`、`5xx`、网络异常和流异常采用映射配置的冷却秒数
+- `429` 优先采用 `Retry-After` 进入冷却；Codex OAuth 全部账号额度耗尽时使用最早恢复账号的等待时间；`401`、`403`、`408`、`425`、`5xx`、网络异常和流异常采用映射配置的冷却秒数
 - `3xx`、`404`、`405`、`410` 自动禁用目标；其他 `4xx` 只触发当前请求的故障切换并记录错误，不改变目标可用状态
 - 正常候选为空时，人工禁用、自动禁用和冷却不阻止兜底选择；系统始终从当前运行时仍存在的全部目标中选择最高优先级目标
 - 正常故障切换在同一个下游请求内每个目标最多尝试一次；进入兜底态后固定最高优先级目标，该目标失败时结束本次请求；新请求重新选择目标，单目标或全部目标禁用时仍会再次映射到该目标
@@ -179,12 +179,12 @@ decoder
   - Codex 配额查询优先使用认证文件 `proxy_url`，其后使用全局 OAuth 代理设置
   - token 交换、token 刷新与配额查询遇到代理风险确认页时，会走统一自动确认重试流程
   - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
-  - 持久化认证文件人工禁用状态、最近一次配额快照、配额刷新错误、最近成功认证文件与 Codex 模型代理使用状态
+  - 持久化认证文件人工禁用状态、额度禁用截止时间、最近一次配额快照、配额刷新错误、最近成功认证文件与 Codex 模型代理使用状态
   - 启动 Codex 配额后台刷新任务，每小时刷新一轮可查询认证文件，并在已知 Codex 额度窗口到达 `reset_at` 时刷新对应认证文件；认证文件之间间隔 10 秒
-  - 额度快照显示窗口耗尽时，认证文件按已耗尽 Codex 窗口中最早的 `reset_at` 冷却到下一次重查；缺少 `reset_at` 时保留已有冷却或使用 60 秒兜底
+  - 额度快照显示窗口耗尽时，认证文件等待全部已耗尽 Codex 窗口到达 `reset_at`；截止时间跨进程重启生效，到点后自动恢复；缺少 `reset_at` 时保留已有截止时间或使用 60 秒兜底
   - 维护本地 Codex OAuth 文本模型目录、图片模型目录和默认图片模型
   - 内置常用 Codex 文本模型和图片模型 ID；添加内置模型只把缺失的内置 ID 加回本地目录，保留用户自行添加的模型 ID
-  - 按本地模型目录、人工禁用状态、本地冷却、认证失败状态和最近成功认证文件提供 Codex 请求候选账号
+  - 按本地模型目录、人工禁用状态、持久化额度禁用、认证失败状态和最近成功认证文件提供 Codex 请求候选账号
 - `ClaudeOAuthService`
   - 生成 Claude OAuth PKCE 授权链接
   - 使用回调 URL 或手动粘贴的 `code#state` 换取 token 并写入本地认证文件
@@ -198,7 +198,7 @@ decoder
   - 使用 `data/oauth/codex/*.json` 中的 OAuth access token 请求 Codex backend
   - 按默认图片模型为普通 Codex 请求补齐 `image_generation` 工具配置
   - 将 OpenAI Images 兼容请求包装成 Codex `image_generation` 工具调用
-  - 遇到账号配额耗尽时标记临时冷却、刷新该认证文件配额快照并尝试下一个账号
+  - 遇到账号配额耗尽时持久化额度禁用截止时间、刷新该认证文件配额快照并尝试下一个账号；全部账号额度禁用时向模型映射传播最早恢复时间
   - 将每个认证文件最近一次数据面成功或失败结果写回 OAuth 状态
   - 按首个非空目标协议字节区分流提交前后的 transport 失败
   - 流提交后的 transport 失败会发送下游协议错误事件并记录当前认证文件失败
@@ -498,8 +498,8 @@ OAuth 模型是数据平面的例外路由：
   - 正常候选为空时忽略目标的人工禁用、自动禁用和冷却状态，按最高优先级选择运行时目标；兜底目标在当前请求失败后不重复调用
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
-  - 维护 OAuth PKCE 临时会话、Codex 账号配额冷却状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet；后台任务按每小时周期和已知额度窗口重置时间调度
-  - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件人工禁用状态、配额、最近一次模型代理状态与最近成功认证文件
+  - 维护 OAuth PKCE 临时会话、Codex 账号配额禁用状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet；后台任务按每小时周期和已知额度窗口重置时间调度
+  - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件人工禁用状态、额度禁用截止时间、配额、最近一次模型代理状态与最近成功认证文件
   - 在 `data/oauth/codex/models.json`、`data/oauth/codex/image_models.json` 和 `data/oauth/codex/image_settings.json` 持久化本地文本模型目录、图片模型目录和默认图片模型
 - `ClaudeOAuthService`
   - 每次 token / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
@@ -844,10 +844,10 @@ OAuth Claude tab
 - Codex / Claude 候选列表仍会按请求重建；人工禁用的认证文件不会进入候选列表；其余文件默认按认证文件修改时间倒序排列，最近一次真实请求成功的认证文件如果未被过滤，会被提升为第一候选
 - 禁用状态作用于后续候选列表构建；已经选中或已经发往上游的请求继续完成
 - 同一个认证文件的配额刷新使用进程内非阻塞锁；重复刷新请求会直接返回跳过结果，不重复访问 Codex 上游
-- Codex 认证文件的 `reset-quota` 会清除本地配额快照、配额错误和进程内额度冷却；该操作不重置 OpenAI / ChatGPT 上游真实额度，也不清除认证失败状态
+- Codex 认证文件的 `reset-quota` 会清除本地配额快照、配额错误和持久化额度禁用；该操作不重置 OpenAI / ChatGPT 上游真实额度，也不清除认证失败状态
 - 如果认证文件 access token 已过期且缺少 refresh token，请求候选筛选不会直接跳过；系统会先用当前 access token 尝试请求一次，再按上游返回的认证、配额或其他错误决定后续状态
 - Codex 配额后台刷新任务随应用启动，第一轮在启动后 5 小时触发；每轮刷新所有未标记为认证失败、类型合法且包含 access token 的 Codex 认证文件，每个文件之间间隔 10 秒
-- 配额刷新会同步内存冷却状态：Codex 窗口耗尽时冷却该认证文件，恢复可用时立即清除冷却
+- 配额刷新会同步持久化额度禁用状态：Codex 窗口耗尽时记录自动恢复截止时间，恢复可用时立即清除该状态
 - Codex 数据面请求成功后，如果本地配额快照中的 Codex 窗口重置时间已经到期，会最佳努力刷新该认证文件的前端配额快照；刷新失败不会阻断本次模型响应
 - Codex 数据面请求收到上游额度耗尽响应后，会立即真实刷新该认证文件的配额快照；刷新结果写入 OAuth 页面展示数据，刷新失败写入配额错误且不阻断候选账号切换
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
@@ -1142,7 +1142,7 @@ sequenceDiagram
     Client->>Controller: POST /v1/chat/completions model=gpt-5-codex
     Controller->>Controller: Provider 未命中后查 Codex 模型目录
     Controller->>CodexOAuth: iter_auth_candidates_for_model()
-    CodexOAuth->>CodexOAuth: 过滤人工禁用/认证失败/冷却文件，并优先最近成功认证文件
+    CodexOAuth->>CodexOAuth: 过滤人工禁用/认证失败/额度禁用文件，并优先最近成功认证文件
     Controller->>CodexProxy: proxy_request()
     CodexProxy->>ChatGPT: POST /backend-api/codex/responses
     Note over CodexProxy,ChatGPT: 对齐 Codex backend 要求：stream=true、store=false、parallel_tool_calls=true、include encrypted content，并移除不支持字段
@@ -1156,7 +1156,7 @@ sequenceDiagram
         end
     else 账号配额耗尽
         ChatGPT-->>CodexProxy: 429 usage_limit_reached
-        CodexProxy->>CodexOAuth: mark_auth_file_quota_exhausted()
+        CodexProxy->>CodexOAuth: 持久化 quota_cooldown_until
         CodexProxy->>CodexOAuth: record_auth_file_failure()
         CodexProxy->>CodexOAuth: refresh_auth_file_quota_snapshot()
         CodexProxy->>ChatGPT: 使用下一个认证文件重试

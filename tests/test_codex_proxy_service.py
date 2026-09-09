@@ -536,7 +536,40 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual(429, status_code)
         self.assertIsNotNone(failure)
         self.assertEqual("codex_quota_exhausted", failure.error_code)
-        self.assertEqual({"Retry-After": 120.0}, failure.response_headers)
+        self.assertEqual({"Retry-After": "120"}, failure.response_headers)
+
+    def test_persisted_quota_cooldown_returns_retry_after_without_upstream_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-only.json", "access-only", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            with patch("src.services.codex_oauth_service.time.time", return_value=1_000.0):
+                oauth_service.mark_auth_file_quota_exhausted("codex-only.json", retry_after_seconds=120)
+
+            next_oauth_service = CodexOAuthService(ctx)
+            proxy_service = CodexProxyService(ctx, next_oauth_service)
+            with (
+                patch("src.services.codex_oauth_service.time.time", return_value=1_030.0),
+                patch("src.services.codex_proxy_service.requests.post") as post_mock,
+            ):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {
+                        "model": "gpt-5.4",
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "stream": False,
+                    },
+                    {"Authorization": "Bearer downstream-token"},
+                    resolved_target_format="openai_chat",
+                )
+
+        self.assertIsNone(response)
+        self.assertEqual(429, status_code)
+        self.assertIsNotNone(failure)
+        self.assertEqual("codex_quota_exhausted", failure.error_code)
+        self.assertEqual({"Retry-After": "90"}, failure.response_headers)
+        post_mock.assert_not_called()
 
     def test_nonstream_request_falls_back_to_next_account_after_quota_429(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -770,6 +803,40 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual(10, payload["usage"]["total_tokens"])
         self.assertEqual("gpt-image-2", complete_meta["response_model"])
         self.assertEqual(10, complete_meta["total_tokens"])
+
+    def test_image_quota_exhaustion_propagates_retry_after(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-only.json", "access-only", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del headers, json, timeout, kwargs
+                self.assertEqual(CODEX_BACKEND_RESPONSES_URL, url)
+                self.assertTrue(stream)
+                return FakeHTTPResponse(
+                    status_code=429,
+                    body=b'{"error":{"type":"usage_limit_reached","resets_in_seconds":180}}',
+                    headers={"Content-Type": "application/json"},
+                )
+
+            with patch.object(oauth_service, "refresh_auth_file_quota_snapshot") as refresh_mock:
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                    response, status_code, failure = proxy_service.proxy_image_request(
+                        {"prompt": "draw", "model": "gpt-image-2"},
+                        {"Authorization": "Bearer downstream-token"},
+                        action="generate",
+                    )
+                refresh_mock.assert_called_once_with("codex-only.json")
+
+        self.assertIsNone(response)
+        self.assertEqual(429, status_code)
+        self.assertIsNotNone(failure)
+        self.assertEqual("codex_quota_exhausted", failure.error_code)
+        self.assertEqual({"Retry-After": "180"}, failure.response_headers)
 
     def test_proxy_warning_confirmation_failure_returns_confirmation_url_without_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

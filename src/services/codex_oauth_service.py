@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import re
 import secrets
 import threading
@@ -560,10 +561,11 @@ class CodexOAuthService:
                 continue
             if self._is_auth_failure_state(file_state):
                 continue
+            self._sync_quota_cooldown_from_state(path.name, file_state)
+            if self._is_quota_cooling_down(path.name):
+                continue
             candidate = self._build_auth_candidate(path)
             if candidate is None:
-                continue
-            if self._is_quota_cooling_down(candidate.name):
                 continue
             candidates.append(candidate)
         return self._prioritize_last_success_candidate(candidates, state)
@@ -579,7 +581,22 @@ class CodexOAuthService:
         if not normalized_name:
             return
         cooldown_seconds = retry_after_seconds if retry_after_seconds is not None else 60.0
-        self._quota_cooldowns[normalized_name] = time.time() + max(float(cooldown_seconds), 1.0)
+        cooldown_until = time.time() + max(float(cooldown_seconds), 1.0)
+        self._quota_cooldowns[normalized_name] = cooldown_until
+        self._update_auth_file_state(
+            normalized_name,
+            {"quota_cooldown_until": self._format_timestamp(cooldown_until)},
+        )
+
+    def get_quota_retry_after_seconds(self) -> int | None:
+        """返回全部额度禁用账号中最早的自动恢复等待秒数。"""
+        self._restore_quota_cooldowns_from_state()
+        self._purge_quota_cooldowns()
+        if not self._quota_cooldowns:
+            return None
+        now = time.time()
+        retry_after = min(self._quota_cooldowns.values()) - now
+        return max(math.ceil(retry_after), 1)
 
     def reset_auth_file_quota_state(self, name: str) -> dict[str, Any]:
         """清除认证文件的本地配额快照和额度冷却状态。"""
@@ -593,7 +610,7 @@ class CodexOAuthService:
         file_state = files.get(auth_file.name)
         if not isinstance(file_state, dict):
             file_state = {}
-        for field in ("quota", "quota_error", "quota_refreshed_at"):
+        for field in ("quota", "quota_error", "quota_refreshed_at", "quota_cooldown_until"):
             file_state.pop(field, None)
         if self._is_quota_failure_state(file_state):
             file_state.update(
@@ -636,6 +653,7 @@ class CodexOAuthService:
                 "usage_error_type": "",
                 "usage_retry_after_seconds": None,
                 "usage_status_updated_at": self._now_iso(),
+                "quota_cooldown_until": None,
             },
         )
         self._remember_last_success_auth_file(normalized_name)
@@ -1389,20 +1407,60 @@ class CodexOAuthService:
             self._logger.warning("Codex auth file runtime state reset failed: file=%s error=%s", name, exc)
 
     def _sync_quota_cooldown_from_quota(self, name: str, quota: dict[str, Any]) -> None:
-        """根据最新配额刷新结果同步内存冷却状态。"""
+        """根据最新配额刷新结果同步持久化额度禁用状态。"""
         normalized_name = self._normalize_auth_file_name(name)
         if not normalized_name:
             return
         if self._is_quota_exhausted(quota):
             retry_after_seconds = self._quota_retry_after_seconds(quota)
-            if retry_after_seconds is None and self._is_quota_cooling_down(normalized_name):
-                return
+            if retry_after_seconds is None:
+                self._restore_quota_cooldowns_from_state()
+                if self._is_quota_cooling_down(normalized_name):
+                    return
             self.mark_auth_file_quota_exhausted(
                 normalized_name,
                 retry_after_seconds=retry_after_seconds,
             )
             return
         self._quota_cooldowns.pop(normalized_name, None)
+        self._update_auth_file_state(normalized_name, {"quota_cooldown_until": None})
+
+    def _restore_quota_cooldowns_from_state(self) -> None:
+        """从认证文件状态恢复尚未到期的额度禁用。"""
+        state = self._load_auth_file_state()
+        state_files = state.get("files")
+        if not isinstance(state_files, dict):
+            return
+        for path in self._iter_auth_file_paths():
+            file_state = state_files.get(path.name)
+            if not isinstance(file_state, dict):
+                continue
+            if not self._is_auth_file_enabled(file_state) or self._is_auth_failure_state(file_state):
+                self._quota_cooldowns.pop(path.name, None)
+                continue
+            self._sync_quota_cooldown_from_state(path.name, file_state)
+
+    def _sync_quota_cooldown_from_state(self, name: str, file_state: dict[str, Any]) -> None:
+        """把持久化截止时间或有效配额快照同步到内存。"""
+        now = time.time()
+        cooldown_until = self._parse_epoch_or_datetime(file_state.get("quota_cooldown_until"))
+        cooldown_timestamp = cooldown_until.timestamp() if cooldown_until is not None else 0.0
+
+        quota = file_state.get("quota")
+        if isinstance(quota, dict):
+            retry_after_seconds = self._quota_retry_after_seconds(quota)
+            if retry_after_seconds is not None:
+                cooldown_timestamp = max(cooldown_timestamp, now + retry_after_seconds)
+            elif self._is_quota_exhausted(quota):
+                cooldown_timestamp = max(cooldown_timestamp, now + 60.0)
+
+        if cooldown_timestamp <= now:
+            self._quota_cooldowns.pop(name, None)
+            if file_state.get("quota_cooldown_until") not in (None, ""):
+                self._update_auth_file_state(name, {"quota_cooldown_until": None})
+            return
+        current_cooldown = self._quota_cooldowns.get(name, 0.0)
+        self._quota_cooldowns[name] = max(current_cooldown, cooldown_timestamp)
 
     def _clear_auth_file_auth_failure(self, name: str) -> None:
         state = self._load_auth_file_state()
@@ -1573,8 +1631,8 @@ class CodexOAuthService:
         plan_type = str(value or "").strip().lower()
         return plan_type or "unknown"
 
-    @staticmethod
-    def _is_quota_exhausted(quota: dict[str, Any]) -> bool:
+    @classmethod
+    def _is_quota_exhausted(cls, quota: dict[str, Any]) -> bool:
         windows = quota.get("windows")
         if not isinstance(windows, list):
             return False
@@ -1587,18 +1645,23 @@ class CodexOAuthService:
         if not codex_windows:
             return False
 
+        now = datetime.now(timezone.utc)
         for window in codex_windows:
-            remaining_percent = CodexOAuthService._parse_float(window.get("remaining_percent"))
-            used_percent = CodexOAuthService._parse_float(window.get("used_percent"))
-            if remaining_percent is not None and remaining_percent <= 0:
-                return True
-            if used_percent is not None and used_percent >= 100:
+            remaining_percent = cls._parse_float(window.get("remaining_percent"))
+            used_percent = cls._parse_float(window.get("used_percent"))
+            is_exhausted = (remaining_percent is not None and remaining_percent <= 0) or (
+                used_percent is not None and used_percent >= 100
+            )
+            if not is_exhausted:
+                continue
+            reset_at = cls._parse_epoch_or_datetime(window.get("reset_at") or window.get("resetAt"))
+            if reset_at is None or reset_at > now:
                 return True
         return False
 
     @staticmethod
     def _quota_retry_after_seconds(quota: dict[str, Any]) -> float | None:
-        """返回已耗尽窗口中最早的下次重查时间。"""
+        """返回全部已耗尽 Codex 窗口恢复所需的等待时间。"""
         windows = quota.get("windows")
         if not isinstance(windows, list):
             return None
@@ -1621,10 +1684,10 @@ class CodexOAuthService:
             if not is_exhausted:
                 continue
             reset_at = CodexOAuthService._parse_epoch_or_datetime(window.get("reset_at") or window.get("resetAt"))
-            if reset_at is None:
+            if reset_at is None or reset_at <= now:
                 continue
-            retry_after_values.append(max((reset_at - now).total_seconds(), 1.0))
-        return min(retry_after_values) if retry_after_values else None
+            retry_after_values.append((reset_at - now).total_seconds())
+        return max(retry_after_values) if retry_after_values else None
 
     def _purge_quota_cooldowns(self) -> None:
         now = time.time()
@@ -1820,6 +1883,8 @@ class CodexOAuthService:
             file_state = state_files[path.name]
         quota = file_state.get("quota") if isinstance(file_state.get("quota"), dict) else None
         enabled = self._is_auth_file_enabled(file_state)
+        if enabled:
+            self._sync_quota_cooldown_from_state(path.name, file_state)
         availability = self._build_auth_file_availability(path.name, payload, file_state, quota)
         return {
             "name": path.name,
@@ -1889,7 +1954,11 @@ class CodexOAuthService:
                 message = f"配额冷却中：上游返回 {reason}，暂时跳过此认证文件"
             return self._availability("quota_cooldown", message, quota_retry_at)
 
-        if quota is not None and self._is_quota_exhausted(quota):
+        if (
+            quota is not None
+            and self._is_quota_exhausted(quota)
+            and file_state.get("quota_cooldown_until") in (None, "")
+        ):
             return self._availability("quota_exhausted", "配额已耗尽：最近一次配额刷新显示 Codex 窗口无剩余额度")
 
         if self._is_auth_payload_expired(payload):

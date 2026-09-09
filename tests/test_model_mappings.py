@@ -756,6 +756,12 @@ class ModelMappingServiceTests(unittest.TestCase):
             recovered_target = self.service.acquire_target("public_model")
         self.assertEqual("alpha/fast", recovered_target.target_model_id)
 
+    def test_retry_after_accepts_codex_fractional_seconds(self) -> None:
+        self.assertEqual(
+            121,
+            self.service._parse_retry_after_seconds({"Retry-After": 120.25}),
+        )
+
     def test_long_lived_target_failure_auto_disables_until_manual_enable(self) -> None:
         self.service.create_mapping(self._mapping_payload())
         selected = self.service.acquire_target("public_model")
