@@ -2071,8 +2071,11 @@
             return codexWindows.some(window => {
                 const remainingPercent = Number(window?.remaining_percent);
                 const usedPercent = Number(window?.used_percent);
-                return (Number.isFinite(remainingPercent) && remainingPercent <= 0)
+                const isExhausted = (Number.isFinite(remainingPercent) && remainingPercent <= 0)
                     || (Number.isFinite(usedPercent) && usedPercent >= 100);
+                if (!isExhausted) return false;
+                const resetAt = parseCodexQuotaTimestamp(window?.reset_at ?? window?.resetAt);
+                return resetAt === null || resetAt > Date.now();
             });
         }
 

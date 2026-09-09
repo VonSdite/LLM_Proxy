@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -523,7 +524,10 @@ class ModelMappingService:
         if retry_after in (None, ""):
             return None
         try:
-            seconds = int(str(retry_after).strip())
+            raw_seconds = float(str(retry_after).strip())
+            if not math.isfinite(raw_seconds):
+                return None
+            seconds = math.ceil(raw_seconds)
             return seconds if seconds > 0 else None
         except (TypeError, ValueError):
             pass
