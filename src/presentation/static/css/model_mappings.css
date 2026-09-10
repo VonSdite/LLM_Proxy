@@ -803,6 +803,7 @@
 
 .mapping-target-row.is-disabled td,
 .mapping-target-row.is-auto-disabled td,
+.mapping-target-row.is-cooldown td,
 .mapping-target-row.is-unavailable td {
     background: #e8ebef;
     color: #667085;
@@ -810,6 +811,7 @@
 
 .model-mappings-page .mapping-target-row.is-disabled .form-control,
 .model-mappings-page .mapping-target-row.is-auto-disabled .form-control,
+.model-mappings-page .mapping-target-row.is-cooldown .form-control,
 .model-mappings-page .mapping-target-row.is-unavailable .form-control {
     border-color: #b8c0ca;
     background: #dfe3e8;
@@ -1575,6 +1577,7 @@
 
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled td,
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td,
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-cooldown td,
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
     background: #29313b;
     color: #a9b4c3;
@@ -1582,6 +1585,7 @@
 
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled .form-control,
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled .form-control,
+:root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-cooldown .form-control,
 :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable .form-control {
     border-color: #4b5664;
     background: #1b222b;
@@ -1730,21 +1734,25 @@
 
     .mapping-target-row.is-disabled,
     .mapping-target-row.is-auto-disabled,
+    .mapping-target-row.is-cooldown,
     .mapping-target-row.is-unavailable {
         background: rgba(90, 102, 120, 0.08);
     }
 
     .mapping-target-row.is-disabled td,
     .mapping-target-row.is-auto-disabled td,
+    .mapping-target-row.is-cooldown td,
     .mapping-target-row.is-unavailable td,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled td,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled td,
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-cooldown td,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable td {
         background: transparent;
     }
 
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-disabled,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-auto-disabled,
+    :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-cooldown,
     :root[data-theme="dark"] .model-mappings-page .mapping-target-row.is-unavailable {
         background: rgba(45, 52, 62, 0.78);
     }
