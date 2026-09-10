@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}模型映射{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260905-2">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/model_mappings.css?v=20260910-1">{% endblock %}
 {% block body_class %}model-mappings-page{% endblock %}
 {% block header_title %}模型映射{% endblock %}
 {% block header_subtitle %}维护独立模型 ID 与目标模型{% endblock %}
@@ -71,7 +71,7 @@
                                     aria-controls="mappingHelpPopover"
                                     aria-describedby="mappingCooldownHelp"
                                 >?</button>
-                                <span class="visually-hidden" id="mappingCooldownHelp">401、403、408、425、429、5xx、网络或流异常进入临时冷却，之后自动重试。429 优先采用上游 Retry-After，其他情况使用设置的故障冷却秒数。重定向、404、405、410 自动禁用。其他 4xx 只切换本次请求，不改变目标状态。</span>
+                                <span class="visually-hidden" id="mappingCooldownHelp">401、403、408、425、429、5xx、网络或流异常进入临时冷却，前端显示禁用。Codex OAuth 额度用完时，会在额度恢复后自动解除禁用；其他临时故障会在冷却结束后自动解除禁用并重试。429 优先采用上游 Retry-After，其他情况使用设置的故障冷却秒数。重定向、404、405、410 自动禁用。其他 4xx 只切换本次请求，不改变目标状态。</span>
                             </div>
                             <input type="number" class="form-control" id="mappingCooldownInput" min="0" value="60">
                         </div>
@@ -194,7 +194,8 @@
             cooldown: {
                 title: "故障冷却",
                 html: `
-                    <p><code>临时冷却</code>401/403/408/425、429、5xx、网络或流异常会进入冷却，之后自动重试。429 优先采用上游 Retry-After，其他情况使用这里设置的秒数。</p>
+                    <p><code>临时禁用</code>401/403/408/425、429、5xx、网络或流异常会进入冷却，前端显示“禁用”。Codex OAuth 额度用完时，会在额度恢复后自动解除禁用；其他临时故障会在冷却结束后自动解除禁用并重试。</p>
+                    <p><code>冷却时间</code>429 优先采用上游 Retry-After，其他情况使用这里设置的秒数。</p>
                     <p><code>自动禁用</code>重定向、404、405、410 表示目标长期不可用，目标会保持禁用状态。</p>
                     <p><code>仅切换当前请求</code>其他 4xx 通常与请求内容有关，只切换本次请求，不改变目标状态。</p>
                 `
@@ -619,12 +620,16 @@
             const enabled = target.enabled !== false;
             const manuallyDisabled = !enabled;
             const autoDisabled = target.status === "auto_disabled";
+            const cooldown = target.status === "cooldown";
             const failureTooltip = buildTargetFailureTooltip(target);
-            row.className = `mapping-target-row${unavailable ? " is-unavailable" : ""}${autoDisabled ? " is-auto-disabled" : ""}`;
+            const cooldownTooltip = "临时禁用：Codex OAuth 额度用完时，会在额度恢复后自动解除禁用；其他临时故障会在冷却结束后自动解除禁用。";
+            row.className = `mapping-target-row${unavailable ? " is-unavailable" : ""}${autoDisabled ? " is-auto-disabled" : ""}${cooldown ? " is-cooldown" : ""}`;
             row.dataset.enabled = enabled ? "true" : "false";
             row.dataset.autoDisabled = autoDisabled ? "true" : "false";
+            row.dataset.cooldown = cooldown ? "true" : "false";
             row.dataset.available = unavailable ? "false" : "true";
             row.dataset.failureTooltip = failureTooltip;
+            row.dataset.cooldownTooltip = cooldownTooltip;
             row.dataset.modelId = String(target.model_id || "");
             row.innerHTML = `
                 <td class="mapping-target-drag-cell">
@@ -663,11 +668,11 @@
                                     aria-label="目标模型不可用，可重新选择模型 ID 或删除此行"
                                     data-tooltip="该目标模型已不在当前可用模型目录中，可重新选择模型 ID 或删除此行。更换前保留现有优先级和启停状态。">?</button>
                             </span>
-                            <span class="mapping-target-auto-disabled-status" ${autoDisabled || manuallyDisabled ? "" : "hidden"}>
+                            <span class="mapping-target-auto-disabled-status" ${autoDisabled || manuallyDisabled || cooldown ? "" : "hidden"}>
                                 <span class="mapping-target-auto-disabled">禁用</span>
                                 <button type="button" class="mapping-help-button mapping-target-auto-disabled-help"
-                                    aria-label="${escapeAttribute(manuallyDisabled ? "手动禁用" : failureTooltip)}"
-                                    data-tooltip="${escapeAttribute(manuallyDisabled ? "手动禁用" : failureTooltip)}">?</button>
+                                    aria-label="${escapeAttribute(manuallyDisabled ? "手动禁用" : cooldown ? cooldownTooltip : failureTooltip)}"
+                                    data-tooltip="${escapeAttribute(manuallyDisabled ? "手动禁用" : cooldown ? cooldownTooltip : failureTooltip)}">?</button>
                             </span>
                         </div>
                     </div>
@@ -709,6 +714,7 @@
             const toggleButton = row.querySelector(".mapping-toggle-target");
             const enabled = row.dataset.enabled !== "false";
             const autoDisabled = row.dataset.autoDisabled === "true";
+            const cooldown = row.dataset.cooldown === "true";
             const available = row.dataset.available !== "false";
             const duplicate = row.dataset.duplicate === "true";
             row.classList.toggle("is-unavailable", !available && !duplicate);
@@ -718,9 +724,14 @@
             row.querySelector(".target-priority").disabled = !available || duplicate;
             row.classList.toggle("is-disabled", available && !enabled);
             row.classList.toggle("is-auto-disabled", available && autoDisabled);
-            row.querySelector(".mapping-target-auto-disabled-status").hidden = !available || (enabled && !autoDisabled);
+            row.classList.toggle("is-cooldown", available && cooldown);
+            row.querySelector(".mapping-target-auto-disabled-status").hidden = !available || (enabled && !autoDisabled && !cooldown);
             const disabledHelp = row.querySelector(".mapping-target-auto-disabled-help");
-            const disabledTooltip = enabled ? (row.dataset.failureTooltip || "最后一次调用失败") : "手动禁用";
+            const disabledTooltip = !enabled
+                ? "手动禁用"
+                : cooldown
+                    ? row.dataset.cooldownTooltip
+                    : (row.dataset.failureTooltip || "最后一次调用失败");
             disabledHelp.setAttribute("aria-label", disabledTooltip);
             disabledHelp.dataset.tooltip = disabledTooltip;
             renderTargetTestResult(row);
@@ -729,14 +740,15 @@
                 return;
             }
             toggleButton.hidden = false;
-            toggleButton.textContent = enabled && !autoDisabled ? "禁用" : "启用";
-            toggleButton.classList.toggle("is-delete", enabled && !autoDisabled);
-            toggleButton.classList.toggle("is-primary", !enabled || autoDisabled);
+            toggleButton.textContent = enabled && !autoDisabled && !cooldown ? "禁用" : "启用";
+            toggleButton.classList.toggle("is-delete", enabled && !autoDisabled && !cooldown);
+            toggleButton.classList.toggle("is-primary", !enabled || autoDisabled || cooldown);
         }
 
         function toggleTargetRow(row) {
-            if (row.dataset.autoDisabled === "true") {
+            if (row.dataset.autoDisabled === "true" || row.dataset.cooldown === "true") {
                 row.dataset.autoDisabled = "false";
+                row.dataset.cooldown = "false";
                 row.dataset.enabled = "true";
             } else {
                 row.dataset.enabled = row.dataset.enabled === "false" ? "true" : "false";
@@ -1158,6 +1170,7 @@
                 resetTargetTest(row);
                 row.dataset.modelId = modelId;
                 row.dataset.autoDisabled = "false";
+                row.dataset.cooldown = "false";
                 row.dataset.failureTooltip = "";
                 row.querySelector(".mapping-target-test-auth").hidden = true;
                 const authSelect = row.querySelector(".target-test-auth-entry");

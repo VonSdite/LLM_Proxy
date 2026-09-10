@@ -184,7 +184,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         stylesheet = (project_root / "src/presentation/static/css/model_mappings.css").read_text(encoding="utf-8")
         settings_template = (project_root / "src/presentation/templates/settings.html").read_text(encoding="utf-8")
 
-        self.assertIn("model_mappings.css?v=20260905-2", template)
+        self.assertIn("model_mappings.css?v=20260910-1", template)
         self.assertIn('id="mappingStrategySelect"', template)
         self.assertIn('<option value="highest_priority">最高优先级</option>', template)
         self.assertIn('<option value="sticky_failover">粘滞故障切换</option>', template)
@@ -207,6 +207,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn("mapping-cooldown-help", template)
         self.assertIn('data-mapping-help-topic="cooldown"', template)
         self.assertIn("401/403/408/425、429、5xx、网络或流异常会进入冷却", template)
+        self.assertIn("前端显示“禁用”", template)
         self.assertIn("其他 4xx 只切换本次请求，不改变目标状态", template)
         target_label_markup = template.split('<div class="mapping-target-label">', 1)[1].split("</div>", 1)[0]
         priority_header_markup = template.split('<span class="mapping-table-heading">', 1)[1].split("</span>", 1)[0]
@@ -240,9 +241,15 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn("该目标模型已不在当前可用模型目录中", template)
         self.assertIn("mapping-target-auto-disabled", template)
         self.assertIn("mapping-target-auto-disabled-help", template)
-        self.assertIn('manuallyDisabled ? "手动禁用" : failureTooltip', template)
+        self.assertIn('manuallyDisabled ? "手动禁用" : cooldown ? cooldownTooltip : failureTooltip', template)
         self.assertIn("row.dataset.failureTooltip = failureTooltip", template)
         self.assertIn("最后一次调用失败", template)
+        self.assertIn('const cooldown = target.status === "cooldown"', template)
+        self.assertIn('row.dataset.cooldown = cooldown ? "true" : "false"', template)
+        self.assertIn("会在额度恢复后自动解除禁用", template)
+        self.assertIn("其他临时故障会在冷却结束后自动解除禁用", template)
+        self.assertIn(".mapping-target-row.is-cooldown td", stylesheet)
+        self.assertIn(".mapping-target-row.is-cooldown .form-control", stylesheet)
         self.assertIn("width: 72px", stylesheet)
         self.assertIn("border-radius: 999px", stylesheet)
         self.assertIn(".mapping-help-popover", stylesheet)

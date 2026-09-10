@@ -13,7 +13,7 @@ function createHarness(modelId = "alpha/fast", available = true) {
     const elements = new Map();
     const classes = new Set();
     const row = {
-        dataset: { modelId, available: String(available), enabled: "true", autoDisabled: "false" },
+        dataset: { modelId, available: String(available), enabled: "true", autoDisabled: "false", cooldown: "false" },
         isConnected: true,
         classList: { toggle(name, enabled) { enabled ? classes.add(name) : classes.delete(name); } },
         querySelector(selector) {
@@ -145,6 +145,26 @@ test("an unavailable model status refreshes after the model ID input loses focus
     assert.equal(row.dataset.available, "false");
     assert.equal(row.querySelector(".mapping-target-unavailable-status").hidden, false);
     assert.equal(row.querySelector(".target-model-id").value, "1222");
+});
+
+test("cooldown targets appear disabled and explain automatic recovery", () => {
+    const { context, row, classes } = createHarness();
+    row.dataset.cooldown = "true";
+    row.dataset.cooldownTooltip = "临时禁用：Codex OAuth 额度用完时，会在额度恢复后自动解除禁用；其他临时故障会在冷却结束后自动解除禁用。";
+
+    context.syncTargetRowActions(row);
+
+    assert.equal(classes.has("is-cooldown"), true);
+    assert.equal(row.querySelector(".mapping-target-auto-disabled-status").hidden, false);
+    assert.equal(row.querySelector(".mapping-target-auto-disabled-help").dataset.tooltip, row.dataset.cooldownTooltip);
+    assert.equal(row.querySelector(".mapping-toggle-target").textContent, "启用");
+
+    context.toggleTargetRow(row);
+
+    assert.equal(row.dataset.cooldown, "false");
+    assert.equal(classes.has("is-cooldown"), false);
+    assert.equal(row.querySelector(".mapping-target-auto-disabled-status").hidden, true);
+    assert.equal(row.querySelector(".mapping-toggle-target").textContent, "禁用");
 });
 
 test("testing reuses the Provider configuration and metric format without toggling the target", async () => {
