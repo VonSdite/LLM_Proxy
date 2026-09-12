@@ -280,6 +280,7 @@ class Application:
             claude_oauth_service=claude_oauth_service,
         )
         self._model_mapping_service = model_mapping_service
+        codex_oauth_service.set_quota_recovered_callback(model_mapping_service.restore_codex_quota_targets)
         model_catalog_service = ModelCatalogService(
             self._ctx,
             codex_oauth_service=codex_oauth_service,

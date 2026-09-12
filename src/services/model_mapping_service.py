@@ -44,6 +44,7 @@ class ModelMappingService:
     EXPORT_VERSION = 1
     _AUTO_DISABLE_STATUS_CODES = frozenset({404, 405, 410})
     _COOLDOWN_STATUS_CODES = frozenset({401, 403, 408, 425, 429})
+    _CODEX_QUOTA_ERROR_CODE = "codex_quota_exhausted"
 
     def __init__(
         self,
@@ -317,6 +318,27 @@ class ModelMappingService:
         self._repository.restore_target(selection.mapping_id, selection.target_model_id)
         self._repository.set_current_target(selection.mapping_id, selection.target_model_id)
 
+    def restore_codex_quota_targets(self, recovered_plan_type: str) -> int:
+        """额度刷新确认恢复后清理 Codex 映射目标的额度冷却。"""
+        text_model_ids = set(self._read_oauth_catalog_ids(self._codex_oauth_service, "list_models"))
+        target_model_ids = set(text_model_ids)
+        if str(recovered_plan_type or "").strip().lower() != "free":
+            target_model_ids.update(self._read_oauth_catalog_ids(self._codex_oauth_service, "list_image_models"))
+
+        restored_count = 0
+        for mapping in self._repository.list_mappings():
+            runtime_states = self._repository.list_target_runtime_states(mapping["id"])
+            for target in mapping["targets"]:
+                target_model_id = target["model_id"]
+                runtime = runtime_states.get(target_model_id, {})
+                if target_model_id not in target_model_ids or not self._is_codex_quota_cooldown(runtime):
+                    continue
+                self._repository.restore_target(mapping["id"], target_model_id)
+                restored_count += 1
+        if restored_count:
+            self._logger.info("Codex quota recovery restored model mapping targets: count=%s", restored_count)
+        return restored_count
+
     def record_failure(
         self,
         selection: SelectedModelMappingTarget,
@@ -472,6 +494,22 @@ class ModelMappingService:
             return False
         cooldown_until = parse_local_datetime(runtime.get("cooldown_until"))
         return cooldown_until is None or cooldown_until <= now
+
+    @classmethod
+    def _is_codex_quota_cooldown(cls, runtime: Mapping[str, Any]) -> bool:
+        if runtime.get("auto_disabled") or not runtime.get("cooldown_until"):
+            return False
+        if runtime.get("disabled_reason") == cls._CODEX_QUOTA_ERROR_CODE:
+            return True
+        if runtime.get("last_error_type") == cls._CODEX_QUOTA_ERROR_CODE:
+            return True
+        last_status_code = runtime.get("last_status_code")
+        try:
+            is_rate_limited = int(last_status_code) == 429
+        except (TypeError, ValueError):
+            is_rate_limited = False
+        last_error_message = str(runtime.get("last_error_message") or "").strip().lower()
+        return is_rate_limited and last_error_message.startswith("codex oauth account quota exhausted")
 
     def _list_runtime_target_model_ids(self) -> tuple[str, ...]:
         provider_ids = tuple(self._provider_manager.list_model_names())

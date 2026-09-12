@@ -246,7 +246,8 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn("最后一次调用失败", template)
         self.assertIn('const cooldown = target.status === "cooldown"', template)
         self.assertIn('row.dataset.cooldown = cooldown ? "true" : "false"', template)
-        self.assertIn("会在额度恢复后自动解除禁用", template)
+        self.assertIn("会立即自动解除额度禁用", template)
+        self.assertIn("包括 5 小时和 7 天窗口", template)
         self.assertIn("其他临时故障会在冷却结束后自动解除禁用", template)
         self.assertIn(".mapping-target-row.is-cooldown td", stylesheet)
         self.assertIn(".mapping-target-row.is-cooldown .form-control", stylesheet)
@@ -817,6 +818,41 @@ class ModelMappingServiceTests(unittest.TestCase):
             recovered_target = self.service.acquire_target("public_model")
         self.assertEqual("alpha/fast", recovered_target.target_model_id)
 
+    def test_codex_quota_recovery_only_restores_matching_text_and_paid_image_targets(self) -> None:
+        target_cases = {
+            "codex_text": ("gpt_text", "codex_quota_exhausted", "quota exhausted"),
+            "codex_legacy": ("gpt_text", "upstream_error", "Codex OAuth account quota exhausted for model"),
+            "codex_image": ("gpt_image", "codex_quota_exhausted", "quota exhausted"),
+            "provider_target": ("alpha/fast", "rate_limit_error", "rate limited"),
+        }
+        for mapping_id, (target_model_id, error_type, error_message) in target_cases.items():
+            self.service.create_mapping(
+                {
+                    "id": mapping_id,
+                    "targets": [{"model_id": target_model_id}],
+                }
+            )
+            self.repository.save_target_runtime_state(
+                mapping_id,
+                target_model_id,
+                auto_disabled=False,
+                disabled_reason=error_type,
+                cooldown_until="2999-01-01 00:00:00",
+                last_status_code=429,
+                last_error_type=error_type,
+                last_error_message=error_message,
+            )
+
+        self.assertEqual(2, self.service.restore_codex_quota_targets("free"))
+        self.assertEqual("available", self.service.get_mapping("codex_text")["targets"][0]["status"])
+        self.assertEqual("available", self.service.get_mapping("codex_legacy")["targets"][0]["status"])
+        self.assertEqual("cooldown", self.service.get_mapping("codex_image")["targets"][0]["status"])
+        self.assertEqual("cooldown", self.service.get_mapping("provider_target")["targets"][0]["status"])
+
+        self.assertEqual(1, self.service.restore_codex_quota_targets("plus"))
+        self.assertEqual("available", self.service.get_mapping("codex_image")["targets"][0]["status"])
+        self.assertEqual("cooldown", self.service.get_mapping("provider_target")["targets"][0]["status"])
+
     def test_request_error_switches_current_request_without_changing_target_state(self) -> None:
         self.service.create_mapping(self._mapping_payload())
         selected = self.service.acquire_target("public_model")
@@ -1230,6 +1266,42 @@ class ModelMappingProxyControllerTests(ModelMappingServiceTests):
         self.assertEqual("API key has no model access", targets["alpha/fast"]["last_error_message"])
         self.assertEqual("gpt_text", mapping["current_target_model_id"])
         self.assertEqual("gpt_text", completed[0]["target_model_id"])
+
+    def test_codex_quota_failure_code_is_persisted_for_recovery_notification(self) -> None:
+        calls: list[str] = []
+        completed: list[dict[str, Any]] = []
+        outcomes = {
+            "gpt_text": (
+                None,
+                429,
+                ProxyErrorInfo(
+                    message="Codex OAuth account quota exhausted",
+                    status_code=429,
+                    error_type="upstream_error",
+                    error_code="codex_quota_exhausted",
+                    response_headers={"Retry-After": "3600"},
+                ),
+            ),
+            "claude_text": (Response("ok", status=200), 200, None),
+        }
+        controller = self._build_controller(outcomes, calls)
+        self.service.create_mapping(
+            {
+                "id": "public_model",
+                "targets": [
+                    {"model_id": "gpt_text", "priority": 20},
+                    {"model_id": "claude_text", "priority": 10},
+                ],
+            }
+        )
+
+        self._proxy(controller, completed)
+        target = self.service.get_mapping("public_model")["targets"][0]
+
+        self.assertEqual(["gpt_text", "claude_text"], calls)
+        self.assertEqual("cooldown", target["status"])
+        self.assertEqual("codex_quota_exhausted", target["disabled_reason"])
+        self.assertEqual("codex_quota_exhausted", target["last_error_type"])
 
     def test_image_mapping_uses_codex_image_target(self) -> None:
         calls: list[str] = []

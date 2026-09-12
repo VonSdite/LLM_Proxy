@@ -1186,6 +1186,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
                         "type": "codex",
                         "email": "codex@example.com",
                         "access_token": "access-demo",
+                        "plan_type": "plus",
                         "expired": "2999-01-01T00:00:00Z",
                     }
                 ),
@@ -1193,6 +1194,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
             )
             service = self._build_service(root)
             usage_values = [100, 25]
+            recovered_plan_types: list[str] = []
+            service.set_quota_recovered_callback(recovered_plan_types.append)
 
             def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
                 del url, headers, timeout, proxies, verify, kwargs
@@ -1216,6 +1219,93 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertEqual(0.0, exhausted_quota["windows"][0]["remaining_percent"])
         self.assertEqual(75.0, available_quota["windows"][0]["remaining_percent"])
         self.assertNotIn("codex-demo.json", service._quota_cooldowns)
+        self.assertEqual(["plus"], recovered_plan_types)
+
+    def test_manual_quota_refresh_does_not_notify_recovery_while_weekly_window_is_exhausted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                        "plan_type": "plus",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            recovered_plan_types: list[str] = []
+            service.set_quota_recovered_callback(recovered_plan_types.append)
+            service.mark_auth_file_quota_exhausted("codex-demo.json", retry_after_seconds=3600)
+
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del url, headers, timeout, proxies, verify, kwargs
+                return FakeResponse(
+                    {
+                        "plan_type": "plus",
+                        "rate_limit": {
+                            "primary_window": {"used_percent": 25, "reset_after_seconds": 3600},
+                            "secondary_window": {"used_percent": 100, "reset_after_seconds": 7200},
+                        },
+                    }
+                )
+
+            with patch_requests_session(get=fake_get):
+                quota = service.get_auth_file_quota("codex-demo.json")
+
+        self.assertEqual(75.0, quota["windows"][0]["remaining_percent"])
+        self.assertEqual(0.0, quota["windows"][1]["remaining_percent"])
+        self.assertEqual([], recovered_plan_types)
+        self.assertIn("codex-demo.json", service._quota_cooldowns)
+
+    def test_background_quota_refresh_notifies_recovery_when_all_codex_windows_have_quota(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "codex-demo.json").write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "email": "codex@example.com",
+                        "access_token": "access-demo",
+                        "plan_type": "plus",
+                        "expired": "2999-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            recovered_plan_types: list[str] = []
+            service.set_quota_recovered_callback(recovered_plan_types.append)
+            service.mark_auth_file_quota_exhausted("codex-demo.json", retry_after_seconds=3600)
+
+            def fake_get(url, headers=None, timeout=None, proxies=None, verify=None, **kwargs):
+                del headers, timeout, proxies, verify, kwargs
+                if url == CODEX_USAGE_URL:
+                    return FakeResponse(
+                        {
+                            "plan_type": "plus",
+                            "rate_limit": {
+                                "primary_window": {"used_percent": 25, "reset_after_seconds": 3600},
+                                "secondary_window": {"used_percent": 50, "reset_after_seconds": 7200},
+                            },
+                        }
+                    )
+                if url == CODEX_RESET_CREDITS_URL:
+                    return FakeResponse({"credits": []})
+                raise AssertionError(f"Unexpected GET request: {url}")
+
+            with patch_requests_session(get=fake_get):
+                result = service.refresh_all_auth_file_quota_snapshots(file_delay_seconds=0)
+
+        self.assertEqual(["codex-demo.json"], result["refreshed"])
+        self.assertEqual(["plus"], recovered_plan_types)
 
     def test_quota_retry_after_waits_for_all_exhausted_codex_windows(self) -> None:
         now = datetime.now(timezone.utc)

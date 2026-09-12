@@ -182,6 +182,7 @@ decoder
   - 持久化认证文件人工禁用状态、额度禁用截止时间、最近一次配额快照、配额刷新错误、最近成功认证文件与 Codex 模型代理使用状态
   - 启动 Codex 配额后台刷新任务，每小时刷新一轮可查询认证文件，并在已知 Codex 额度窗口到达 `reset_at` 时刷新对应认证文件；认证文件之间间隔 10 秒
   - 额度快照显示窗口耗尽时，认证文件等待全部已耗尽 Codex 窗口到达 `reset_at`；截止时间跨进程重启生效，到点后自动恢复；缺少 `reset_at` 时保留已有截止时间或使用 60 秒兜底
+  - 主动或后台配额刷新确认已启用账号的全部 Codex 额度窗口均有剩余额度时，通知模型映射服务立即清理 `codex_quota_exhausted` 目标冷却；Free 账号不恢复图片映射目标
   - 维护本地 Codex OAuth 文本模型目录、图片模型目录和默认图片模型
   - 内置常用 Codex 文本模型和图片模型 ID；添加内置模型只把缺失的内置 ID 加回本地目录，保留用户自行添加的模型 ID
   - 按本地模型目录、人工禁用状态、持久化额度禁用、认证失败状态和最近成功认证文件提供 Codex 请求候选账号
@@ -495,6 +496,7 @@ OAuth 模型是数据平面的例外路由：
   - 映射策略、目标人工启用状态、故障冷却、自动禁用错误和当前目标保存在 SQLite
   - `highest_priority` 在每次请求中重新比较正常候选，高优先级目标恢复后立即参与选择
   - `sticky_failover` 在当前目标仍正常可用时保持流量，当前目标不可用时重新按优先级选择
+  - 接收 Codex OAuth 额度确认恢复通知，只清理由 `codex_quota_exhausted` 产生的对应文本或图片目标冷却
   - 正常候选为空时忽略目标的人工禁用、自动禁用和冷却状态，按最高优先级选择运行时目标；兜底目标在当前请求失败后不重复调用
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
@@ -1135,6 +1137,7 @@ sequenceDiagram
 sequenceDiagram
     participant Client
     participant Controller
+    participant ModelMapping
     participant CodexOAuth
     participant CodexProxy
     participant ChatGPT
@@ -1196,6 +1199,9 @@ sequenceDiagram
             CodexProxy->>Controller: 完成统计回调携带 usage_status
             Note over CodexProxy,CodexOAuth: 认证文件状态保持不变
         end
+    end
+    opt 后续主动或后台刷新确认全部 Codex 额度窗口均有剩余额度
+        CodexOAuth->>ModelMapping: 清理 codex_quota_exhausted 目标冷却
     end
     Note over CodexProxy,ChatGPT: response.completed 后的 HTTP framing error 保持逻辑完成状态
 ```

@@ -1327,7 +1327,9 @@ class ProxyController:
             self._model_mapping_service.record_failure(
                 selection,
                 status_code=recorded_status_code if recorded_status_code is not None else status_code,
-                error_type=failure.error_type,
+                error_type=(
+                    failure.error_code if failure.error_code == "codex_quota_exhausted" else failure.error_type
+                ),
                 error_message=failure.message,
                 response_headers=response_headers,
             )
@@ -1451,7 +1453,9 @@ class ProxyController:
             self._model_mapping_service.record_failure(
                 selection,
                 status_code=recorded_status_code if recorded_status_code is not None else status_code,
-                error_type=failure.error_type,
+                error_type=(
+                    failure.error_code if failure.error_code == "codex_quota_exhausted" else failure.error_type
+                ),
                 error_message=failure.message,
                 response_headers=response_headers,
             )

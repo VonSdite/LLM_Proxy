@@ -150,7 +150,7 @@ test("an unavailable model status refreshes after the model ID input loses focus
 test("cooldown targets appear disabled and explain automatic recovery", () => {
     const { context, row, classes } = createHarness();
     row.dataset.cooldown = "true";
-    row.dataset.cooldownTooltip = "临时禁用：Codex OAuth 额度用完时，会在额度恢复后自动解除禁用；其他临时故障会在冷却结束后自动解除禁用。";
+    row.dataset.cooldownTooltip = "临时禁用：主动或后台刷新确认 Codex OAuth 账号的全部额度窗口均有剩余额度时，会立即自动解除额度禁用；否则在预计恢复时间到达后自动解除并重试。其他临时故障会在冷却结束后自动解除禁用。";
 
     context.syncTargetRowActions(row);
 
