@@ -1691,6 +1691,49 @@ class TranslatorTests(unittest.TestCase):
             translated["tool_choice"],
         )
 
+    def test_responses_to_chat_preserves_plain_text_input(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+
+        translated = translator.translate_request(
+            "gpt-4.1",
+            {"input": "Hello", "stream": False},
+            False,
+        )
+
+        self.assertEqual([{"role": "user", "content": "Hello"}], translated["messages"])
+        self.assertFalse(translated["stream"])
+
+    def test_responses_to_chat_preserves_streaming_image_input(self) -> None:
+        translator = OpenAIChatResponsesTranslator()
+
+        translated = translator.translate_request(
+            "gpt-4.1",
+            {
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Read the image"},
+                            {
+                                "type": "input_image",
+                                "image_url": "data:image/png;base64,aGVsbG8=",
+                            },
+                        ],
+                    }
+                ],
+                "stream": True,
+            },
+            True,
+        )
+
+        self.assertTrue(translated["stream"])
+        self.assertEqual(["text", "image_url"], [part["type"] for part in translated["messages"][0]["content"]])
+        self.assertEqual(
+            "data:image/png;base64,aGVsbG8=",
+            translated["messages"][0]["content"][1]["image_url"]["url"],
+        )
+
     def test_direct_responses_response_to_chat_maps_custom_tool_call(self) -> None:
         translator = OpenAIResponsesTranslator()
 
