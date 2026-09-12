@@ -425,6 +425,133 @@ class HookContractsTests(unittest.TestCase):
         self.assertEqual(20, rewritten["top_k"])
         self.assertNotIn("reasoning_effort", rewritten)
 
+    def test_qwen_vl_hook_flattens_and_merges_responses_instruction_messages(self) -> None:
+        module = self._load_hook_module("claude_responses_to_chat_qwen_compat.py")
+        hook = module.Hook()
+        translator = build_default_translator_registry().get("openai_chat", "openai_responses")
+        ctx = self._ctx(
+            provider_name="codemate",
+            upstream_model="Qwen3.6-27B-VL",
+            provider_source_format="openai_chat",
+            provider_target_format="openai_responses",
+            stream=True,
+        )
+        translated = translator.translate_request(
+            "Qwen3.6-27B-VL",
+            {
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "developer",
+                        "content": [
+                            {"type": "input_text", "text": "AAA"},
+                            {"type": "input_text", "text": "BBB"},
+                        ],
+                    },
+                    {
+                        "type": "message",
+                        "role": "system",
+                        "content": [{"type": "input_text", "text": "CCC"}],
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Read the image"},
+                            {
+                                "type": "input_image",
+                                "image_url": "data:image/png;base64,aGVsbG8=",
+                                "detail": "high",
+                            },
+                        ],
+                    },
+                ],
+                "stream": True,
+            },
+            True,
+        )
+
+        rewritten = hook.request_guard(ctx, translated)
+
+        self.assertEqual(["system", "user"], [message["role"] for message in rewritten["messages"]])
+        self.assertEqual("AAA\n\nBBB\n\nCCC", rewritten["messages"][0]["content"])
+        self.assertEqual(
+            [
+                {"type": "text", "text": "Read the image"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,aGVsbG8=", "detail": "high"},
+                },
+            ],
+            rewritten["messages"][1]["content"],
+        )
+        self.assertTrue(rewritten["stream"])
+
+    def test_qwen_vl_hook_flattens_single_system_responses_message(self) -> None:
+        module = self._load_hook_module("claude_responses_to_chat_qwen_compat.py")
+        hook = module.Hook()
+        translator = build_default_translator_registry().get("openai_chat", "openai_responses")
+        ctx = self._ctx(
+            provider_name="codemate",
+            upstream_model="Qwen3.6-27B-VL",
+            provider_source_format="openai_chat",
+            provider_target_format="openai_responses",
+        )
+        translated = translator.translate_request(
+            "Qwen3.6-27B-VL",
+            {
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "system",
+                        "content": [{"type": "input_text", "text": "Follow the rules"}],
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": "data:image/png;base64,aGVsbG8=",
+                            }
+                        ],
+                    },
+                ]
+            },
+            False,
+        )
+
+        rewritten = hook.request_guard(ctx, translated)
+
+        self.assertEqual("system", rewritten["messages"][0]["role"])
+        self.assertEqual("Follow the rules", rewritten["messages"][0]["content"])
+        self.assertEqual("image_url", rewritten["messages"][1]["content"][0]["type"])
+
+    def test_qwen_vl_instruction_normalization_does_not_apply_to_qwen_text_model(self) -> None:
+        module = self._load_hook_module("claude_responses_to_chat_qwen_compat.py")
+        hook = module.Hook()
+        ctx = self._ctx(
+            provider_name="codemate",
+            upstream_model="Qwen3.7-Max",
+            provider_source_format="openai_chat",
+            provider_target_format="openai_responses",
+        )
+        body = {
+            "model": "Qwen3.7-Max",
+            "messages": [
+                {"role": "developer", "content": [{"type": "text", "text": "AAA"}]},
+                {"role": "system", "content": [{"type": "text", "text": "BBB"}]},
+            ],
+        }
+
+        rewritten = hook.request_guard(ctx, body)
+
+        self.assertEqual(["system", "system"], [message["role"] for message in rewritten["messages"]])
+        self.assertEqual(
+            [[{"type": "text", "text": "AAA"}], [{"type": "text", "text": "BBB"}]],
+            [message["content"] for message in rewritten["messages"]],
+        )
+
     def test_vendor_hooks_map_developer_messages_without_reasoning_parameters(self) -> None:
         cases = (
             ("claude_responses_to_chat_minimax_compat.py", "minimax-m3"),
