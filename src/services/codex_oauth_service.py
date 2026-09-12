@@ -120,6 +120,11 @@ class CodexOAuthService:
         self._quota_refresh_locks: dict[str, threading.Lock] = {}
         self._quota_refresh_lock_guard = threading.RLock()
         self._quota_auto_refresh_worker: Any | None = None
+        self._quota_recovered_callback: Callable[[str], Any] | None = None
+
+    def set_quota_recovered_callback(self, callback: Callable[[str], Any] | None) -> None:
+        """设置额度确认恢复后的通知回调，参数为恢复账号的套餐类型。"""
+        self._quota_recovered_callback = callback
 
     def start_login(self) -> dict[str, Any]:
         """生成新的 Codex OAuth 授权链接。"""
@@ -889,14 +894,19 @@ class CodexOAuthService:
                 "refreshed": False,
                 "refreshed_at": self._now_iso(),
                 "plan_type": self._normalize_text(
-                    usage_payload.get("plan_type") or usage_payload.get("planType") or payload.get("plan_type")
+                    usage_payload.get("plan_type")
+                    or usage_payload.get("planType")
+                    or payload.get("plan_type")
+                    or self._extract_plan_type_from_payload(payload)
                 ),
                 "windows": self._build_quota_windows(usage_payload),
                 "raw": usage_payload,
             }
             self._store_auth_file_quota(auth_file.name, result)
-            self._sync_quota_cooldown_from_quota(auth_file.name, result)
+            quota_recovered = self._sync_quota_cooldown_from_quota(auth_file.name, result)
             self._clear_auth_file_auth_failure(auth_file.name)
+            if quota_recovered:
+                self._notify_quota_recovered(auth_file.name, result)
             return result
         except Exception as exc:
             self._store_auth_file_quota_error(auth_file.name, str(exc))
@@ -1406,24 +1416,42 @@ class CodexOAuthService:
         except Exception as exc:
             self._logger.warning("Codex auth file runtime state reset failed: file=%s error=%s", name, exc)
 
-    def _sync_quota_cooldown_from_quota(self, name: str, quota: dict[str, Any]) -> None:
+    def _sync_quota_cooldown_from_quota(self, name: str, quota: dict[str, Any]) -> bool:
         """根据最新配额刷新结果同步持久化额度禁用状态。"""
         normalized_name = self._normalize_auth_file_name(name)
         if not normalized_name:
-            return
-        if self._is_quota_exhausted(quota):
+            return False
+        quota_available = self._has_available_codex_quota(quota)
+        if not quota_available:
             retry_after_seconds = self._quota_retry_after_seconds(quota)
             if retry_after_seconds is None:
                 self._restore_quota_cooldowns_from_state()
                 if self._is_quota_cooling_down(normalized_name):
-                    return
-            self.mark_auth_file_quota_exhausted(
-                normalized_name,
-                retry_after_seconds=retry_after_seconds,
-            )
-            return
+                    return False
+            if self._has_exhausted_codex_quota(quota):
+                self.mark_auth_file_quota_exhausted(
+                    normalized_name,
+                    retry_after_seconds=retry_after_seconds,
+                )
+            return False
         self._quota_cooldowns.pop(normalized_name, None)
         self._update_auth_file_state(normalized_name, {"quota_cooldown_until": None})
+        return True
+
+    def _notify_quota_recovered(self, name: str, quota: dict[str, Any]) -> None:
+        """通知已启用账号的全部 Codex 额度窗口确认恢复。"""
+        callback = self._quota_recovered_callback
+        if callback is None:
+            return
+        state = self._load_auth_file_state()
+        state_files = state.get("files")
+        file_state = state_files.get(name) if isinstance(state_files, dict) else None
+        if isinstance(file_state, dict) and not self._is_auth_file_enabled(file_state):
+            return
+        try:
+            callback(self._normalize_codex_plan_type(quota.get("plan_type")))
+        except Exception as exc:
+            self._logger.warning("Codex quota recovery callback failed: file=%s error=%s", name, exc)
 
     def _restore_quota_cooldowns_from_state(self) -> None:
         """从认证文件状态恢复尚未到期的额度禁用。"""
@@ -1656,6 +1684,47 @@ class CodexOAuthService:
                 continue
             reset_at = cls._parse_epoch_or_datetime(window.get("reset_at") or window.get("resetAt"))
             if reset_at is None or reset_at > now:
+                return True
+        return False
+
+    @classmethod
+    def _has_available_codex_quota(cls, quota: dict[str, Any]) -> bool:
+        """判断最新快照中的全部 Codex 额度窗口是否都有剩余额度。"""
+        windows = quota.get("windows")
+        if not isinstance(windows, list):
+            return False
+        codex_windows = [
+            window
+            for window in windows
+            if isinstance(window, dict) and str(window.get("label") or "").strip().lower().startswith("codex")
+        ]
+        if not codex_windows:
+            return False
+        for window in codex_windows:
+            remaining_percent = cls._parse_float(window.get("remaining_percent"))
+            used_percent = cls._parse_float(window.get("used_percent"))
+            if remaining_percent is not None:
+                if remaining_percent <= 0:
+                    return False
+                continue
+            if used_percent is None or used_percent >= 100:
+                return False
+        return True
+
+    @classmethod
+    def _has_exhausted_codex_quota(cls, quota: dict[str, Any]) -> bool:
+        """判断最新快照中是否存在明确耗尽的 Codex 额度窗口。"""
+        windows = quota.get("windows")
+        if not isinstance(windows, list):
+            return False
+        for window in windows:
+            if not isinstance(window, dict) or not str(window.get("label") or "").strip().lower().startswith("codex"):
+                continue
+            remaining_percent = cls._parse_float(window.get("remaining_percent"))
+            used_percent = cls._parse_float(window.get("used_percent"))
+            if (remaining_percent is not None and remaining_percent <= 0) or (
+                used_percent is not None and used_percent >= 100
+            ):
                 return True
         return False
 
