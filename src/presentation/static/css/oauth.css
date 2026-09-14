@@ -901,7 +901,7 @@
 
 .oauth-page .oauth-reset-card-actions {
     display: grid;
-    grid-template-columns: auto minmax(240px, 320px) auto;
+    grid-template-columns: auto minmax(240px, 280px) auto;
     align-items: center;
     justify-content: start;
     gap: 8px;
@@ -914,6 +914,7 @@
 
 .oauth-page .oauth-reset-card-picker {
     position: relative;
+    width: min(280px, 100%);
     min-width: 0;
 }
 
@@ -954,7 +955,7 @@
 .oauth-page .oauth-reset-card-summary-copy {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 12px;
     min-width: 0;
     white-space: nowrap;
@@ -1053,7 +1054,7 @@
 .oauth-page .oauth-reset-card-option-copy {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 12px;
     min-width: 0;
     white-space: nowrap;
@@ -1076,7 +1077,7 @@
 .oauth-page .oauth-reset-card-placeholder {
     display: flex;
     align-items: center;
-    width: min(320px, 100%);
+    width: min(280px, 100%);
     height: 32px;
     padding: 0 10px;
     border: 1px solid var(--line);

@@ -245,12 +245,17 @@ class CodexOAuthService:
             "auth_dir": str(self._auth_dir),
         }
 
-    @staticmethod
-    def _auth_file_display_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
-        """按套餐优先级和认证文件名生成管理页排序键。"""
+    @classmethod
+    def _auth_file_display_sort_key(cls, item: dict[str, Any]) -> tuple[int, int, int, str, str]:
+        """按额度、启用状态、套餐和认证文件名生成管理页排序键。"""
+        quota = item.get("quota")
+        has_available_quota = isinstance(quota, dict) and cls._has_available_codex_quota(quota)
+        enabled = item.get("enabled") is True
         plan_type = re.sub(r"[^a-z0-9]+", "", str(item.get("plan_type") or "").strip().lower())
         name = str(item.get("name") or "")
         return (
+            0 if has_available_quota else 1,
+            0 if enabled else 1,
             CODEX_AUTH_FILE_PLAN_SORT_ORDER.get(plan_type, len(CODEX_AUTH_FILE_PLAN_SORT_ORDER)),
             name.casefold(),
             name,

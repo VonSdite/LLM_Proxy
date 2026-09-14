@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
 from src.services.codex_oauth_service import (
-    CODEX_AUTH_FILE_PLAN_SORT_ORDER,
     CODEX_CLIENT_ID,
     CODEX_MODEL_REFERENCE_URLS,
     CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS,
@@ -601,20 +600,21 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertFalse(original_exists)
         self.assertTrue(archived_exists)
 
-    def test_list_auth_files_sorts_by_plan_priority_then_name(self) -> None:
+    def test_list_auth_files_sorts_by_quota_enabled_plan_then_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             auth_dir = root / "data" / "oauth" / "codex"
             auth_dir.mkdir(parents=True)
             auth_files = (
-                ("codex-z-pro.json", "pro"),
-                ("codex-a-pro.json", "PRO"),
-                ("codex-z-prolite.json", "prolite"),
-                ("codex-a-prolite.json", "Pro Lite"),
-                ("codex-b-plus.json", "plus"),
-                ("codex-a-free.json", "free"),
-                ("codex-b-team.json", "team"),
-                ("codex-a-unknown.json", "unknown"),
+                ("codex-z-available-pro.json", "pro"),
+                ("codex-a-available-pro.json", "PRO"),
+                ("codex-available-prolite.json", "Pro Lite"),
+                ("codex-available-plus.json", "plus"),
+                ("codex-available-free.json", "free"),
+                ("codex-available-disabled-pro.json", "pro"),
+                ("codex-a-exhausted-pro.json", "pro"),
+                ("codex-z-unknown-pro.json", "pro"),
+                ("codex-exhausted-disabled-free.json", "free"),
             )
             for name, plan_type in auth_files:
                 (auth_dir / name).write_text(
@@ -629,21 +629,63 @@ class CodexOAuthServiceTests(unittest.TestCase):
                     ),
                     encoding="utf-8",
                 )
+            available_quota = {
+                "windows": [
+                    {
+                        "label": "Codex 7 天",
+                        "used_percent": 50,
+                        "remaining_percent": 50,
+                    }
+                ]
+            }
+            exhausted_quota = {
+                "windows": [
+                    {
+                        "label": "Codex 7 天",
+                        "used_percent": 100,
+                        "remaining_percent": 0,
+                    }
+                ]
+            }
+            state_file = auth_dir / ".state" / "auth_files.json"
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "files": {
+                            name: {
+                                "quota": available_quota,
+                                "disabled": name == "codex-available-disabled-pro.json",
+                            }
+                            for name, _ in auth_files
+                            if "available" in name
+                        }
+                        | {
+                            "codex-a-exhausted-pro.json": {"quota": exhausted_quota},
+                            "codex-exhausted-disabled-free.json": {
+                                "quota": exhausted_quota,
+                                "disabled": True,
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
             service = self._build_service(root)
 
             result = service.list_auth_files()
 
-        self.assertEqual({"pro": 0, "prolite": 1, "plus": 2, "free": 3}, CODEX_AUTH_FILE_PLAN_SORT_ORDER)
         self.assertEqual(
             [
-                "codex-a-pro.json",
-                "codex-z-pro.json",
-                "codex-a-prolite.json",
-                "codex-z-prolite.json",
-                "codex-b-plus.json",
-                "codex-a-free.json",
-                "codex-a-unknown.json",
-                "codex-b-team.json",
+                "codex-a-available-pro.json",
+                "codex-z-available-pro.json",
+                "codex-available-prolite.json",
+                "codex-available-plus.json",
+                "codex-available-free.json",
+                "codex-available-disabled-pro.json",
+                "codex-a-exhausted-pro.json",
+                "codex-z-unknown-pro.json",
+                "codex-exhausted-disabled-free.json",
             ],
             [item["name"] for item in result["files"]],
         )

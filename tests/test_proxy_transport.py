@@ -1816,8 +1816,16 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".oauth-page .oauth-auth-usage-row.is-previous", css)
         self.assertRegex(css, r"\.oauth-page \.oauth-auth-usage-row \{[^}]*font-size: 13px;")
         self.assertRegex(css, r"\.oauth-page \.oauth-auth-usage-row strong \{[^}]*font-size: inherit;")
-        self.assertIn("grid-template-columns: auto minmax(240px, 320px) auto;", css)
-        self.assertIn("width: min(320px, 100%);", css)
+        self.assertIn("grid-template-columns: auto minmax(240px, 280px) auto;", css)
+        self.assertEqual(2, css.count("width: min(280px, 100%);"))
+        self.assertRegex(
+            css,
+            r"\.oauth-page \.oauth-reset-card-summary-copy \{[^}]*justify-content: flex-start;",
+        )
+        self.assertRegex(
+            css,
+            r"\.oauth-page \.oauth-reset-card-option-copy \{[^}]*justify-content: flex-start;",
+        )
         self.assertIn("function renderTrashIcon", html)
         self.assertIn("function renderDisableIcon", html)
         self.assertIn("function renderEnableIcon", html)
