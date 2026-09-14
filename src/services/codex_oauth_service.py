@@ -59,6 +59,14 @@ CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS = 60 * 60
 CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS = 10
 CODEX_USAGE_WINDOW_SECONDS = 7 * 24 * 60 * 60
 CODEX_USAGE_RESET_DROP_PERCENT = 1.0
+CODEX_USAGE_ACTIVE_REFRESH_INTERVAL_SECONDS = 5 * 60
+CODEX_USAGE_ACTIVE_REFRESH_DELAY_SECONDS = 10
+CODEX_AUTH_FILE_PLAN_SORT_ORDER = {
+    "pro": 0,
+    "prolite": 1,
+    "plus": 2,
+    "free": 3,
+}
 OAUTH_SESSION_TTL_SECONDS = 10 * 60
 DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = (
     "gpt-6-astra",
@@ -130,6 +138,7 @@ class CodexOAuthService:
         self._log_repository = log_repository
         self._active_auth_file_name: str | None = None
         self._candidate_prepare_lock = threading.RLock()
+        self._usage_refresh_next_at: dict[str, float] = {}
 
     def set_quota_recovered_callback(self, callback: Callable[[str], Any] | None) -> None:
         """设置额度确认恢复后的通知回调，参数为恢复账号的套餐类型。"""
@@ -229,12 +238,23 @@ class CodexOAuthService:
             entry = self._build_auth_file_entry(path, state)
             if entry:
                 files.append(entry)
-        files.sort(key=lambda item: str(item.get("name") or "").lower())
+        files.sort(key=self._auth_file_display_sort_key)
         return {
             "files": files,
             "total": len(files),
             "auth_dir": str(self._auth_dir),
         }
+
+    @staticmethod
+    def _auth_file_display_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
+        """按套餐优先级和认证文件名生成管理页排序键。"""
+        plan_type = re.sub(r"[^a-z0-9]+", "", str(item.get("plan_type") or "").strip().lower())
+        name = str(item.get("name") or "")
+        return (
+            CODEX_AUTH_FILE_PLAN_SORT_ORDER.get(plan_type, len(CODEX_AUTH_FILE_PLAN_SORT_ORDER)),
+            name.casefold(),
+            name,
+        )
 
     def start_quota_auto_refresh_worker(
         self,
@@ -591,6 +611,7 @@ class CodexOAuthService:
         with self._candidate_prepare_lock:
             if self._active_auth_file_name == candidate.name:
                 return None if self._is_quota_cooling_down(candidate.name) else candidate
+            self._usage_refresh_next_at.pop(candidate.name, None)
 
             quota: dict[str, Any] | None = None
             accounting_start_at = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -630,8 +651,10 @@ class CodexOAuthService:
         normalized_name = Path(str(name or "").strip()).name
         if not normalized_name:
             return
-        if self._active_auth_file_name == normalized_name:
-            self._active_auth_file_name = None
+        with self._candidate_prepare_lock:
+            if self._active_auth_file_name == normalized_name:
+                self._active_auth_file_name = None
+            self._usage_refresh_next_at.pop(normalized_name, None)
         cooldown_seconds = retry_after_seconds if retry_after_seconds is not None else 60.0
         cooldown_until = time.time() + max(float(cooldown_seconds), 1.0)
         self._quota_cooldowns[normalized_name] = cooldown_until
@@ -710,6 +733,31 @@ class CodexOAuthService:
         )
         self._remember_last_success_auth_file(normalized_name)
         self._refresh_auth_file_quota_snapshot_if_due(normalized_name)
+        self._schedule_active_auth_file_usage_refresh(normalized_name)
+
+    def _schedule_active_auth_file_usage_refresh(self, name: str) -> None:
+        """活跃认证文件产生成功请求后，限频刷新七天用量终点。"""
+        if self._log_repository is None:
+            return
+        with self._candidate_prepare_lock:
+            if self._active_auth_file_name != name:
+                return
+            now = time.monotonic()
+            if now < self._usage_refresh_next_at.get(name, 0.0):
+                return
+            self._usage_refresh_next_at[name] = now + CODEX_USAGE_ACTIVE_REFRESH_INTERVAL_SECONDS
+        try:
+            from gevent import spawn_later
+
+            spawn_later(
+                CODEX_USAGE_ACTIVE_REFRESH_DELAY_SECONDS,
+                self.refresh_auth_file_quota_snapshot,
+                name,
+            )
+        except Exception as exc:
+            with self._candidate_prepare_lock:
+                self._usage_refresh_next_at.pop(name, None)
+            self._logger.warning("Codex active auth usage refresh not scheduled: file=%s error=%s", name, exc)
 
     def record_auth_file_failure(
         self,

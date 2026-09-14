@@ -15,7 +15,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext, Logger
 from src.repositories.log_repository import LogRepository
-from src.services.codex_oauth_service import CodexAuthCandidate, CodexOAuthService
+from src.services.codex_oauth_service import (
+    CODEX_USAGE_ACTIVE_REFRESH_DELAY_SECONDS,
+    CODEX_USAGE_ACTIVE_REFRESH_INTERVAL_SECONDS,
+    CodexAuthCandidate,
+    CodexOAuthService,
+)
 from src.services.codex_proxy_service import CodexProxyService
 from src.utils.database import create_connection_factory
 from src.utils.local_time import parse_local_datetime
@@ -198,6 +203,53 @@ class CodexAuthUsageTests(unittest.TestCase):
             self.assertIs(candidate, self.service.prepare_auth_candidate_for_use(candidate))
 
         refresh_mock.assert_called_once()
+
+    def test_success_schedules_rate_limited_active_usage_refresh(self) -> None:
+        candidate = CodexAuthCandidate(
+            name=self.auth_file.name,
+            path=self.auth_file,
+            access_token="access-demo",
+            account_id="account-demo",
+            email="demo@example.com",
+            plan_type="plus",
+            payload={},
+        )
+        baseline_quota = self._quota(
+            used_percent=40,
+            reset_at="2026-09-21T00:00:00Z",
+            refreshed_at="2026-09-16T00:00:00Z",
+        )
+        refreshed_quota = self._quota(
+            used_percent=46,
+            reset_at="2026-09-21T00:00:00Z",
+            refreshed_at="2026-09-18T00:00:00Z",
+        )
+        scheduled: list[tuple[float, Any, tuple[Any, ...]]] = []
+
+        def fake_spawn_later(delay: float, func: Any, *args: Any) -> object:
+            scheduled.append((delay, func, args))
+            return object()
+
+        with patch.object(self.service, "_get_auth_file_quota", return_value=baseline_quota):
+            self.assertIs(candidate, self.service.prepare_auth_candidate_for_use(candidate))
+        self._insert_usage("2026-09-17T00:00:00Z", tokens=12_000, cost=120)
+        with (
+            patch("src.services.codex_oauth_service.time.monotonic", side_effect=(100.0, 101.0, 401.0)),
+            patch("gevent.spawn_later", side_effect=fake_spawn_later),
+        ):
+            self.service.record_auth_file_success(self.auth_file.name)
+            self.service.record_auth_file_success(self.auth_file.name)
+            self.service.record_auth_file_success(self.auth_file.name)
+
+        self.assertEqual(2, len(scheduled))
+        self.assertEqual(CODEX_USAGE_ACTIVE_REFRESH_DELAY_SECONDS, scheduled[0][0])
+        self.assertEqual(self.service.refresh_auth_file_quota_snapshot, scheduled[0][1])
+        self.assertEqual((self.auth_file.name,), scheduled[0][2])
+        self.assertEqual(5 * 60, CODEX_USAGE_ACTIVE_REFRESH_INTERVAL_SECONDS)
+
+        self.service._store_auth_file_quota(self.auth_file.name, refreshed_quota)
+        usage = self.service.list_auth_files()["files"][0]["current_usage"]
+        self.assertAlmostEqual(2_000, usage["estimated_full_cost_usd"])
 
     def test_unknown_model_cost_remains_unavailable_with_auth_identity(self) -> None:
         meta = CodexProxyService._build_auth_usage_meta(

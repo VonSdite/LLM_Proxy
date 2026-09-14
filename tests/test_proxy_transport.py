@@ -2101,12 +2101,12 @@ process.stdout.write(JSON.stringify([
   sandbox.formatCodexUsageTokens(385000000),
   sandbox.formatCodexUsageCost(2082.38),
   sandbox.renderCodexAuthUsage({{
-    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_full_cost_usd: 2082.38 }},
+    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_cost_usd: 182.38, estimated_full_cost_usd: 2082.38 }},
     previous_usage: null,
   }}),
   sandbox.renderCodexAuthUsage({{
-    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_full_cost_usd: 2082.38 }},
-    previous_usage: {{ request_count: 3146, total_tokens: 372400000, estimated_full_cost_usd: 1900 }},
+    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_cost_usd: 182.38, estimated_full_cost_usd: 2082.38 }},
+    previous_usage: {{ request_count: 3146, total_tokens: 372400000, estimated_cost_usd: 170, estimated_full_cost_usd: 1900 }},
   }}),
 ]));
 """
@@ -2124,8 +2124,10 @@ process.stdout.write(JSON.stringify([
         self.assertIn("当前", current_rendered)
         self.assertNotIn("上期", current_rendered)
         self.assertIn("上期", previous_rendered)
-        self.assertEqual(2, previous_rendered.count("7天预估"))
-        self.assertNotIn("费用", previous_rendered)
+        self.assertEqual(2, previous_rendered.count("<span>累计 "))
+        self.assertEqual(2, previous_rendered.count("<span>7天预估 "))
+        self.assertIn("累计 $182.38", previous_rendered)
+        self.assertIn("累计 $170.00", previous_rendered)
 
     def test_settings_template_contains_oauth_network_settings(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"

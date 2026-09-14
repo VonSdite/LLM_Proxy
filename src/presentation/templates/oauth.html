@@ -2871,20 +2871,22 @@
         function renderCodexAuthUsage(file) {
             const current = file?.current_usage || {};
             const previous = file?.previous_usage;
-            const renderRow = (label, usage, costLabel, costField, className = '') => `
+            const renderRow = (label, usage, className = '') => `
                 <div class="oauth-auth-usage-row${className ? ` ${className}` : ''}">
                     <strong>${label}</strong>
                     <span>请求 ${formatCodexUsageCount(usage?.request_count)}</span>
                     <i aria-hidden="true">·</i>
                     <span>Token ${formatCodexUsageTokens(usage?.total_tokens)}</span>
                     <i aria-hidden="true">·</i>
-                    <span>${costLabel} ${formatCodexUsageCost(usage?.[costField])}</span>
+                    <span>累计 ${formatCodexUsageCost(usage?.estimated_cost_usd)}</span>
+                    <i aria-hidden="true">·</i>
+                    <span>7天预估 ${formatCodexUsageCost(usage?.estimated_full_cost_usd)}</span>
                 </div>
             `;
             return `
-                <div class="oauth-auth-usage" title="按各自窗口的本地新增用量折算 7 天满额度的 API 等价价值">
-                    ${renderRow('当前', current, '7天预估', 'estimated_full_cost_usd')}
-                    ${previous ? renderRow('上期', previous, '7天预估', 'estimated_full_cost_usd', 'is-previous') : ''}
+                <div class="oauth-auth-usage" title="累计为各自窗口内的 API 等价费用；7天预估按本地新增用量折算满额度价值">
+                    ${renderRow('当前', current)}
+                    ${previous ? renderRow('上期', previous, 'is-previous') : ''}
                 </div>
             `;
         }
