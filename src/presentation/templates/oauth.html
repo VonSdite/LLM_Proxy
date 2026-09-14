@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}OAuth 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260906-3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260914-1">{% endblock %}
 {% block body_class %}oauth-page{% endblock %}
 {% block header_title %}OAuth 管理{% endblock %}
 {% block header_subtitle %}管理 CLI/OAuth 类认证文件，并查看账号状态与配额。{% endblock %}
@@ -1930,6 +1930,7 @@
                                             onclick="loadCodexQuota('${encodedName}')"
                                             ${isQuotaActionDisabled ? 'disabled' : ''}
                                         >${renderRefreshIcon()}</button>
+                                        ${renderCodexAuthUsage(file)}
                                     </div>
                                     <div class="oauth-quota-refreshed-at"><span>上次刷新：</span>${escapeHtml(quotaRefreshedAt)}</div>
                                     <div class="oauth-quota-text">${renderCodexQuotaSummary(quota, isLoadingQuota)}</div>
@@ -2842,6 +2843,52 @@
             return formatTimestamp(refreshedAt);
         }
 
+        function formatCodexUsageCount(value) {
+            const count = Number(value);
+            return Number.isFinite(count) ? Math.max(Math.trunc(count), 0).toLocaleString('en-US') : '--';
+        }
+
+        function formatCodexUsageTokens(value) {
+            const tokens = Number(value);
+            if (!Number.isFinite(tokens) || tokens < 0) return '--';
+            if (tokens < 1_000) return Math.trunc(tokens).toLocaleString('en-US');
+            const units = [
+                { value: 1_000_000_000, suffix: 'B' },
+                { value: 1_000_000, suffix: 'M' },
+                { value: 1_000, suffix: 'K' },
+            ];
+            const unit = units.find(item => tokens >= item.value);
+            return unit ? `${(tokens / unit.value).toFixed(1)}${unit.suffix}` : '0';
+        }
+
+        function formatCodexUsageCost(value) {
+            if (value === null || value === undefined || String(value).trim() === '') return '--';
+            const cost = Number(value);
+            if (!Number.isFinite(cost) || cost < 0) return '--';
+            return `$${cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+
+        function renderCodexAuthUsage(file) {
+            const current = file?.current_usage || {};
+            const previous = file?.previous_usage;
+            const renderRow = (label, usage, costLabel, costField, className = '') => `
+                <div class="oauth-auth-usage-row${className ? ` ${className}` : ''}">
+                    <strong>${label}</strong>
+                    <span>请求 ${formatCodexUsageCount(usage?.request_count)}</span>
+                    <i aria-hidden="true">·</i>
+                    <span>Token ${formatCodexUsageTokens(usage?.total_tokens)}</span>
+                    <i aria-hidden="true">·</i>
+                    <span>${costLabel} ${formatCodexUsageCost(usage?.[costField])}</span>
+                </div>
+            `;
+            return `
+                <div class="oauth-auth-usage" title="按各自窗口的本地新增用量折算 7 天满额度的 API 等价价值">
+                    ${renderRow('当前', current, '7天预估', 'estimated_full_cost_usd')}
+                    ${previous ? renderRow('上期', previous, '7天预估', 'estimated_full_cost_usd', 'is-previous') : ''}
+                </div>
+            `;
+        }
+
         function renderCodexQuotaProgress(quota, isLoadingQuota = false) {
             if (isLoadingQuota || !quota || quota.error) {
                 return '';
@@ -3593,6 +3640,10 @@
                     quota: quota || file.quota || null,
                     quota_error: errorMessage || '',
                     quota_refreshed_at: refreshedAt || quota?.refreshed_at || quota?.quota_refreshed_at || file.quota_refreshed_at || '',
+                    current_usage: quota?.current_usage || file.current_usage,
+                    previous_usage: quota && Object.prototype.hasOwnProperty.call(quota, 'previous_usage')
+                        ? quota.previous_usage
+                        : file.previous_usage,
                 };
             });
         }

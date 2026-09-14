@@ -820,10 +820,57 @@
     align-items: center;
     gap: 8px;
     min-height: 32px;
+    flex-wrap: wrap;
 }
 
 .oauth-page .oauth-quota-label {
     color: var(--text-secondary);
+}
+
+.oauth-page .oauth-auth-usage {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+    margin-left: 2px;
+    font-variant-numeric: tabular-nums;
+}
+
+.oauth-page .oauth-auth-usage-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.oauth-page .oauth-auth-usage-row strong {
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.oauth-page .oauth-auth-usage-row i {
+    color: var(--line-strong);
+    font-style: normal;
+}
+
+.oauth-page .oauth-auth-usage-row.is-previous,
+.oauth-page .oauth-auth-usage-row.is-previous strong {
+    color: var(--text-secondary);
+}
+
+@media (max-width: 720px) {
+    .oauth-page .oauth-auth-usage {
+        flex-basis: 100%;
+        margin-left: 0;
+    }
+
+    .oauth-page .oauth-auth-usage-row {
+        flex-wrap: wrap;
+        white-space: normal;
+    }
 }
 
 .oauth-page .oauth-quota-text {

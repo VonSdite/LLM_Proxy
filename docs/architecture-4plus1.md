@@ -142,6 +142,7 @@ decoder
   - 导入用户迁移 JSON 时按 IP 创建或更新用户
 - `LogService`
   - 读取请求日志、统计汇总、用户用量汇总和筛选项
+  - 按 Codex 认证文件、账号和七天窗口边界聚合请求数、Token 与请求发生时保存的预计费用
   - 支持按筛选条件导出统计迁移 JSON，迁移包包含请求明细和日聚合统计
   - 导入请求明细时按明细业务字段识别重复行；导入日聚合统计时按日期、IP、请求模型、映射目标模型和响应模型累加数值
 - `ApiKeyController`
@@ -180,12 +181,15 @@ decoder
   - token 交换、token 刷新与配额查询遇到代理风险确认页时，会走统一自动确认重试流程
   - 按认证文件名限制同一时刻只有一个配额刷新请求会真实访问上游
   - 持久化认证文件人工禁用状态、额度禁用截止时间、最近一次配额快照、配额刷新错误、最近成功认证文件与 Codex 模型代理使用状态
+  - 持久化每个账号当前和上一 Codex 七天窗口的本地统计边界、首次接管用量基线与最近用量快照
+  - 当前和上一窗口分别按本地累计模型费用与额度增量折算七天满额度的 API 等价价值
   - 启动 Codex 配额后台刷新任务，每小时刷新一轮可查询认证文件，并在已知 Codex 额度窗口到达 `reset_at` 时刷新对应认证文件；认证文件之间间隔 10 秒
   - 额度快照显示窗口耗尽时，认证文件等待全部已耗尽 Codex 窗口到达 `reset_at`；截止时间跨进程重启生效，到点后自动恢复；缺少 `reset_at` 时保留已有截止时间或使用 60 秒兜底
   - 主动或后台配额刷新确认已启用账号的全部 Codex 额度窗口均有剩余额度时，通知模型映射服务立即清理 `codex_quota_exhausted` 目标冷却；Free 账号不恢复图片映射目标
   - 维护本地 Codex OAuth 文本模型目录、图片模型目录和默认图片模型
   - 内置常用 Codex 文本模型和图片模型 ID；添加内置模型只把缺失的内置 ID 加回本地目录，保留用户自行添加的模型 ID
   - 按本地模型目录、人工禁用状态、持久化额度禁用、认证失败状态和最近成功认证文件提供 Codex 请求候选账号
+  - 认证文件进入新的粘滞使用段时先查询一次配额；查询失败不阻断模型请求，确认额度耗尽时跳过该认证文件
 - `ClaudeOAuthService`
   - 生成 Claude OAuth PKCE 授权链接
   - 使用回调 URL 或手动粘贴的 `code#state` 换取 token 并写入本地认证文件
@@ -200,6 +204,7 @@ decoder
   - 按默认图片模型为普通 Codex 请求补齐 `image_generation` 工具配置
   - 将 OpenAI Images 兼容请求包装成 Codex `image_generation` 工具调用
   - 遇到账号配额耗尽时持久化额度禁用截止时间、刷新该认证文件配额快照并尝试下一个账号；全部账号额度禁用时向模型映射传播最早恢复时间
+  - 完成回调携带最终认证文件名和稳定账号 ID，并按实际响应模型优先计算请求发生时的 API 美元等价费用
   - 将每个认证文件最近一次数据面成功或失败结果写回 OAuth 状态
   - 按首个非空目标协议字节区分流提交前后的 transport 失败
   - 流提交后的 transport 失败会发送下游协议错误事件并记录当前认证文件失败
@@ -486,6 +491,7 @@ OAuth 模型是数据平面的例外路由：
   - 每次数据面请求读取当前 `api_keys.enabled`，开启时要求有效 API Key
   - 数据面转发始终从发往上游的 header 中移除下游 `Authorization`
   - 统计完成回调写日志时会带上 `api_key_id`，用于同步累加 key 级用量
+  - Codex 完成回调同时写入最终认证文件名、账号 ID 和请求发生时的预计费用
   - 流式 transport 失败和客户端取消在下游已提交后调用统计完成回调；usage 未知时记录 `unknown`，只采集到部分 token 时记录 `partial`
 - `ModelCatalogService`
   - 每次用户 / API Key 权限管理读取当前 Provider 配置模型和 Codex / Claude OAuth 可用模型
@@ -501,7 +507,8 @@ OAuth 模型是数据平面的例外路由：
 - `CodexOAuthService`
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额禁用状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet；后台任务按每小时周期和已知额度窗口重置时间调度
-  - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件人工禁用状态、额度禁用截止时间、配额、最近一次模型代理状态与最近成功认证文件
+  - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件人工禁用状态、额度禁用截止时间、配额、最近一次模型代理状态、最近成功认证文件和七天用量窗口基线
+  - 进程内记录当前粘滞认证文件；认证文件首次进入粘滞使用段时同步刷新一次额度，同一粘滞使用段不重复刷新
   - 在 `data/oauth/codex/models.json`、`data/oauth/codex/image_models.json` 和 `data/oauth/codex/image_settings.json` 持久化本地文本模型目录、图片模型目录和默认图片模型
 - `ClaudeOAuthService`
   - 每次 token / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
@@ -512,6 +519,8 @@ OAuth 模型是数据平面的例外路由：
   - 每次 Codex 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 普通 Codex 数据面请求按模型、账号计划、responses-lite 标记和默认图片模型决定是否携带 `image_generation` 工具
   - OpenAI Images 数据面请求固定使用 Codex OAuth 文本模型作为主请求模型，并用图片模型作为 `image_generation` 工具模型
+  - 使用内置日期化价格快照按响应模型优先估算单次 API 美元等价费用；未知模型或不完整 Token 用量不产生费用值
+  - 当前价格快照日期为 `2026-09-14`，数据源为 `Wei-Shaw/model-price-repo` 的 `model_prices_and_context_window.json`
 - `ClaudeProxyService`
   - 每次 Claude 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
 
@@ -785,6 +794,8 @@ OAuth Codex tab
   -> clear the old local quota state and refresh quota and reset-credit details after a successful consume response
   -> skip duplicate quota refresh when the same auth file is already refreshing
   -> persist quota snapshot or quota error
+  -> persist the first-use baseline and current / previous Codex 7-day window boundaries
+  -> aggregate request count, tokens, actual saved cost, and full-window estimated value from request_logs
   -> check reset_at on the open page every minute, hide expired windows, refresh due windows through the quota and reset-card APIs, and render the updated snapshot
   -> optional reset local quota snapshot and cooldown state
 ```
@@ -818,7 +829,12 @@ OAuth Claude tab
 - Codex 图片模型目录缓存在 `data/oauth/codex/image_models.json`，文件内容只保存模型 ID 字符串数组
 - Codex 图片模型设置缓存在 `data/oauth/codex/image_settings.json`，当前保存默认图片模型 ID
 - Claude 模型目录缓存在 `data/oauth/claude/models.json`，文件内容只保存模型 ID 字符串数组
-- 认证文件的人工禁用状态、最近配额、配额错误、数据面使用状态和最近成功认证文件保存在 `data/oauth/codex/.state/auth_files.json`
+- 认证文件的人工禁用状态、最近配额、配额错误、数据面使用状态、最近成功认证文件以及当前和上一七天窗口基线保存在 `data/oauth/codex/.state/auth_files.json`
+- `request_logs` 为 Codex 请求保存最终 `auth_file_name`、稳定 `auth_account_id` 和请求发生时的 `estimated_cost_usd`；历史价格变化不重算已保存费用
+- 当前窗口从认证文件首次接管时的上游 `used_percent` 建立基线；本地消耗占比为“当前已用百分比减首次基线”，等价于“首次剩余额度减当前剩余额度”
+- 当前和上一窗口的满额度预计价值分别使用“窗口内本地累计费用 × 100 ÷ 窗口内本地消耗占比”；消耗占比不大于零、Token 不完整或模型价格未知时不显示金额
+- 配额刷新确认 `reset_at` 后移或 `used_percent` 显著下降时切换窗口；新窗口优先使用 `reset_at - limit_window_seconds` 作为真实边界，上一窗口只保留一份
+- OAuth 卡片始终显示当前窗口的请求数、Token 和“7天预估”；上一窗口存在请求或 Token 时显示该窗口的“7天预估”，只有 Token 使用 `K/M/B` 缩写
 - Claude 认证文件的人工禁用状态、最近一次数据面使用状态和最近成功认证文件保存在 `data/oauth/claude/.state/auth_files.json`
 - 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
 - OAuth 页面为启用的认证文件显示禁用按钮，为禁用的认证文件显示启用按钮；禁用文件块使用灰态显示，并可通过顶部“禁用”筛选快速定位
@@ -844,11 +860,12 @@ OAuth Claude tab
 - Codex 数据面请求遇到 401 或认证类错误时，如果认证文件存在 refresh token，会先刷新认证文件并使用当前认证文件重试一次
 - Claude OAuth 数据面请求前如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
 - Codex / Claude 候选列表仍会按请求重建；人工禁用的认证文件不会进入候选列表；其余文件默认按认证文件修改时间倒序排列，最近一次真实请求成功的认证文件如果未被过滤，会被提升为第一候选
+- Codex 候选认证文件进入新的粘滞使用段时会在真实模型请求前查询一次 `wham/usage`；同一粘滞使用段不按请求重复查询，服务重启后的第一次使用会重新查询
 - 禁用状态作用于后续候选列表构建；已经选中或已经发往上游的请求继续完成
 - 同一个认证文件的配额刷新使用进程内非阻塞锁；重复刷新请求会直接返回跳过结果，不重复访问 Codex 上游
 - Codex 认证文件的 `reset-quota` 会清除本地配额快照、配额错误和持久化额度禁用；该操作不重置 OpenAI / ChatGPT 上游真实额度，也不清除认证失败状态
 - 如果认证文件 access token 已过期且缺少 refresh token，请求候选筛选不会直接跳过；系统会先用当前 access token 尝试请求一次，再按上游返回的认证、配额或其他错误决定后续状态
-- Codex 配额后台刷新任务随应用启动，第一轮在启动后 5 小时触发；每轮刷新所有未标记为认证失败、类型合法且包含 access token 的 Codex 认证文件，每个文件之间间隔 10 秒
+- Codex 配额后台刷新任务随应用启动，第一轮在启动后 1 小时触发；每轮刷新所有未标记为认证失败、类型合法且包含 access token 的 Codex 认证文件，每个文件之间间隔 10 秒
 - 配额刷新会同步持久化额度禁用状态：Codex 窗口耗尽时记录自动恢复截止时间，恢复可用时立即清除该状态
 - Codex 数据面请求成功后，如果本地配额快照中的 Codex 窗口重置时间已经到期，会最佳努力刷新该认证文件的前端配额快照；刷新失败不会阻断本次模型响应
 - Codex 数据面请求收到上游额度耗尽响应后，会立即真实刷新该认证文件的配额快照；刷新结果写入 OAuth 页面展示数据，刷新失败写入配额错误且不阻断候选账号切换

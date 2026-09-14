@@ -111,6 +111,9 @@ class LogRepository:
                     cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
                     cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
                     cache_usage_status TEXT NOT NULL DEFAULT 'unknown',
+                    auth_file_name TEXT,
+                    auth_account_id TEXT,
+                    estimated_cost_usd REAL,
                     start_time TEXT NOT NULL,
                     end_time TEXT,
                     created_at TEXT NOT NULL
@@ -140,9 +143,19 @@ class LogRepository:
                     cursor.execute(f"ALTER TABLE request_logs ADD COLUMN {column_name} INTEGER NOT NULL DEFAULT 0")
             if "cache_usage_status" not in request_log_columns:
                 cursor.execute("ALTER TABLE request_logs ADD COLUMN cache_usage_status TEXT NOT NULL DEFAULT 'unknown'")
+            if "auth_file_name" not in request_log_columns:
+                cursor.execute("ALTER TABLE request_logs ADD COLUMN auth_file_name TEXT")
+            if "auth_account_id" not in request_log_columns:
+                cursor.execute("ALTER TABLE request_logs ADD COLUMN auth_account_id TEXT")
+            if "estimated_cost_usd" not in request_log_columns:
+                cursor.execute("ALTER TABLE request_logs ADD COLUMN estimated_cost_usd REAL")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_start_time ON request_logs(start_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_address ON request_logs(ip_address)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_api_key ON request_logs(api_key_id)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_request_logs_auth_usage "
+                "ON request_logs(auth_file_name, auth_account_id, start_time)"
+            )
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS daily_request_stats (
@@ -287,6 +300,9 @@ class LogRepository:
         ip_address: str | None = None,
         api_key_id: int | None = None,
         target_model_id: str | None = None,
+        auth_file_name: str | None = None,
+        auth_account_id: str | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> int | None:
         """写入单条请求日志，并同步更新日聚合统计。"""
         start_time_value = ensure_local_datetime(start_time)
@@ -297,6 +313,9 @@ class LogRepository:
         safe_completion_tokens = int(completion_tokens or 0)
         safe_cache_read_tokens = max(int(cache_read_input_tokens or 0), 0)
         safe_cache_creation_tokens = max(int(cache_creation_input_tokens or 0), 0)
+        safe_estimated_cost_usd = None
+        if estimated_cost_usd is not None:
+            safe_estimated_cost_usd = max(float(estimated_cost_usd), 0.0)
         inferred_usage_status = (
             "known" if any((safe_total_tokens, safe_prompt_tokens, safe_completion_tokens)) else "unknown"
         )
@@ -316,8 +335,9 @@ class LogRepository:
                 (api_key_id, ip_address, request_model, target_model_id, response_model, total_tokens,
                  prompt_tokens, completion_tokens, usage_status,
                  cache_read_input_tokens, cache_creation_input_tokens, cache_usage_status,
+                 auth_file_name, auth_account_id, estimated_cost_usd,
                  start_time, end_time, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     api_key_id,
@@ -332,6 +352,9 @@ class LogRepository:
                     safe_cache_read_tokens,
                     safe_cache_creation_tokens,
                     safe_cache_usage_status,
+                    str(auth_file_name or "").strip() or None,
+                    str(auth_account_id or "").strip() or None,
+                    safe_estimated_cost_usd,
                     format_local_datetime(start_time_value),
                     format_local_datetime(end_time_value),
                     now_text,
@@ -412,6 +435,55 @@ class LogRepository:
                     ),
                 )
             return log_id
+
+    def get_auth_file_usage(
+        self,
+        auth_file_name: str,
+        auth_account_id: str,
+        start_time: str,
+        end_time: str | None = None,
+    ) -> dict[str, Any]:
+        """按认证文件、账号和时间窗口聚合请求量、Token 与已保存费用。"""
+        conditions = [
+            "auth_file_name = ?",
+            "auth_account_id = ?",
+            "start_time >= ?",
+        ]
+        params: list[Any] = [auth_file_name, auth_account_id, start_time]
+        if end_time:
+            conditions.append("start_time < ?")
+            params.append(end_time)
+        with self._get_connection() as conn:
+            row = conn.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS request_count,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                    SUM(CASE WHEN usage_status = 'known' THEN 1 ELSE 0 END) AS known_usage_count,
+                    COUNT(estimated_cost_usd) AS known_cost_count,
+                    COALESCE(SUM(estimated_cost_usd), 0.0) AS estimated_cost_usd
+                FROM request_logs
+                WHERE {" AND ".join(conditions)}
+                """,
+                params,
+            ).fetchone()
+        request_count = int(row["request_count"] or 0)
+        known_usage_count = int(row["known_usage_count"] or 0)
+        known_cost_count = int(row["known_cost_count"] or 0)
+        usage_status = "known"
+        if request_count and known_usage_count == 0:
+            usage_status = "unknown"
+        elif known_usage_count < request_count:
+            usage_status = "partial"
+        return {
+            "request_count": request_count,
+            "total_tokens": int(row["total_tokens"] or 0),
+            "usage_status": usage_status,
+            "estimated_cost_usd": (
+                float(row["estimated_cost_usd"] or 0.0) if known_cost_count == request_count else None
+            ),
+            "cost_status": "known" if known_cost_count == request_count else "unknown",
+        }
 
     @staticmethod
     def _normalize_filter_values(values: str | Sequence[str] | None) -> list[str]:
@@ -756,6 +828,7 @@ class LogRepository:
                        l.request_model, l.target_model_id, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
                        l.cache_read_input_tokens, l.cache_creation_input_tokens, l.cache_usage_status,
+                       l.auth_file_name, l.auth_account_id, l.estimated_cost_usd,
                        CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
                            as cache_known_prompt_tokens,
                        CASE
@@ -818,6 +891,7 @@ class LogRepository:
                        l.request_model, l.target_model_id, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
                        l.cache_read_input_tokens, l.cache_creation_input_tokens, l.cache_usage_status,
+                       l.auth_file_name, l.auth_account_id, l.estimated_cost_usd,
                        CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
                            as cache_known_prompt_tokens,
                        CASE
@@ -873,6 +947,9 @@ class LogRepository:
                     l.cache_read_input_tokens,
                     l.cache_creation_input_tokens,
                     l.cache_usage_status,
+                    l.auth_file_name,
+                    l.auth_account_id,
+                    l.estimated_cost_usd,
                     l.start_time,
                     l.end_time,
                     l.created_at
@@ -1036,9 +1113,10 @@ class LogRepository:
                         api_key_id, ip_address, request_model, target_model_id, response_model, total_tokens,
                         prompt_tokens, completion_tokens, usage_status,
                         cache_read_input_tokens, cache_creation_input_tokens, cache_usage_status,
+                        auth_file_name, auth_account_id, estimated_cost_usd,
                         start_time, end_time, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         row["api_key_id"],
@@ -1053,6 +1131,9 @@ class LogRepository:
                         row["cache_read_input_tokens"],
                         row["cache_creation_input_tokens"],
                         row["cache_usage_status"],
+                        row["auth_file_name"],
+                        row["auth_account_id"],
+                        row["estimated_cost_usd"],
                         row["start_time"],
                         row["end_time"],
                         row["created_at"],
@@ -1207,6 +1288,15 @@ class LogRepository:
             "cache_read_input_tokens": cache_read_tokens,
             "cache_creation_input_tokens": cache_creation_tokens,
             "cache_usage_status": cls._normalize_cache_usage_status(row.get("cache_usage_status")),
+            "auth_file_name": cls._normalize_stat_text(
+                row.get("auth_file_name"), field_name="auth_file_name", required=False
+            ),
+            "auth_account_id": cls._normalize_stat_text(
+                row.get("auth_account_id"), field_name="auth_account_id", required=False
+            ),
+            "estimated_cost_usd": cls._normalize_optional_stat_float(
+                row.get("estimated_cost_usd"), field_name="estimated_cost_usd"
+            ),
             "start_time": cls._normalize_stat_text(row.get("start_time"), field_name="start_time", required=True),
             "end_time": cls._normalize_stat_text(row.get("end_time"), field_name="end_time", required=False),
             "created_at": cls._normalize_stat_text(row.get("created_at"), field_name="created_at", required=False)
@@ -1218,6 +1308,18 @@ class LogRepository:
         if value is None or str(value).strip() == "":
             return None
         return cls._normalize_stat_int(value, field_name=field_name)
+
+    @staticmethod
+    def _normalize_optional_stat_float(value: Any, *, field_name: str) -> float | None:
+        if value is None or str(value).strip() == "":
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"request log {field_name} must be a number") from exc
+        if parsed < 0:
+            raise ValueError(f"request log {field_name} must be greater than or equal to 0")
+        return parsed
 
     @classmethod
     def _normalize_optional_positive_int(cls, value: Any, *, field_name: str) -> int | None:
@@ -1301,6 +1403,9 @@ class LogRepository:
               AND cache_read_input_tokens IS ?
               AND cache_creation_input_tokens IS ?
               AND cache_usage_status IS ?
+              AND auth_file_name IS ?
+              AND auth_account_id IS ?
+              AND estimated_cost_usd IS ?
               AND start_time IS ?
               AND end_time IS ?
             LIMIT 1
@@ -1317,6 +1422,9 @@ class LogRepository:
                 row["cache_read_input_tokens"],
                 row["cache_creation_input_tokens"],
                 row["cache_usage_status"],
+                row["auth_file_name"],
+                row["auth_account_id"],
+                row["estimated_cost_usd"],
                 row["start_time"],
                 row["end_time"],
             ),

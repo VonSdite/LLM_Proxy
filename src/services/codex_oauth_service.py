@@ -16,12 +16,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
 from ..application.app_context import AppContext
+from ..utils.local_time import format_local_datetime
 from ..utils.net import (
     PROXY_MODE_CUSTOM,
     apply_requests_proxy_settings,
@@ -36,6 +37,9 @@ from .oauth_auth_file_archive import (
     expand_auth_file_import_sources,
     move_auth_file_to_deleted,
 )
+
+if TYPE_CHECKING:
+    from ..repositories import LogRepository
 
 CODEX_AUTH_URL = "https://auth.openai.com/oauth/authorize"
 CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -53,6 +57,8 @@ CODEX_USER_AGENT = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (c
 CODEX_QUOTA_USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
 CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS = 60 * 60
 CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS = 10
+CODEX_USAGE_WINDOW_SECONDS = 7 * 24 * 60 * 60
+CODEX_USAGE_RESET_DROP_PERCENT = 1.0
 OAUTH_SESSION_TTL_SECONDS = 10 * 60
 DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = (
     "gpt-6-astra",
@@ -106,7 +112,7 @@ class CodexOAuthAuthenticationError(ValueError):
 class CodexOAuthService:
     """处理 Codex OAuth 授权、认证文件生成与配额查询。"""
 
-    def __init__(self, ctx: AppContext):
+    def __init__(self, ctx: AppContext, log_repository: LogRepository | None = None):
         self._logger = ctx.logger
         self._config_manager = ctx.config_manager
         self._auth_dir = ctx.root_path / "data" / "oauth" / "codex"
@@ -121,6 +127,9 @@ class CodexOAuthService:
         self._quota_refresh_lock_guard = threading.RLock()
         self._quota_auto_refresh_worker: Any | None = None
         self._quota_recovered_callback: Callable[[str], Any] | None = None
+        self._log_repository = log_repository
+        self._active_auth_file_name: str | None = None
+        self._candidate_prepare_lock = threading.RLock()
 
     def set_quota_recovered_callback(self, callback: Callable[[str], Any] | None) -> None:
         """设置额度确认恢复后的通知回调，参数为恢复账号的套餐类型。"""
@@ -575,6 +584,42 @@ class CodexOAuthService:
             candidates.append(candidate)
         return self._prioritize_last_success_candidate(candidates, state)
 
+    def prepare_auth_candidate_for_use(self, candidate: CodexAuthCandidate) -> CodexAuthCandidate | None:
+        """认证文件进入当前粘滞使用段时刷新一次配额并建立统计基线。"""
+        if self._log_repository is None:
+            return candidate
+        with self._candidate_prepare_lock:
+            if self._active_auth_file_name == candidate.name:
+                return None if self._is_quota_cooling_down(candidate.name) else candidate
+
+            quota: dict[str, Any] | None = None
+            accounting_start_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            try:
+                quota = self._get_auth_file_quota(
+                    candidate.name,
+                    record_auth_failure=False,
+                    wait_for_refresh=True,
+                )
+            except Exception as exc:
+                self._logger.warning(
+                    "Codex quota refresh before first auth file use failed: file=%s error=%s",
+                    candidate.name,
+                    exc,
+                )
+            if quota is not None:
+                self._ensure_auth_file_usage_tracking(
+                    candidate.name,
+                    self._get_candidate_usage_account_id(candidate),
+                    quota,
+                    accounting_start_at=accounting_start_at,
+                )
+            if self._is_quota_cooling_down(candidate.name) or (
+                quota is not None and self._has_exhausted_codex_quota(quota)
+            ):
+                return None
+            self._active_auth_file_name = candidate.name
+            return candidate
+
     def mark_auth_file_quota_exhausted(
         self,
         name: str,
@@ -585,6 +630,8 @@ class CodexOAuthService:
         normalized_name = Path(str(name or "").strip()).name
         if not normalized_name:
             return
+        if self._active_auth_file_name == normalized_name:
+            self._active_auth_file_name = None
         cooldown_seconds = retry_after_seconds if retry_after_seconds is not None else 60.0
         cooldown_until = time.time() + max(float(cooldown_seconds), 1.0)
         self._quota_cooldowns[normalized_name] = cooldown_until
@@ -864,11 +911,17 @@ class CodexOAuthService:
             self._logger.warning("Codex quota snapshot refresh failed: file=%s error=%s", normalized_name, exc)
             return None
 
-    def _get_auth_file_quota(self, name: str, *, record_auth_failure: bool) -> dict[str, Any]:
+    def _get_auth_file_quota(
+        self,
+        name: str,
+        *,
+        record_auth_failure: bool,
+        wait_for_refresh: bool = False,
+    ) -> dict[str, Any]:
         """查询认证文件配额，并按调用场景决定是否写入认证失败状态。"""
         auth_file = self._resolve_auth_file(name)
         quota_lock = self._get_quota_refresh_lock(auth_file.name)
-        if not quota_lock.acquire(blocking=False):
+        if not quota_lock.acquire(blocking=wait_for_refresh):
             return self._build_skipped_quota_refresh_result(auth_file.name)
         try:
             payload = self._read_auth_file(auth_file)
@@ -907,7 +960,7 @@ class CodexOAuthService:
             self._clear_auth_file_auth_failure(auth_file.name)
             if quota_recovered:
                 self._notify_quota_recovered(auth_file.name, result)
-            return result
+            return self._attach_auth_file_usage(result, auth_file.name)
         except Exception as exc:
             self._store_auth_file_quota_error(auth_file.name, str(exc))
             raise
@@ -1259,6 +1312,246 @@ class CodexOAuthService:
                 "quota_refreshed_at": refreshed_at,
             },
         )
+        self._update_auth_file_usage_tracking(name, quota)
+
+    def _ensure_auth_file_usage_tracking(
+        self,
+        name: str,
+        account_id: str,
+        quota: dict[str, Any],
+        *,
+        accounting_start_at: datetime | None = None,
+    ) -> None:
+        """在认证文件第一次真实参与调度时建立七天窗口统计基线。"""
+        window = self._find_codex_usage_window(quota)
+        if window is None:
+            return
+        state = self._load_auth_file_state()
+        files = state.setdefault("files", {})
+        if not isinstance(files, dict):
+            files = {}
+            state["files"] = files
+        file_state = files.get(name)
+        if not isinstance(file_state, dict):
+            file_state = {}
+            files[name] = file_state
+        tracking = file_state.get("usage_tracking")
+        if isinstance(tracking, dict) and tracking.get("account_id") == account_id:
+            return
+
+        observed_at = self._parse_epoch_or_datetime(quota.get("refreshed_at")) or datetime.now(timezone.utc)
+        baseline_start_at = accounting_start_at or observed_at - timedelta(seconds=1)
+        file_state["usage_tracking"] = {
+            "account_id": account_id,
+            "current": self._build_usage_window_state(
+                window,
+                baseline_used_percent=self._parse_float(window.get("used_percent")),
+                accounting_start_at=baseline_start_at,
+                observed_at=observed_at,
+            ),
+            "previous": None,
+        }
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Codex auth usage baseline write failed: file=%s error=%s", name, exc)
+
+    def _update_auth_file_usage_tracking(self, name: str, quota: dict[str, Any]) -> None:
+        """使用最新七天额度快照更新统计窗口，并识别提前或按期重置。"""
+        window = self._find_codex_usage_window(quota)
+        if window is None:
+            return
+        state = self._load_auth_file_state()
+        files = state.get("files")
+        file_state = files.get(name) if isinstance(files, dict) else None
+        if not isinstance(file_state, dict):
+            return
+        tracking = file_state.get("usage_tracking")
+        if not isinstance(tracking, dict):
+            return
+        current = tracking.get("current")
+        if not isinstance(current, dict):
+            return
+
+        observed_at = self._parse_epoch_or_datetime(quota.get("refreshed_at")) or datetime.now(timezone.utc)
+        latest_used_percent = self._parse_float(current.get("latest_used_percent"))
+        current_used_percent = self._parse_float(window.get("used_percent"))
+        previous_reset_at = self._parse_epoch_or_datetime(current.get("reset_at"))
+        current_reset_at = self._parse_epoch_or_datetime(window.get("reset_at"))
+        reset_at_moved = bool(
+            previous_reset_at is not None
+            and current_reset_at is not None
+            and current_reset_at > previous_reset_at + timedelta(seconds=60)
+        )
+        usage_dropped = bool(
+            latest_used_percent is not None
+            and current_used_percent is not None
+            and latest_used_percent - current_used_percent >= CODEX_USAGE_RESET_DROP_PERCENT
+        )
+        if reset_at_moved or usage_dropped:
+            new_window_start = self._resolve_usage_window_start(window, observed_at)
+            previous = dict(current)
+            previous["end_at"] = self._format_datetime(new_window_start)
+            tracking["previous"] = previous
+            tracking["current"] = self._build_usage_window_state(
+                window,
+                baseline_used_percent=0.0,
+                accounting_start_at=new_window_start,
+                observed_at=observed_at,
+            )
+        else:
+            current["latest_used_percent"] = current_used_percent
+            current["observed_at"] = self._format_datetime(observed_at)
+            if current_reset_at is not None:
+                current["reset_at"] = self._format_datetime(current_reset_at)
+            window_seconds = self._parse_float(window.get("limit_window_seconds"))
+            if window_seconds is not None:
+                current["limit_window_seconds"] = int(round(window_seconds))
+        try:
+            self._write_auth_file_state(state)
+        except Exception as exc:
+            self._logger.warning("Codex auth usage window write failed: file=%s error=%s", name, exc)
+
+    def _attach_auth_file_usage(
+        self,
+        payload: dict[str, Any],
+        name: str,
+        state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """把当前与上一七天窗口的本地请求聚合附加到返回对象。"""
+        result = dict(payload)
+        result["current_usage"] = {
+            "request_count": 0,
+            "total_tokens": 0,
+            "usage_status": "known",
+            "estimated_cost_usd": 0.0,
+            "estimated_full_cost_usd": None,
+            "consumed_percent": None,
+        }
+        result["previous_usage"] = None
+        if self._log_repository is None:
+            return result
+        auth_file_state = state if state is not None else self._load_auth_file_state()
+        files = auth_file_state.get("files")
+        file_state = files.get(name) if isinstance(files, dict) else None
+        tracking = file_state.get("usage_tracking") if isinstance(file_state, dict) else None
+        if not isinstance(tracking, dict):
+            return result
+        account_id = str(tracking.get("account_id") or "").strip()
+        current = tracking.get("current")
+        if not account_id or not isinstance(current, dict):
+            return result
+        try:
+            current_usage = self._query_auth_file_usage(name, account_id, current)
+            result["current_usage"] = current_usage
+
+            previous = tracking.get("previous")
+            if isinstance(previous, dict):
+                previous_usage = self._query_auth_file_usage(name, account_id, previous)
+                if previous_usage["request_count"] > 0 or previous_usage["total_tokens"] > 0:
+                    result["previous_usage"] = previous_usage
+        except Exception as exc:
+            self._logger.warning("Codex auth usage aggregation failed: file=%s error=%s", name, exc)
+        return result
+
+    def _query_auth_file_usage(
+        self,
+        name: str,
+        account_id: str,
+        window_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        start_time = self._format_usage_query_time(window_state.get("accounting_start_at"))
+        if not start_time:
+            usage = {
+                "request_count": 0,
+                "total_tokens": 0,
+                "usage_status": "unknown",
+                "estimated_cost_usd": None,
+                "cost_status": "unknown",
+            }
+        else:
+            end_time = self._format_usage_query_time(window_state.get("end_at"))
+            usage = self._log_repository.get_auth_file_usage(name, account_id, start_time, end_time)
+
+        baseline_used = self._parse_float(window_state.get("baseline_used_percent"))
+        latest_used = self._parse_float(window_state.get("latest_used_percent"))
+        consumed_percent = None
+        if baseline_used is not None and latest_used is not None:
+            consumed_percent = max(latest_used - baseline_used, 0.0)
+        usage["consumed_percent"] = consumed_percent
+        accumulated_cost = usage.get("estimated_cost_usd")
+        usage["estimated_full_cost_usd"] = (
+            float(accumulated_cost) * 100.0 / consumed_percent
+            if accumulated_cost is not None and consumed_percent is not None and consumed_percent > 0
+            else None
+        )
+        return usage
+
+    @classmethod
+    def _find_codex_usage_window(cls, quota: dict[str, Any]) -> dict[str, Any] | None:
+        windows = quota.get("windows")
+        if not isinstance(windows, list):
+            return None
+        codex_windows = [
+            window
+            for window in windows
+            if isinstance(window, dict) and str(window.get("label") or "").strip().lower().startswith("codex")
+        ]
+        for window in codex_windows:
+            window_seconds = cls._parse_float(window.get("limit_window_seconds"))
+            if window_seconds is not None and abs(window_seconds - CODEX_USAGE_WINDOW_SECONDS) < 1:
+                return window
+        for window in codex_windows:
+            if "7 天" in str(window.get("label") or ""):
+                return window
+        return None
+
+    @classmethod
+    def _build_usage_window_state(
+        cls,
+        window: dict[str, Any],
+        *,
+        baseline_used_percent: float | None,
+        accounting_start_at: datetime,
+        observed_at: datetime,
+    ) -> dict[str, Any]:
+        reset_at = cls._parse_epoch_or_datetime(window.get("reset_at"))
+        window_seconds = cls._parse_float(window.get("limit_window_seconds"))
+        window_start_at = cls._resolve_usage_window_start(window, observed_at)
+        return {
+            "window_start_at": cls._format_datetime(window_start_at),
+            "accounting_start_at": cls._format_datetime(accounting_start_at),
+            "reset_at": cls._format_datetime(reset_at) if reset_at is not None else "",
+            "limit_window_seconds": int(round(window_seconds)) if window_seconds is not None else None,
+            "baseline_used_percent": baseline_used_percent,
+            "latest_used_percent": cls._parse_float(window.get("used_percent")),
+            "observed_at": cls._format_datetime(observed_at),
+        }
+
+    @classmethod
+    def _resolve_usage_window_start(cls, window: dict[str, Any], fallback: datetime) -> datetime:
+        reset_at = cls._parse_epoch_or_datetime(window.get("reset_at"))
+        window_seconds = cls._parse_float(window.get("limit_window_seconds"))
+        if reset_at is not None and window_seconds is not None and window_seconds > 0:
+            return reset_at - timedelta(seconds=window_seconds)
+        return fallback
+
+    @classmethod
+    def _format_usage_query_time(cls, value: Any) -> str:
+        parsed = cls._parse_epoch_or_datetime(value)
+        if parsed is None:
+            return ""
+        return format_local_datetime(parsed.astimezone().replace(tzinfo=None))
+
+    @staticmethod
+    def _get_candidate_usage_account_id(candidate: CodexAuthCandidate) -> str:
+        account_id = str(candidate.account_id or "").strip()
+        if account_id:
+            return account_id
+        email = str(candidate.email or "").strip().lower()
+        if email:
+            return f"email:{email}"
+        return f"file:{candidate.name}"
 
     def _store_auth_file_reset_cards(
         self,
@@ -1399,7 +1692,7 @@ class CodexOAuthService:
             self._logger.warning("Codex auth file state delete failed: file=%s error=%s", name, exc)
 
     def _reset_auth_file_runtime_state(self, name: str) -> None:
-        """清理认证运行状态，同时保留人工禁用设置。"""
+        """清理认证运行状态，同时保留人工禁用设置和用量窗口。"""
         state = self._load_auth_file_state()
         files = state.get("files")
         if not isinstance(files, dict):
@@ -1407,10 +1700,16 @@ class CodexOAuthService:
         current = files.get(name)
         if not isinstance(current, dict):
             return
-        if self._is_auth_file_enabled(current):
-            files.pop(name, None)
+        preserved: dict[str, Any] = {}
+        if not self._is_auth_file_enabled(current):
+            preserved["disabled"] = True
+        usage_tracking = current.get("usage_tracking")
+        if isinstance(usage_tracking, dict):
+            preserved["usage_tracking"] = usage_tracking
+        if preserved:
+            files[name] = preserved
         else:
-            files[name] = {"disabled": True}
+            files.pop(name, None)
         try:
             self._write_auth_file_state(state)
         except Exception as exc:
@@ -1955,7 +2254,7 @@ class CodexOAuthService:
         if enabled:
             self._sync_quota_cooldown_from_state(path.name, file_state)
         availability = self._build_auth_file_availability(path.name, payload, file_state, quota)
-        return {
+        entry = {
             "name": path.name,
             "path": str(path),
             "type": payload.get("type") or "codex",
@@ -1986,6 +2285,7 @@ class CodexOAuthService:
             "size": path.stat().st_size,
             "modified": int(path.stat().st_mtime),
         }
+        return self._attach_auth_file_usage(entry, path.name, auth_file_state)
 
     def _build_auth_file_availability(
         self,
@@ -2352,9 +2652,16 @@ class CodexOAuthService:
                 used_percent_value = window.get("usedPercent")
             used_percent = self._parse_float(used_percent_value)
             remaining_percent = None if used_percent is None else max(0.0, min(100.0, 100.0 - used_percent))
+            window_seconds = self._parse_float(
+                window.get("limit_window_seconds")
+                if window.get("limit_window_seconds") is not None
+                else window.get("limitWindowSeconds")
+            )
             windows.append(
                 {
                     "label": f"{label} {self._format_quota_window_duration(window, fallback_label)}",
+                    "window_key": key,
+                    "limit_window_seconds": window_seconds,
                     "used_percent": used_percent,
                     "remaining_percent": remaining_percent,
                     "reset_label": self._format_reset_label(window),
