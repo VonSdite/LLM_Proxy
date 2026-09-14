@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
 from src.services.codex_oauth_service import (
+    CODEX_AUTH_FILE_PLAN_SORT_ORDER,
     CODEX_CLIENT_ID,
     CODEX_MODEL_REFERENCE_URLS,
     CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS,
@@ -599,6 +600,53 @@ class CodexOAuthServiceTests(unittest.TestCase):
         self.assertEqual(["codex-b.json"], [item["name"] for item in after_delete["files"]])
         self.assertFalse(original_exists)
         self.assertTrue(archived_exists)
+
+    def test_list_auth_files_sorts_by_plan_priority_then_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            auth_files = (
+                ("codex-z-pro.json", "pro"),
+                ("codex-a-pro.json", "PRO"),
+                ("codex-z-prolite.json", "prolite"),
+                ("codex-a-prolite.json", "Pro Lite"),
+                ("codex-b-plus.json", "plus"),
+                ("codex-a-free.json", "free"),
+                ("codex-b-team.json", "team"),
+                ("codex-a-unknown.json", "unknown"),
+            )
+            for name, plan_type in auth_files:
+                (auth_dir / name).write_text(
+                    json.dumps(
+                        {
+                            "type": "codex",
+                            "email": f"{name}@example.com",
+                            "access_token": "access-demo",
+                            "plan_type": plan_type,
+                            "expired": "2999-01-01T00:00:00Z",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            service = self._build_service(root)
+
+            result = service.list_auth_files()
+
+        self.assertEqual({"pro": 0, "prolite": 1, "plus": 2, "free": 3}, CODEX_AUTH_FILE_PLAN_SORT_ORDER)
+        self.assertEqual(
+            [
+                "codex-a-pro.json",
+                "codex-z-pro.json",
+                "codex-a-prolite.json",
+                "codex-z-prolite.json",
+                "codex-b-plus.json",
+                "codex-a-free.json",
+                "codex-a-unknown.json",
+                "codex-b-team.json",
+            ],
+            [item["name"] for item in result["files"]],
+        )
 
     def test_export_auth_files_builds_zip_with_selected_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
