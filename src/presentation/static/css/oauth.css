@@ -829,17 +829,17 @@
 
 .oauth-page .oauth-auth-usage {
     display: grid;
-    gap: 1px;
+    grid-template-columns: repeat(8, max-content);
+    align-items: baseline;
+    column-gap: 6px;
+    row-gap: 1px;
     min-width: 0;
     margin-left: 2px;
     font-variant-numeric: tabular-nums;
 }
 
 .oauth-page .oauth-auth-usage-row {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    min-width: 0;
+    display: contents;
     color: var(--text-primary);
     font-size: 13px;
     white-space: nowrap;
@@ -860,18 +860,6 @@
 .oauth-page .oauth-auth-usage-row.is-previous,
 .oauth-page .oauth-auth-usage-row.is-previous strong {
     color: var(--text-secondary);
-}
-
-@media (max-width: 720px) {
-    .oauth-page .oauth-auth-usage {
-        flex-basis: 100%;
-        margin-left: 0;
-    }
-
-    .oauth-page .oauth-auth-usage-row {
-        flex-wrap: wrap;
-        white-space: normal;
-    }
 }
 
 .oauth-page .oauth-quota-text {
