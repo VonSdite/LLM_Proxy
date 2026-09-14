@@ -841,12 +841,13 @@
     gap: 6px;
     min-width: 0;
     color: var(--text-primary);
+    font-size: 13px;
     white-space: nowrap;
 }
 
 .oauth-page .oauth-auth-usage-row strong {
     color: var(--primary);
-    font-size: 11px;
+    font-size: inherit;
     font-weight: 800;
     letter-spacing: 0.04em;
 }
@@ -900,7 +901,7 @@
 
 .oauth-page .oauth-reset-card-actions {
     display: grid;
-    grid-template-columns: auto minmax(240px, 420px) auto;
+    grid-template-columns: auto minmax(240px, 320px) auto;
     align-items: center;
     justify-content: start;
     gap: 8px;
@@ -1075,7 +1076,7 @@
 .oauth-page .oauth-reset-card-placeholder {
     display: flex;
     align-items: center;
-    width: min(420px, 100%);
+    width: min(320px, 100%);
     height: 32px;
     padding: 0 10px;
     border: 1px solid var(--line);
