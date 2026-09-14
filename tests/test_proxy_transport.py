@@ -1764,8 +1764,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn('id="codexAuthFileToolbar"', html)
         self.assertIn('id="codexSelectAllAuthFiles"', html)
         self.assertIn("resetCardSelectionByFile", html)
+        self.assertIn("function ensureCodexResetCardSelection", html)
         self.assertIn("function refreshCodexResetCardsByName", html)
         self.assertIn("function consumeCodexSelectedResetCard", html)
+        self.assertIn("function closeCodexResetCardPickersOnOutsideClick", html)
+        self.assertIn("document.addEventListener('click', closeCodexResetCardPickersOnOutsideClick);", html)
         self.assertNotIn("function loadCodexResetCards", html)
         self.assertIn('id="codexImportAuthFilesInput"', html)
         self.assertIn('id="codexImportAuthFilesBtn"', html)
@@ -2039,6 +2042,60 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertNotIn(".oauth-page .oauth-auth-file-error", css)
         self.assertIn(".oauth-page .oauth-pagination", css)
         self.assertIn(':root[data-theme="dark"] .oauth-page .btn-secondary', css)
+
+    def test_oauth_template_defaults_reset_card_selection_and_closes_picker_on_outside_click(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "oauth.html"
+        html = template_path.read_text(encoding="utf-8")
+        selection_start = html.index("function ensureCodexResetCardSelection")
+        selection_end = html.index("function renderCodexResetCardControls", selection_start)
+        outside_click_start = html.index("function closeCodexResetCardPickersOnOutsideClick")
+        outside_click_end = html.index("function createCodexResetCardRequestId", outside_click_start)
+        script = html[selection_start:selection_end] + html[outside_click_start:outside_click_end]
+        node_script = f"""
+const vm = require("vm");
+const pickerA = {{ open: true, contains: target => target === "inside-a" }};
+const pickerB = {{ open: true, contains: target => target === "inside-b" }};
+const sandbox = {{
+  codexAuthState: {{ resetCardSelectionByFile: {{}} }},
+  document: {{ querySelectorAll: selector => selector === ".oauth-reset-card-picker[open]" ? [pickerA, pickerB] : [] }},
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+const cards = [{{ id: "first" }}, {{ id: "second" }}];
+const defaultSelection = sandbox.ensureCodexResetCardSelection("demo.json", cards);
+sandbox.codexAuthState.resetCardSelectionByFile["demo.json"] = "second";
+const retainedSelection = sandbox.ensureCodexResetCardSelection("demo.json", cards);
+sandbox.codexAuthState.resetCardSelectionByFile["demo.json"] = "missing";
+const replacedSelection = sandbox.ensureCodexResetCardSelection("demo.json", cards);
+const emptySelection = sandbox.ensureCodexResetCardSelection("empty.json", []);
+sandbox.closeCodexResetCardPickersOnOutsideClick({{ target: "inside-a" }});
+const insideState = [pickerA.open, pickerB.open];
+pickerA.open = true;
+pickerB.open = true;
+sandbox.closeCodexResetCardPickersOnOutsideClick({{ target: "outside" }});
+process.stdout.write(JSON.stringify({{
+  defaultSelection,
+  retainedSelection,
+  replacedSelection,
+  emptySelection,
+  insideState,
+  outsideState: [pickerA.open, pickerB.open],
+}}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        result = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual("first", result["defaultSelection"])
+        self.assertEqual("second", result["retainedSelection"])
+        self.assertEqual("first", result["replacedSelection"])
+        self.assertEqual("", result["emptySelection"])
+        self.assertEqual([True, False], result["insideState"])
+        self.assertEqual([False, False], result["outsideState"])
 
     def test_oauth_template_formats_codex_quota_without_coercing_null_to_zero(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "oauth.html"
