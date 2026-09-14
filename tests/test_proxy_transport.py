@@ -1815,10 +1815,26 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("function renderCodexAuthUsage", html)
         self.assertIn("function formatCodexUsageTokens", html)
         self.assertIn("${renderCodexAuthUsage(file)}", html)
+        auth_usage_css = css[
+            css.index(".oauth-page .oauth-auth-usage {") : css.index(".oauth-page .oauth-quota-text {")
+        ]
         self.assertIn(".oauth-page .oauth-auth-usage", css)
         self.assertIn(".oauth-page .oauth-auth-usage-row.is-previous", css)
-        self.assertRegex(css, r"\.oauth-page \.oauth-auth-usage-row \{[^}]*font-size: 13px;")
-        self.assertRegex(css, r"\.oauth-page \.oauth-auth-usage-row strong \{[^}]*font-size: inherit;")
+        self.assertRegex(
+            css,
+            r"\.oauth-page \.oauth-auth-usage \{[^}]*grid-template-columns: repeat\(8, max-content\);",
+        )
+        self.assertRegex(
+            css,
+            r"\.oauth-page \.oauth-auth-usage-row \{[^}]*display: contents;[^}]*font-size: 13px;",
+        )
+        self.assertRegex(
+            css,
+            r"\.oauth-page \.oauth-auth-usage-row strong \{[^}]*font-size: inherit;",
+        )
+        self.assertNotIn("@media", auth_usage_css)
+        self.assertNotIn("#e3b341", css)
+        self.assertNotIn("#9a6700", css)
         self.assertIn("grid-template-columns: auto minmax(240px, 280px) auto;", css)
         self.assertEqual(2, css.count("width: min(280px, 100%);"))
         self.assertRegex(
