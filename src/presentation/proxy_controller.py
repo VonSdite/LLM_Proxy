@@ -136,6 +136,9 @@ class LogServiceLike(Protocol):
         ip_address: str | None = None,
         api_key_id: int | None = None,
         target_model_id: str | None = None,
+        auth_file_name: str | None = None,
+        auth_account_id: str | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> int | None: ...
 
 
@@ -463,6 +466,9 @@ class ProxyController:
                 "cache_read_input_tokens",
                 "cache_creation_input_tokens",
                 "cache_usage_status",
+                "auth_file_name",
+                "auth_account_id",
+                "estimated_cost_usd",
             }
             if not any(field in error_text for field in compatibility_fields):
                 raise
@@ -671,6 +677,9 @@ class ProxyController:
                     "cache_read_input_tokens": response_meta.get("cache_read_input_tokens", 0),
                     "cache_creation_input_tokens": response_meta.get("cache_creation_input_tokens", 0),
                     "cache_usage_status": response_meta.get("cache_usage_status", "unknown"),
+                    "auth_file_name": response_meta.get("auth_file_name"),
+                    "auth_account_id": response_meta.get("auth_account_id"),
+                    "estimated_cost_usd": response_meta.get("estimated_cost_usd"),
                     "start_time": start_time,
                     "end_time": now_local_datetime(),
                     "ip_address": client_ip,
@@ -929,6 +938,9 @@ class ProxyController:
                     "cache_read_input_tokens": response_meta.get("cache_read_input_tokens", 0),
                     "cache_creation_input_tokens": response_meta.get("cache_creation_input_tokens", 0),
                     "cache_usage_status": response_meta.get("cache_usage_status", "unknown"),
+                    "auth_file_name": response_meta.get("auth_file_name"),
+                    "auth_account_id": response_meta.get("auth_account_id"),
+                    "estimated_cost_usd": response_meta.get("estimated_cost_usd"),
                     "start_time": start_time,
                     "end_time": now_local_datetime(),
                     "ip_address": client_ip,

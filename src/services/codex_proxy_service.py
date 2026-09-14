@@ -37,6 +37,7 @@ from .codex_oauth_service import (
     CodexAuthCandidate,
     CodexOAuthService,
 )
+from .openai_model_pricing import estimate_openai_request_cost_usd
 from .proxy_response_builder import ProxyResponseBuilder
 from .proxy_service import ProxyErrorInfo
 
@@ -149,6 +150,9 @@ class CodexProxyService:
 
         last_failure: ProxyErrorInfo | None = None
         for candidate in candidates:
+            candidate = self._codex_oauth_service.prepare_auth_candidate_for_use(candidate)
+            if candidate is None:
+                continue
             response, status_code, failure = self._proxy_with_candidate(
                 candidate=candidate,
                 model_name=model_name,
@@ -172,6 +176,16 @@ class CodexProxyService:
             return response, status_code, failure
 
         if last_failure is None:
+            retry_after = self._codex_oauth_service.get_quota_retry_after_seconds()
+            if retry_after is not None:
+                last_failure = ProxyErrorInfo(
+                    message=f"Codex OAuth account quota exhausted for model: {model_name}",
+                    status_code=429,
+                    error_type="upstream_error",
+                    error_code="codex_quota_exhausted",
+                    response_headers=self._build_retry_after_headers(retry_after),
+                )
+                return None, last_failure.status_code, last_failure
             last_failure = ProxyErrorInfo(
                 message="All Codex OAuth accounts are unavailable",
                 status_code=503,
@@ -304,6 +318,9 @@ class CodexProxyService:
         image_request_data["model"] = image_model
         last_failure: ProxyErrorInfo | None = None
         for candidate in candidates:
+            candidate = self._codex_oauth_service.prepare_auth_candidate_for_use(candidate)
+            if candidate is None:
+                continue
             response, status_code, failure = self._proxy_image_with_candidate(
                 candidate=candidate,
                 request_data=image_request_data,
@@ -326,6 +343,16 @@ class CodexProxyService:
             return response, status_code, failure
 
         if last_failure is None:
+            retry_after = self._codex_oauth_service.get_quota_retry_after_seconds()
+            if retry_after is not None:
+                last_failure = ProxyErrorInfo(
+                    message="Codex OAuth account quota exhausted for image generation",
+                    status_code=429,
+                    error_type="upstream_error",
+                    error_code="codex_quota_exhausted",
+                    response_headers=self._build_retry_after_headers(retry_after),
+                )
+                return None, last_failure.status_code, last_failure
             last_failure = ProxyErrorInfo(
                 message="All Codex OAuth accounts are unavailable for image generation",
                 status_code=503,
@@ -561,6 +588,7 @@ class CodexProxyService:
                     route_name=route_name,
                     client_ip=client_ip,
                     auth_file_name=candidate.name,
+                    auth_account_id=self._get_candidate_usage_account_id(candidate),
                     on_stream_failure=on_stream_failure,
                 )
             except (requests.exceptions.RequestException, OSError) as exc:
@@ -588,6 +616,7 @@ class CodexProxyService:
                 route_name=route_name,
                 client_ip=client_ip,
                 auth_file_name=candidate.name,
+                auth_account_id=self._get_candidate_usage_account_id(candidate),
             )
         except (requests.exceptions.RequestException, OSError) as exc:
             return self._build_candidate_transport_failure(
@@ -792,6 +821,7 @@ class CodexProxyService:
                     response_format=self._normalize_image_response_format(request_data.get("response_format")),
                     on_complete=on_complete,
                     auth_file_name=candidate.name,
+                    auth_account_id=self._get_candidate_usage_account_id(candidate),
                 ),
                 upstream_response.status_code,
                 None,
@@ -803,6 +833,7 @@ class CodexProxyService:
             response_format=self._normalize_image_response_format(request_data.get("response_format")),
             on_complete=on_complete,
             auth_file_name=candidate.name,
+            auth_account_id=self._get_candidate_usage_account_id(candidate),
         )
 
     def _build_candidate_transport_failure(
@@ -1360,6 +1391,7 @@ class CodexProxyService:
         route_name: str | None,
         client_ip: str | None,
         auth_file_name: str,
+        auth_account_id: str,
         on_stream_failure: Callable[[dict[str, Any]], None] | None,
     ) -> Response:
         del route_name, client_ip
@@ -1557,7 +1589,14 @@ class CodexProxyService:
                 )
                 if on_complete is not None and should_record_completion:
                     try:
-                        on_complete(public_usage_meta(meta))
+                        on_complete(
+                            self._build_auth_usage_meta(
+                                public_usage_meta(meta),
+                                model_name=model_name,
+                                auth_file_name=auth_file_name,
+                                auth_account_id=auth_account_id,
+                            )
+                        )
                     except Exception as exc:
                         self._logger.error("Error in Codex on_complete callback: %s", exc)
 
@@ -1582,6 +1621,7 @@ class CodexProxyService:
         route_name: str | None,
         client_ip: str | None,
         auth_file_name: str,
+        auth_account_id: str,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         del route_name, client_ip
         try:
@@ -1638,7 +1678,14 @@ class CodexProxyService:
                 )
             if on_complete is not None:
                 try:
-                    on_complete(public_usage_meta(meta))
+                    on_complete(
+                        self._build_auth_usage_meta(
+                            public_usage_meta(meta),
+                            model_name=model_name,
+                            auth_file_name=auth_file_name,
+                            auth_account_id=auth_account_id,
+                        )
+                    )
                 except Exception as exc:
                     self._logger.error("Error in Codex on_complete callback: %s", exc)
 
@@ -1663,6 +1710,7 @@ class CodexProxyService:
         response_format: str,
         on_complete: Callable[[dict[str, Any]], None] | None,
         auth_file_name: str,
+        auth_account_id: str,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         try:
             completed_payload, failed_payload, image_items = self._collect_image_response_events(response)
@@ -1707,7 +1755,14 @@ class CodexProxyService:
             payload = self._build_images_api_response(results, created_at, usage, response_format)
             if on_complete is not None:
                 try:
-                    on_complete(self._build_image_response_meta(image_model, usage))
+                    on_complete(
+                        self._build_auth_usage_meta(
+                            self._build_image_response_meta(image_model, usage),
+                            model_name=image_model,
+                            auth_file_name=auth_file_name,
+                            auth_account_id=auth_account_id,
+                        )
+                    )
                 except Exception as exc:
                     self._logger.error("Error in Codex image on_complete callback: %s", exc)
             self._codex_oauth_service.record_auth_file_success(auth_file_name)
@@ -1732,6 +1787,7 @@ class CodexProxyService:
         response_format: str,
         on_complete: Callable[[dict[str, Any]], None] | None,
         auth_file_name: str,
+        auth_account_id: str,
     ) -> Response:
         downstream_headers = self._filter_response_headers(response.headers)
         downstream_headers["Content-Type"] = "text/event-stream; charset=utf-8"
@@ -1808,7 +1864,14 @@ class CodexProxyService:
                     self._codex_oauth_service.record_auth_file_success(auth_file_name)
                     if on_complete is not None:
                         try:
-                            on_complete(self._build_image_response_meta(image_model, usage))
+                            on_complete(
+                                self._build_auth_usage_meta(
+                                    self._build_image_response_meta(image_model, usage),
+                                    model_name=image_model,
+                                    auth_file_name=auth_file_name,
+                                    auth_account_id=auth_account_id,
+                                )
+                            )
                         except Exception as exc:
                             self._logger.error("Error in Codex image on_complete callback: %s", exc)
 
@@ -2010,6 +2073,35 @@ class CodexProxyService:
             "completion_tokens": output_tokens,
             "usage_status": usage_status,
         }
+
+    @staticmethod
+    def _build_auth_usage_meta(
+        usage_meta: dict[str, Any],
+        *,
+        model_name: str,
+        auth_file_name: str,
+        auth_account_id: str,
+    ) -> dict[str, Any]:
+        """附加最终认证文件身份和请求发生时的模型费用估算。"""
+        result = dict(usage_meta)
+        pricing_model = str(result.get("response_model") or model_name).strip()
+        result["auth_file_name"] = auth_file_name
+        result["auth_account_id"] = auth_account_id
+        estimated_cost = estimate_openai_request_cost_usd(pricing_model, result)
+        if estimated_cost is None and pricing_model != model_name:
+            estimated_cost = estimate_openai_request_cost_usd(model_name, result)
+        result["estimated_cost_usd"] = estimated_cost
+        return result
+
+    @staticmethod
+    def _get_candidate_usage_account_id(candidate: CodexAuthCandidate) -> str:
+        account_id = str(candidate.account_id or "").strip()
+        if account_id:
+            return account_id
+        email = str(candidate.email or "").strip().lower()
+        if email:
+            return f"email:{email}"
+        return f"file:{candidate.name}"
 
     @staticmethod
     def _extract_stream_failure_message(payload: dict[str, Any] | None) -> str:

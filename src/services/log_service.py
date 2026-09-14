@@ -45,6 +45,9 @@ class LogService:
         ip_address: str | None = None,
         api_key_id: int | None = None,
         target_model_id: str | None = None,
+        auth_file_name: str | None = None,
+        auth_account_id: str | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> int | None:
         """记录一次请求日志。"""
         try:
@@ -63,6 +66,9 @@ class LogService:
                 end_time=end_time,
                 ip_address=ip_address,
                 api_key_id=api_key_id,
+                auth_file_name=auth_file_name,
+                auth_account_id=auth_account_id,
+                estimated_cost_usd=estimated_cost_usd,
             )
             self._logger.info(
                 "Request log saved: id=%s model=%s target_model_id=%s response_model=%s total_tokens=%s "

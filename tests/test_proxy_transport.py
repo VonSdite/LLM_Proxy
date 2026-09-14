@@ -1809,6 +1809,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("已选择 ${selectedSize} 个", html)
         self.assertNotIn("已选择 ${selectedSize} 个 / 共", html)
         self.assertIn("function renderCodexQuotaProgress", html)
+        self.assertIn("function renderCodexAuthUsage", html)
+        self.assertIn("function formatCodexUsageTokens", html)
+        self.assertIn("${renderCodexAuthUsage(file)}", html)
+        self.assertIn(".oauth-page .oauth-auth-usage", css)
+        self.assertIn(".oauth-page .oauth-auth-usage-row.is-previous", css)
         self.assertIn("function renderTrashIcon", html)
         self.assertIn("function renderDisableIcon", html)
         self.assertIn("function renderEnableIcon", html)
@@ -2075,6 +2080,48 @@ process.stdout.write(JSON.stringify([
             ["Codex expired", "Codex active", "Codex unknown"],
             [window["label"] for window in visible_windows],
         )
+
+    def test_oauth_template_formats_compact_codex_auth_usage(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "templates" / "oauth.html"
+        html = template_path.read_text(encoding="utf-8")
+        script_start = html.index("function formatCodexUsageCount")
+        script_end = html.index("function renderCodexQuotaProgress", script_start)
+        script = html[script_start:script_end]
+        node_script = f"""
+const vm = require("vm");
+const sandbox = {{}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(script)}, sandbox);
+process.stdout.write(JSON.stringify([
+  sandbox.formatCodexUsageCount(3200),
+  sandbox.formatCodexUsageTokens(385000000),
+  sandbox.formatCodexUsageCost(2082.38),
+  sandbox.renderCodexAuthUsage({{
+    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_full_cost_usd: 2082.38 }},
+    previous_usage: null,
+  }}),
+  sandbox.renderCodexAuthUsage({{
+    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_full_cost_usd: 2082.38 }},
+    previous_usage: {{ request_count: 3146, total_tokens: 372400000, estimated_full_cost_usd: 1900 }},
+  }}),
+]));
+"""
+        completed = subprocess.run(
+            ["node", "-e", node_script],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+        )
+        request_count, tokens, cost, current_rendered, previous_rendered = json.loads(completed.stdout.decode("utf-8"))
+
+        self.assertEqual("3,200", request_count)
+        self.assertEqual("385.0M", tokens)
+        self.assertEqual("$2,082.38", cost)
+        self.assertIn("当前", current_rendered)
+        self.assertNotIn("上期", current_rendered)
+        self.assertIn("上期", previous_rendered)
+        self.assertEqual(2, previous_rendered.count("7天预估"))
+        self.assertNotIn("费用", previous_rendered)
 
     def test_settings_template_contains_oauth_network_settings(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"
