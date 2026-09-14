@@ -2947,6 +2947,15 @@
             return expiresAt ? formatTimestamp(expiresAt) : '不过期';
         }
 
+        function ensureCodexResetCardSelection(name, cards) {
+            const currentId = codexAuthState.resetCardSelectionByFile[name] || '';
+            const selectedId = cards.some(card => String(card.id || '') === currentId)
+                ? currentId
+                : String(cards[0]?.id || '');
+            codexAuthState.resetCardSelectionByFile[name] = selectedId;
+            return selectedId;
+        }
+
         function renderCodexResetCardControls(file, encodedName, isDisabled) {
             const name = file?.name || '';
             const isLoading = codexAuthState.resetCardLoadingByFile[name] === true;
@@ -2954,7 +2963,7 @@
             const errorMessage = codexAuthState.resetCardErrorByFile[name] || '';
             if (!isLoaded && !isLoading && !errorMessage) return '';
             const cards = getCodexAuthFileResetCards(file);
-            const selectedId = codexAuthState.resetCardSelectionByFile[name] || '';
+            const selectedId = ensureCodexResetCardSelection(name, cards);
             const selectedCard = cards.find(card => String(card.id || '') === selectedId) || null;
             const options = cards.map(card => {
                 const id = String(card.id || '');
@@ -3444,6 +3453,14 @@
             renderCodexAuthFiles();
         }
 
+        function closeCodexResetCardPickersOnOutsideClick(event) {
+            document.querySelectorAll('.oauth-reset-card-picker[open]').forEach(picker => {
+                if (!picker.contains(event.target)) {
+                    picker.open = false;
+                }
+            });
+        }
+
         function createCodexResetCardRequestId() {
             if (window.crypto && typeof window.crypto.randomUUID === 'function') {
                 return window.crypto.randomUUID();
@@ -3652,6 +3669,7 @@
 
         function initOAuthPage() {
             initThemeToggle();
+            document.addEventListener('click', closeCodexResetCardPickersOnOutsideClick);
             switchOAuthTab('codex');
             syncCodexAuthControls();
             syncClaudeAuthControls();
