@@ -475,14 +475,17 @@ class LogRepository:
             usage_status = "unknown"
         elif known_usage_count < request_count:
             usage_status = "partial"
+        cost_status = "known"
+        if known_cost_count == 0 and request_count > 0:
+            cost_status = "unknown"
+        elif known_cost_count < request_count:
+            cost_status = "partial"
         return {
             "request_count": request_count,
             "total_tokens": int(row["total_tokens"] or 0),
             "usage_status": usage_status,
-            "estimated_cost_usd": (
-                float(row["estimated_cost_usd"] or 0.0) if known_cost_count == request_count else None
-            ),
-            "cost_status": "known" if known_cost_count == request_count else "unknown",
+            "estimated_cost_usd": (float(row["estimated_cost_usd"] or 0.0) if cost_status != "unknown" else None),
+            "cost_status": cost_status,
         }
 
     @staticmethod

@@ -508,7 +508,7 @@ OAuth 模型是数据平面的例外路由：
   - 每次 token / quota / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
   - 维护 OAuth PKCE 临时会话、Codex 账号配额禁用状态、认证文件配额刷新锁与 Codex 配额后台刷新 greenlet；后台任务按每小时周期和已知额度窗口重置时间调度
   - 在 `data/oauth/codex/.state/auth_files.json` 持久化认证文件人工禁用状态、额度禁用截止时间、配额、最近一次模型代理状态、最近成功认证文件和七天用量窗口基线
-  - 进程内记录当前粘滞认证文件和主动用量刷新限频；认证文件首次进入粘滞使用段时同步刷新额度起点，成功请求后延迟 10 秒刷新终点，持续使用时最多每 5 分钟刷新一次
+  - 进程内记录当前粘滞认证文件和主动用量刷新限频；认证文件首次进入粘滞使用段时同步刷新额度起点，成功请求后延迟 60 秒刷新终点，持续使用时最多每 10 分钟刷新一次
   - 在 `data/oauth/codex/models.json`、`data/oauth/codex/image_models.json` 和 `data/oauth/codex/image_settings.json` 持久化本地文本模型目录、图片模型目录和默认图片模型
 - `ClaudeOAuthService`
   - 每次 token / models 请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
@@ -868,7 +868,7 @@ OAuth Claude tab
 - Codex 配额后台刷新任务随应用启动，第一轮在启动后 1 小时触发；每轮刷新所有未标记为认证失败、类型合法且包含 access token 的 Codex 认证文件，每个文件之间间隔 10 秒
 - 配额刷新会同步持久化额度禁用状态：Codex 窗口耗尽时记录自动恢复截止时间，恢复可用时立即清除该状态
 - Codex 数据面请求成功后，如果本地配额快照中的 Codex 窗口重置时间已经到期，会最佳努力刷新该认证文件的前端配额快照；刷新失败不会阻断本次模型响应
-- Codex 数据面请求成功后会为当前粘滞认证文件调度一次延迟 10 秒的配额刷新，同一认证文件的主动用量刷新间隔不小于 5 分钟；刷新在后台执行，不增加模型响应等待时间
+- Codex 数据面请求成功后会为当前粘滞认证文件调度一次延迟 60 秒的配额刷新，同一认证文件的主动用量刷新间隔不小于 10 分钟；刷新在后台执行，不增加模型响应等待时间
 - Codex 数据面请求收到上游额度耗尽响应后，会立即真实刷新该认证文件的配额快照；刷新结果写入 OAuth 页面展示数据，刷新失败写入配额错误且不阻断候选账号切换
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
@@ -1204,7 +1204,7 @@ sequenceDiagram
             CodexProxy->>CodexOAuth: record_auth_file_success()
             CodexOAuth->>CodexOAuth: 记录最近成功认证文件
             opt 主动用量刷新限频已到
-                CodexOAuth->>CodexOAuth: 调度 10 秒后的后台刷新
+                CodexOAuth->>CodexOAuth: 调度 60 秒后的后台刷新
                 CodexOAuth->>ChatGPT: GET /backend-api/wham/usage
                 CodexOAuth->>CodexOAuth: 更新七天用量终点
             end
@@ -1258,7 +1258,7 @@ sequenceDiagram
     end
     CodexProxy->>CodexOAuth: record_auth_file_success()
     opt 主动用量刷新限频已到
-        CodexOAuth->>CodexOAuth: 调度 10 秒后的后台刷新
+        CodexOAuth->>CodexOAuth: 调度 60 秒后的后台刷新
         CodexOAuth->>ChatGPT: GET /backend-api/wham/usage
         CodexOAuth->>CodexOAuth: 更新七天用量终点
     end
