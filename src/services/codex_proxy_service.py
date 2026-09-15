@@ -1595,6 +1595,7 @@ class CodexProxyService:
                                 model_name=model_name,
                                 auth_file_name=auth_file_name,
                                 auth_account_id=auth_account_id,
+                                service_tier=translated_request.get("service_tier"),
                             )
                         )
                     except Exception as exc:
@@ -1684,6 +1685,7 @@ class CodexProxyService:
                             model_name=model_name,
                             auth_file_name=auth_file_name,
                             auth_account_id=auth_account_id,
+                            service_tier=translated_request.get("service_tier"),
                         )
                     )
                 except Exception as exc:
@@ -2066,13 +2068,18 @@ class CodexProxyService:
         has_input = "input_tokens" in usage or "prompt_tokens" in usage
         has_output = "output_tokens" in usage or "completion_tokens" in usage
         usage_status = "known" if has_input and has_output else "partial" if has_input or has_output else "unknown"
-        return {
+        result = {
             "response_model": image_model,
             "total_tokens": total_tokens,
             "prompt_tokens": input_tokens,
             "completion_tokens": output_tokens,
             "usage_status": usage_status,
         }
+        for field in ("input_tokens_details", "output_tokens_details"):
+            details = usage.get(field)
+            if isinstance(details, dict):
+                result[field] = dict(details)
+        return result
 
     @staticmethod
     def _build_auth_usage_meta(
@@ -2081,12 +2088,15 @@ class CodexProxyService:
         model_name: str,
         auth_file_name: str,
         auth_account_id: str,
+        service_tier: Any = None,
     ) -> dict[str, Any]:
         """附加最终认证文件身份和请求发生时的模型费用估算。"""
         result = dict(usage_meta)
         pricing_model = str(result.get("response_model") or model_name).strip()
         result["auth_file_name"] = auth_file_name
         result["auth_account_id"] = auth_account_id
+        if service_tier is not None:
+            result["service_tier"] = service_tier
         estimated_cost = estimate_openai_request_cost_usd(pricing_model, result)
         if estimated_cost is None and pricing_model != model_name:
             estimated_cost = estimate_openai_request_cost_usd(model_name, result)
