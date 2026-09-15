@@ -218,6 +218,47 @@ class CodexProxyServiceTests(unittest.TestCase):
         CodexProxyService._apply_codex_body_defaults(priority_body, "gpt-5.4")
         self.assertEqual("priority", priority_body["service_tier"])
 
+    def test_fast_service_tier_uses_fast_price_on_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            captured_body: dict[str, Any] = {}
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, headers, stream, timeout, kwargs
+                captured_body.update(dict(json or {}))
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":100000,"output_tokens":10000,"total_tokens":110000}}}\n\n'
+                    ],
+                )
+
+            complete_meta: dict[str, Any] = {}
+            with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {
+                        "model": "gpt-5.4",
+                        "input": "hi",
+                        "stream": False,
+                        "service_tier": "fast",
+                    },
+                    {"Authorization": "Bearer downstream-token"},
+                    on_complete=complete_meta.update,
+                    resolved_target_format="openai_responses",
+                )
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(response)
+        self.assertEqual("fast", captured_body["service_tier"])
+        self.assertEqual("fast", complete_meta["service_tier"])
+        self.assertAlmostEqual(0.8, complete_meta["estimated_cost_usd"])
+
     def test_codex_body_defaults_normalize_builtin_tool_aliases(self) -> None:
         body: dict[str, Any] = {
             "tools": [
@@ -746,7 +787,9 @@ class CodexProxyServiceTests(unittest.TestCase):
                     "tool_usage": {
                         "image_gen": {
                             "input_tokens": 4,
+                            "input_tokens_details": {"image_tokens": 0, "text_tokens": 4},
                             "output_tokens": 6,
+                            "output_tokens_details": {"image_tokens": 6, "text_tokens": 0},
                             "total_tokens": 10,
                         }
                     },
@@ -778,7 +821,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                 response, status_code, failure = proxy_service.proxy_image_request(
                     {
                         "prompt": "draw",
-                        "model": "gpt-image-2",
+                        "model": "gpt-image-1.5",
                         "response_format": "url",
                         "size": "1024x1024",
                     },
@@ -794,15 +837,18 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual({"type": "image_generation"}, captured_body["tool_choice"])
         self.assertEqual("image_generation", captured_body["tools"][0]["type"])
         self.assertEqual("generate", captured_body["tools"][0]["action"])
-        self.assertEqual("gpt-image-2", captured_body["tools"][0]["model"])
+        self.assertEqual("gpt-image-1.5", captured_body["tools"][0]["model"])
         self.assertEqual("1024x1024", captured_body["tools"][0]["size"])
         self.assertEqual("draw", captured_body["input"][0]["content"][0]["text"])
         self.assertEqual(1770000000, payload["created"])
         self.assertEqual("data:image/png;base64,aGVsbG8=", payload["data"][0]["url"])
         self.assertEqual("draw a tidy diagram", payload["data"][0]["revised_prompt"])
         self.assertEqual(10, payload["usage"]["total_tokens"])
-        self.assertEqual("gpt-image-2", complete_meta["response_model"])
+        self.assertEqual("gpt-image-1.5", complete_meta["response_model"])
         self.assertEqual(10, complete_meta["total_tokens"])
+        self.assertAlmostEqual(0.000212, complete_meta["estimated_cost_usd"])
+        self.assertEqual({"image_tokens": 0, "text_tokens": 4}, complete_meta["input_tokens_details"])
+        self.assertEqual({"image_tokens": 6, "text_tokens": 0}, complete_meta["output_tokens_details"])
 
     def test_image_quota_exhaustion_propagates_retry_after(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
