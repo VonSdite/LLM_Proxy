@@ -180,6 +180,45 @@ class CodexAuthUsageTests(unittest.TestCase):
         self.assertEqual(30 * 24 * 60 * 60, usage["limit_window_seconds"])
         self.assertAlmostEqual(1_000, usage["estimated_full_cost_usd"])
 
+    def test_unknown_usage_request_keeps_known_cost_subtotal_and_forecast(self) -> None:
+        baseline_quota = self._quota(
+            used_percent=40,
+            reset_at="2026-09-21T00:00:00Z",
+            refreshed_at="2026-09-16T00:00:00Z",
+        )
+        self.service._store_auth_file_quota(self.auth_file.name, baseline_quota)
+        self.service._ensure_auth_file_usage_tracking(self.auth_file.name, "account-demo", baseline_quota)
+        self._insert_usage("2026-09-17T00:00:00Z", tokens=12_000, cost=120)
+        unknown_started_at = self._local_datetime("2026-09-17T00:01:00Z")
+        self.repository.insert(
+            request_model="public-model",
+            target_model_id="gpt-5.6-terra",
+            response_model="gpt-5.6-terra",
+            total_tokens=0,
+            usage_status="unknown",
+            start_time=unknown_started_at,
+            end_time=unknown_started_at,
+            auth_file_name=self.auth_file.name,
+            auth_account_id="account-demo",
+            estimated_cost_usd=None,
+        )
+
+        self.service._store_auth_file_quota(
+            self.auth_file.name,
+            self._quota(
+                used_percent=46,
+                reset_at="2026-09-21T00:00:00Z",
+                refreshed_at="2026-09-18T00:00:00Z",
+            ),
+        )
+        usage = self.service.list_auth_files()["files"][0]["current_usage"]
+
+        self.assertEqual(2, usage["request_count"])
+        self.assertEqual("partial", usage["usage_status"])
+        self.assertEqual("partial", usage["cost_status"])
+        self.assertEqual(120, usage["estimated_cost_usd"])
+        self.assertAlmostEqual(2_000, usage["estimated_full_cost_usd"])
+
     def test_new_reset_window_keeps_previous_usage_and_regroups_on_real_boundary(self) -> None:
         baseline_quota = self._quota(
             used_percent=40,
@@ -270,7 +309,7 @@ class CodexAuthUsageTests(unittest.TestCase):
             self.assertIs(candidate, self.service.prepare_auth_candidate_for_use(candidate))
         self._insert_usage("2026-09-17T00:00:00Z", tokens=12_000, cost=120)
         with (
-            patch("src.services.codex_oauth_service.time.monotonic", side_effect=(100.0, 101.0, 401.0)),
+            patch("src.services.codex_oauth_service.time.monotonic", side_effect=(100.0, 101.0, 701.0)),
             patch("gevent.spawn_later", side_effect=fake_spawn_later),
         ):
             self.service.record_auth_file_success(self.auth_file.name)
@@ -278,10 +317,11 @@ class CodexAuthUsageTests(unittest.TestCase):
             self.service.record_auth_file_success(self.auth_file.name)
 
         self.assertEqual(2, len(scheduled))
+        self.assertEqual(60, CODEX_USAGE_ACTIVE_REFRESH_DELAY_SECONDS)
         self.assertEqual(CODEX_USAGE_ACTIVE_REFRESH_DELAY_SECONDS, scheduled[0][0])
         self.assertEqual(self.service.refresh_auth_file_quota_snapshot, scheduled[0][1])
         self.assertEqual((self.auth_file.name,), scheduled[0][2])
-        self.assertEqual(5 * 60, CODEX_USAGE_ACTIVE_REFRESH_INTERVAL_SECONDS)
+        self.assertEqual(10 * 60, CODEX_USAGE_ACTIVE_REFRESH_INTERVAL_SECONDS)
 
         self.service._store_auth_file_quota(self.auth_file.name, refreshed_quota)
         usage = self.service.list_auth_files()["files"][0]["current_usage"]
