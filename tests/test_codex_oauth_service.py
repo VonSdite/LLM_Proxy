@@ -1135,6 +1135,32 @@ class CodexOAuthServiceTests(unittest.TestCase):
 
         self.assertEqual(["Codex 7 天", "Codex 5 小时"], [window["label"] for window in windows])
 
+    def test_codex_usage_tracking_prefers_longest_quota_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = self._build_service(Path(tmp_dir))
+
+            windows = service._build_quota_windows(
+                {
+                    "rate_limit": {
+                        "primary_window": {
+                            "used_percent": 5,
+                            "limit_window_seconds": 18000,
+                            "reset_after_seconds": 3600,
+                        },
+                        "secondary_window": {
+                            "used_percent": 12,
+                            "limit_window_seconds": 30 * 24 * 60 * 60,
+                            "reset_after_seconds": 10 * 24 * 60 * 60,
+                        },
+                    }
+                }
+            )
+            window = service._find_codex_usage_window({"windows": windows})
+
+        self.assertIsNotNone(window)
+        assert window is not None
+        self.assertEqual("Codex 30 天", window["label"])
+
     def test_build_quota_windows_preserves_zero_used_percent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = self._build_service(Path(tmp_dir))

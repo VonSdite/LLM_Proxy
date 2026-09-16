@@ -57,7 +57,6 @@ CODEX_USER_AGENT = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (c
 CODEX_QUOTA_USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
 CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS = 60 * 60
 CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS = 10
-CODEX_USAGE_WINDOW_SECONDS = 7 * 24 * 60 * 60
 CODEX_USAGE_RESET_DROP_PERCENT = 1.0
 CODEX_USAGE_ACTIVE_REFRESH_INTERVAL_SECONDS = 5 * 60
 CODEX_USAGE_ACTIVE_REFRESH_DELAY_SECONDS = 10
@@ -741,7 +740,7 @@ class CodexOAuthService:
         self._schedule_active_auth_file_usage_refresh(normalized_name)
 
     def _schedule_active_auth_file_usage_refresh(self, name: str) -> None:
-        """活跃认证文件产生成功请求后，限频刷新七天用量终点。"""
+        """活跃认证文件产生成功请求后，限频刷新配额用量终点。"""
         if self._log_repository is None:
             return
         with self._candidate_prepare_lock:
@@ -1375,7 +1374,7 @@ class CodexOAuthService:
         *,
         accounting_start_at: datetime | None = None,
     ) -> None:
-        """在认证文件第一次真实参与调度时建立七天窗口统计基线。"""
+        """在认证文件第一次真实参与调度时建立最长配额窗口统计基线。"""
         window = self._find_codex_usage_window(quota)
         if window is None:
             return
@@ -1410,7 +1409,7 @@ class CodexOAuthService:
             self._logger.warning("Codex auth usage baseline write failed: file=%s error=%s", name, exc)
 
     def _update_auth_file_usage_tracking(self, name: str, quota: dict[str, Any]) -> None:
-        """使用最新七天额度快照更新统计窗口，并识别提前或按期重置。"""
+        """使用最新额度快照更新统计窗口，并识别提前或按期重置。"""
         window = self._find_codex_usage_window(quota)
         if window is None:
             return
@@ -1471,7 +1470,7 @@ class CodexOAuthService:
         name: str,
         state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """把当前与上一七天窗口的本地请求聚合附加到返回对象。"""
+        """把当前与上一配额窗口的本地请求聚合附加到返回对象。"""
         result = dict(payload)
         result["current_usage"] = {
             "request_count": 0,
@@ -1480,6 +1479,7 @@ class CodexOAuthService:
             "estimated_cost_usd": 0.0,
             "estimated_full_cost_usd": None,
             "consumed_percent": None,
+            "limit_window_seconds": None,
         }
         result["previous_usage"] = None
         if self._log_repository is None:
@@ -1532,6 +1532,10 @@ class CodexOAuthService:
         if baseline_used is not None and latest_used is not None:
             consumed_percent = max(latest_used - baseline_used, 0.0)
         usage["consumed_percent"] = consumed_percent
+        window_seconds = self._parse_float(window_state.get("limit_window_seconds"))
+        usage["limit_window_seconds"] = (
+            int(round(window_seconds)) if window_seconds is not None and window_seconds > 0 else None
+        )
         accumulated_cost = usage.get("estimated_cost_usd")
         usage["estimated_full_cost_usd"] = (
             float(accumulated_cost) * 100.0 / consumed_percent
@@ -1550,14 +1554,12 @@ class CodexOAuthService:
             for window in windows
             if isinstance(window, dict) and str(window.get("label") or "").strip().lower().startswith("codex")
         ]
-        for window in codex_windows:
-            window_seconds = cls._parse_float(window.get("limit_window_seconds"))
-            if window_seconds is not None and abs(window_seconds - CODEX_USAGE_WINDOW_SECONDS) < 1:
-                return window
-        for window in codex_windows:
-            if "7 天" in str(window.get("label") or ""):
-                return window
-        return None
+        if not codex_windows:
+            return None
+        return max(
+            codex_windows,
+            key=lambda window: cls._parse_float(window.get("limit_window_seconds")) or 0.0,
+        )
 
     @classmethod
     def _build_usage_window_state(
