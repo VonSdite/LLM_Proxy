@@ -946,9 +946,20 @@
                 codexAuthState.authorizationUrl = '';
                 codexAuthState.state = '';
                 renderCodexAuthUrl();
-                setCodexOAuthStatus(`认证文件已生成：${result.auth_file?.name || ''}`, 'success');
-                showMessage('Codex 认证文件已生成', 'success');
+                const authFileName = String(result.auth_file?.name || '').trim();
+                setCodexOAuthStatus(`认证文件已生成：${authFileName}`, 'success');
                 await loadCodexAuthFiles();
+                if (authFileName) {
+                    const quotaRefresh = await refreshCodexAuthFileQuotas([authFileName], { refreshResetCards: true });
+                    showMessage(
+                        quotaRefresh.failedCount
+                            ? 'Codex 认证文件已生成，额度刷新失败，可手动刷新'
+                            : 'Codex 认证文件已生成，额度已刷新',
+                        quotaRefresh.failedCount ? 'warning' : 'success'
+                    );
+                } else {
+                    showMessage('Codex 认证文件已生成', 'success');
+                }
                 await loadCodexModels();
                 await loadCodexImageModels();
             } catch (error) {
@@ -3167,9 +3178,21 @@
             renderCodexAuthFiles();
             try {
                 const result = await uploadAuthFiles('/api/oauth/codex/auth-files/import', files);
-                const message = formatAuthFileImportMessage(result);
-                showMessage(message, Number(result.failed || 0) > 0 ? 'warning' : 'success');
+                const importedNames = getCodexImportedAuthFileNames(result);
                 await loadCodexAuthFiles();
+                const quotaRefresh = await refreshCodexAuthFileQuotas(importedNames, { refreshResetCards: true });
+                const message = formatAuthFileImportMessage(result);
+                const hasImportFailure = Number(result.failed || 0) > 0;
+                if (quotaRefresh.total > 0 && quotaRefresh.failedCount > 0) {
+                    showMessage(
+                        `${message}，额度刷新成功 ${quotaRefresh.successCount} 个，失败 ${quotaRefresh.failedCount} 个`,
+                        'warning'
+                    );
+                } else if (quotaRefresh.total > 0) {
+                    showMessage(`${message}，额度已刷新 ${quotaRefresh.successCount} 个`, hasImportFailure ? 'warning' : 'success');
+                } else {
+                    showMessage(message, hasImportFailure ? 'warning' : 'success');
+                }
                 await loadCodexModels();
             } catch (error) {
                 console.error('导入 Codex 认证文件失败:', error);
@@ -3429,6 +3452,42 @@
             await refreshCodexQuotaByName(name, { refreshResetCards: true });
         }
 
+        function getCodexImportedAuthFileNames(result) {
+            if (!Array.isArray(result?.imported_files)) return [];
+            return Array.from(new Set(
+                result.imported_files
+                    .map(name => String(name || '').trim())
+                    .filter(Boolean)
+            ));
+        }
+
+        async function refreshCodexAuthFileQuotas(names, options = {}) {
+            const uniqueNames = Array.from(new Set(
+                (Array.isArray(names) ? names : [names])
+                    .map(name => String(name || '').trim())
+                    .filter(Boolean)
+            ));
+            const refreshResetCards = options.refreshResetCards !== false;
+            let successCount = 0;
+            let failedCount = 0;
+            for (const name of uniqueNames) {
+                const ok = await refreshCodexQuotaByName(name, {
+                    silent: true,
+                    refreshResetCards,
+                });
+                if (ok) {
+                    successCount += 1;
+                } else {
+                    failedCount += 1;
+                }
+            }
+            return {
+                total: uniqueNames.length,
+                successCount,
+                failedCount,
+            };
+        }
+
         async function refreshCodexResetCardsByName(name) {
             const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-cards`, {
                 cache: 'no-store',
@@ -3539,8 +3598,10 @@
                     codexAuthState.resetCardErrorByFile[name] = '';
                 }
                 await loadCodexAuthFiles({ showLoading: false });
-                if (resetResult.quota_error) {
-                    showMessage(`重置卡已使用，但额度刷新失败：${resetResult.quota_error}`, 'error');
+                const quotaRefresh = await refreshCodexAuthFileQuotas([name], { refreshResetCards: false });
+                if (quotaRefresh.failedCount > 0) {
+                    const quotaError = String(resetResult.quota_error || '').trim();
+                    showMessage(`重置卡已使用，但额度刷新失败${quotaError ? `：${quotaError}` : ''}`, 'error');
                 } else if (resetCardsRefreshError) {
                     showMessage('重置卡已使用，额度已刷新，但重置卡列表获取失败', 'error');
                 } else {
