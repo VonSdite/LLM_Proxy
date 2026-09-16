@@ -81,15 +81,22 @@ class CodexAuthUsageTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     @staticmethod
-    def _quota(*, used_percent: float, reset_at: str, refreshed_at: str) -> dict[str, Any]:
+    def _quota(
+        *,
+        used_percent: float,
+        reset_at: str,
+        refreshed_at: str,
+        label: str = "Codex 7 天",
+        window_seconds: int = 604800,
+    ) -> dict[str, Any]:
         return {
             "status": "ok",
             "refreshed_at": refreshed_at,
             "windows": [
                 {
-                    "label": "Codex 7 天",
+                    "label": label,
                     "window_key": "secondary_window",
-                    "limit_window_seconds": 604800,
+                    "limit_window_seconds": window_seconds,
                     "used_percent": used_percent,
                     "remaining_percent": 100 - used_percent,
                     "reset_at": reset_at,
@@ -142,7 +149,36 @@ class CodexAuthUsageTests(unittest.TestCase):
         self.assertEqual(1, usage["request_count"])
         self.assertEqual(12_000, usage["total_tokens"])
         self.assertEqual(6, usage["consumed_percent"])
+        self.assertEqual(604800, usage["limit_window_seconds"])
         self.assertAlmostEqual(2_000, usage["estimated_full_cost_usd"])
+
+    def test_thirty_day_quota_window_estimates_from_local_increment(self) -> None:
+        baseline_quota = self._quota(
+            used_percent=10,
+            reset_at="2026-10-16T00:00:00Z",
+            refreshed_at="2026-09-16T00:00:00Z",
+            label="Codex 30 天",
+            window_seconds=30 * 24 * 60 * 60,
+        )
+        self.service._store_auth_file_quota(self.auth_file.name, baseline_quota)
+        self.service._ensure_auth_file_usage_tracking(self.auth_file.name, "account-demo", baseline_quota)
+        self._insert_usage("2026-09-17T00:00:00Z", tokens=3_000, cost=30)
+
+        self.service._store_auth_file_quota(
+            self.auth_file.name,
+            self._quota(
+                used_percent=13,
+                reset_at="2026-10-16T00:00:00Z",
+                refreshed_at="2026-09-18T00:00:00Z",
+                label="Codex 30 天",
+                window_seconds=30 * 24 * 60 * 60,
+            ),
+        )
+        usage = self.service.list_auth_files()["files"][0]["current_usage"]
+
+        self.assertEqual(3, usage["consumed_percent"])
+        self.assertEqual(30 * 24 * 60 * 60, usage["limit_window_seconds"])
+        self.assertAlmostEqual(1_000, usage["estimated_full_cost_usd"])
 
     def test_new_reset_window_keeps_previous_usage_and_regroups_on_real_boundary(self) -> None:
         baseline_quota = self._quota(

@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}OAuth 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260914-6">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260916-1">{% endblock %}
 {% block body_class %}oauth-page{% endblock %}
 {% block header_title %}OAuth 管理{% endblock %}
 {% block header_subtitle %}管理 CLI/OAuth 类认证文件，并查看账号状态与配额。{% endblock %}
@@ -2879,6 +2879,16 @@
             return `$${cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
 
+        function formatCodexUsageEstimateLabel(usage) {
+            const seconds = Number(usage?.limit_window_seconds);
+            if (!Number.isFinite(seconds) || seconds <= 0) return '预估';
+            const rounded = Math.round(seconds);
+            if (rounded % 86400 === 0) return `${rounded / 86400}天预估`;
+            if (rounded % 3600 === 0) return `${rounded / 3600}小时预估`;
+            if (rounded % 60 === 0) return `${rounded / 60}分钟预估`;
+            return `${rounded}秒预估`;
+        }
+
         function renderCodexAuthUsage(file) {
             const current = file?.current_usage || {};
             const previous = file?.previous_usage;
@@ -2891,11 +2901,11 @@
                     <i aria-hidden="true">·</i>
                     <span>累计 ${formatCodexUsageCost(usage?.estimated_cost_usd)}</span>
                     <i aria-hidden="true">·</i>
-                    <span>7天预估 ${formatCodexUsageCost(usage?.estimated_full_cost_usd)}</span>
+                    <span>${formatCodexUsageEstimateLabel(usage)} ${formatCodexUsageCost(usage?.estimated_full_cost_usd)}</span>
                 </div>
             `;
             return `
-                <div class="oauth-auth-usage" title="累计为各自窗口内的 API 等价费用；7天预估按本地新增用量折算满额度价值">
+                <div class="oauth-auth-usage" title="累计为各自窗口内的 API 等价费用；周期预估按本地新增用量折算满额度价值">
                     ${renderRow('当前', current)}
                     ${previous ? renderRow('上期', previous, 'is-previous') : ''}
                 </div>

@@ -2187,13 +2187,15 @@ process.stdout.write(JSON.stringify([
   sandbox.formatCodexUsageCount(3200),
   sandbox.formatCodexUsageTokens(385000000),
   sandbox.formatCodexUsageCost(2082.38),
+  sandbox.formatCodexUsageEstimateLabel({{ limit_window_seconds: 604800 }}),
+  sandbox.formatCodexUsageEstimateLabel({{ limit_window_seconds: 30 * 24 * 60 * 60 }}),
   sandbox.renderCodexAuthUsage({{
-    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_cost_usd: 182.38, estimated_full_cost_usd: 2082.38 }},
+    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_cost_usd: 182.38, estimated_full_cost_usd: 2082.38, limit_window_seconds: 604800 }},
     previous_usage: null,
   }}),
   sandbox.renderCodexAuthUsage({{
-    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_cost_usd: 182.38, estimated_full_cost_usd: 2082.38 }},
-    previous_usage: {{ request_count: 3146, total_tokens: 372400000, estimated_cost_usd: 170, estimated_full_cost_usd: 1900 }},
+    current_usage: {{ request_count: 3200, total_tokens: 385000000, estimated_cost_usd: 182.38, estimated_full_cost_usd: 2082.38, limit_window_seconds: 604800 }},
+    previous_usage: {{ request_count: 3146, total_tokens: 372400000, estimated_cost_usd: 170, estimated_full_cost_usd: 1900, limit_window_seconds: 30 * 24 * 60 * 60 }},
   }}),
 ]));
 """
@@ -2203,16 +2205,21 @@ process.stdout.write(JSON.stringify([
             check=True,
             capture_output=True,
         )
-        request_count, tokens, cost, current_rendered, previous_rendered = json.loads(completed.stdout.decode("utf-8"))
+        request_count, tokens, cost, seven_day_label, thirty_day_label, current_rendered, previous_rendered = (
+            json.loads(completed.stdout.decode("utf-8"))
+        )
 
         self.assertEqual("3,200", request_count)
         self.assertEqual("385.0M", tokens)
         self.assertEqual("$2,082.38", cost)
+        self.assertEqual("7天预估", seven_day_label)
+        self.assertEqual("30天预估", thirty_day_label)
         self.assertIn("当前", current_rendered)
         self.assertNotIn("上期", current_rendered)
         self.assertIn("上期", previous_rendered)
         self.assertEqual(2, previous_rendered.count("<span>累计 "))
-        self.assertEqual(2, previous_rendered.count("<span>7天预估 "))
+        self.assertEqual(1, previous_rendered.count("<span>7天预估 "))
+        self.assertEqual(1, previous_rendered.count("<span>30天预估 "))
         self.assertIn("累计 $182.38", previous_rendered)
         self.assertIn("累计 $170.00", previous_rendered)
 
