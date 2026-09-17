@@ -30,6 +30,7 @@ class ModelMappingRepository:
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     strategy TEXT NOT NULL DEFAULT 'highest_priority',
                     cooldown_seconds_on_429 INTEGER NOT NULL DEFAULT 60,
+                    safe_desensitization_enabled INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -85,6 +86,10 @@ class ModelMappingRepository:
                     "ALTER TABLE model_mappings ADD COLUMN strategy TEXT NOT NULL "
                     f"DEFAULT '{DEFAULT_MODEL_MAPPING_STRATEGY}'"
                 )
+            if "safe_desensitization_enabled" not in mapping_columns:
+                conn.execute(
+                    "ALTER TABLE model_mappings ADD COLUMN safe_desensitization_enabled INTEGER NOT NULL DEFAULT 0"
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_model_mappings_order ON model_mappings(sort_order, created_at)"
             )
@@ -93,7 +98,8 @@ class ModelMappingRepository:
         with self._get_connection() as conn:
             mappings = conn.execute(
                 """
-                SELECT id, enabled, sort_order, strategy, cooldown_seconds_on_429, created_at, updated_at
+                SELECT id, enabled, sort_order, strategy, cooldown_seconds_on_429,
+                       safe_desensitization_enabled, created_at, updated_at
                 FROM model_mappings
                 ORDER BY sort_order, created_at, id
                 """
@@ -124,6 +130,7 @@ class ModelMappingRepository:
                 "sort_order": int(row["sort_order"]),
                 "strategy": str(row["strategy"] or DEFAULT_MODEL_MAPPING_STRATEGY),
                 "cooldown_seconds_on_429": int(row["cooldown_seconds_on_429"]),
+                "safe_desensitization_enabled": bool(row["safe_desensitization_enabled"]),
                 "targets": targets_by_mapping.get(row["id"], []),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
@@ -383,8 +390,9 @@ class ModelMappingRepository:
         conn.execute(
             """
             INSERT INTO model_mappings (
-                id, enabled, sort_order, strategy, cooldown_seconds_on_429, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, enabled, sort_order, strategy, cooldown_seconds_on_429,
+                safe_desensitization_enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mapping.id,
@@ -392,6 +400,7 @@ class ModelMappingRepository:
                 sort_order,
                 mapping.strategy,
                 mapping.cooldown_seconds_on_429,
+                1 if mapping.safe_desensitization_enabled else 0,
                 created_at or now_text,
                 now_text,
             ),

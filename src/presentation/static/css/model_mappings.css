@@ -451,7 +451,7 @@
 
 .mapping-editor-fields {
     display: grid;
-    grid-template-columns: minmax(240px, 1fr) minmax(250px, 0.8fr) 160px;
+    grid-template-columns: minmax(220px, 1fr) minmax(220px, 0.8fr) 150px 150px;
     gap: 16px;
 }
 
@@ -672,6 +672,19 @@
 
 .mapping-help-popover-body p:last-child {
     margin-bottom: 0;
+}
+
+.mapping-help-popover-body ul {
+    margin: 0 0 10px;
+    padding-left: 18px;
+}
+
+.mapping-help-popover-body ul:last-child {
+    margin-bottom: 0;
+}
+
+.mapping-help-popover-body li + li {
+    margin-top: 6px;
 }
 
 .mapping-help-popover-body code {

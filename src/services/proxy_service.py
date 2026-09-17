@@ -33,6 +33,7 @@ from ..utils.proxy_warning import (
     PROXY_WARNING_STATUS_CODE,
     ProxyWarningRequired,
 )
+from .outbound_privacy import OutboundPrivacyContext, OutboundPrivacyService
 from .proxy_response_builder import ProxyResponseBuilder
 from .proxy_trace_logger import ProxyTraceLogger
 from .proxy_transport_gateway import ProxyTransportGateway
@@ -64,6 +65,7 @@ class ProxyService:
         self._translator_registry = build_default_translator_registry()
         self._trace = ProxyTraceLogger(self._config_manager, self._trace_logger)
         self._transport = ProxyTransportGateway(self._executor_registry)
+        self._privacy = OutboundPrivacyService()
         self._response_builder = ProxyResponseBuilder(
             logger=self._logger,
             trace=self._trace,
@@ -138,6 +140,7 @@ class ProxyService:
         route_name: str | None = None,
         client_ip: str | None = None,
         on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
+        force_safe_desensitization: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """代理请求到目标 provider，并处理重试、格式转换与 guard。"""
         target_url = provider.api
@@ -160,6 +163,18 @@ class ProxyService:
             resolved_target_format,
         )
         translator = self._translator_registry.get(provider.source_format, downstream_target_format)
+        upstream_request_data = self._build_upstream_request_data(request_data, upstream_model)
+        privacy_context: OutboundPrivacyContext | None = None
+        if provider.safe_desensitization_enabled or force_safe_desensitization:
+            privacy_result = self._privacy.sanitize_request_body(upstream_request_data)
+            upstream_request_data = privacy_result.body
+            privacy_context = privacy_result.context
+            if privacy_context.enabled:
+                self._logger.info(
+                    "Outbound privacy desensitized request: provider=%s replacements=%s",
+                    provider.name,
+                    privacy_context.replacement_count,
+                )
         last_error: ProxyErrorInfo | None = None
         previous_status_code: int | None = None
         previous_error_type: HookErrorType | None = None
@@ -169,6 +184,14 @@ class ProxyService:
             selected_auth: SelectedAuthEntry | None,
         ) -> tuple[dict[str, str], dict[str, Any], dict[str, Any], HookContext]:
             headers = self._filter_upstream_request_headers(request_headers)
+            if provider.safe_desensitization_enabled or force_safe_desensitization:
+                sanitized_headers = self._privacy.sanitize_request_headers(headers)
+                if len(sanitized_headers) != len(headers):
+                    self._logger.debug(
+                        "Outbound privacy stripped credential headers: provider=%s",
+                        provider.name,
+                    )
+                headers = sanitized_headers
             headers["content-type"] = "application/json"
             if selected_auth is not None:
                 headers = merge_http_headers(headers, selected_auth.headers_mapping())
@@ -184,7 +207,7 @@ class ProxyService:
                 request_model=requested_model,
                 upstream_model=upstream_model,
                 provider_target_format=downstream_target_format,
-                request_data=self._build_upstream_request_data(request_data, upstream_model),
+                request_data=upstream_request_data,
                 request_headers=headers,
                 translator=translator,
                 attempt=attempt,
@@ -298,6 +321,7 @@ class ProxyService:
                         client_ip=client_ip,
                         request_model=requested_model,
                         upstream_model=effective_upstream_model,
+                        privacy_context=privacy_context,
                     )
                     finalize_attempt(
                         status_code=opened.status_code,
@@ -386,6 +410,7 @@ class ProxyService:
                         trace_id=trace_id,
                         route_name=route_name,
                         client_ip=client_ip,
+                        privacy_context=privacy_context,
                     )
                 elif opened.is_stream:
                     response = self._response_builder.build_stream_response(
@@ -403,6 +428,7 @@ class ProxyService:
                         route_name=route_name,
                         client_ip=client_ip,
                         on_stream_failure=on_stream_failure,
+                        privacy_context=privacy_context,
                     )
                 else:
                     response = self._response_builder.build_nonstream_response(
@@ -418,6 +444,7 @@ class ProxyService:
                         trace_id=trace_id,
                         route_name=route_name,
                         client_ip=client_ip,
+                        privacy_context=privacy_context,
                     )
 
                 log_message = "Upstream response opened" if opened.is_stream else "Upstream request completed"

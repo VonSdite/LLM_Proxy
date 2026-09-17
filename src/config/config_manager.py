@@ -93,6 +93,9 @@ class ConfigManager:
     def is_oauth_verify_ssl_enabled(self) -> bool:
         return self._read_bool("oauth.verify_ssl", default=False)
 
+    def is_oauth_safe_desensitization_enabled(self) -> bool:
+        return self._read_bool("oauth.safe_desensitization_enabled", default=False)
+
     def get_database_path(self) -> str:
         return self.get("database.path", self._root_path / "data/requests.db")
 

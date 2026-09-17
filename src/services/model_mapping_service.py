@@ -99,6 +99,11 @@ class ModelMappingService:
         normalized_id = str(mapping_id or "").strip()
         return normalized_id in set(self.list_mapping_ids())
 
+    def is_safe_desensitization_enabled(self, mapping_id: str) -> bool:
+        """读取映射级安全脱敏开关；映射不存在时视为关闭。"""
+        mapping = self._repository.get_mapping(str(mapping_id or "").strip())
+        return bool(mapping and mapping.get("safe_desensitization_enabled"))
+
     def list_available_target_model_ids(self) -> tuple[str, ...]:
         """返回可在编辑器中选择的 Provider、OAuth 文本模型与图片模型。"""
         provider_models = tuple(self._provider_manager.list_model_names())
@@ -136,6 +141,10 @@ class ModelMappingService:
             raise ValueError(f"模型映射不存在: {normalized_current_id}")
         normalized_payload = dict(payload)
         normalized_payload.setdefault("enabled", bool(current_mapping["enabled"]))
+        normalized_payload.setdefault(
+            "safe_desensitization_enabled",
+            bool(current_mapping.get("safe_desensitization_enabled")),
+        )
         mapping = self._build_mapping(normalized_payload)
         self._validate_unavailable_target_changes(current_mapping, mapping)
         self._validate_target_ids(
@@ -170,6 +179,7 @@ class ModelMappingService:
                 "enabled": bool(source["enabled"]),
                 "strategy": source["strategy"],
                 "cooldown_seconds_on_429": source["cooldown_seconds_on_429"],
+                "safe_desensitization_enabled": bool(source.get("safe_desensitization_enabled")),
                 "targets": source["targets"],
             }
         )

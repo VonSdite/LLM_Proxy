@@ -34,9 +34,10 @@ auth_groups:
       Authorization: Bearer 1
 oauth:
   enabled: true
-  proxy: ''
+  proxy: http://192.168.101.253:21809
   verify_ssl: false
-  proxy_mode: direct
+  proxy_mode: custom
+  safe_desensitization_enabled: false
 api_keys:
   enabled: true
 model_mapping:

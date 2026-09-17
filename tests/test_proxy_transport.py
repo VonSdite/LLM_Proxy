@@ -403,6 +403,46 @@ class ProviderTransportTests(unittest.TestCase):
                 }
             )
 
+    def test_provider_safe_desensitization_defaults_to_false_and_accepts_true(self) -> None:
+        default_schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "default-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "model_list": ["gpt-4.1"],
+            }
+        )
+        enabled_schema = ProviderConfigSchema.from_mapping(
+            {
+                "name": "privacy-provider",
+                "api": "https://example.com/v1/chat/completions",
+                "api_key": "demo-key",
+                "safe_desensitization_enabled": True,
+                "model_list": ["gpt-4.1"],
+            }
+        )
+
+        default_runtime = RuntimeProviderSpec.from_schema(default_schema)
+        enabled_runtime = RuntimeProviderSpec.from_schema(enabled_schema)
+        self.assertFalse(default_schema.safe_desensitization_enabled)
+        self.assertFalse(default_runtime.safe_desensitization_enabled)
+        self.assertTrue(enabled_schema.safe_desensitization_enabled)
+        self.assertTrue(enabled_runtime.safe_desensitization_enabled)
+        self.assertFalse(default_schema.to_mapping()["safe_desensitization_enabled"])
+        self.assertTrue(enabled_schema.to_mapping()["safe_desensitization_enabled"])
+
+    def test_provider_safe_desensitization_rejects_invalid_value(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Provider safe_desensitization_enabled must be a boolean value"):
+            ProviderConfigSchema.from_mapping(
+                {
+                    "name": "demo",
+                    "api": "https://example.com/v1/chat/completions",
+                    "api_key": "demo-key",
+                    "safe_desensitization_enabled": "maybe",
+                    "model_list": ["gpt-4.1"],
+                }
+            )
+
     def test_provider_schema_accepts_safe_provider_name_payload(self) -> None:
         schema = ProviderConfigSchema.from_payload(
             {
@@ -1327,6 +1367,11 @@ class ProviderTemplateTransportTests(unittest.TestCase):
 
         self.assertNotIn('data-provider-help-topic="transport"', html)
         self.assertIn('data-provider-help-topic="source_format"', html)
+        self.assertIn('data-provider-help-topic="safe_desensitization"', html)
+        self.assertIn(
+            "safe_desensitization_enabled: document.getElementById('providerSafeDesensitization').value", html
+        )
+        self.assertIn("安全脱敏", html)
         self.assertNotIn('data-provider-help-topic="target_format"', html)
         self.assertIn('data-provider-help-topic="auth_group_field"', html)
         self.assertIn('data-provider-help-topic="auth_groups_overview"', html)
@@ -2300,7 +2345,7 @@ process.stdout.write(JSON.stringify([
         self.assertIn(".settings-page .oauth-toggle-row", css)
         self.assertIn(".settings-page .oauth-toggle-card", css)
         self.assertIn(".settings-page .setting-toggle-inline", css)
-        self.assertIn("grid-template-columns: repeat(2, minmax(0, 360px));", css)
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 360px));", css)
         self.assertIn("width: min(360px, 100%);", css)
         self.assertIn(".settings-page .oauth-details-panel[hidden]", css)
         self.assertIn(".settings-page .oauth-settings-block", css)
@@ -2321,12 +2366,18 @@ process.stdout.write(JSON.stringify([
         html = template_path.read_text(encoding="utf-8")
 
         self.assertIn('id="providerForceUpstreamStream"', html)
+        self.assertIn('id="providerSafeDesensitization"', html)
         self.assertIn('<option value="false">关闭</option>', html)
         self.assertIn('<option value="true">启用</option>', html)
         self.assertIn("setupCustomSelect('providerForceUpstreamStream');", html)
+        self.assertIn("setupCustomSelect('providerSafeDesensitization');", html)
         self.assertLess(
             html.index('id="providerVerifySsl"'),
             html.index('id="providerForceUpstreamStream"'),
+        )
+        self.assertLess(
+            html.index('id="providerForceUpstreamStream"'),
+            html.index('id="providerSafeDesensitization"'),
         )
 
     def test_provider_model_list_tidy_sorts_and_manual_cleanup_is_explicit(
@@ -2385,6 +2436,7 @@ const sandbox = {{
       modelTestSelectAllCheckbox: {{ checked: false, indeterminate: false }},
       providerSourceFormat: {{ value: "openai_chat" }},
       providerForceUpstreamStream: {{ value: "false" }},
+      providerSafeDesensitization: {{ value: "true" }},
       providerApiKey: {{ value: " secret " }},
       providerProxy: {{ value: "" }},
       providerTimeout: {{ value: "" }},
@@ -2419,11 +2471,13 @@ process.stdout.write(JSON.stringify({{
   beforeHiddenModelList: collectedBefore.hidden_model_list,
   beforeAuthGroup: collectedBefore.auth_group,
   beforeApiKey: collectedBefore.api_key,
+  beforeSafeDesensitization: collectedBefore.safe_desensitization_enabled,
   afterRows: sandbox.modelTestRows.map(row => row.model),
   afterModelList: collectedAfter.model_list,
   afterHiddenModelList: collectedAfter.hidden_model_list,
   afterAuthGroup: collectedAfter.auth_group,
   afterApiKey: collectedAfter.api_key,
+  afterSafeDesensitization: collectedAfter.safe_desensitization_enabled,
   allVisibleAfterShow,
   allHiddenAfterHide,
   countText: sandbox.document.elements.modelTestSummary.textContent,
@@ -2442,11 +2496,13 @@ process.stdout.write(JSON.stringify({{
         self.assertEqual(["beta", "Beta"], payload["beforeHiddenModelList"])
         self.assertEqual("shared-pool", payload["beforeAuthGroup"])
         self.assertEqual("", payload["beforeApiKey"])
+        self.assertEqual("true", payload["beforeSafeDesensitization"])
         self.assertEqual(["Alpha", "Beta", "alpha", "beta"], payload["afterRows"])
         self.assertEqual("Alpha\nBeta\nalpha\nbeta", payload["afterModelList"])
         self.assertEqual(["Beta", "beta"], payload["afterHiddenModelList"])
         self.assertEqual("shared-pool", payload["afterAuthGroup"])
         self.assertEqual("", payload["afterApiKey"])
+        self.assertEqual("true", payload["afterSafeDesensitization"])
         self.assertTrue(payload["allVisibleAfterShow"])
         self.assertTrue(payload["allHiddenAfterHide"])
         self.assertIn("4", payload["countText"])

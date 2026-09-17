@@ -285,6 +285,22 @@
                                     <span class="slider"></span>
                                 </label>
                             </div>
+                            <div class="oauth-toggle-card oauth-desensitization-row">
+                                <div class="setting-toggle-title-row">
+                                    <span class="setting-toggle-title">安全脱敏</span>
+                                    <button
+                                        type="button"
+                                        class="field-help-button"
+                                        data-settings-help-topic="oauth_safe_desensitization"
+                                        onclick="toggleSettingsHelp('oauth_safe_desensitization', event)"
+                                        aria-label="查看 OAuth 安全脱敏说明"
+                                    >?</button>
+                                </div>
+                                <label class="switch" aria-label="切换 OAuth 安全脱敏">
+                                    <input type="checkbox" id="oauthSafeDesensitization">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
                         </div>
 
                         <div class="oauth-details-panel" id="oauthDetailsPanel" hidden>
@@ -528,6 +544,17 @@
                     <p>默认关闭 SSL 证书校验，适合本地代理或抓包代理场景。</p>
                     <p>开启后，OAuth token 请求、token 刷新、Codex 配额查询和 OAuth 数据面代理会校验上游 HTTPS 证书。</p>
                 `
+            },
+            oauth_safe_desensitization: {
+                title: "OAuth 安全脱敏",
+                html: `
+                    <p>默认关闭。开启后，经 OAuth 上游（Codex / Claude）发出的请求体会先替换为请求级占位符，响应返回下游前再恢复原值。</p>
+                    <ul>
+                        <li><strong>覆盖范围</strong>：与 Provider 的安全脱敏一致，含图片生成 prompt。</li>
+                        <li><strong>映射级开关</strong>：模型映射开启脱敏时，即使这里关闭，该映射的请求也会脱敏。</li>
+                        <li><strong>已知误伤</strong>：版本号（如 <code>2.5.7.1</code>）可能被识别为 IP；11 位订单号可能被识别为手机号；恰好通过银行卡校验的长数字会被当作卡号。</li>
+                    </ul>
+                `
             }
         };
 
@@ -725,7 +752,8 @@
                     enabled: document.getElementById("oauthEnabled").checked,
                     proxy_mode: proxyMode,
                     proxy: proxyMode === "custom" ? document.getElementById("oauthProxy").value.trim() : "",
-                    verify_ssl: document.getElementById("oauthVerifySsl").checked
+                    verify_ssl: document.getElementById("oauthVerifySsl").checked,
+                    safe_desensitization_enabled: document.getElementById("oauthSafeDesensitization").checked
                 }
             };
         }
@@ -775,6 +803,7 @@
             document.getElementById("oauthProxyMode").value = ["direct", "system", "custom"].includes(proxyMode) ? proxyMode : "direct";
             document.getElementById("oauthProxy").value = settings?.oauth?.proxy || "";
             document.getElementById("oauthVerifySsl").checked = Boolean(settings?.oauth?.verify_ssl);
+            document.getElementById("oauthSafeDesensitization").checked = Boolean(settings?.oauth?.safe_desensitization_enabled);
             if (options.preserveSensitiveVisibility) {
                 syncSensitiveInputToggle("oauthProxy");
             } else {
@@ -1523,6 +1552,10 @@
             });
 
             document.getElementById("oauthVerifySsl")?.addEventListener("change", function () {
+                saveOAuthSettings();
+            });
+
+            document.getElementById("oauthSafeDesensitization")?.addEventListener("change", function () {
                 saveOAuthSettings();
             });
 

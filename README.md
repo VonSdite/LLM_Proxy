@@ -47,6 +47,7 @@ server:
 #   proxy_mode: direct
 #   proxy: ""
 #   verify_ssl: false
+#   safe_desensitization_enabled: false
 
 providers:
   - name: openai-chat
@@ -55,6 +56,7 @@ providers:
     source_format: openai_chat
     api_key: sk-your-openai-key
     force_upstream_stream: false
+    safe_desensitization_enabled: false
     verify_ssl: false
     model_list:
       - gpt-4.1
@@ -172,6 +174,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `oauth.enabled`：是否在后台导航显示 OAuth 管理入口
 - `oauth.proxy`：OAuth 登录、Codex 配额查询和 OAuth 上游请求使用的代理地址，留空表示不使用代理
 - `oauth.verify_ssl`：OAuth 网络请求是否校验证书，默认 `false`
+- `oauth.safe_desensitization_enabled`：是否对 OAuth 上游（Codex / Claude）请求启用安全脱敏，默认 `false`；效果与 Provider 的 `safe_desensitization_enabled` 一致
 
 ### `providers[]` 字段说明
 
@@ -186,6 +189,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `max_retries`：一次 Provider 上游操作允许的最大尝试次数，包含首次尝试；默认 `3`，设为 `1` 时只尝试一次
 - `verify_ssl`：是否校验证书；代码默认值为 `false`，公网 HTTPS 建议显式设为 `true`
 - `force_upstream_stream`：是否在下游非流式请求时强制使用上游流式请求；默认 `false`。启用后代理会聚合上游流式事件，再以非流式响应返回下游
+- `safe_desensitization_enabled`：是否启用安全脱敏；默认 `false`。启用后，请求体中的常见密码与中英文口令赋值（含 `DB_PASSWORD=` 等环境变量风格）、AK/SK、Token、常见云厂商与 SaaS 密钥前缀、Authorization、Cookie、私钥与 SSH 公钥、连接串内嵌凭据、Webhook URL、CLI 密码参数、邮箱、手机号、身份证号、银行卡号和 IP 地址会在上游请求前替换为请求级占位符，响应返回下游前再恢复；同时不再向上游转发 `Cookie`、`x-api-key` 等凭据类客户端请求头。模型映射编辑页与系统设置的 OAuth 区域提供同粒度开关：映射级开关开启时，即使目标 Provider 或 OAuth 未开启脱敏，该映射的请求也会脱敏
 - `model_list`：当前 Provider 可路由的模型列表
 - `hidden_model_list`：不出现在下游 `GET /v1/models` 的模型列表；模型路由、测试和权限配置保持可用
 - `hook`：相对 `hooks/` 目录的 Hook 文件路径，文件中需要导出名为 `Hook` 的类
@@ -336,9 +340,10 @@ oauth:
   proxy_mode: direct
   proxy: ""
   verify_ssl: false
+  safe_desensitization_enabled: false
 ```
 
-开启后，后台导航会显示 `/oauth` 页面。`proxy_mode` 支持 `direct`、`system`、`custom`；只有 `custom` 会读取 `proxy`，但 `custom` 下 `proxy` 为空时会按直连执行。这里的 `proxy` 是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的出站代理，不是下游客户端访问本服务的入口代理。认证文件未提供 `proxy_url` 时，`proxy_mode` 和 `proxy` 决定 Codex 配额查询的网络出口；`verify_ssl` 继续控制 HTTPS 证书校验。自定义代理 URL 中的账号密码会由系统规范化转义。旧配置缺少 `proxy_mode` 时，启动加载会按是否存在 `proxy` 自动回写为 `custom` 或 `direct`。
+开启后，后台导航会显示 `/oauth` 页面。`proxy_mode` 支持 `direct`、`system`、`custom`；只有 `custom` 会读取 `proxy`，但 `custom` 下 `proxy` 为空时会按直连执行。这里的 `proxy` 是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的出站代理，不是下游客户端访问本服务的入口代理。认证文件未提供 `proxy_url` 时，`proxy_mode` 和 `proxy` 决定 Codex 配额查询的网络出口；`verify_ssl` 继续控制 HTTPS 证书校验。自定义代理 URL 中的账号密码会由系统规范化转义。旧配置缺少 `proxy_mode` 时，启动加载会按是否存在 `proxy` 自动回写为 `custom` 或 `direct`。`safe_desensitization_enabled` 开启后，经 OAuth 上游发出的请求体会先替换为请求级占位符，响应返回前恢复；也可以在 `/settings` 的 OAuth 区域切换。
 
 ### 2. 生成 OAuth 认证文件
 

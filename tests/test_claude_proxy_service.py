@@ -27,6 +27,7 @@ from src.services.claude_proxy_service import (
     CLAUDE_USER_AGENT,
     ClaudeProxyService,
 )
+from src.services.outbound_privacy import PLACEHOLDER_PREFIX
 
 
 class FakeLogger:
@@ -44,11 +45,17 @@ class FakeLogger:
 
 
 class FakeConfigManager:
+    def __init__(self, *, oauth_safe_desensitization_enabled: bool = False) -> None:
+        self.oauth_safe_desensitization_enabled = oauth_safe_desensitization_enabled
+
     def get_oauth_proxy(self) -> None:
         return None
 
     def is_oauth_verify_ssl_enabled(self) -> bool:
         return False
+
+    def is_oauth_safe_desensitization_enabled(self) -> bool:
+        return self.oauth_safe_desensitization_enabled
 
 
 class FakeHTTPResponse:
@@ -80,10 +87,10 @@ class FakeHTTPResponse:
         self.closed = True
 
 
-def build_context(root_path: Path) -> AppContext:
+def build_context(root_path: Path, config_manager: FakeConfigManager | None = None) -> AppContext:
     return AppContext(
         logger=FakeLogger(),
-        config_manager=FakeConfigManager(),  # type: ignore[arg-type]
+        config_manager=config_manager or FakeConfigManager(),  # type: ignore[arg-type]
         root_path=root_path,
         flask_app=Flask(__name__),
     )
@@ -109,6 +116,25 @@ def write_auth_file(root: Path, name: str, token: str, *, mtime: int) -> None:
 
 
 class ClaudeProxyServiceTests(unittest.TestCase):
+
+    @staticmethod
+    def _find_placeholder(value: Any) -> str | None:
+        if isinstance(value, str) and PLACEHOLDER_PREFIX in value:
+            start = value.index(PLACEHOLDER_PREFIX)
+            end = value.find("__", start + len(PLACEHOLDER_PREFIX))
+            return value[start:] if end < 0 else value[start : end + 2]
+        if isinstance(value, dict):
+            for item in value.values():
+                found = ClaudeProxyServiceTests._find_placeholder(item)
+                if found:
+                    return found
+        if isinstance(value, list):
+            for item in value:
+                found = ClaudeProxyServiceTests._find_placeholder(item)
+                if found:
+                    return found
+        return None
+
     def test_nonstream_openai_chat_request_uses_claude_oauth_account(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -647,6 +673,101 @@ class ClaudeProxyServiceTests(unittest.TestCase):
 
     def test_xxhash64_known_vector(self) -> None:
         self.assertEqual(0xEF46DB3751D8E999, _xxhash64(b""))
+
+    def test_oauth_safe_desensitization_sanitizes_upstream_body_and_restores_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "claude-first.json", "access-first", mtime=2000)
+            ctx = build_context(root, FakeConfigManager(oauth_safe_desensitization_enabled=True))
+            oauth_service = ClaudeOAuthService(ctx)
+            oauth_service.add_model("claude-sonnet-4-5")
+            proxy_service = ClaudeProxyService(ctx, oauth_service)
+            captured: dict[str, Any] = {}
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, headers, stream, timeout, kwargs
+                captured.update(dict(json or {}))
+                assert self._find_placeholder(captured) is not None
+                upstream_content = captured["messages"][0]["content"]
+                if isinstance(upstream_content, list):
+                    upstream_content = upstream_content[0].get("text", "")
+                return FakeHTTPResponse(
+                    status_code=200,
+                    body=json_module_dumps(
+                        {
+                            "id": "msg_1",
+                            "type": "message",
+                            "role": "assistant",
+                            "model": "claude-sonnet-4-5",
+                            "content": [{"type": "text", "text": f"echo {upstream_content}"}],
+                            "stop_reason": "end_turn",
+                            "usage": {"input_tokens": 1, "output_tokens": 2},
+                        }
+                    ),
+                )
+
+            with patch("src.services.claude_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {
+                        "model": "claude-sonnet-4-5",
+                        "messages": [{"role": "user", "content": "password=SuperSecret123"}],
+                        "stream": False,
+                        "max_tokens": 512,
+                    },
+                    {},
+                    resolved_target_format="openai_chat",
+                )
+            payload = json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(self._find_placeholder(captured))
+        self.assertNotIn("SuperSecret123", json.dumps(captured))
+        self.assertEqual("echo password=SuperSecret123", payload["choices"][0]["message"]["content"])
+
+    def test_force_safe_desensitization_overrides_oauth_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "claude-first.json", "access-first", mtime=2000)
+            ctx = build_context(root, FakeConfigManager(oauth_safe_desensitization_enabled=False))
+            oauth_service = ClaudeOAuthService(ctx)
+            oauth_service.add_model("claude-sonnet-4-5")
+            proxy_service = ClaudeProxyService(ctx, oauth_service)
+            captured: dict[str, Any] = {}
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, headers, stream, timeout, kwargs
+                captured.update(dict(json or {}))
+                return FakeHTTPResponse(
+                    status_code=200,
+                    body=json_module_dumps(
+                        {
+                            "id": "msg_1",
+                            "type": "message",
+                            "role": "assistant",
+                            "model": "claude-sonnet-4-5",
+                            "content": [{"type": "text", "text": "ok"}],
+                            "stop_reason": "end_turn",
+                            "usage": {"input_tokens": 1, "output_tokens": 2},
+                        }
+                    ),
+                )
+
+            with patch("src.services.claude_proxy_service.requests.post", side_effect=fake_post):
+                proxy_service.proxy_request(
+                    {
+                        "model": "claude-sonnet-4-5",
+                        "messages": [{"role": "user", "content": "password=SuperSecret123"}],
+                        "stream": False,
+                        "max_tokens": 512,
+                    },
+                    {},
+                    resolved_target_format="openai_chat",
+                    force_safe_desensitization=True,
+                )
+
+        self.assertIsNotNone(self._find_placeholder(captured))
+        self.assertNotIn("SuperSecret123", json.dumps(captured))
 
     @staticmethod
     def _build_stream_request(target_format: str) -> dict[str, Any]:

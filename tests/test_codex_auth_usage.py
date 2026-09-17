@@ -4,7 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -111,6 +111,9 @@ class CodexAuthUsageTests(unittest.TestCase):
 
     def _insert_usage(self, iso_value: str, *, tokens: int, cost: float) -> None:
         started_at = self._local_datetime(iso_value)
+        self._insert_usage_at(started_at, tokens=tokens, cost=cost)
+
+    def _insert_usage_at(self, started_at: datetime, *, tokens: int, cost: float) -> None:
         self.repository.insert(
             request_model="public-model",
             target_model_id="gpt-6-astra",
@@ -125,6 +128,14 @@ class CodexAuthUsageTests(unittest.TestCase):
             auth_account_id="account-demo",
             estimated_cost_usd=cost,
         )
+
+    def _current_usage_accounting_start(self) -> datetime:
+        state = self.service._load_auth_file_state()
+        file_state = state["files"][self.auth_file.name]
+        current = file_state["usage_tracking"]["current"]
+        accounting_start = self.service._parse_epoch_or_datetime(current["accounting_start_at"])
+        assert accounting_start is not None
+        return accounting_start
 
     def test_mid_window_baseline_estimates_from_local_increment_only(self) -> None:
         baseline_quota = self._quota(
@@ -307,7 +318,10 @@ class CodexAuthUsageTests(unittest.TestCase):
 
         with patch.object(self.service, "_get_auth_file_quota", return_value=baseline_quota):
             self.assertIs(candidate, self.service.prepare_auth_candidate_for_use(candidate))
-        self._insert_usage("2026-09-17T00:00:00Z", tokens=12_000, cost=120)
+        usage_time = self._local_datetime(
+            self.service._format_datetime(self._current_usage_accounting_start() + timedelta(seconds=1))
+        )
+        self._insert_usage_at(usage_time, tokens=12_000, cost=120)
         with (
             patch("src.services.codex_oauth_service.time.monotonic", side_effect=(100.0, 101.0, 701.0)),
             patch("gevent.spawn_later", side_effect=fake_spawn_later),

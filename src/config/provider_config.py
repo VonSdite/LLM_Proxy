@@ -21,6 +21,7 @@ DEFAULT_PROVIDER_TIMEOUT_SECONDS = 1200
 DEFAULT_PROVIDER_MAX_RETRIES = 3
 DEFAULT_PROVIDER_VERIFY_SSL = False
 DEFAULT_PROVIDER_FORCE_UPSTREAM_STREAM = False
+DEFAULT_PROVIDER_SAFE_DESENSITIZATION_ENABLED = False
 DEFAULT_PROVIDER_TRANSPORT = "http"
 DEFAULT_PROVIDER_SOURCE_FORMAT = "openai_chat"
 DEFAULT_PROVIDER_TARGET_FORMAT = "openai_chat"
@@ -54,6 +55,7 @@ SUPPORTED_PROVIDER_FIELDS = {
     "max_retries",
     "verify_ssl",
     "force_upstream_stream",
+    "safe_desensitization_enabled",
     "model_list",
     "hidden_model_list",
     "hook",
@@ -445,6 +447,7 @@ class ProviderConfigSchema:
     max_retries: int | None = None
     verify_ssl: bool | None = None
     force_upstream_stream: bool = DEFAULT_PROVIDER_FORCE_UPSTREAM_STREAM
+    safe_desensitization_enabled: bool = DEFAULT_PROVIDER_SAFE_DESENSITIZATION_ENABLED
     model_list: tuple[str, ...] = ()
     hidden_model_list: tuple[str, ...] = ()
     hook: str | None = None
@@ -527,6 +530,13 @@ class ProviderConfigSchema:
                     error_message="Provider force_upstream_stream must be a boolean value",
                 )
             ),
+            safe_desensitization_enabled=bool(
+                parse_optional_bool(
+                    config.get("safe_desensitization_enabled"),
+                    default=DEFAULT_PROVIDER_SAFE_DESENSITIZATION_ENABLED,
+                    error_message="Provider safe_desensitization_enabled must be a boolean value",
+                )
+            ),
             model_list=model_list,
             hidden_model_list=hidden_model_list,
             hook=clean_optional_string(config.get("hook")),
@@ -548,6 +558,7 @@ class ProviderConfigSchema:
             "api": self.api,
             "source_format": self.source_format,
             "force_upstream_stream": bool(self.force_upstream_stream),
+            "safe_desensitization_enabled": bool(self.safe_desensitization_enabled),
         }
 
         if self.api_key is not None:
@@ -597,6 +608,7 @@ class RuntimeProviderSpec:
     max_retries: int
     verify_ssl: bool
     force_upstream_stream: bool
+    safe_desensitization_enabled: bool
     hook: str | None
 
     @classmethod
@@ -622,6 +634,7 @@ class RuntimeProviderSpec:
             max_retries=config.max_retries or DEFAULT_PROVIDER_MAX_RETRIES,
             verify_ssl=(config.verify_ssl if config.verify_ssl is not None else DEFAULT_PROVIDER_VERIFY_SSL),
             force_upstream_stream=bool(config.force_upstream_stream),
+            safe_desensitization_enabled=bool(config.safe_desensitization_enabled),
             hook=config.hook,
         )
 
@@ -650,6 +663,7 @@ class ProviderRuntimeView:
     max_retries: int
     verify_ssl: bool
     force_upstream_stream: bool
+    safe_desensitization_enabled: bool
     hook: str | None
 
     @classmethod
@@ -671,6 +685,7 @@ class ProviderRuntimeView:
             max_retries=spec.max_retries,
             verify_ssl=spec.verify_ssl,
             force_upstream_stream=spec.force_upstream_stream,
+            safe_desensitization_enabled=spec.safe_desensitization_enabled,
             hook=spec.hook,
         )
 

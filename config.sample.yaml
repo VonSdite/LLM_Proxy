@@ -44,6 +44,8 @@ oauth:
   # 服务端访问 OAuth 上游时使用的自定义出站代理地址。custom 模式下留空等同直连；账号密码可直接写在 URL 里，系统会规范化转义。
   proxy: ""
   verify_ssl: false
+  # 是否对 OAuth 上游（Codex / Claude）请求启用安全脱敏；默认 false。
+  safe_desensitization_enabled: false
 
 auth_groups:
   - name: openai-shared
@@ -75,6 +77,7 @@ providers:
     auth_group: openai-shared
     proxy_mode: direct
     force_upstream_stream: false
+    safe_desensitization_enabled: false
     verify_ssl: true
     timeout_seconds: 1200
     max_retries: 3
