@@ -42,6 +42,7 @@ downstream request
   -> resolve route model key to upstream model id
   -> strip downstream Authorization from upstream headers
   -> auth header resolve (api_key or auth_group + auth_entry)
+  -> optional outbound privacy desensitization
   -> header_hook
   -> translator.translate_request()
   -> request_guard
@@ -51,6 +52,7 @@ downstream request
   -> raw upstream usage collector
   -> translator.translate_nonstream_response() or translate_stream_event()
   -> response_guard
+  -> optional outbound privacy restore
   -> encoder
   -> prefetch first non-empty encoded downstream bytes (stream only)
   -> downstream response
@@ -64,6 +66,7 @@ decoder
   -> source protocol native stream accumulator
   -> complete source-to-target response translator
   -> response_guard
+  -> optional outbound privacy restore
   -> JSON encoder
   -> downstream response
 ```
@@ -232,6 +235,7 @@ decoder
 - `ProxyService`
   - 组装整条代理链路
   - 根据当前请求所处接口选择 translator 和 encoder
+  - Provider 开启 `safe_desensitization_enabled`（或请求经开启脱敏的模型映射路由，`force_safe_desensitization` 生效）时，先把请求体中的常见敏感信息替换为请求级占位符，并在下游响应编码前恢复占位符；同时剔除不应转发上游的凭据类客户端请求头（Cookie、x-api-key 等）
   - Provider 开启 `force_upstream_stream` 且下游非流式时，强制上游请求使用流式并选择聚合响应路径
   - 在下游流提交前管理 Provider 上游 transport 失败和原生流聚合失败的最大尝试次数
   - 聚合失败时重新选择 Auth Entry，并把推断出的尝试状态提供给 Hook 重试上下文和 Auth Group 运行态
@@ -240,6 +244,7 @@ decoder
 - `ProxyResponseBuilder`
   - 构建非流式响应和流式响应
   - 将强制上游流式场景的上游事件聚合为完整 source payload，再依次执行 response translation、`response_guard` 和非流式编码
+  - 在响应编码前执行请求级安全脱敏占位符恢复
   - 在中间尝试传播聚合错误，在最后一次尝试按目标协议构造结构化 `502` 响应
   - 预取首个非空目标协议字节并建立流提交边界
   - 跟踪协议终止事件、上游 transport 失败和客户端取消
@@ -573,6 +578,8 @@ Provider 公共配置字段只有：
 - `timeout_seconds`
 - `max_retries`
 - `verify_ssl`
+- `force_upstream_stream`
+- `safe_desensitization_enabled`
 - `model_list`
 - `hidden_model_list`
 - `hook`
@@ -592,6 +599,19 @@ Provider 公共配置字段只有：
   - 默认值为 `3`
   - 值为 `1` 时只执行一次上游尝试
   - 流式 transport 异常只在下游响应提交前进入下一次尝试
+- `force_upstream_stream`
+  - 下游非流式请求使用上游流式请求，并在代理进程内聚合为非流式响应
+- `safe_desensitization_enabled`
+  - 默认值为 `false`
+  - 启用后，普通 Provider 数据面请求体在 translator 前执行规则型敏感信息替换
+  - 请求级占位符映射保存在当前请求内，普通响应、聚合响应、流式响应和上游错误响应在下游编码前恢复占位符
+  - 规则覆盖结构化字段和文本中的密码与中英文口令赋值（含环境变量风格）、AK/SK、Token、常见云厂商与 SaaS 密钥前缀、Authorization、Cookie、私钥与 SSH 公钥、连接串内嵌凭据、Webhook URL、CLI 密码参数、邮箱、手机号、身份证号、银行卡号和 IP 地址
+- 系统设置 `oauth.safe_desensitization_enabled`
+  - 默认值为 `false`，在 `/settings` OAuth 区域或配置文件中切换
+  - 开启后，Codex / Claude OAuth 数据面（含图片生成请求）在上游请求前执行同样的规则型脱敏与响应恢复；Claude 链路在重签 `cch` 前完成脱敏，保证签名覆盖实送请求体
+- 模型映射 `safe_desensitization_enabled`
+  - 默认值为 `false`，在模型映射编辑页切换，随映射定义持久化在 SQLite
+  - 开启后，经该映射路由的请求强制脱敏，无论目标 Provider 或 OAuth 是否开启
 - `hook`
   - 路径固定相对项目根目录 `hooks/`
   - 管理 API 输出和配置写入只保留本机存在且位于 `hooks/` 下的 hook 文件路径
@@ -1054,6 +1074,8 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 流式解码
 - [src/proxy_core/encoder.py](/root/.ww/code/002llm/000LLM_Proxy/src/proxy_core/encoder.py)
   - 下游编码
+- [src/services/outbound_privacy.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/outbound_privacy.py)
+  - 安全脱敏的规则型出站替换与请求级响应恢复，供 Provider、Codex OAuth、Claude OAuth 与模型映射链路复用
 - [src/translators/registry.py](/root/.ww/code/002llm/000LLM_Proxy/src/translators/registry.py)
   - 4x4 translator registry
 - [src/translators/reasoning_utils.py](/root/.ww/code/002llm/000LLM_Proxy/src/translators/reasoning_utils.py)

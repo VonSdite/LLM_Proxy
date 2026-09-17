@@ -75,6 +75,26 @@
                             </div>
                             <input type="number" class="form-control" id="mappingCooldownInput" min="0" value="60">
                         </div>
+                        <div class="mapping-field">
+                            <div class="mapping-field-label">
+                                <label class="form-label" for="mappingSafeDesensitization">安全脱敏</label>
+                                <button
+                                    type="button"
+                                    class="mapping-help-button mapping-desensitization-help"
+                                    data-mapping-help-topic="safe_desensitization"
+                                    onclick="toggleMappingHelp('safe_desensitization', event)"
+                                    aria-label="查看安全脱敏说明"
+                                    aria-expanded="false"
+                                    aria-controls="mappingHelpPopover"
+                                    aria-describedby="mappingSafeDesensitizationHelp"
+                                >?</button>
+                                <span class="visually-hidden" id="mappingSafeDesensitizationHelp">开启后，经过该模型映射的请求会先把常见敏感信息替换为请求级占位符再发给目标模型，响应返回下游前恢复。目标 Provider 或 OAuth 设置已开启脱敏时无需重复开启；映射级开关可以在目标未开启时强制脱敏。</span>
+                            </div>
+                            <select class="form-select" id="mappingSafeDesensitization">
+                                <option value="false">关闭</option>
+                                <option value="true">开启</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="mapping-target-section">
                         <div class="mapping-target-label">
@@ -189,6 +209,18 @@
                     <p><code>最高优先级</code>每次请求选择当前正常候选中优先级最高的目标。高优先级目标恢复后自动切回。</p>
                     <p><code>粘滞故障切换</code>继续使用最近成功的目标。该目标进入冷却、禁用或不可用后，才重新选择。</p>
                     <p>未设置策略时使用“最高优先级”。</p>
+                `
+            },
+            safe_desensitization: {
+                title: "安全脱敏",
+                html: `
+                    <p>默认关闭。开启后，经过该映射的请求会先把请求体中的常见敏感信息替换为请求级占位符再发给目标模型，响应返回下游前恢复原值。</p>
+                    <ul>
+                        <li><strong>覆盖</strong>：密码与口令赋值、AK/SK、Token、云厂商与 SaaS 密钥、连接串凭据、私钥、邮箱、手机号、身份证号、银行卡号、IP 地址等。</li>
+                        <li><strong>强制生效</strong>：目标 Provider 或 OAuth 未开启脱敏时，映射级开关仍然生效；目标已开启时无需重复开启。</li>
+                        <li><strong>已知误伤</strong>：版本号（如 <code>2.5.7.1</code>）可能被识别为 IP；11 位订单号可能被识别为手机号；恰好通过银行卡校验的长数字会被当作卡号；<code>cookie:</code> 等头样式后面的整行说明文字可能被吞。</li>
+                        <li><strong>已知漏报</strong>：纯字母口令、中文姓名、地址等不在规则覆盖内。</li>
+                    </ul>
                 `
             },
             cooldown: {
@@ -486,6 +518,7 @@
                                 : '<span class="muted-text">未配置</span>';
                             const targetSummary = `<div class="mapping-target-summary">
                                 <span class="mapping-strategy-badge">${strategyLabel}</span>
+                                ${mapping.safe_desensitization_enabled ? '<span class="mapping-strategy-badge" title="映射级安全脱敏已开启">安全脱敏</span>' : ""}
                                 ${preview.total ? `<span class="mapping-target-count">共 ${preview.total} 个</span>` : ""}
                                 ${preview.hiddenCount ? `<span class="mapping-target-more">+${preview.hiddenCount}</span>` : ""}
                                 ${preview.hiddenCount ? `<button class="mapping-inline-button" type="button" onclick="openEditMapping('${encodedId}')">查看全部</button>` : ""}
@@ -844,6 +877,7 @@
             document.getElementById("mappingIdInput").value = "";
             document.getElementById("mappingStrategySelect").value = "highest_priority";
             document.getElementById("mappingCooldownInput").value = "60";
+            document.getElementById("mappingSafeDesensitization").value = "false";
             document.getElementById("mappingTargetList").innerHTML = "";
             mappingEditorModal.show();
         }
@@ -858,6 +892,7 @@
             document.getElementById("mappingIdInput").value = mapping.id;
             document.getElementById("mappingStrategySelect").value = mapping.strategy || "highest_priority";
             document.getElementById("mappingCooldownInput").value = mapping.cooldown_seconds_on_429;
+            document.getElementById("mappingSafeDesensitization").value = mapping.safe_desensitization_enabled ? "true" : "false";
             document.getElementById("mappingTargetList").innerHTML = "";
             mapping.targets.forEach(createTargetRow);
             mappingEditorModal.show();
@@ -894,6 +929,7 @@
                 id: document.getElementById("mappingIdInput").value.trim(),
                 strategy: document.getElementById("mappingStrategySelect").value,
                 cooldown_seconds_on_429: Number(document.getElementById("mappingCooldownInput").value),
+                safe_desensitization_enabled: document.getElementById("mappingSafeDesensitization").value === "true",
                 targets
             };
         }

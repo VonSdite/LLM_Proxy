@@ -38,7 +38,8 @@ from .codex_oauth_service import (
     CodexOAuthService,
 )
 from .openai_model_pricing import estimate_openai_request_cost_usd
-from .proxy_response_builder import ProxyResponseBuilder
+from .outbound_privacy import OutboundPrivacyContext, OutboundPrivacyService
+from .proxy_response_builder import ProxyResponseBuilder, StreamPrivacyRestorer
 from .proxy_service import ProxyErrorInfo
 
 CODEX_BACKEND_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
@@ -59,9 +60,35 @@ class CodexProxyService:
         self._logger = ctx.logger
         self._config_manager = ctx.config_manager
         self._codex_oauth_service = codex_oauth_service
+        self._privacy = OutboundPrivacyService()
         from ..translators import build_default_translator_registry
 
         self._translator_registry = build_default_translator_registry()
+
+    def _is_safe_desensitization_enabled(self, *, force: bool = False) -> bool:
+        """OAuth 上游脱敏开关：系统设置或模型映射强制任一开启即生效。"""
+        if force:
+            return True
+        if self._config_manager is None:
+            return False
+        return bool(self._config_manager.is_oauth_safe_desensitization_enabled())
+
+    def _sanitize_upstream_body(
+        self,
+        upstream_body: dict[str, Any],
+        *,
+        model_name: str,
+    ) -> tuple[dict[str, Any], OutboundPrivacyContext | None]:
+        privacy_result = self._privacy.sanitize_request_body(upstream_body)
+        context = privacy_result.context
+        if context.enabled:
+            self._logger.info(
+                "Outbound privacy desensitized request: provider=codex model=%s replacements=%s",
+                model_name,
+                context.replacement_count,
+            )
+            return privacy_result.body, context
+        return upstream_body, None
 
     def has_model(self, model_name: str) -> bool:
         """判断 Codex OAuth 是否支持指定模型。"""
@@ -94,11 +121,13 @@ class CodexProxyService:
         route_name: str | None = None,
         client_ip: str | None = None,
         on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
+        force_safe_desensitization: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """按账号配额顺序代理 Codex 请求。"""
         del trace_id
         model_name = str(request_data.get("model") or "").strip()
         target_format = str(resolved_target_format or "").strip().lower()
+        desensitize = self._is_safe_desensitization_enabled(force=force_safe_desensitization)
         if not model_name:
             return (
                 None,
@@ -164,6 +193,7 @@ class CodexProxyService:
                 route_name=route_name,
                 client_ip=client_ip,
                 on_stream_failure=on_stream_failure,
+                desensitize=desensitize,
             )
             if failure is not None:
                 if failure.error_code in {
@@ -204,9 +234,11 @@ class CodexProxyService:
         trace_id: str | None = None,
         route_name: str | None = None,
         client_ip: str | None = None,
+        force_safe_desensitization: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """把 OpenAI Images 请求包装成 Codex image_generation 工具调用。"""
         del trace_id
+        desensitize = self._is_safe_desensitization_enabled(force=force_safe_desensitization)
         normalized_action = self._normalize_image_action(action)
         if not normalized_action:
             return (
@@ -331,6 +363,7 @@ class CodexProxyService:
                 on_complete=on_complete,
                 route_name=route_name,
                 client_ip=client_ip,
+                desensitize=desensitize,
             )
             if failure is not None:
                 if failure.error_code in {
@@ -375,6 +408,7 @@ class CodexProxyService:
         client_ip: str | None,
         on_stream_failure: Callable[[dict[str, Any]], None] | None,
         allow_auth_refresh_retry: bool = True,
+        desensitize: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         translator = self._translator_registry.get("openai_responses", target_format)
         upstream_body = translator.translate_request(
@@ -397,6 +431,9 @@ class CodexProxyService:
             ),
             responses_lite=responses_lite,
         )
+        privacy_context: OutboundPrivacyContext | None = None
+        if desensitize:
+            upstream_body, privacy_context = self._sanitize_upstream_body(upstream_body, model_name=model_name)
         upstream_headers = self._build_codex_headers(
             request_headers,
             candidate,
@@ -503,6 +540,7 @@ class CodexProxyService:
                         client_ip=client_ip,
                         on_stream_failure=on_stream_failure,
                         allow_auth_refresh_retry=False,
+                        desensitize=desensitize,
                     )
                 if refresh_failure is not None:
                     return None, refresh_failure.status_code, refresh_failure
@@ -590,6 +628,7 @@ class CodexProxyService:
                     auth_file_name=candidate.name,
                     auth_account_id=self._get_candidate_usage_account_id(candidate),
                     on_stream_failure=on_stream_failure,
+                    privacy_context=privacy_context,
                 )
             except (requests.exceptions.RequestException, OSError) as exc:
                 return self._build_candidate_transport_failure(
@@ -617,6 +656,7 @@ class CodexProxyService:
                 client_ip=client_ip,
                 auth_file_name=candidate.name,
                 auth_account_id=self._get_candidate_usage_account_id(candidate),
+                privacy_context=privacy_context,
             )
         except (requests.exceptions.RequestException, OSError) as exc:
             return self._build_candidate_transport_failure(
@@ -639,6 +679,7 @@ class CodexProxyService:
         route_name: str | None,
         client_ip: str | None,
         allow_auth_refresh_retry: bool = True,
+        desensitize: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         upstream_body = self._build_image_responses_body(
             request_data,
@@ -646,6 +687,9 @@ class CodexProxyService:
             image_model=image_model,
             main_model=main_model,
         )
+        privacy_context: OutboundPrivacyContext | None = None
+        if desensitize:
+            upstream_body, privacy_context = self._sanitize_upstream_body(upstream_body, model_name=image_model)
         upstream_headers = self._build_codex_headers(
             request_headers,
             candidate,
@@ -749,6 +793,7 @@ class CodexProxyService:
                         route_name=route_name,
                         client_ip=client_ip,
                         allow_auth_refresh_retry=False,
+                        desensitize=desensitize,
                     )
                 if refresh_failure is not None:
                     return None, refresh_failure.status_code, refresh_failure
@@ -822,6 +867,7 @@ class CodexProxyService:
                     on_complete=on_complete,
                     auth_file_name=candidate.name,
                     auth_account_id=self._get_candidate_usage_account_id(candidate),
+                    privacy_context=privacy_context,
                 ),
                 upstream_response.status_code,
                 None,
@@ -834,6 +880,7 @@ class CodexProxyService:
             on_complete=on_complete,
             auth_file_name=candidate.name,
             auth_account_id=self._get_candidate_usage_account_id(candidate),
+            privacy_context=privacy_context,
         )
 
     def _build_candidate_transport_failure(
@@ -1393,6 +1440,7 @@ class CodexProxyService:
         auth_file_name: str,
         auth_account_id: str,
         on_stream_failure: Callable[[dict[str, Any]], None] | None,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> Response:
         del route_name, client_ip
         downstream_headers = self._filter_response_headers(response.headers)
@@ -1419,6 +1467,7 @@ class CodexProxyService:
             stream_failure_message = ""
             transport_failed = False
             processing_failed = False
+            stream_privacy_restorer = StreamPrivacyRestorer(privacy_context)
 
             def emit_stream_error(message: str, error_type: str) -> Iterator[bytes]:
                 nonlocal terminal_sent
@@ -1468,25 +1517,26 @@ class CodexProxyService:
                     )
                     ProxyResponseBuilder._update_meta_from_stream_state(meta, state)
                     for chunk in chunks:
-                        terminal_chunk = chunk.kind == "done" or is_terminal_chunk(chunk, target_format)
-                        if chunk.kind == "done":
-                            if terminal_sent:
+                        for restored_chunk in stream_privacy_restorer.restore_chunk(chunk):
+                            terminal_chunk = restored_chunk.kind == "done" or is_terminal_chunk(restored_chunk, target_format)
+                            if restored_chunk.kind == "done":
+                                if terminal_sent:
+                                    continue
+                            if terminal_chunk and not completed and failed_payload is None:
                                 continue
-                        if terminal_chunk and not completed and failed_payload is None:
-                            continue
 
-                        if chunk.kind == "json" and isinstance(chunk.payload, dict):
-                            if (
-                                target_format == "openai_chat"
-                                and not forward_stream_usage
-                                and self._is_usage_only_stream_chunk(chunk.payload)
-                            ):
-                                continue
-                        encoded = encode_downstream_chunk(chunk, target_format)
-                        if encoded:
-                            if terminal_chunk:
-                                terminal_sent = True
-                            yield encoded
+                            if restored_chunk.kind == "json" and isinstance(restored_chunk.payload, dict):
+                                if (
+                                    target_format == "openai_chat"
+                                    and not forward_stream_usage
+                                    and self._is_usage_only_stream_chunk(restored_chunk.payload)
+                                ):
+                                    continue
+                            encoded = encode_downstream_chunk(restored_chunk, target_format)
+                            if encoded:
+                                if terminal_chunk:
+                                    terminal_sent = True
+                                yield encoded
             except GeneratorExit:
                 downstream_cancelled = True
                 raise
@@ -1623,6 +1673,7 @@ class CodexProxyService:
         client_ip: str | None,
         auth_file_name: str,
         auth_account_id: str,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         del route_name, client_ip
         try:
@@ -1665,6 +1716,8 @@ class CodexProxyService:
                 translated_request,
                 payload_for_translation,
             )
+            if privacy_context is not None:
+                translated_payload = privacy_context.restore_payload(translated_payload)
             meta = ProxyResponseBuilder._create_empty_meta()
             ProxyResponseBuilder._update_meta_from_payload(
                 meta,
@@ -1713,6 +1766,7 @@ class CodexProxyService:
         on_complete: Callable[[dict[str, Any]], None] | None,
         auth_file_name: str,
         auth_account_id: str,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         try:
             completed_payload, failed_payload, image_items = self._collect_image_response_events(response)
@@ -1755,6 +1809,8 @@ class CodexProxyService:
                 )
 
             payload = self._build_images_api_response(results, created_at, usage, response_format)
+            if privacy_context is not None:
+                payload = privacy_context.restore_payload(payload)
             if on_complete is not None:
                 try:
                     on_complete(
@@ -1790,6 +1846,7 @@ class CodexProxyService:
         on_complete: Callable[[dict[str, Any]], None] | None,
         auth_file_name: str,
         auth_account_id: str,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> Response:
         downstream_headers = self._filter_response_headers(response.headers)
         downstream_headers["Content-Type"] = "text/event-stream; charset=utf-8"
@@ -1821,6 +1878,8 @@ class CodexProxyService:
                         completed = True
                         results, _, usage = self._extract_image_results(payload, image_items)
                         for result in results:
+                            if privacy_context is not None:
+                                result = privacy_context.restore_payload(result)
                             yield self._build_image_completed_frame(
                                 result,
                                 usage,

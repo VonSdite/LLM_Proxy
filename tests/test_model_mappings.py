@@ -561,6 +561,50 @@ class ModelMappingServiceTests(unittest.TestCase):
         self.assertFalse(disabled["effective"])
         self.assertFalse(self.service.has_mapping("enabled_b"))
 
+    def test_mapping_safe_desensitization_flag_roundtrip_and_query(self) -> None:
+        payload = self._mapping_payload("desensitized")
+        payload["safe_desensitization_enabled"] = True
+        created = self.service.create_mapping(payload)
+        self.assertTrue(created["safe_desensitization_enabled"])
+        self.assertTrue(self.service.is_safe_desensitization_enabled("desensitized"))
+
+        plain = self.service.create_mapping(self._mapping_payload("plain"))
+        self.assertFalse(plain["safe_desensitization_enabled"])
+        self.assertFalse(self.service.is_safe_desensitization_enabled("plain"))
+        self.assertFalse(self.service.is_safe_desensitization_enabled("missing_mapping"))
+
+        recreated = self._build_service()
+        self.assertTrue(recreated.is_safe_desensitization_enabled("desensitized"))
+        self.assertFalse(recreated.is_safe_desensitization_enabled("plain"))
+
+        copied = self.service.copy_mapping("desensitized")
+        self.assertTrue(copied["safe_desensitization_enabled"])
+
+        updated = self.service.update_mapping(
+            "plain",
+            {
+                "id": "plain",
+                "targets": [{"model_id": "alpha/fast", "priority": 10, "enabled": True}],
+            },
+        )
+        self.assertFalse(updated["safe_desensitization_enabled"])
+        updated = self.service.update_mapping(
+            "plain",
+            {
+                "id": "plain",
+                "safe_desensitization_enabled": True,
+                "targets": [{"model_id": "alpha/fast", "priority": 10, "enabled": True}],
+            },
+        )
+        self.assertTrue(updated["safe_desensitization_enabled"])
+        self.assertTrue(self.service.is_safe_desensitization_enabled("plain"))
+
+    def test_mapping_safe_desensitization_rejects_non_boolean(self) -> None:
+        payload = self._mapping_payload("bad_flag")
+        payload["safe_desensitization_enabled"] = "yes"
+        with self.assertRaisesRegex(ValueError, "布尔值"):
+            self.service.create_mapping(payload)
+
     def test_copy_mapping_inserts_definition_below_source_without_runtime_state(self) -> None:
         source_payload = self._mapping_payload("enabled_a")
         source_payload["strategy"] = "sticky_failover"

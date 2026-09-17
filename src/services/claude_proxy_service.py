@@ -33,7 +33,8 @@ from ..utils.proxy_warning import (
 )
 from .anthropic_billing import resign_anthropic_messages_body_cch
 from .claude_oauth_service import ClaudeAuthCandidate, ClaudeOAuthService
-from .proxy_response_builder import ProxyResponseBuilder
+from .outbound_privacy import OutboundPrivacyContext, OutboundPrivacyService
+from .proxy_response_builder import ProxyResponseBuilder, StreamPrivacyRestorer
 from .proxy_service import ProxyErrorInfo
 
 CLAUDE_MESSAGES_URL = "https://api.anthropic.com/v1/messages?beta=true"
@@ -59,9 +60,35 @@ class ClaudeProxyService:
         self._logger = ctx.logger
         self._config_manager = ctx.config_manager
         self._claude_oauth_service = claude_oauth_service
+        self._privacy = OutboundPrivacyService()
         from ..translators import build_default_translator_registry
 
         self._translator_registry = build_default_translator_registry()
+
+    def _is_safe_desensitization_enabled(self, *, force: bool = False) -> bool:
+        """OAuth 上游脱敏开关：系统设置或模型映射强制任一开启即生效。"""
+        if force:
+            return True
+        if self._config_manager is None:
+            return False
+        return bool(self._config_manager.is_oauth_safe_desensitization_enabled())
+
+    def _sanitize_upstream_body(
+        self,
+        upstream_body: dict[str, Any],
+        *,
+        model_name: str,
+    ) -> tuple[dict[str, Any], OutboundPrivacyContext | None]:
+        privacy_result = self._privacy.sanitize_request_body(upstream_body)
+        context = privacy_result.context
+        if context.enabled:
+            self._logger.info(
+                "Outbound privacy desensitized request: provider=claude model=%s replacements=%s",
+                model_name,
+                context.replacement_count,
+            )
+            return privacy_result.body, context
+        return upstream_body, None
 
     def has_model(self, model_name: str) -> bool:
         """判断 Claude OAuth 是否支持指定模型。"""
@@ -82,11 +109,13 @@ class ClaudeProxyService:
         route_name: str | None = None,
         client_ip: str | None = None,
         on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
+        force_safe_desensitization: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """按认证文件顺序代理 Claude OAuth 请求。"""
         del trace_id, forward_stream_usage
         model_name = str(request_data.get("model") or "").strip()
         target_format = str(resolved_target_format or "").strip().lower()
+        desensitize = self._is_safe_desensitization_enabled(force=force_safe_desensitization)
         if not model_name:
             return (
                 None,
@@ -135,6 +164,7 @@ class ClaudeProxyService:
                 route_name=route_name,
                 client_ip=client_ip,
                 on_stream_failure=on_stream_failure,
+                desensitize=desensitize,
             )
             if failure is not None:
                 if failure.error_code in {
@@ -167,6 +197,7 @@ class ClaudeProxyService:
         route_name: str | None,
         client_ip: str | None,
         on_stream_failure: Callable[[dict[str, Any]], None] | None,
+        desensitize: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         translator = self._translator_registry.get("claude_chat", target_format)
         requested_stream = bool(request_data.get("stream", False))
@@ -177,6 +208,10 @@ class ClaudeProxyService:
         )
         extra_betas, upstream_body = self._extract_betas(upstream_body)
         self._apply_claude_body_defaults(upstream_body, model_name, requested_stream)
+        # 脱敏必须在重签 cch 之前完成，保证签名覆盖实际上送的请求体。
+        privacy_context: OutboundPrivacyContext | None = None
+        if desensitize:
+            upstream_body, privacy_context = self._sanitize_upstream_body(upstream_body, model_name=model_name)
         resign_anthropic_messages_body_cch(upstream_body)
         upstream_headers = self._build_claude_headers(
             request_headers,
@@ -279,6 +314,7 @@ class ClaudeProxyService:
                     client_ip=client_ip,
                     auth_file_name=candidate.name,
                     on_stream_failure=on_stream_failure,
+                    privacy_context=privacy_context,
                 )
             except (requests.exceptions.RequestException, OSError) as exc:
                 return self._build_candidate_transport_failure(
@@ -305,6 +341,7 @@ class ClaudeProxyService:
                 route_name=route_name,
                 client_ip=client_ip,
                 auth_file_name=candidate.name,
+                privacy_context=privacy_context,
             )
         except (requests.exceptions.RequestException, OSError) as exc:
             return self._build_candidate_transport_failure(
@@ -448,6 +485,7 @@ class ClaudeProxyService:
         client_ip: str | None,
         auth_file_name: str,
         on_stream_failure: Callable[[dict[str, Any]], None] | None,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> Response:
         del route_name, client_ip
         downstream_headers = self._filter_response_headers(response.headers)
@@ -474,6 +512,7 @@ class ClaudeProxyService:
             stream_failure_message = ""
             transport_failed = False
             processing_failed = False
+            stream_privacy_restorer = StreamPrivacyRestorer(privacy_context)
 
             def emit_stream_error(message: str, error_type: str) -> Iterator[bytes]:
                 nonlocal terminal_sent
@@ -523,18 +562,19 @@ class ClaudeProxyService:
                     )
                     ProxyResponseBuilder._update_meta_from_stream_state(meta, state)
                     for chunk in chunks:
-                        terminal_chunk = chunk.kind == "done" or is_terminal_chunk(chunk, target_format)
-                        if chunk.kind == "done":
-                            if terminal_sent:
+                        for restored_chunk in stream_privacy_restorer.restore_chunk(chunk):
+                            terminal_chunk = restored_chunk.kind == "done" or is_terminal_chunk(restored_chunk, target_format)
+                            if restored_chunk.kind == "done":
+                                if terminal_sent:
+                                    continue
+                            if terminal_chunk and not completed and not upstream_error_message:
                                 continue
-                        if terminal_chunk and not completed and not upstream_error_message:
-                            continue
 
-                        encoded = encode_downstream_chunk(chunk, target_format)
-                        if encoded:
-                            if terminal_chunk:
-                                terminal_sent = True
-                            yield encoded
+                            encoded = encode_downstream_chunk(restored_chunk, target_format)
+                            if encoded:
+                                if terminal_chunk:
+                                    terminal_sent = True
+                                yield encoded
             except GeneratorExit:
                 downstream_cancelled = True
                 raise
@@ -660,6 +700,7 @@ class ClaudeProxyService:
         route_name: str | None,
         client_ip: str | None,
         auth_file_name: str,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         del route_name, client_ip
         body = self._read_response_body(response)
@@ -694,6 +735,8 @@ class ClaudeProxyService:
             translated_request,
             payload,
         )
+        if privacy_context is not None:
+            translated_payload = privacy_context.restore_payload(translated_payload)
         if isinstance(translated_payload, dict):
             ProxyResponseBuilder._update_meta_from_payload(
                 meta,

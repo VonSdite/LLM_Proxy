@@ -60,6 +60,7 @@ class SettingsService:
                 "proxy_mode": self._config_manager.get_oauth_proxy_mode(),
                 "proxy": self._config_manager.get_oauth_proxy() or "",
                 "verify_ssl": self._config_manager.is_oauth_verify_ssl_enabled(),
+                "safe_desensitization_enabled": self._config_manager.is_oauth_safe_desensitization_enabled(),
             },
             "api_keys": {
                 "enabled": self._config_manager.is_api_key_management_enabled(),
@@ -215,6 +216,12 @@ class SettingsService:
         verify_ssl = parse_optional_bool(oauth_payload.get("verify_ssl"))
         if verify_ssl is None:
             raise ValueError("OAuth SSL verify flag is required")
+        safe_desensitization = parse_optional_bool(
+            oauth_payload.get("safe_desensitization_enabled"),
+            default=self._config_manager.is_oauth_safe_desensitization_enabled(),
+        )
+        if safe_desensitization is None:
+            raise ValueError("OAuth safe desensitization flag is required")
 
         config = self._config_manager.get_raw_config()
         oauth_config = self._ensure_mapping(config, "oauth")
@@ -222,6 +229,7 @@ class SettingsService:
         oauth_config["proxy_mode"] = proxy_mode
         oauth_config["proxy"] = proxy
         oauth_config["verify_ssl"] = verify_ssl
+        oauth_config["safe_desensitization_enabled"] = safe_desensitization
 
         self._config_manager.write_raw_config(config)
         return {
@@ -317,7 +325,7 @@ class SettingsService:
             )
             client_ip_values = (real_ip_enabled, real_ip_header)
 
-        oauth_values: tuple[bool, str, str, bool] | None = None
+        oauth_values: tuple[bool, str, str, bool, bool] | None = None
         if "oauth" in payload:
             oauth_payload = payload.get("oauth")
             if not isinstance(oauth_payload, dict):
@@ -340,7 +348,13 @@ class SettingsService:
             verify_ssl = parse_optional_bool(oauth_payload.get("verify_ssl"))
             if verify_ssl is None:
                 raise ValueError("OAuth SSL verify flag is required")
-            oauth_values = (enabled, proxy_mode, proxy, verify_ssl)
+            safe_desensitization = parse_optional_bool(
+                oauth_payload.get("safe_desensitization_enabled"),
+                default=self._config_manager.is_oauth_safe_desensitization_enabled(),
+            )
+            if safe_desensitization is None:
+                raise ValueError("OAuth safe desensitization flag is required")
+            oauth_values = (enabled, proxy_mode, proxy, verify_ssl, safe_desensitization)
 
         api_key_values: tuple[bool] | None = None
         if "api_keys" in payload:
@@ -390,6 +404,7 @@ class SettingsService:
             oauth_config["proxy_mode"] = oauth_values[1]
             oauth_config["proxy"] = oauth_values[2]
             oauth_config["verify_ssl"] = oauth_values[3]
+            oauth_config["safe_desensitization_enabled"] = oauth_values[4]
 
         if api_key_values is not None:
             api_keys_config = self._ensure_mapping(config, "api_keys")

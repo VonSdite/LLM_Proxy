@@ -23,6 +23,7 @@ from src.services.codex_proxy_service import (
     CODEX_PROXY_WARNING_STATUS_CODE,
     CodexProxyService,
 )
+from src.services.outbound_privacy import PLACEHOLDER_PREFIX
 
 
 class FakeLogger:
@@ -50,11 +51,17 @@ class FakeLogger:
 
 
 class FakeConfigManager:
+    def __init__(self, *, oauth_safe_desensitization_enabled: bool = False) -> None:
+        self.oauth_safe_desensitization_enabled = oauth_safe_desensitization_enabled
+
     def get_oauth_proxy(self) -> None:
         return None
 
     def is_oauth_verify_ssl_enabled(self) -> bool:
         return False
+
+    def is_oauth_safe_desensitization_enabled(self) -> bool:
+        return self.oauth_safe_desensitization_enabled
 
     def is_llm_request_debug_enabled(self) -> bool:
         return False
@@ -1573,6 +1580,151 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual("too many tokens", auth_entries["codex-first.json"]["usage_status_message"])
         self.assertEqual("codex_stream_failed", auth_entries["codex-first.json"]["usage_error_type"])
         self.assertEqual(1, len(completed_meta))
+
+    @staticmethod
+    def _find_placeholder(value: Any) -> str | None:
+        if isinstance(value, str) and PLACEHOLDER_PREFIX in value:
+            start = value.index(PLACEHOLDER_PREFIX)
+            end = value.find("__", start + len(PLACEHOLDER_PREFIX))
+            return value[start:] if end < 0 else value[start : end + 2]
+        if isinstance(value, dict):
+            for item in value.values():
+                found = CodexProxyServiceTests._find_placeholder(item)
+                if found:
+                    return found
+        if isinstance(value, list):
+            for item in value:
+                found = CodexProxyServiceTests._find_placeholder(item)
+                if found:
+                    return found
+        return None
+
+    def test_oauth_safe_desensitization_sanitizes_upstream_body_and_restores_nonstream_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root, FakeConfigManager(oauth_safe_desensitization_enabled=True))
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            captured_body: dict[str, Any] = {}
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, headers, stream, timeout, kwargs
+                captured_body.update(dict(json or {}))
+                placeholder = self._find_placeholder(captured_body)
+                assert placeholder is not None
+                completed = (
+                    '{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4",'
+                    '"created_at":1770000000,"output":[{"type":"message","role":"assistant",'
+                    '"content":[{"type":"output_text","text":"echo ' + placeholder + '"}]}],'
+                    '"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}'
+                )
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[f"data: {completed}\n\n".encode("utf-8")],
+                )
+
+            with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {
+                        "model": "gpt-5.4",
+                        "input": "password=SuperSecret123",
+                        "stream": False,
+                    },
+                    {},
+                    resolved_target_format="openai_responses",
+                )
+            response_body = json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(self._find_placeholder(captured_body))
+        self.assertNotIn("SuperSecret123", json.dumps(captured_body))
+        response_text = json.dumps(response_body)
+        self.assertIn("SuperSecret123", response_text)
+        self.assertNotIn(PLACEHOLDER_PREFIX, response_text)
+
+    def test_oauth_safe_desensitization_restores_streaming_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root, FakeConfigManager(oauth_safe_desensitization_enabled=True))
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            captured_body: dict[str, Any] = {}
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, headers, stream, timeout, kwargs
+                captured_body.update(dict(json or {}))
+                placeholder = self._find_placeholder(captured_body)
+                assert placeholder is not None
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        f'data: {{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"echo {placeholder}"}}\n\n'.encode("utf-8"),
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n',
+                    ],
+                )
+
+            with ctx.flask_app.test_request_context("/v1/chat/completions"):
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                    response, status_code, failure = proxy_service.proxy_request(
+                        {
+                            "model": "gpt-5.4",
+                            "messages": [{"role": "user", "content": "password=SuperSecret123"}],
+                            "stream": True,
+                        },
+                        {},
+                        resolved_target_format="openai_chat",
+                    )
+                    streamed = b"".join(response.response)  # type: ignore[union-attr]
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(self._find_placeholder(captured_body))
+        self.assertNotIn("SuperSecret123", json.dumps(captured_body))
+        self.assertIn(b"SuperSecret123", streamed)
+        self.assertNotIn(PLACEHOLDER_PREFIX.encode("utf-8"), streamed)
+
+    def test_force_safe_desensitization_overrides_oauth_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-first.json", "access-first", mtime=2000)
+            ctx = build_context(root, FakeConfigManager(oauth_safe_desensitization_enabled=False))
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            captured_body: dict[str, Any] = {}
+
+            def fake_post(url, headers=None, json=None, stream=None, timeout=None, **kwargs):
+                del url, headers, stream, timeout, kwargs
+                captured_body.update(dict(json or {}))
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n'
+                    ],
+                )
+
+            with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {
+                        "model": "gpt-5.4",
+                        "input": "password=SuperSecret123",
+                        "stream": False,
+                    },
+                    {},
+                    resolved_target_format="openai_responses",
+                    force_safe_desensitization=True,
+                )
+                json.loads(response.get_data(as_text=True))  # type: ignore[union-attr]
+
+        self.assertIsNone(failure)
+        self.assertEqual(200, status_code)
+        self.assertIsNotNone(self._find_placeholder(captured_body))
+        self.assertNotIn("SuperSecret123", json.dumps(captured_body))
 
     @staticmethod
     def _build_stream_request(target_format: str) -> dict[str, Any]:

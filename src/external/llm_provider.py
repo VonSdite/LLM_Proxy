@@ -32,6 +32,7 @@ class LLMProvider:
     max_retries: int = 3
     verify_ssl: bool = False
     force_upstream_stream: bool = False
+    safe_desensitization_enabled: bool = False
     hook: HookModule | None = None
 
     def __post_init__(self) -> None:

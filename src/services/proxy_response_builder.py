@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -35,6 +36,7 @@ from ..translators.stream_aggregator import (
     aggregate_stream_to_native_response,
     infer_stream_aggregation_status_code,
 )
+from .outbound_privacy import OutboundPrivacyContext
 from .proxy_trace_logger import ProxyTraceLogger
 
 
@@ -82,6 +84,114 @@ class _PrefetchedStreamIterator:
         close = getattr(self._stream, "close", None)
         if callable(close):
             close()
+
+
+class StreamPrivacyRestorer:
+    """按流式文本路径缓存半截占位符，并在完整后恢复。"""
+
+    def __init__(self, privacy_context: OutboundPrivacyContext | None) -> None:
+        self._privacy_context = privacy_context
+        self._pending_by_key: dict[tuple[Any, ...], str] = {}
+        self._template_by_key: dict[tuple[Any, ...], tuple[DownstreamChunk, tuple[Any, ...]]] = {}
+
+    @property
+    def enabled(self) -> bool:
+        return self._privacy_context is not None and self._privacy_context.enabled
+
+    def restore_chunk(self, chunk: DownstreamChunk) -> list[DownstreamChunk]:
+        if not self.enabled:
+            return [chunk]
+        if chunk.kind == "done":
+            return [*self.flush(), chunk]
+        payload = self._restore_value(
+            chunk.payload,
+            chunk=chunk,
+            path=(),
+            key_prefix=(chunk.event or "", chunk.kind),
+        )
+        if payload is chunk.payload:
+            return [chunk]
+        if isinstance(payload, (dict, list)):
+            return [DownstreamChunk(kind="json", payload=payload, event=chunk.event)]
+        return [DownstreamChunk(kind="text", payload=payload, event=chunk.event)]
+
+    def flush(self) -> list[DownstreamChunk]:
+        if not self.enabled or not self._pending_by_key:
+            return []
+        assert self._privacy_context is not None
+        chunks: list[DownstreamChunk] = []
+        for key, pending in list(self._pending_by_key.items()):
+            template = self._template_by_key.get(key)
+            if template is None:
+                continue
+            chunk, path = template
+            payload = self._replace_path(
+                chunk.payload,
+                path,
+                self._privacy_context.restore_text(pending),
+            )
+            if isinstance(payload, (dict, list)):
+                chunks.append(DownstreamChunk(kind="json", payload=payload, event=chunk.event))
+            else:
+                chunks.append(DownstreamChunk(kind="text", payload=payload, event=chunk.event))
+        self._pending_by_key.clear()
+        self._template_by_key.clear()
+        return chunks
+
+    def _restore_value(
+        self,
+        value: Any,
+        *,
+        chunk: DownstreamChunk,
+        path: tuple[Any, ...],
+        key_prefix: tuple[Any, ...],
+    ) -> Any:
+        if isinstance(value, str):
+            assert self._privacy_context is not None
+            key = (*key_prefix, *path)
+            combined = self._pending_by_key.pop(key, "") + value
+            restored, pending = self._privacy_context.restore_stream_text_fragment(combined)
+            if pending:
+                self._pending_by_key[key] = pending
+                self._template_by_key[key] = (chunk, path)
+            return restored
+        if isinstance(value, dict):
+            changed = False
+            result: dict[Any, Any] = {}
+            for item_key, item_value in value.items():
+                restored_item = self._restore_value(
+                    item_value,
+                    chunk=chunk,
+                    path=(*path, item_key),
+                    key_prefix=key_prefix,
+                )
+                result[item_key] = restored_item
+                changed = changed or restored_item is not item_value
+            return result if changed else value
+        if isinstance(value, list):
+            changed = False
+            result: list[Any] = []
+            for index, item_value in enumerate(value):
+                restored_item = self._restore_value(
+                    item_value,
+                    chunk=chunk,
+                    path=(*path, index),
+                    key_prefix=key_prefix,
+                )
+                result.append(restored_item)
+                changed = changed or restored_item is not item_value
+            return result if changed else value
+        return value
+
+    def _replace_path(self, payload: Any, path: tuple[Any, ...], value: str) -> Any:
+        if not path:
+            return value
+        result = copy.deepcopy(payload)
+        current = result
+        for key in path[:-1]:
+            current = current[key]
+        current[path[-1]] = value
+        return result
 
 
 class ProxyResponseBuilder:
@@ -149,6 +259,7 @@ class ProxyResponseBuilder:
         route_name: str | None = None,
         client_ip: str | None = None,
         on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> Response:
         response = opened.response
         meta = self._create_empty_meta()
@@ -163,6 +274,7 @@ class ProxyResponseBuilder:
         downstream_headers = self._filter_response_headers(getattr(response, "headers", {}))
         downstream_headers["Content-Type"] = "text/event-stream; charset=utf-8"
         downstream_headers["Cache-Control"] = "no-cache"
+        stream_privacy_restorer = StreamPrivacyRestorer(privacy_context)
 
         def mark_downstream_started() -> None:
             nonlocal downstream_started
@@ -255,31 +367,32 @@ class ProxyResponseBuilder:
                     guarded_chunk = self._guard_stream_chunk(provider, request_ctx, downstream_chunk)
                     if guarded_chunk is None:
                         continue
-                    terminal_chunk = is_terminal_chunk(guarded_chunk, downstream_target_format)
-                    terminal_already_sent = terminal_sent
-                    if guarded_chunk.kind == "done":
-                        if terminal_already_sent:
+                    for restored_chunk in stream_privacy_restorer.restore_chunk(guarded_chunk):
+                        terminal_chunk = is_terminal_chunk(restored_chunk, downstream_target_format)
+                        terminal_already_sent = terminal_sent
+                        if restored_chunk.kind == "done":
+                            if terminal_already_sent:
+                                continue
+                            encoded_terminal = encode_downstream_chunk(restored_chunk, downstream_target_format)
+                            if encoded_terminal:
+                                self._extend_trace_buffer(downstream_payload_buffer, encoded_terminal)
+                                if terminal_chunk:
+                                    terminal_sent = True
+                                yield encoded_terminal
                             continue
-                        encoded_terminal = encode_downstream_chunk(guarded_chunk, downstream_target_format)
-                        if encoded_terminal:
-                            self._extend_trace_buffer(downstream_payload_buffer, encoded_terminal)
+                        if (
+                            downstream_target_format == "openai_chat"
+                            and restored_chunk.kind == "json"
+                            and not forward_stream_usage
+                            and self._is_usage_only_stream_chunk(restored_chunk.payload)
+                        ):
+                            continue
+                        encoded_chunk = encode_downstream_chunk(restored_chunk, downstream_target_format)
+                        if encoded_chunk:
+                            self._extend_trace_buffer(downstream_payload_buffer, encoded_chunk)
                             if terminal_chunk:
                                 terminal_sent = True
-                            yield encoded_terminal
-                        continue
-                    if (
-                        downstream_target_format == "openai_chat"
-                        and guarded_chunk.kind == "json"
-                        and not forward_stream_usage
-                        and self._is_usage_only_stream_chunk(guarded_chunk.payload)
-                    ):
-                        continue
-                    encoded_chunk = encode_downstream_chunk(guarded_chunk, downstream_target_format)
-                    if encoded_chunk:
-                        self._extend_trace_buffer(downstream_payload_buffer, encoded_chunk)
-                        if terminal_chunk:
-                            terminal_sent = True
-                        yield encoded_chunk
+                            yield encoded_chunk
 
             def emit_stream_error(message: str, error_type: str) -> Iterator[bytes]:
                 nonlocal terminal_sent
@@ -568,6 +681,7 @@ class ProxyResponseBuilder:
         trace_id: str | None = None,
         route_name: str | None = None,
         client_ip: str | None = None,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> Response:
         """聚合上游流式响应，并以单个非流式响应返回给下游。"""
         response = opened.response
@@ -611,6 +725,7 @@ class ProxyResponseBuilder:
                 )
             guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
             body_to_send = translated_payload if guarded_payload is None else guarded_payload
+            body_to_send = self._restore_payload(body_to_send, privacy_context)
             response_body = encode_downstream_response_body(body_to_send, downstream_target_format)
             headers = self._filter_response_headers(getattr(response, "headers", {}))
             headers["Content-Type"] = self._resolve_nonstream_content_type(body_to_send, opened.content_type)
@@ -685,6 +800,7 @@ class ProxyResponseBuilder:
                 client_ip=client_ip,
                 raw_response_headers=raw_response_headers,
                 upstream_payload_buffer=upstream_payload_buffer,
+                privacy_context=privacy_context,
             )
         except HookAbortError as exc:
             return self._build_aggregated_error_response(
@@ -703,6 +819,7 @@ class ProxyResponseBuilder:
                 client_ip=client_ip,
                 raw_response_headers=raw_response_headers,
                 upstream_payload_buffer=upstream_payload_buffer,
+                privacy_context=privacy_context,
             )
         except UnicodeError as exc:
             aggregation_error = StreamAggregationError.from_message(
@@ -727,6 +844,7 @@ class ProxyResponseBuilder:
                 client_ip=client_ip,
                 raw_response_headers=raw_response_headers,
                 upstream_payload_buffer=upstream_payload_buffer,
+                privacy_context=privacy_context,
             )
         finally:
             response.close()
@@ -750,6 +868,7 @@ class ProxyResponseBuilder:
         raw_response_headers: dict[str, Any],
         upstream_payload_buffer: bytearray | None,
         finalize_status_code: int | None = None,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> Response:
         """把尚未提交下游的聚合错误转换为目标协议的普通响应。"""
         payload = self._build_nonstream_error_payload(
@@ -759,6 +878,7 @@ class ProxyResponseBuilder:
             error_code=error_code,
             error_payload=error_payload,
         )
+        payload = self._restore_payload(payload, privacy_context)
         response_body = encode_downstream_response_body(payload, downstream_target_format)
         headers = self._filter_response_headers(raw_response_headers)
         headers["Content-Type"] = "application/json; charset=utf-8"
@@ -858,6 +978,7 @@ class ProxyResponseBuilder:
         trace_id: str | None = None,
         route_name: str | None = None,
         client_ip: str | None = None,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> Response:
         response = opened.response
         try:
@@ -903,6 +1024,7 @@ class ProxyResponseBuilder:
                 )
             guarded_payload = provider.apply_response_guard(request_ctx, translated_payload)
             body_to_send = translated_payload if guarded_payload is None else guarded_payload
+            body_to_send = self._restore_payload(body_to_send, privacy_context)
 
             completion_meta = public_usage_meta(meta)
             if on_complete:
@@ -950,11 +1072,13 @@ class ProxyResponseBuilder:
         client_ip: str | None = None,
         request_model: str | None = None,
         upstream_model: str | None = None,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> tuple[bytes, dict[str, str], str | None]:
         response = opened.response
         try:
             body = self._read_response_body(response)
             summary = self._summarize_upstream_error(body, opened.content_type)
+            downstream_body = self._restore_response_bytes(body, privacy_context)
             log_method = self._logger.warning if opened.status_code < 500 else self._logger.error
             log_method(
                 "Upstream returned error: provider=%s transport=%s format=%s status=%s stream=%s error=%s",
@@ -987,7 +1111,7 @@ class ProxyResponseBuilder:
                 stream=opened.is_stream,
                 error_summary=summary,
             )
-            return body, headers, summary
+            return downstream_body, headers, summary
         finally:
             response.close()
 
@@ -1002,6 +1126,7 @@ class ProxyResponseBuilder:
         client_ip: str | None = None,
         request_model: str | None = None,
         upstream_model: str | None = None,
+        privacy_context: OutboundPrivacyContext | None = None,
     ) -> tuple[Response, str | None]:
         body, headers, summary = self.consume_upstream_error(
             provider=provider,
@@ -1012,6 +1137,7 @@ class ProxyResponseBuilder:
             client_ip=client_ip,
             request_model=request_model,
             upstream_model=upstream_model,
+            privacy_context=privacy_context,
         )
         self._trace.log_entry(
             stage="downstream_response",
@@ -1058,6 +1184,21 @@ class ProxyResponseBuilder:
         if isinstance(payload, (dict, list)):
             return DownstreamChunk(kind="json", payload=payload, event=chunk.event)
         return DownstreamChunk(kind="text", payload=payload, event=chunk.event)
+
+    @staticmethod
+    def _restore_payload(payload: Any, privacy_context: OutboundPrivacyContext | None) -> Any:
+        if privacy_context is None or not privacy_context.enabled:
+            return payload
+        return privacy_context.restore_payload(payload)
+
+    @staticmethod
+    def _restore_response_bytes(
+        payload: bytes,
+        privacy_context: OutboundPrivacyContext | None,
+    ) -> bytes:
+        if privacy_context is None or not privacy_context.enabled:
+            return payload
+        return privacy_context.restore_bytes(payload)
 
     @staticmethod
     def build_stream_error_chunks(

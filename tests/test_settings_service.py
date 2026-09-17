@@ -182,6 +182,40 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual("http://127.0.0.1:7890", persisted["oauth"]["proxy"])
         self.assertTrue(persisted["oauth"]["verify_ssl"])
 
+    def test_update_oauth_settings_persists_safe_desensitization_flag(self) -> None:
+        self.assertFalse(self.service.get_system_settings()["oauth"]["safe_desensitization_enabled"])
+
+        result = self.service.update_oauth_settings(
+            {
+                "oauth": {
+                    "enabled": True,
+                    "proxy_mode": "direct",
+                    "proxy": "",
+                    "verify_ssl": False,
+                    "safe_desensitization_enabled": True,
+                }
+            }
+        )
+
+        self.assertTrue(result["settings"]["oauth"]["safe_desensitization_enabled"])
+        self.assertTrue(self.config_manager.is_oauth_safe_desensitization_enabled())
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        self.assertTrue(persisted["oauth"]["safe_desensitization_enabled"])
+
+        self.service.update_oauth_settings(
+            {
+                "oauth": {
+                    "enabled": True,
+                    "proxy_mode": "direct",
+                    "proxy": "",
+                    "verify_ssl": False,
+                    "safe_desensitization_enabled": False,
+                }
+            }
+        )
+        self.assertFalse(self.service.get_system_settings()["oauth"]["safe_desensitization_enabled"])
+
     def test_update_oauth_settings_supports_system_proxy_mode(self) -> None:
         result = self.service.update_oauth_settings(
             {

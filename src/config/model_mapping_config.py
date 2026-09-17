@@ -15,6 +15,7 @@ DEFAULT_MODEL_MAPPING_COOLDOWN_SECONDS_ON_429 = 60
 DEFAULT_MODEL_MAPPING_TARGET_PRIORITY = 1
 MODEL_MAPPING_STRATEGY_HIGHEST_PRIORITY = "highest_priority"
 MODEL_MAPPING_STRATEGY_STICKY_FAILOVER = "sticky_failover"
+DEFAULT_MODEL_MAPPING_SAFE_DESENSITIZATION = False
 SUPPORTED_MODEL_MAPPING_STRATEGIES = frozenset(
     {
         MODEL_MAPPING_STRATEGY_HIGHEST_PRIORITY,
@@ -107,6 +108,7 @@ class ModelMappingSchema:
     strategy: str
     cooldown_seconds_on_429: int
     targets: tuple[ModelMappingTargetSchema, ...]
+    safe_desensitization_enabled: bool = DEFAULT_MODEL_MAPPING_SAFE_DESENSITIZATION
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> ModelMappingSchema:
@@ -116,6 +118,9 @@ class ModelMappingSchema:
         enabled = payload.get("enabled", True)
         if not isinstance(enabled, bool):
             raise ValueError("模型映射启用状态必须是布尔值")
+        safe_desensitization_enabled = payload.get("safe_desensitization_enabled", DEFAULT_MODEL_MAPPING_SAFE_DESENSITIZATION)
+        if not isinstance(safe_desensitization_enabled, bool):
+            raise ValueError("模型映射安全脱敏开关必须是布尔值")
         raw_targets = payload.get("targets")
         if not isinstance(raw_targets, Sequence) or isinstance(raw_targets, (str, bytes)) or not raw_targets:
             raise ValueError("模型映射至少需要一个目标模型")
@@ -135,6 +140,7 @@ class ModelMappingSchema:
                 field_label="故障冷却时间",
             ),
             targets=targets,
+            safe_desensitization_enabled=safe_desensitization_enabled,
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -143,5 +149,6 @@ class ModelMappingSchema:
             "enabled": self.enabled,
             "strategy": self.strategy,
             "cooldown_seconds_on_429": self.cooldown_seconds_on_429,
+            "safe_desensitization_enabled": self.safe_desensitization_enabled,
             "targets": [target.to_mapping() for target in self.targets],
         }

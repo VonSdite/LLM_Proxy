@@ -116,6 +116,7 @@ class ProviderRuntimeFactory:
             max_retries=spec.max_retries,
             verify_ssl=spec.verify_ssl,
             force_upstream_stream=spec.force_upstream_stream,
+            safe_desensitization_enabled=spec.safe_desensitization_enabled,
             hook=self._build_hook_proxy(spec.hook),
         )
 

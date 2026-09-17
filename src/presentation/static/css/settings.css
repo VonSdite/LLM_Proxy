@@ -93,7 +93,7 @@
 
 .settings-page .oauth-toggle-row {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 360px));
+    grid-template-columns: repeat(3, minmax(0, 360px));
     gap: 14px;
     align-items: stretch;
 }
@@ -451,6 +451,19 @@
 
 .settings-page .settings-help-popover-body p:last-child {
     margin-bottom: 0;
+}
+
+.settings-page .settings-help-popover-body ul {
+    margin: 0 0 10px;
+    padding-left: 18px;
+}
+
+.settings-page .settings-help-popover-body ul:last-child {
+    margin-bottom: 0;
+}
+
+.settings-page .settings-help-popover-body li + li {
+    margin-top: 6px;
 }
 
 .settings-page .settings-help-popover-body code {

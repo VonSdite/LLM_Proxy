@@ -16,6 +16,7 @@ from src.executors import OpenedUpstreamResponse
 from src.external import LLMProvider
 from src.hooks import BaseHook, HookAbortError
 from src.proxy_core import StreamEvent, decode_stream_events
+from src.services.outbound_privacy import PLACEHOLDER_PREFIX
 from src.services.proxy_service import ProxyService
 from src.services.upstream_request_builder import build_upstream_request
 from src.translators import (
@@ -4218,6 +4219,308 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertIsNotNone(response)
         self.assertEqual(["application/json; charset=utf-8"], response.headers.getlist("Content-Type"))
         self.assertEqual("trace-1", response.headers["X-Upstream-Trace"])
+
+    def test_safe_desensitization_replaces_upstream_body_and_restores_nonstream_response(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            safe_desensitization_enabled=True,
+        )
+        captured: dict[str, Any] = {}
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            upstream_content = body["messages"][0]["content"]
+            payload = {
+                "id": "chatcmpl_privacy",
+                "object": "chat.completion",
+                "model": "gpt-4.1",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": f"echo {upstream_content}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+            return OpenedUpstreamResponse(
+                response=FakeStreamResponse([json.dumps(payload).encode("utf-8")], content_type="application/json"),
+                status_code=200,
+                content_type="application/json",
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "password=SuperSecret123 ip=192.168.1.10"}],
+                    "stream": False,
+                },
+                {},
+            )
+            response_body = json.loads(self._collect_response_body(response))
+
+        upstream_content = captured["body"]["messages"][0]["content"]
+        downstream_content = response_body["choices"][0]["message"]["content"]
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(PLACEHOLDER_PREFIX, upstream_content)
+        self.assertNotIn("SuperSecret123", upstream_content)
+        self.assertNotIn("192.168.1.10", upstream_content)
+        self.assertIn("password=SuperSecret123 ip=192.168.1.10", downstream_content)
+
+    def test_safe_desensitization_restores_streaming_chunks(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            safe_desensitization_enabled=True,
+        )
+        captured: dict[str, Any] = {}
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            upstream_content = body["messages"][0]["content"]
+            payload = json.dumps({"choices": [{"delta": {"content": upstream_content}}]}).encode("utf-8")
+            return OpenedUpstreamResponse(
+                response=FakeStreamResponse([b"data: ", payload, b"\n\n", b"data: [DONE]\n\n"]),
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Authorization: Bearer secret-token-1234567890"}],
+                    "stream": True,
+                },
+                {},
+            )
+            response_body = self._collect_response_body(response).decode("utf-8")
+
+        upstream_content = captured["body"]["messages"][0]["content"]
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(PLACEHOLDER_PREFIX, upstream_content)
+        self.assertNotIn("secret-token-1234567890", upstream_content)
+        self.assertIn("Authorization: Bearer secret-token-1234567890", response_body)
+        self.assertNotIn(PLACEHOLDER_PREFIX, response_body)
+
+    def test_safe_desensitization_restores_placeholder_split_across_stream_events(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            safe_desensitization_enabled=True,
+        )
+        captured: dict[str, Any] = {}
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            upstream_content = body["messages"][0]["content"]
+            placeholder = upstream_content.split(": ", 1)[1]
+            split_at = len(placeholder) // 2
+            first_payload = json.dumps(
+                {"choices": [{"delta": {"content": f"prefix {placeholder[:split_at]}"}}]}
+            ).encode("utf-8")
+            second_payload = json.dumps(
+                {"choices": [{"delta": {"content": f"{placeholder[split_at:]} suffix"}}]}
+            ).encode("utf-8")
+            return OpenedUpstreamResponse(
+                response=FakeStreamResponse(
+                    [
+                        b"data: ",
+                        first_payload,
+                        b"\n\n",
+                        b"data: ",
+                        second_payload,
+                        b"\n\n",
+                        b"data: [DONE]\n\n",
+                    ]
+                ),
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "Authorization: Bearer secret-token-1234567890"}],
+                    "stream": True,
+                },
+                {},
+            )
+            response_bytes = self._collect_response_body(response)
+            response_body = response_bytes.decode("utf-8")
+            content = "".join(
+                event.payload["choices"][0]["delta"].get("content", "")
+                for event in decode_stream_events([response_bytes], "sse_json")
+                if event.kind == "json"
+            )
+
+        upstream_content = captured["body"]["messages"][0]["content"]
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(PLACEHOLDER_PREFIX, upstream_content)
+        self.assertEqual("prefix Bearer secret-token-1234567890 suffix", content)
+        self.assertNotIn(PLACEHOLDER_PREFIX, response_body)
+        self.assertNotIn("__LLM_PROXY", response_body)
+
+    def test_safe_desensitization_strips_client_credential_headers(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            safe_desensitization_enabled=True,
+        )
+        captured: dict[str, Any] = {}
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, body, args, kwargs
+            captured["headers"] = headers
+            payload = {
+                "id": "chatcmpl_privacy_headers",
+                "object": "chat.completion",
+                "model": "gpt-4.1",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+            return OpenedUpstreamResponse(
+                response=FakeStreamResponse([json.dumps(payload).encode("utf-8")], content_type="application/json"),
+                status_code=200,
+                content_type="application/json",
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+                {
+                    "Cookie": "sessionid=client-secret-123",
+                    "x-api-key": "sk-client-key-1234567890",
+                    "User-Agent": "demo-client/1.0",
+                },
+            )
+            self._collect_response_body(response)
+
+        upstream_headers = {key.lower(): value for key, value in captured["headers"].items()}
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertNotIn("cookie", upstream_headers)
+        self.assertNotIn("x-api-key", upstream_headers)
+        self.assertEqual("demo-client/1.0", upstream_headers["user-agent"])
+        self.assertEqual("application/json", upstream_headers["content-type"])
+
+    def test_safe_desensitization_force_overrides_provider_flag(self) -> None:
+        app, service = self._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("gpt-4.1",),
+            max_retries=1,
+            safe_desensitization_enabled=False,
+        )
+        captured: dict[str, Any] = {}
+
+        def stub_open_upstream_response(provider_arg, headers, body, *args, **kwargs):
+            del provider_arg, headers, args, kwargs
+            captured["body"] = body
+            upstream_content = body["messages"][0]["content"]
+            payload = {
+                "id": "chatcmpl_privacy_force",
+                "object": "chat.completion",
+                "model": "gpt-4.1",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": f"echo {upstream_content}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+            return OpenedUpstreamResponse(
+                response=FakeStreamResponse([json.dumps(payload).encode("utf-8")], content_type="application/json"),
+                status_code=200,
+                content_type="application/json",
+                is_stream=False,
+                stream_format="nonstream",
+            )
+
+        service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
+
+        with app.test_request_context("/v1/chat/completions"):
+            response, status_code, failure_info = service.proxy_request(
+                provider,
+                {
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "password=SuperSecret123"}],
+                    "stream": False,
+                },
+                {},
+                force_safe_desensitization=True,
+            )
+            response_body = json.loads(self._collect_response_body(response))
+
+        upstream_content = captured["body"]["messages"][0]["content"]
+        downstream_content = response_body["choices"][0]["message"]["content"]
+        self.assertIsNone(failure_info)
+        self.assertEqual(200, status_code)
+        self.assertIn(PLACEHOLDER_PREFIX, upstream_content)
+        self.assertNotIn("SuperSecret123", upstream_content)
+        self.assertIn("password=SuperSecret123", downstream_content)
+        self.assertNotIn(PLACEHOLDER_PREFIX, downstream_content)
 
     def test_build_upstream_request_applies_request_guard_to_translated_body(self) -> None:
         provider = LLMProvider(

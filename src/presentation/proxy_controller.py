@@ -157,6 +157,8 @@ class ModelMappingServiceLike(Protocol):
 
     def has_mapping(self, mapping_id: str) -> bool: ...
 
+    def is_safe_desensitization_enabled(self, mapping_id: str) -> bool: ...
+
     def acquire_target(self, mapping_id: str, excluded_target_ids: Iterable[str] = ()) -> Any: ...
 
     def record_success(self, selection: Any) -> None: ...
@@ -1252,6 +1254,7 @@ class ProxyController:
             )
             return None, failure.status_code, failure
 
+        force_desensitization = self._model_mapping_service.is_safe_desensitization_enabled(mapping_id)
         excluded_targets: set[str] = set()
         last_failure: ProxyErrorInfo | None = None
         while True:
@@ -1299,6 +1302,7 @@ class ProxyController:
                         trace_id=trace_id,
                         route_name=route_name,
                         client_ip=client_ip,
+                        force_safe_desensitization=force_desensitization,
                     )
                 else:
                     failure = ProxyErrorInfo(
@@ -1372,6 +1376,7 @@ class ProxyController:
             )
             return None, failure.status_code, failure
 
+        force_desensitization = self._model_mapping_service.is_safe_desensitization_enabled(mapping_id)
         excluded_targets: set[str] = set()
         last_failure: ProxyErrorInfo | None = None
         while True:
@@ -1434,6 +1439,7 @@ class ProxyController:
                     trace_id=trace_id,
                     route_name=route_name,
                     client_ip=client_ip,
+                    force_safe_desensitization=force_desensitization,
                 )
             except Exception as exc:
                 self._logger.error("Mapped target raised an exception: model=%s error=%s", target_model_id, exc)
@@ -1488,6 +1494,7 @@ class ProxyController:
         trace_id: str,
         route_name: str,
         client_ip: str,
+        force_safe_desensitization: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         provider = self._provider_manager.get_provider_for_model(target_model_id)
         common_kwargs = {
@@ -1500,11 +1507,27 @@ class ProxyController:
             "client_ip": client_ip,
         }
         if provider is not None:
-            return self._proxy_service.proxy_request(provider, request_data, request_headers, **common_kwargs)
+            return self._proxy_service.proxy_request(
+                provider,
+                request_data,
+                request_headers,
+                force_safe_desensitization=force_safe_desensitization,
+                **common_kwargs,
+            )
         if self._codex_proxy_service is not None and self._codex_proxy_service.has_model(target_model_id):
-            return self._codex_proxy_service.proxy_request(request_data, request_headers, **common_kwargs)
+            return self._codex_proxy_service.proxy_request(
+                request_data,
+                request_headers,
+                force_safe_desensitization=force_safe_desensitization,
+                **common_kwargs,
+            )
         if self._claude_proxy_service is not None and self._claude_proxy_service.has_model(target_model_id):
-            return self._claude_proxy_service.proxy_request(request_data, request_headers, **common_kwargs)
+            return self._claude_proxy_service.proxy_request(
+                request_data,
+                request_headers,
+                force_safe_desensitization=force_safe_desensitization,
+                **common_kwargs,
+            )
         failure = ProxyErrorInfo(
             message=f"Mapped target is unavailable: {target_model_id}",
             status_code=503,

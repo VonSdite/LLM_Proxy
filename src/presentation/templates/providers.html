@@ -269,6 +269,16 @@
                                 <option value="true">启用</option>
                             </select>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label field-label-with-help">
+                                <span>安全脱敏</span>
+                                <button type="button" class="field-help-button" data-provider-help-topic="safe_desensitization" onclick="toggleProviderHelp('safe_desensitization', event)" aria-label="查看安全脱敏说明">?</button>
+                            </label>
+                            <select class="form-control" id="providerSafeDesensitization" data-custom-select="true">
+                                <option value="false">关闭</option>
+                                <option value="true">启用</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="mb-3 provider-model-list-section">
                         <div class="field-header">
@@ -656,6 +666,19 @@
                 html: `
                     <p>启用后，下游请求没有设置 <code>stream</code> 或设置为 <code>false</code> 时，代理会以流式请求访问上游。</p>
                     <p>代理会在内存中合并上游流式事件，再以一个非流式 JSON 响应返回给下游。下游明确请求流式时保持原有流式输出。</p>
+                `,
+            },
+            safe_desensitization: {
+                title: '安全脱敏怎么用',
+                html: `
+                    <p>启用后，当前 Provider 的上游请求会先把常见敏感信息替换为请求级占位符；上游响应回到下游前再把占位符恢复为原值。</p>
+                    <ul>
+                        <li><strong>覆盖</strong>：密码与口令赋值、AK/SK、Token、云厂商与 SaaS 密钥、连接串凭据、私钥与 SSH 公钥、邮箱、手机号、身份证号、银行卡号、IP 地址等。</li>
+                        <li><strong>请求头</strong>：同时不再向上游转发 <code>Cookie</code>、<code>x-api-key</code> 等凭据类请求头。</li>
+                        <li><strong>已知误伤</strong>：版本号（如 <code>2.5.7.1</code>）可能被识别为 IP；11 位订单号可能被识别为手机号；恰好通过银行卡校验的长数字会被当作卡号；<code>cookie:</code> 等头样式后面的整行说明文字可能被吞。</li>
+                        <li><strong>已知漏报</strong>：纯字母口令、中文姓名、地址等不在规则覆盖内。</li>
+                    </ul>
+                    <p>这是规则型假名化，不是完整匿名化；更复杂的业务语义需要后续本地 NER 或策略规则补充。</p>
                 `,
             },
             auth_group_field: {
@@ -3271,6 +3294,7 @@
                 api: document.getElementById('providerApi').value.trim(),
                 source_format: document.getElementById('providerSourceFormat').value.trim() || 'openai_chat',
                 force_upstream_stream: document.getElementById('providerForceUpstreamStream').value,
+                safe_desensitization_enabled: document.getElementById('providerSafeDesensitization').value,
                 auth_group: authGroup,
                 api_key: apiKey,
                 proxy_mode: proxyMode,
@@ -3520,6 +3544,11 @@
             setSelectValueOrFallback(
                 'providerForceUpstreamStream',
                 provider?.force_upstream_stream === true ? 'true' : 'false',
+                'false',
+            );
+            setSelectValueOrFallback(
+                'providerSafeDesensitization',
+                provider?.safe_desensitization_enabled === true ? 'true' : 'false',
                 'false',
             );
             setSelectValueOrFallback('providerAuthMode', authMode, 'legacy_api_key');
@@ -3911,6 +3940,7 @@
                                 ${provider.auth_group ? `<span class="provider-chip provider-chip-hook">auth_group:${escapeHtml(provider.auth_group)}</span>` : ''}
                                 ${provider.api_key ? '<span class="provider-chip provider-chip-muted">legacy api_key</span>' : ''}
                                 ${provider.force_upstream_stream === true ? '<span class="provider-chip provider-chip-hook">上游强制流式</span>' : ''}
+                                ${provider.safe_desensitization_enabled === true ? '<span class="provider-chip provider-chip-hook">安全脱敏</span>' : ''}
                                 ${provider.hook ? `<span class="provider-chip provider-chip-hook">${escapeHtml(provider.hook)}</span>` : ''}
                             </div>
                         </td>
@@ -5422,6 +5452,7 @@
             setupCustomSelect('providerProxyMode');
             setupCustomSelect('providerSourceFormat');
             setupCustomSelect('providerForceUpstreamStream');
+            setupCustomSelect('providerSafeDesensitization');
             setupCustomSelect('providerVerifySsl');
             setupCustomSelect('authGroupStrategy');
             const modalElement = document.getElementById('providerModal');
