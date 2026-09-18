@@ -16,12 +16,14 @@ providers:
   enabled: true
   api: https://api.deepseek.com/chat/completions
   source_format: openai_chat
-  hook: claude_responses_to_chat_compat.py
+  force_upstream_stream: false
+  safe_desensitization_enabled: false
   api_key: sk-1234
   verify_ssl: false
   model_list:
   - deepseek-v4-flash
   - deepseek-v4-pro
+  hook: claude_responses_to_chat_compat.py
   proxy_mode: direct
 auth_groups:
 - name: group1
@@ -34,9 +36,9 @@ auth_groups:
       Authorization: Bearer 1
 oauth:
   enabled: true
-  proxy: http://192.168.101.253:21809
+  proxy: ''
   verify_ssl: false
-  proxy_mode: custom
+  proxy_mode: direct
   safe_desensitization_enabled: false
 api_keys:
   enabled: true
