@@ -207,7 +207,7 @@ class ModelMappingSchemaTests(unittest.TestCase):
         self.assertIn('aria-describedby="mappingCooldownHelp"', template)
         self.assertIn("mapping-cooldown-help", template)
         self.assertIn('data-mapping-help-topic="cooldown"', template)
-        self.assertIn("401/403/408/425、429、5xx、网络或流异常会进入冷却", template)
+        self.assertIn("<code>401/403/408/425</code>、<code>429</code>、<code>5xx</code>、网络或流异常会进入冷却", template)
         self.assertIn("前端显示“禁用”", template)
         self.assertIn("其他 4xx 只切换本次请求，不改变目标状态", template)
         target_label_markup = template.split('<div class="mapping-target-label">', 1)[1].split("</div>", 1)[0]

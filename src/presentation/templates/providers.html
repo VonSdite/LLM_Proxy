@@ -664,8 +664,8 @@
             force_upstream_stream: {
                 title: '上游强制流式怎么用',
                 html: `
-                    <p>启用后，下游请求没有设置 <code>stream</code> 或设置为 <code>false</code> 时，代理会以流式请求访问上游。</p>
-                    <p>代理会在内存中合并上游流式事件，再以一个非流式 JSON 响应返回给下游。下游明确请求流式时保持原有流式输出。</p>
+                    <p><strong>启用后</strong>，下游请求没有设置 <code>stream</code> 或设置为 <code>false</code> 时，代理会以流式请求访问上游。</p>
+                    <p>代理会在内存中合并上游流式事件，再以一个非流式 JSON 响应返回给下游；<strong>下游明确请求流式时</strong>保持原有流式输出。</p>
                 `,
             },
             safe_desensitization: {
@@ -772,14 +772,14 @@
             model_test_first_token_latency: {
                 title: '首字延迟',
                 html: `
-                    <p>首字延迟记录从测试请求发出到首个正文或推理增量到达的时间。</p>
+                    <p><strong>首字延迟</strong>记录从测试请求发出到首个正文或推理增量到达的时间。</p>
                     <p>流式思考内容以 <code>reasoning_content</code> 形式到达时，会作为首个模型输出参与记录。</p>
                 `,
             },
             model_test_tps: {
                 title: 'TPS',
                 html: `
-                    <p>TPS 使用上游 <code>completion usage</code> 中的 <code>completion_tokens</code> 除以本次流式请求端到端耗时计算。</p>
+                    <p><strong>TPS</strong> 使用上游 <code>completion usage</code> 中的 <code>completion_tokens</code> 除以本次流式请求端到端耗时计算。</p>
                     <p>端到端耗时从测试请求发出开始，到流式响应结束为止。</p>
                 `,
             },

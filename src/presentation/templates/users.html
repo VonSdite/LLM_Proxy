@@ -251,14 +251,14 @@
             whitelist: {
                 title: 'Chat 白名单',
                 html: `
-                    <p>启用后会按 IP 校验白名单，只允许已登记用户访问 Chat。</p>
+                    <p><strong>启用后</strong>会按 IP 校验白名单，只允许已登记用户访问 Chat。</p>
                     <p>同时会继续按用户模型权限控制 Chat 请求和 <code>/v1/models</code> 返回结果。</p>
                 `
             },
             permission_allow_all: {
                 title: '允许全部模型',
                 html: `
-                    <p>启用后会用 <code>*</code> 表示当前用户可访问全部模型。</p>
+                    <p><strong>启用后</strong>会用 <code>*</code> 表示当前用户可访问全部模型。</p>
                     <p>同时会自动继承当前和后续新增的模型，不需要逐个勾选。</p>
                 `
             }
