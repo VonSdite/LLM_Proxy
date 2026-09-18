@@ -189,7 +189,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `max_retries`：一次 Provider 上游操作允许的最大尝试次数，包含首次尝试；默认 `3`，设为 `1` 时只尝试一次
 - `verify_ssl`：是否校验证书；代码默认值为 `false`，公网 HTTPS 建议显式设为 `true`
 - `force_upstream_stream`：是否在下游非流式请求时强制使用上游流式请求；默认 `false`。启用后代理会聚合上游流式事件，再以非流式响应返回下游
-- `safe_desensitization_enabled`：是否启用安全脱敏；默认 `false`。启用后，请求体中的常见密码与中英文口令赋值（含 `DB_PASSWORD=` 等环境变量风格）、AK/SK、Token、常见云厂商与 SaaS 密钥前缀、Authorization、Cookie、私钥与 SSH 公钥、连接串内嵌凭据、Webhook URL、CLI 密码参数、邮箱、手机号、身份证号、银行卡号和 IP 地址会在上游请求前替换为请求级占位符，响应返回下游前再恢复；同时不再向上游转发 `Cookie`、`x-api-key` 等凭据类客户端请求头。模型映射编辑页与系统设置的 OAuth 区域提供同粒度开关：映射级开关开启时，即使目标 Provider 或 OAuth 未开启脱敏，该映射的请求也会脱敏
+- `safe_desensitization_enabled`：是否启用安全脱敏；默认 `false`。启用后，请求体中的常见密码与中英文口令赋值（含 `DB_PASSWORD=` 等环境变量风格）、AK/SK、Token、常见云厂商与 SaaS 密钥前缀、Authorization、Cookie、私钥与 SSH 公钥、连接串内嵌凭据、Webhook URL、CLI 密码参数、邮箱、手机号、身份证号、银行卡号和 IP 地址会在上游请求前替换为请求级占位符，响应返回下游前再恢复；同时不再向上游转发 `Cookie`、`x-api-key` 等凭据类客户端请求头。模型映射编辑页与系统设置的 OAuth 区域提供同粒度开关：映射级开关开启时，即使目标 Provider 或 OAuth 未开启脱敏，该映射的请求也会脱敏。覆盖范围、已知漏报与误伤场景见「功能介绍 - 7. 安全脱敏」
 - `model_list`：当前 Provider 可路由的模型列表
 - `hidden_model_list`：不出现在下游 `GET /v1/models` 的模型列表；模型路由、测试和权限配置保持可用
 - `hook`：相对 `hooks/` 目录的 Hook 文件路径，文件中需要导出名为 `Hook` 的类
@@ -343,7 +343,7 @@ oauth:
   safe_desensitization_enabled: false
 ```
 
-开启后，后台导航会显示 `/oauth` 页面。`proxy_mode` 支持 `direct`、`system`、`custom`；只有 `custom` 会读取 `proxy`，但 `custom` 下 `proxy` 为空时会按直连执行。这里的 `proxy` 是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的出站代理，不是下游客户端访问本服务的入口代理。认证文件未提供 `proxy_url` 时，`proxy_mode` 和 `proxy` 决定 Codex 配额查询的网络出口；`verify_ssl` 继续控制 HTTPS 证书校验。自定义代理 URL 中的账号密码会由系统规范化转义。旧配置缺少 `proxy_mode` 时，启动加载会按是否存在 `proxy` 自动回写为 `custom` 或 `direct`。`safe_desensitization_enabled` 开启后，经 OAuth 上游发出的请求体会先替换为请求级占位符，响应返回前恢复；也可以在 `/settings` 的 OAuth 区域切换。
+开启后，后台导航会显示 `/oauth` 页面。`proxy_mode` 支持 `direct`、`system`、`custom`；只有 `custom` 会读取 `proxy`，但 `custom` 下 `proxy` 为空时会按直连执行。这里的 `proxy` 是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的出站代理，不是下游客户端访问本服务的入口代理。认证文件未提供 `proxy_url` 时，`proxy_mode` 和 `proxy` 决定 Codex 配额查询的网络出口；`verify_ssl` 继续控制 HTTPS 证书校验。自定义代理 URL 中的账号密码会由系统规范化转义。旧配置缺少 `proxy_mode` 时，启动加载会按是否存在 `proxy` 自动回写为 `custom` 或 `direct`。`safe_desensitization_enabled` 开启后，经 OAuth 上游发出的请求体会先替换为请求级占位符，响应返回前恢复；也可以在 `/settings` 的 OAuth 区域切换。脱敏边界与已知漏报、误伤场景见「功能介绍 - 7. 安全脱敏」。
 
 ### 2. 生成 OAuth 认证文件
 
@@ -643,6 +643,52 @@ providers:
 - 如果上一轮重试失败是 HTTP 状态码导致的，例如 `429`，下一轮会看到 `last_status_code`
 - 如果上一轮失败是本地传输错误，例如超时或连接错误，下一轮会看到 `last_error_type`
 - 流式响应提交后不产生新的 Provider 尝试，该阶段的失败不会进入下一轮 `HookContext`
+
+### 7. 安全脱敏
+
+开启后，代理会在请求发往上游前把请求体中的敏感内容替换为请求级占位符（形如 `__LLM_PROXY_REDACTED_SECRET_0001_<随机串>__`），上游响应回到下游前再按占位符逐字精确恢复；上游全程只看到占位符。三个开关任一生效即对该请求启用：
+
+- Provider 级：`providers[].safe_desensitization_enabled`
+- OAuth 级：`oauth.safe_desensitization_enabled`，覆盖 Codex（含图片生成 prompt）与 Claude 路径
+- 模型映射级：映射编辑页的脱敏开关，即使目标 Provider 或 OAuth 未开启，该映射的请求也会强制脱敏
+
+Provider 路径开启后，同时不再向上游转发凭据类客户端请求头（`cookie`、`set-cookie`、`api-key`、`x-api-key`、`x-goog-api-key`、`x-auth-token`、`x-session-token`、`x-csrf-token`、`x-amz-security-token`）。
+
+这是规则型假名化（正则与字段名启发式），不是完整匿名化。以下边界按当前实现说明，开启前建议对照评估。
+
+**会失效的场景（漏报，敏感内容仍会到达上游）：**
+
+- 有意跳过的内容：`data:` URI 内嵌文件不脱敏——视觉模型请求里的截图、图片会原样送达上游，图片内部的敏感信息（如截图里的密码）不在保护范围内；超过 4096 字符且 98% 为 base64 字符集的大段编码内容同样跳过；任意层级中键名为 `model` 的字符串值不脱敏（保护模型路由）。
+- 纯字母口令：为避免把 "Password Policy" 这类英文说明当作凭据，英文关键词后跟纯字母单词时会跳过，`basic` 纯字母凭据同理。中文关键词（如 `密码：abcdefg`）不受此豁免影响，仍会脱敏。
+- 裸密钥：既不带已知前缀、也不在敏感字段名下的随机字符串不会被识别。
+- 密钥前缀清单有限：当前识别 `sk-`、`sk-ant-`、`AIza`、`AKIA`/`ASIA`、`ghp_`/`github_pat_`、`sk_live_`/`pk_live_`/`rk_live_`（含 `_test_`）、`glpat-`、`hf_`、`npm_`、`xox*`、`SG.`、`ya29.` 和 Telegram Bot Token 等格式；Azure、阿里云（`LTAI`）、腾讯云、DeepSeek、智谱等厂商的密钥前缀不在清单内，只能依赖字段名或赋值样式命中。
+- 个人信息识别范围：手机号仅中国大陆 `1[3-9]` 号段（支持 `+86` 与分隔符）；身份证仅 18 位；银行卡需 15-19 位且通过 Luhn 校验；IP 仅合法 IPv4/IPv6 字面量。座机、港澳台与国际号码、15 位旧身份证、域名、中文姓名、住址等均不覆盖。
+- 请求头剔除按路径不同：Provider 路径只剔除固定清单，自定义命名的凭据头（如 `x-my-token`）仍会转发；Codex 路径的上游请求头按白名单重建，客户端头基本不透传；Claude 路径会合并转发客户端头（固定剔除 `authorization` 与 `x-api-key`），`Cookie` 等头仍会发往 Anthropic 上游。
+- Hook `request_guard` 拿到的已是脱敏后的上游请求体，Hook 内部重新写入的敏感内容不会二次脱敏。
+
+**会误伤的场景（正常内容被替换）：**
+
+- 数字类：形如 IP 的版本号或坐标（如 `2.5.7.1`）会被当作 IPv4；`1[3-9]` 开头的 11 位订单号会被当作手机号（无运营商校验）；恰好通过 Luhn 校验的 15-19 位数字（部分订单号、时间戳拼接）会被当作银行卡；文档示例 IP（`127.0.0.1`、`192.168.1.1`）一律替换。
+- 字段名含关键词：请求体 JSON 中键名包含 `token`、`session`、`password`、`secret`、`cookie`、`credential`、`api_key`、`authorization` 等子串时，其字符串值会被整体替换——`tokenizer`、`prompt_tokens`、`total_tokens`、`session_timeout`、`password_policy` 都会命中，且此时纯字母值也不豁免（"Password Policy" 豁免只作用于文本赋值形式，不作用于 JSON 字段）。`max_tokens`、`max_output_tokens`、`max_completion_tokens`、`num_tokens`、`token_limit` 已在保护白名单。
+- 赋值样式：值不是纯字母时，`session: 2h30m`、`token: 1000` 这类说明性赋值会被当作口令；`Bearer` 后跟 16 位以上连续字母数字串（如 `Bearer AbCdEf123456789012`）会被当作令牌（`basic` 纯字母有豁免，`bearer` 没有）；`cookie: ` 等头样式后面的整行文本会被吞掉；示例连接串 `postgres://user:example@localhost/db` 中的 `user:pass@` 整段替换。
+- 邮箱一律替换，包括 `user@example.com` 这类示例邮箱和公开联系方式。
+- 行为变化：Provider 路径开启后 `Cookie` 不再转发，依赖 Cookie 会话的上游接口可能异常。
+
+误伤的直接影响是上游模型看不到原文：让模型排序版本号、核对订单号、讲解示例 IP 时，模型收到的是占位符，这部分推理会失真。下游响应虽会恢复原文，但模型输出已经基于占位符生成。
+
+**恢复失效的场景（下游看到 `__LLM_PROXY_REDACTED_...` 残串）：**
+
+- 上游模型改写或截断了占位符（丢字符、Markdown 转义 `\_`、HTML 实体等），逐字匹配的恢复会失败。
+- 非 UTF-8 的二进制响应体不做恢复。
+- 流式响应中断时，跨 chunk 的占位符尾部随缓冲一起丢失。
+- 上游 `HTTP >= 400` 的错误响应不做恢复；错误信息回显脱敏后请求时，下游会看到占位符。
+- 占位符只在本次请求内有效：把上一次响应里的占位符文本复制进新请求，会原样发往上游且不会被还原。
+
+**使用建议：**
+
+- 面向不完全可信的上游、或需要满足"敏感信息不出内网"的合规要求时开启；对精度敏感的代码与数据处理任务（涉及版本号、订单号、示例 IP、邮箱）先评估误伤面再决定。
+- 需要模型真实处理敏感内容本身的任务（例如"核对这个手机号的归属地"）会失败：内容不会到达上游。
+- LLM Trace 的 `upstream_request` 阶段记录的是脱敏后的请求；`downstream_request` 阶段仍记录原始请求与请求头，日志文件本身包含敏感信息，注意访问控制。
 
 ## 数据与目录
 
