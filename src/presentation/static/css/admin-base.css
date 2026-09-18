@@ -646,6 +646,159 @@ html.js .app-page select[data-custom-select]:not(.native-select-hidden) {
     color: #d9eaff;
 }
 
+/* Shared help popover: the single source of truth for "?" help popovers. */
+.app-page .help-popover {
+    position: fixed;
+    z-index: 1080;
+    width: min(460px, calc(100vw - 24px));
+    max-height: min(72vh, 520px);
+    overflow: hidden;
+    border: 1px solid var(--line-strong);
+    border-radius: 16px;
+    background: #ffffff;
+    box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
+}
+
+.app-page .help-popover[hidden] {
+    display: none;
+}
+
+.app-page .help-popover::after,
+.app-page .help-popover::before {
+    content: "";
+    position: absolute;
+    left: var(--popover-arrow-left, 24px);
+    transform: translateX(-50%);
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+}
+
+.app-page .help-popover[data-placement="top"]::after {
+    bottom: -17px;
+    border-top: 9px solid #ffffff;
+}
+
+.app-page .help-popover[data-placement="top"]::before {
+    bottom: -19px;
+    border-top: 10px solid var(--line-strong);
+}
+
+.app-page .help-popover[data-placement="bottom"]::after {
+    top: -17px;
+    border-bottom: 9px solid #ffffff;
+}
+
+.app-page .help-popover[data-placement="bottom"]::before {
+    top: -19px;
+    border-bottom: 10px solid var(--line-strong);
+}
+
+.app-page .help-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.app-page .help-popover-title {
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.app-page .help-popover-close {
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--text-secondary);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color var(--transition);
+}
+
+.app-page .help-popover-close:hover {
+    color: var(--text-primary);
+}
+
+.app-page .help-popover-body {
+    overflow: auto;
+    max-height: calc(min(72vh, 520px) - 58px);
+    padding: 8px 18px 18px;
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+.app-page .help-popover-body p {
+    margin: 0 0 10px;
+}
+
+.app-page .help-popover-body ul {
+    margin: 0 0 12px;
+    padding-left: 18px;
+}
+
+.app-page .help-popover-body li + li {
+    margin-top: 6px;
+}
+
+.app-page .help-popover-body code {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #c2185b;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.7;
+}
+
+:root[data-theme="dark"] .app-page .help-popover {
+    border-color: #30363d;
+    background: #161b22;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
+}
+
+:root[data-theme="dark"] .app-page .help-popover[data-placement="top"]::after {
+    border-top-color: #161b22;
+}
+
+:root[data-theme="dark"] .app-page .help-popover[data-placement="top"]::before {
+    border-top-color: #30363d;
+}
+
+:root[data-theme="dark"] .app-page .help-popover[data-placement="bottom"]::after {
+    border-bottom-color: #161b22;
+}
+
+:root[data-theme="dark"] .app-page .help-popover[data-placement="bottom"]::before {
+    border-bottom-color: #30363d;
+}
+
+:root[data-theme="dark"] .app-page .help-popover-header {
+    border-bottom-color: rgba(99, 110, 123, 0.35);
+}
+
+:root[data-theme="dark"] .app-page .help-popover-close {
+    border-color: #3d4754;
+    background: rgba(255, 255, 255, 0.05);
+    color: #b6c1cd;
+}
+
+:root[data-theme="dark"] .app-page .help-popover-close:hover {
+    color: #ffffff;
+}
+
+:root[data-theme="dark"] .app-page .help-popover-body code {
+    background: rgba(108, 167, 255, 0.14);
+    color: #ff8ac2;
+}
+
 .app-page .table-footer {
     border-top: 1px solid var(--line);
     background: #f9fbfe;
@@ -855,9 +1008,8 @@ html.js .app-page select[data-custom-select]:not(.native-select-hidden) {
     font-size: 13px;
 }
 
-/* 全局帮助说明按钮与接口高亮，供 Provider、用户、设置和 OAuth 页面复用。 */
-body.app-page .field-help-button,
-body.app-page .oauth-help-button {
+/* 全局帮助说明按钮，供各管理页面复用；浮窗内容样式见上方 .help-popover 组件。 */
+body.app-page .field-help-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -880,9 +1032,7 @@ body.app-page .oauth-help-button {
 }
 
 body.app-page .field-help-button:hover,
-body.app-page .field-help-button:focus-visible,
-body.app-page .oauth-help-button:hover,
-body.app-page .oauth-help-button:focus-visible {
+body.app-page .field-help-button:focus-visible {
     border-color: var(--primary);
     background: #fff;
     color: var(--primary);
@@ -890,46 +1040,17 @@ body.app-page .oauth-help-button:focus-visible {
     box-shadow: 0 0 0 3px rgba(95, 143, 190, 0.14);
 }
 
-body.app-page :is(
-    .provider-help-popover-body,
-    .settings-help-popover-body,
-    .users-help-popover-body,
-    .oauth-help-popover
-) code {
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: rgba(59, 130, 246, 0.1);
-    color: #c2185b;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.7;
-}
-
-:root[data-theme="dark"] body.app-page .field-help-button,
-:root[data-theme="dark"] body.app-page .oauth-help-button {
+:root[data-theme="dark"] body.app-page .field-help-button {
     border-color: #3d444d;
     background: #0d1117;
     color: #9da7b3;
 }
 
 :root[data-theme="dark"] body.app-page .field-help-button:hover,
-:root[data-theme="dark"] body.app-page .field-help-button:focus-visible,
-:root[data-theme="dark"] body.app-page .oauth-help-button:hover,
-:root[data-theme="dark"] body.app-page .oauth-help-button:focus-visible {
+:root[data-theme="dark"] body.app-page .field-help-button:focus-visible {
     border-color: var(--primary);
     background: #111820;
     color: var(--primary);
-}
-
-:root[data-theme="dark"] body.app-page :is(
-    .provider-help-popover-body,
-    .settings-help-popover-body,
-    .users-help-popover-body,
-    .oauth-help-popover
-) code {
-    background: rgba(108, 167, 255, 0.14);
-    color: #ff8ac2;
 }
 
 @media (max-width: 900px) {

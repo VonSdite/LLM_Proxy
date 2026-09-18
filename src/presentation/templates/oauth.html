@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}OAuth 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260916-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/oauth.css?v=20260918-1">{% endblock %}
 {% block body_class %}oauth-page{% endblock %}
 {% block header_title %}OAuth 管理{% endblock %}
 {% block header_subtitle %}管理 CLI/OAuth 类认证文件，并查看账号状态与配额。{% endblock %}
@@ -81,23 +81,15 @@
                     <div>
                         <div class="oauth-title-with-help">
                             <h2>Codex 可用模型</h2>
-                            <div class="oauth-help-wrap">
-                                <button
-                                    type="button"
-                                    class="oauth-help-button"
-                                    aria-label="查看 Codex 可用模型说明"
-                                    aria-describedby="codexModelsHelp"
-                                >?</button>
-                                <div class="oauth-help-popover" id="codexModelsHelp" role="tooltip">
-                                    <p>这里维护的是下游可见的 Codex 模型 ID。</p>
-                                    <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
-                                    <ul>
-                                        <li>模型 ID 使用本地目录，内置模型可删除，删除后可通过添加内置模型补回。</li>
-                                        <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
-                                        <li>命中 Codex 模型后，LLM Proxy 会转换请求格式，并使用 Codex OAuth 认证文件访问 <code>POST https://chatgpt.com/backend-api/codex/responses</code>。</li>
-                                    </ul>
-                                </div>
-                            </div>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-oauth-help-topic="codex_models"
+                                onclick="toggleOAuthHelp('codex_models', event)"
+                                aria-label="查看 Codex 可用模型说明"
+                                aria-expanded="false"
+                                aria-controls="oauthHelpPopover"
+                            >?</button>
                         </div>
                     </div>
                 </div>
@@ -132,24 +124,15 @@
                     <div>
                         <div class="oauth-title-with-help">
                             <h2>Codex 图片模型</h2>
-                            <div class="oauth-help-wrap">
-                                <button
-                                    type="button"
-                                    class="oauth-help-button"
-                                    aria-label="查看 Codex 图片模型说明"
-                                    aria-describedby="codexImageModelsHelp"
-                                >?</button>
-                                <div class="oauth-help-popover" id="codexImageModelsHelp" role="tooltip">
-                                    <p>这里维护 Codex 图片生成可用模型，并指定自动补齐时使用的默认模型。</p>
-                                    <ul>
-                                        <li><code>/v1/images/generations</code> 和 <code>/v1/images/edits</code> 可手动指定这里的图片模型。</li>
-                                        <li>Images 请求未传 <code>model</code> 时，会使用默认模型作为本次图片生成模型。</li>
-                                        <li>Codex Responses 请求未声明图片工具模型时，会使用默认模型补齐 <code>image_generation</code> 工具。</li>
-                                        <li>默认模型只决定自动补齐时的选择，不限制手动指定其他可用图片模型。</li>
-                                        <li>内置图片模型可删除，删除后可通过添加内置模型补回；用户自行添加的模型 ID 会保留。</li>
-                                    </ul>
-                                </div>
-                            </div>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-oauth-help-topic="codex_image_models"
+                                onclick="toggleOAuthHelp('codex_image_models', event)"
+                                aria-label="查看 Codex 图片模型说明"
+                                aria-expanded="false"
+                                aria-controls="oauthHelpPopover"
+                            >?</button>
                         </div>
                     </div>
                 </div>
@@ -176,28 +159,15 @@
                     <div>
                         <div class="oauth-title-with-help">
                             <h2>Codex 认证文件</h2>
-                            <div class="oauth-help-wrap">
-                                <button
-                                    type="button"
-                                    class="oauth-help-button"
-                                    aria-label="查看 Codex 认证文件状态说明"
-                                    aria-describedby="codexAuthFilesHelp"
-                                >?</button>
-                                <div class="oauth-help-popover" id="codexAuthFilesHelp" role="tooltip">
-                                    <p>状态来自认证文件内容、最近一次数据面请求结果和已保存的配额快照。</p>
-                                    <ul>
-                                        <li><strong>可用</strong>：未命中过滤条件，或最近一次请求成功。</li>
-                                        <li><strong>待刷新</strong>：access_token 已过期，但有 refresh_token，请求前会自动刷新。</li>
-                                        <li><strong>待验证</strong>：access_token 已过期且缺少 refresh_token，会先用当前 access_token 真实请求一次。</li>
-                                        <li><strong>认证失败</strong>：上游认证错误、缺少 access_token 或 refresh_token 刷新失败；会跳过，直到重新登录、刷新 token 成功或后续请求成功。</li>
-                                        <li><strong>额度用完</strong>：上游返回配额限制，或最近一次配额刷新显示 Codex 窗口无剩余额度；请求时会优先跳过该文件。</li>
-                                        <li><strong>已禁用</strong>：人工停止调度；重新启用后继续按认证和额度状态参与候选选择。</li>
-                                        <li>手动刷新额度或额度到期自动刷新时，会同时获取该账号的重置卡；页面加载不会请求重置卡。</li>
-                                        <li>下拉框在同一行显示重置卡名称和过期时间；已过期的卡会在本地自动隐藏。</li>
-                                        <li>选择一张卡后点击“使用”；上游确认消费成功后，系统自动刷新额度和重置卡列表。</li>
-                                    </ul>
-                                </div>
-                            </div>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-oauth-help-topic="codex_auth_files"
+                                onclick="toggleOAuthHelp('codex_auth_files', event)"
+                                aria-label="查看 Codex 认证文件状态说明"
+                                aria-expanded="false"
+                                aria-controls="oauthHelpPopover"
+                            >?</button>
                         </div>
                     </div>
                 </div>
@@ -365,23 +335,15 @@
                     <div>
                         <div class="oauth-title-with-help">
                             <h2>Claude 可用模型</h2>
-                            <div class="oauth-help-wrap">
-                                <button
-                                    type="button"
-                                    class="oauth-help-button"
-                                    aria-label="查看 Claude 可用模型说明"
-                                    aria-describedby="claudeModelsHelp"
-                                >?</button>
-                                <div class="oauth-help-popover" id="claudeModelsHelp" role="tooltip">
-                                    <p>这里维护的是下游可见的 Claude OAuth 模型 ID。</p>
-                                    <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
-                                    <ul>
-                                        <li>模型 ID 由用户手动添加，不会自动从 Anthropic 拉取。</li>
-                                        <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
-                                        <li>命中 Claude 模型后，LLM Proxy 会转换请求格式，并使用 Claude OAuth 认证文件访问 <code>POST https://api.anthropic.com/v1/messages?beta=true</code>。</li>
-                                    </ul>
-                                </div>
-                            </div>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-oauth-help-topic="claude_models"
+                                onclick="toggleOAuthHelp('claude_models', event)"
+                                aria-label="查看 Claude 可用模型说明"
+                                aria-expanded="false"
+                                aria-controls="oauthHelpPopover"
+                            >?</button>
                         </div>
                     </div>
                 </div>
@@ -415,23 +377,15 @@
                     <div>
                         <div class="oauth-title-with-help">
                             <h2>Claude 认证文件</h2>
-                            <div class="oauth-help-wrap">
-                                <button
-                                    type="button"
-                                    class="oauth-help-button"
-                                    aria-label="查看 Claude 认证文件说明"
-                                    aria-describedby="claudeAuthFilesHelp"
-                                >?</button>
-                                <div class="oauth-help-popover" id="claudeAuthFilesHelp" role="tooltip">
-                                    <p>这里展示本地生成的 Claude OAuth 认证文件。</p>
-                                    <ul>
-                                        <li>认证文件保存在 <code>data/oauth/claude</code>。</li>
-                                        <li>文件格式参考 CLIProxyAPI 的 Claude OAuth token storage。</li>
-                                        <li>已禁用的认证文件保留在本地，并且不参与请求调度。</li>
-                                        <li>当前页面负责生成和删除认证文件，不会自动修改 Provider 配置。</li>
-                                    </ul>
-                                </div>
-                            </div>
+                            <button
+                                type="button"
+                                class="field-help-button"
+                                data-oauth-help-topic="claude_auth_files"
+                                onclick="toggleOAuthHelp('claude_auth_files', event)"
+                                aria-label="查看 Claude 认证文件说明"
+                                aria-expanded="false"
+                                aria-controls="oauthHelpPopover"
+                            >?</button>
                         </div>
                     </div>
                 </div>
@@ -540,6 +494,13 @@
                 </div>
             </div>
         </section>
+    </div>
+    <div class="help-popover" id="oauthHelpPopover" data-placement="bottom" hidden>
+        <div class="help-popover-header">
+            <div class="help-popover-title" id="oauthHelpTitle">说明</div>
+            <button type="button" class="help-popover-close" onclick="hideOAuthHelpPopover()" aria-label="关闭说明">×</button>
+        </div>
+        <div class="help-popover-body" id="oauthHelpBody"></div>
     </div>
 {% endblock %}
 
@@ -3738,8 +3699,267 @@
             });
         }
 
+        const oauthHelpTopics = {
+            codex_models: {
+                title: 'Codex 可用模型',
+                html: `
+                    <p>这里维护的是下游可见的 Codex 模型 ID。</p>
+                    <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
+                    <ul>
+                        <li>模型 ID 使用本地目录，内置模型可删除，删除后可通过添加内置模型补回。</li>
+                        <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
+                        <li>命中 Codex 模型后，LLM Proxy 会转换请求格式，并使用 Codex OAuth 认证文件访问 <code>POST https://chatgpt.com/backend-api/codex/responses</code>。</li>
+                    </ul>
+                `
+            },
+            codex_image_models: {
+                title: 'Codex 图片模型',
+                html: `
+                    <p>这里维护 Codex 图片生成可用模型，并指定自动补齐时使用的默认模型。</p>
+                    <ul>
+                        <li><code>/v1/images/generations</code> 和 <code>/v1/images/edits</code> 可手动指定这里的图片模型。</li>
+                        <li>Images 请求未传 <code>model</code> 时，会使用默认模型作为本次图片生成模型。</li>
+                        <li>Codex Responses 请求未声明图片工具模型时，会使用默认模型补齐 <code>image_generation</code> 工具。</li>
+                        <li>默认模型只决定自动补齐时的选择，不限制手动指定其他可用图片模型。</li>
+                        <li>内置图片模型可删除，删除后可通过添加内置模型补回；用户自行添加的模型 ID 会保留。</li>
+                    </ul>
+                `
+            },
+            codex_auth_files: {
+                title: 'Codex 认证文件状态',
+                html: `
+                    <p>状态来自认证文件内容、最近一次数据面请求结果和已保存的配额快照。</p>
+                    <ul>
+                        <li><strong>可用</strong>：未命中过滤条件，或最近一次请求成功。</li>
+                        <li><strong>待刷新</strong>：access_token 已过期，但有 refresh_token，请求前会自动刷新。</li>
+                        <li><strong>待验证</strong>：access_token 已过期且缺少 refresh_token，会先用当前 access_token 真实请求一次。</li>
+                        <li><strong>认证失败</strong>：上游认证错误、缺少 access_token 或 refresh_token 刷新失败；会跳过，直到重新登录、刷新 token 成功或后续请求成功。</li>
+                        <li><strong>额度用完</strong>：上游返回配额限制，或最近一次配额刷新显示 Codex 窗口无剩余额度；请求时会优先跳过该文件。</li>
+                        <li><strong>已禁用</strong>：人工停止调度；重新启用后继续按认证和额度状态参与候选选择。</li>
+                        <li>手动刷新额度或额度到期自动刷新时，会同时获取该账号的重置卡；页面加载不会请求重置卡。</li>
+                        <li>下拉框在同一行显示重置卡名称和过期时间；已过期的卡会在本地自动隐藏。</li>
+                        <li>选择一张卡后点击“使用”；上游确认消费成功后，系统自动刷新额度和重置卡列表。</li>
+                    </ul>
+                `
+            },
+            claude_models: {
+                title: 'Claude 可用模型',
+                html: `
+                    <p>这里维护的是下游可见的 Claude OAuth 模型 ID。</p>
+                    <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
+                    <ul>
+                        <li>模型 ID 由用户手动添加，不会自动从 Anthropic 拉取。</li>
+                        <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
+                        <li>命中 Claude 模型后，LLM Proxy 会转换请求格式，并使用 Claude OAuth 认证文件访问 <code>POST https://api.anthropic.com/v1/messages?beta=true</code>。</li>
+                    </ul>
+                `
+            },
+            claude_auth_files: {
+                title: 'Claude 认证文件',
+                html: `
+                    <p>这里展示本地生成的 Claude OAuth 认证文件。</p>
+                    <ul>
+                        <li>认证文件保存在 <code>data/oauth/claude</code>。</li>
+                        <li>文件格式参考 CLIProxyAPI 的 Claude OAuth token storage。</li>
+                        <li>已禁用的认证文件保留在本地，并且不参与请求调度。</li>
+                        <li>当前页面负责生成和删除认证文件，不会自动修改 Provider 配置。</li>
+                    </ul>
+                `
+            }
+        };
+        let activeOAuthHelpTopic = null;
+        let activeOAuthHelpTrigger = null;
+        let oauthHelpHideTimer = null;
+
+        function clearOAuthHelpHideTimer() {
+            if (!oauthHelpHideTimer) {
+                return;
+            }
+            clearTimeout(oauthHelpHideTimer);
+            oauthHelpHideTimer = null;
+        }
+
+        function scheduleOAuthHelpPopoverHide() {
+            clearOAuthHelpHideTimer();
+            oauthHelpHideTimer = setTimeout(function () {
+                hideOAuthHelpPopover();
+            }, 160);
+        }
+
+        function hideOAuthHelpPopover() {
+            clearOAuthHelpHideTimer();
+            const popover = document.getElementById('oauthHelpPopover');
+            if (popover) {
+                popover.hidden = true;
+                popover.style.removeProperty('top');
+                popover.style.removeProperty('left');
+                popover.style.removeProperty('visibility');
+                popover.style.removeProperty('--popover-arrow-left');
+                popover.dataset.placement = 'bottom';
+            }
+            activeOAuthHelpTrigger?.setAttribute('aria-expanded', 'false');
+            activeOAuthHelpTrigger = null;
+            activeOAuthHelpTopic = null;
+        }
+
+        function positionOAuthHelpPopover(trigger, popover) {
+            if (!trigger || !popover) {
+                return;
+            }
+
+            const triggerRect = trigger.getBoundingClientRect();
+
+            popover.hidden = false;
+            popover.style.visibility = 'hidden';
+            popover.style.left = '0';
+            popover.style.top = '0';
+            popover.style.removeProperty('--popover-arrow-left');
+
+            const popoverRect = popover.getBoundingClientRect();
+            const viewportPadding = 12;
+            const offset = 12;
+            const centeredLeft = triggerRect.left + (triggerRect.width / 2) - (popoverRect.width / 2);
+            const maxLeft = window.innerWidth - popoverRect.width - viewportPadding;
+            const minLeft = viewportPadding;
+            const left = Math.max(minLeft, Math.min(centeredLeft, maxLeft));
+
+            const canPlaceBottom = triggerRect.bottom + offset + popoverRect.height <= window.innerHeight - viewportPadding;
+            const shouldPlaceBottom = canPlaceBottom || triggerRect.top < popoverRect.height + viewportPadding + offset;
+            const top = shouldPlaceBottom
+                ? Math.min(window.innerHeight - popoverRect.height - viewportPadding, triggerRect.bottom + offset)
+                : Math.max(viewportPadding, triggerRect.top - popoverRect.height - offset);
+            const arrowLeft = Math.min(
+                popoverRect.width - 18,
+                Math.max(18, triggerRect.left + (triggerRect.width / 2) - left)
+            );
+
+            popover.dataset.placement = shouldPlaceBottom ? 'bottom' : 'top';
+            popover.style.left = `${left}px`;
+            popover.style.top = `${top}px`;
+            popover.style.setProperty('--popover-arrow-left', `${arrowLeft}px`);
+            popover.style.visibility = 'visible';
+        }
+
+        function showOAuthHelp(topic, trigger) {
+            clearOAuthHelpHideTimer();
+            const normalizedTopic = String(topic || '');
+            const nextTrigger = trigger || document.querySelector(`[data-oauth-help-topic="${normalizedTopic}"]`);
+            const popover = document.getElementById('oauthHelpPopover');
+            const helpTopic = oauthHelpTopics[normalizedTopic];
+            if (!nextTrigger || !popover || !helpTopic) {
+                return;
+            }
+
+            if (activeOAuthHelpTrigger && activeOAuthHelpTrigger !== nextTrigger) {
+                activeOAuthHelpTrigger.setAttribute('aria-expanded', 'false');
+            }
+
+            document.getElementById('oauthHelpTitle').textContent = helpTopic.title;
+            document.getElementById('oauthHelpBody').innerHTML = helpTopic.html;
+            activeOAuthHelpTrigger = nextTrigger;
+            activeOAuthHelpTopic = normalizedTopic;
+            activeOAuthHelpTrigger.setAttribute('aria-expanded', 'true');
+            positionOAuthHelpPopover(nextTrigger, popover);
+        }
+
+        function toggleOAuthHelp(topic, event) {
+            event?.preventDefault();
+            event?.stopPropagation();
+            showOAuthHelp(topic, event?.currentTarget || null);
+        }
+
+        function isOAuthHelpRelatedTargetWithin(element, event) {
+            return element && event.relatedTarget instanceof Node && element.contains(event.relatedTarget);
+        }
+
+        function getOAuthHelpTriggerFromEvent(event) {
+            if (!(event.target instanceof Element)) {
+                return null;
+            }
+            return event.target.closest('[data-oauth-help-topic]');
+        }
+
+        function initOAuthHelpInteractions() {
+            document.addEventListener('mouseover', function (event) {
+                const trigger = getOAuthHelpTriggerFromEvent(event);
+                if (!trigger || isOAuthHelpRelatedTargetWithin(trigger, event)) {
+                    return;
+                }
+                showOAuthHelp(trigger.dataset.oauthHelpTopic, trigger);
+            });
+
+            document.addEventListener('mouseout', function (event) {
+                const trigger = getOAuthHelpTriggerFromEvent(event);
+                if (!trigger || isOAuthHelpRelatedTargetWithin(trigger, event)) {
+                    return;
+                }
+                scheduleOAuthHelpPopoverHide();
+            });
+
+            document.addEventListener('focusin', function (event) {
+                const trigger = getOAuthHelpTriggerFromEvent(event);
+                if (!trigger) {
+                    return;
+                }
+                showOAuthHelp(trigger.dataset.oauthHelpTopic, trigger);
+            });
+
+            document.addEventListener('focusout', function (event) {
+                const trigger = getOAuthHelpTriggerFromEvent(event);
+                const popover = document.getElementById('oauthHelpPopover');
+                if (!trigger || isOAuthHelpRelatedTargetWithin(popover, event)) {
+                    return;
+                }
+                scheduleOAuthHelpPopoverHide();
+            });
+
+            const popover = document.getElementById('oauthHelpPopover');
+            popover?.addEventListener('mouseover', function (event) {
+                if (isOAuthHelpRelatedTargetWithin(popover, event)) {
+                    return;
+                }
+                clearOAuthHelpHideTimer();
+            });
+            popover?.addEventListener('mouseout', function (event) {
+                if (isOAuthHelpRelatedTargetWithin(popover, event)) {
+                    return;
+                }
+                scheduleOAuthHelpPopoverHide();
+            });
+            popover?.addEventListener('focusin', clearOAuthHelpHideTimer);
+            popover?.addEventListener('focusout', scheduleOAuthHelpPopoverHide);
+
+            document.addEventListener('click', function (event) {
+                if (!(event.target instanceof Element)) {
+                    return;
+                }
+                if (!event.target.closest('[data-oauth-help-topic]') && !event.target.closest('#oauthHelpPopover')) {
+                    hideOAuthHelpPopover();
+                }
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape') {
+                    hideOAuthHelpPopover();
+                }
+            });
+
+            window.addEventListener('resize', function () {
+                if (activeOAuthHelpTrigger) {
+                    positionOAuthHelpPopover(activeOAuthHelpTrigger, document.getElementById('oauthHelpPopover'));
+                }
+            });
+
+            window.addEventListener('scroll', function () {
+                if (activeOAuthHelpTrigger) {
+                    positionOAuthHelpPopover(activeOAuthHelpTrigger, document.getElementById('oauthHelpPopover'));
+                }
+            }, true);
+        }
+
         function initOAuthPage() {
             initThemeToggle();
+            initOAuthHelpInteractions();
             document.addEventListener('click', closeCodexResetCardPickersOnOutsideClick);
             switchOAuthTab('codex');
             syncCodexAuthControls();

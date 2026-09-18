@@ -1272,6 +1272,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         users_css = users_css_path.read_text(encoding="utf-8")
         css_path = Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "css" / "providers.css"
         css = css_path.read_text(encoding="utf-8")
+        admin_base_css_path = (
+            Path(__file__).resolve().parents[1] / "src" / "presentation" / "static" / "css" / "admin-base.css"
+        )
+        admin_base_css = admin_base_css_path.read_text(encoding="utf-8")
 
         self.assertRegex(
             html,
@@ -1621,7 +1625,8 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn("showActionError('删除 Provider'", html)
         self.assertIn("showActionError('拉取模型'", html)
 
-        self.assertIn(".providers-page .provider-help-popover {", css)
+        self.assertIn('class="help-popover" id="providerHelpPopover"', html)
+        self.assertIn(".app-page .help-popover {", admin_base_css)
         self.assertIn(".providers-page .provider-batch-summary {", css)
         self.assertNotIn(".providers-page .provider-batch-delete-modal-dialog {", css)
         self.assertIn(".providers-page .provider-table-checkbox {", css)
@@ -2086,8 +2091,10 @@ class ProviderTemplateTransportTests(unittest.TestCase):
         self.assertIn(".oauth-page .oauth-model-grid", css)
         self.assertIn(".oauth-page .oauth-model-item", css)
         self.assertIn(".oauth-page .oauth-title-with-help", css)
-        self.assertIn(".oauth-page .oauth-help-button", css)
-        self.assertIn(".oauth-page .oauth-help-popover", css)
+        self.assertIn('class="field-help-button"', html)
+        self.assertIn('data-oauth-help-topic="codex_models"', html)
+        self.assertIn('id="oauthHelpPopover"', html)
+        self.assertIn("function toggleOAuthHelp", html)
         self.assertIn(".oauth-page .oauth-auth-file-item", css)
         self.assertIn(".oauth-page .oauth-auth-file-item.is-disabled", css)
         self.assertIn(".oauth-page .oauth-auth-file-toolbar", css)
@@ -2272,6 +2279,7 @@ process.stdout.write(JSON.stringify([
         root = Path(__file__).resolve().parents[1] / "src" / "presentation"
         html = (root / "templates" / "settings.html").read_text(encoding="utf-8")
         css = (root / "static" / "css" / "settings.css").read_text(encoding="utf-8")
+        admin_base_css = (root / "static" / "css" / "admin-base.css").read_text(encoding="utf-8")
         web_controller_py = (root / "web_controller.py").read_text(encoding="utf-8")
 
         self.assertIn("OAuth", html)
@@ -2355,8 +2363,9 @@ process.stdout.write(JSON.stringify([
         self.assertNotIn(".settings-page .oauth-settings-block-ssl", css)
         self.assertNotIn(".settings-page .oauth-network-toggle", css)
         self.assertIn(".settings-page .settings-grid-oauth {", css)
-        self.assertIn(".settings-page .settings-help-popover {\n    position: fixed;", css)
-        self.assertIn("left: var(--popover-arrow-left, 24px);", css)
+        self.assertIn('class="help-popover" id="settingsHelpPopover"', html)
+        self.assertIn(".app-page .help-popover {\n    position: fixed;", admin_base_css)
+        self.assertIn("left: var(--popover-arrow-left, 24px);", admin_base_css)
         self.assertIn('self._app.route("/api/settings/system/client-ip", methods=["PUT"])', web_controller_py)
         self.assertIn('self._app.route("/api/settings/system/oauth", methods=["PUT"])', web_controller_py)
         self.assertIn('self._app.route("/api/settings/system/model-mapping", methods=["PUT"])', web_controller_py)
@@ -2806,7 +2815,7 @@ class FrontendMessageLocalizationTests(unittest.TestCase):
         self.assertIn("/static/js/ui-message.js?v=20260630-1", login_html)
         self.assertIn("/static/js/ui-message.js?v=20260630-1", users_html)
         self.assertIn("/static/js/ui-message.js?v=20260630-1", index_html)
-        self.assertIn("/static/css/admin-base.css?v=20260807-1", base_page_html)
+        self.assertIn("/static/css/admin-base.css?v=20260918-1", base_page_html)
         self.assertIn("/static/js/theme.js?v=20260319-1", base_page_html)
         self.assertIn("/static/js/table-column-resize.js?v=20260807-2", base_page_html)
         self.assertIn("showActionError('登录'", login_html)
@@ -2896,7 +2905,7 @@ process.stdout.write(output);
         self.assertEqual(1, api_keys_html.count('data-resizable-columns="api-keys"'))
         self.assertEqual(1, users_html.count('data-resizable-columns="users"'))
         self.assertIn("/static/css/api_keys.css?v=20260807-1", api_keys_html)
-        self.assertIn("/static/css/users.css?v=20260807-1", users_html)
+        self.assertIn("/static/css/users.css?v=20260918-1", users_html)
         self.assertNotIn("max-width: 180px;", api_keys_css)
         self.assertNotIn("max-width: 320px;", users_css)
 
@@ -3184,10 +3193,9 @@ class DashboardTemplateTests(unittest.TestCase):
             ".dashboard-page .custom-select-menu-action.is-checked .custom-select-menu-action-box,", index_css
         )
         self.assertIn("--nav-tab-hover-bg:", admin_base_css)
-        self.assertIn("body.app-page .field-help-button,", admin_base_css)
-        self.assertIn("body.app-page .oauth-help-button", admin_base_css)
-        self.assertIn(".provider-help-popover-body", admin_base_css)
-        self.assertIn(".oauth-help-popover", admin_base_css)
+        self.assertIn("body.app-page .field-help-button {", admin_base_css)
+        self.assertIn(".app-page .help-popover {", admin_base_css)
+        self.assertIn(".app-page .help-popover-body code", admin_base_css)
         self.assertIn("color: #c2185b;", admin_base_css)
 
     def test_provider_template_keeps_model_row_change_from_rebuilding_table(self) -> None:

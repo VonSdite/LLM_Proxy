@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}用户管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260807-1">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260918-1">{% endblock %}
 {% block body_class %}users-page{% endblock %}
 {% block header_title %}用户管理{% endblock %}
 {% block header_subtitle %}管理用户、IP信息{% endblock %}
@@ -183,12 +183,12 @@
         </div>
     </div>
 
-    <div class="users-help-popover" id="usersHelpPopover" data-placement="bottom" hidden>
-        <div class="users-help-popover-header">
-            <div class="users-help-popover-title" id="usersHelpPopoverTitle">说明</div>
-            <button type="button" class="users-help-popover-close" onclick="hideUsersHelpPopover()" aria-label="关闭说明">×</button>
+    <div class="help-popover" id="usersHelpPopover" data-placement="bottom" hidden>
+        <div class="help-popover-header">
+            <div class="help-popover-title" id="usersHelpPopoverTitle">说明</div>
+            <button type="button" class="help-popover-close" onclick="hideUsersHelpPopover()" aria-label="关闭说明">×</button>
         </div>
-        <div class="users-help-popover-body" id="usersHelpPopoverBody"></div>
+        <div class="help-popover-body" id="usersHelpPopoverBody"></div>
     </div>
 
     <div class="inline-confirm-popover floating-delete-popover" id="userDeletePopover" data-placement="bottom" hidden>
