@@ -466,7 +466,7 @@
                 html: `
                     <p>填写服务启动后实际绑定的监听地址，例如 <code>127.0.0.1</code>、<code>0.0.0.0</code>。</p>
                     <p>保存后会写入配置文件。</p>
-                    <p>如果监听 IP 发生变化，需要重启服务后才会生效。</p>
+                    <p>监听地址发生变化时，<strong>需要重启服务才会生效</strong>。</p>
                 `
             },
             server_port: {
@@ -474,33 +474,34 @@
                 html: `
                     <p>填写服务启动时绑定的监听端口，范围为 <code>1-65535</code>。</p>
                     <p>保存后会写入配置文件。</p>
-                    <p>如果监听端口发生变化，需要重启服务后才会生效。</p>
+                    <p>监听端口发生变化时，<strong>需要重启服务才会生效</strong>。</p>
                 `
             },
             admin_auth: {
                 title: "后台登录",
                 html: `
-                    <p>用户名和密码都填写时，后台页面与管理接口会启用登录校验。</p>
-                    <p>只要任一项为空，就会关闭登录校验，访问后台页面时不再要求登录。</p>
+                    <p><strong>用户名和密码都填写</strong>时，后台页面与管理接口会启用登录校验。</p>
+                    <p><strong>任一项为空</strong>就会关闭登录校验，访问后台页面时不再要求登录。</p>
                 `
             },
             real_client_ip: {
                 title: "真实源 IP",
                 html: `
-                    <p>默认关闭。关闭时，白名单、模型权限、访问日志和请求统计都使用连接到本服务的对端 IP。</p>
-                    <p>开启后，会从配置的 header 读取真实源 IP，适合服务前面还有 Nginx、Cloudflare Tunnel 或其它反向代理的部署。</p>
-                    <p>常用 header 是 <code>X-Forwarded-For</code> 或 <code>X-Real-IP</code>。如果 header 里是逗号分隔列表，系统会取第一个 IP。</p>
-                    <p>请只在可信反向代理已经正确覆盖该 header 时开启；header 缺失或不是合法 IP 时会回退到对端 IP。</p>
+                    <p><strong>默认关闭</strong>。关闭时，白名单、模型权限、访问日志和请求统计都使用连接到本服务的对端 IP。</p>
+                    <p><strong>开启后</strong>，会从配置的 header 读取真实源 IP，适合服务前面还有 Nginx、Cloudflare Tunnel 或其它反向代理的部署。</p>
+                    <p>常用 header 是 <code>X-Forwarded-For</code> 或 <code>X-Real-IP</code>；header 里是逗号分隔列表时，系统会取第一个 IP。</p>
+                    <p>请只在可信反向代理已经正确覆盖该 header 时开启；header 缺失或不是合法 IP 时，会<strong>回退到对端 IP</strong>。</p>
                 `
             },
             api_key_management: {
                 title: "API Key",
                 html: `
-                    <p>开启后，顶部导航会显示 API Key 页签。</p>
-                    <p>开启后，下游访问模型接口必须携带已启用的 API Key。</p>
-                    <p>支持 <code>Authorization: Bearer sk-...</code> 或 <code>X-API-Key</code>。</p>
-                    <p>每个 API Key 可以单独设置模型权限和总 token 使用上限。</p>
-                    <p>如果同时开启 Chat 白名单，最终可访问模型会取用户模型权限和 API Key 模型权限的交集。</p>
+                    <p>开启后，下游访问模型接口必须携带已启用的 API Key，顶部导航会显示 API Key 页签。</p>
+                    <ul>
+                        <li><strong>认证方式</strong>：支持 <code>Authorization: Bearer sk-...</code> 或 <code>X-API-Key</code>。</li>
+                        <li><strong>独立配置</strong>：每个 API Key 可以单独设置模型权限和总 token 使用上限。</li>
+                        <li><strong>与 Chat 白名单叠加</strong>：同时开启 Chat 白名单时，最终可访问模型取用户模型权限和 API Key 模型权限的交集。</li>
+                    </ul>
                 `
             },
             model_mapping: {
@@ -516,33 +517,32 @@
             llm_trace: {
                 title: "LLM Trace",
                 html: `
-                    <p>关闭时不记录 LLM Trace。</p>
-                    <p>开启后会把下游请求、转换后的上游请求、上游响应、转换后的下游响应这四个阶段写入 <code>logs/llm_request_trace.log</code>，每个阶段都会记录起始行、Header 和 Payload。</p>
+                    <p><strong>关闭时</strong>不记录 LLM Trace。</p>
+                    <p><strong>开启后</strong>会把下游请求、转换后的上游请求、上游响应、转换后的下游响应这四个阶段写入 <code>logs/llm_request_trace.log</code>，每个阶段都会记录起始行、Header 和 Payload。</p>
                 `
             },
             oauth_proxy: {
                 title: "OAuth 出站代理说明",
                 html: `
                     <p>这里的代理是服务端访问 OAuth token、配额查询和 OAuth 上游模型接口时使用的 HTTP/HTTPS 出站代理，不是下游客户端访问本服务的入口代理。</p>
-                    <p>直连会关闭 <code>requests</code> 环境代理读取，不使用 <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> 等进程环境变量。</p>
-                    <p>系统代理会使用当前进程环境中的代理变量；如果环境里没有代理，实际会直连。它不保证读取操作系统桌面代理设置。</p>
-                    <p>自定义代理会使用这里填写的代理 URL，并忽略进程环境代理；留空时等同直连。</p>
-                    <p>自定义代理支持在 URL 中填写账号密码，保存时会自动转义账号密码里的特殊字符。</p>
+                    <p><strong>直连</strong> 会关闭 <code>requests</code> 环境代理读取，不使用 <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> 等进程环境变量。</p>
+                    <p><strong>系统代理</strong> 会使用当前进程环境中的代理变量；如果环境里没有代理，实际会直连。它不保证读取操作系统桌面代理设置。</p>
+                    <p><strong>自定义代理</strong> 会使用这里填写的代理 URL，并忽略进程环境代理；留空时等同直连。支持在 URL 中填写账号密码，保存时会自动转义账号密码里的特殊字符。</p>
                     <p>如果账号密码里包含冒号，系统会把第一个冒号当成用户名和密码的分隔符；密码里包含冒号没问题，用户名里包含冒号需要手动写成 <code>%3A</code>。</p>
                 `
             },
             oauth_enabled: {
                 title: "启用 OAuth",
                 html: `
-                    <p>默认关闭。开启后，顶部导航会显示 OAuth 页签。</p>
-                    <p>开启后才会显示 OAuth 出站代理设置。</p>
+                    <p><strong>默认关闭</strong>。开启后，顶部导航会显示 OAuth 页签。</p>
+                    <p>OAuth 出站代理设置只在<strong>开启后</strong>才会显示。</p>
                 `
             },
             oauth_verify_ssl: {
                 title: "OAuth SSL 校验",
                 html: `
-                    <p>默认关闭 SSL 证书校验，适合本地代理或抓包代理场景。</p>
-                    <p>开启后，OAuth token 请求、token 刷新、Codex 配额查询和 OAuth 数据面代理会校验上游 HTTPS 证书。</p>
+                    <p><strong>默认关闭</strong> SSL 证书校验，适合本地代理或抓包代理场景。</p>
+                    <p><strong>开启后</strong>，OAuth token 请求、token 刷新、Codex 配额查询和 OAuth 数据面代理会校验上游 HTTPS 证书。</p>
                 `
             },
             oauth_safe_desensitization: {

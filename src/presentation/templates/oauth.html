@@ -3706,9 +3706,9 @@
                     <p>这里维护的是下游可见的 Codex 模型 ID。</p>
                     <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
                     <ul>
-                        <li>模型 ID 使用本地目录，内置模型可删除，删除后可通过添加内置模型补回。</li>
-                        <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
-                        <li>命中 Codex 模型后，LLM Proxy 会转换请求格式，并使用 Codex OAuth 认证文件访问 <code>POST https://chatgpt.com/backend-api/codex/responses</code>。</li>
+                        <li><strong>本地目录</strong>：模型 ID 使用本地目录维护，内置模型可删除，删除后可通过“添加内置模型”补回。</li>
+                        <li><strong>接入方式</strong>：下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
+                        <li><strong>上游访问</strong>：命中 Codex 模型后，LLM Proxy 会转换请求格式，并使用 Codex OAuth 认证文件访问 <code>POST https://chatgpt.com/backend-api/codex/responses</code>。</li>
                     </ul>
                 `
             },
@@ -3717,11 +3717,11 @@
                 html: `
                     <p>这里维护 Codex 图片生成可用模型，并指定自动补齐时使用的默认模型。</p>
                     <ul>
-                        <li><code>/v1/images/generations</code> 和 <code>/v1/images/edits</code> 可手动指定这里的图片模型。</li>
-                        <li>Images 请求未传 <code>model</code> 时，会使用默认模型作为本次图片生成模型。</li>
-                        <li>Codex Responses 请求未声明图片工具模型时，会使用默认模型补齐 <code>image_generation</code> 工具。</li>
-                        <li>默认模型只决定自动补齐时的选择，不限制手动指定其他可用图片模型。</li>
-                        <li>内置图片模型可删除，删除后可通过添加内置模型补回；用户自行添加的模型 ID 会保留。</li>
+                        <li><strong>手动指定</strong>：<code>/v1/images/generations</code> 和 <code>/v1/images/edits</code> 可手动指定这里的图片模型。</li>
+                        <li><strong>自动补齐</strong>：Images 请求未传 <code>model</code> 时，会使用默认模型作为本次图片生成模型。</li>
+                        <li><strong>工具补齐</strong>：Codex Responses 请求未声明图片工具模型时，会使用默认模型补齐 <code>image_generation</code> 工具。</li>
+                        <li><strong>默认模型范围</strong>：只决定自动补齐时的选择，不限制手动指定其他可用图片模型。</li>
+                        <li><strong>内置模型</strong>：可删除，删除后可通过“添加内置模型”补回；用户自行添加的模型 ID 会保留。</li>
                     </ul>
                 `
             },
@@ -3748,9 +3748,9 @@
                     <p>这里维护的是下游可见的 Claude OAuth 模型 ID。</p>
                     <p>下游请求时直接使用这些模型名，不加 provider 前缀。</p>
                     <ul>
-                        <li>模型 ID 由用户手动添加，不会自动从 Anthropic 拉取。</li>
-                        <li>下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
-                        <li>命中 Claude 模型后，LLM Proxy 会转换请求格式，并使用 Claude OAuth 认证文件访问 <code>POST https://api.anthropic.com/v1/messages?beta=true</code>。</li>
+                        <li><strong>手动维护</strong>：模型 ID 由用户手动添加，不会自动从 Anthropic 拉取。</li>
+                        <li><strong>接入方式</strong>：下游可通过 <code>POST /v1/chat/completions</code>、<code>POST /v1/responses</code>、<code>POST /v1/messages</code> 接入 LLM Proxy。</li>
+                        <li><strong>上游访问</strong>：命中 Claude 模型后，LLM Proxy 会转换请求格式，并使用 Claude OAuth 认证文件访问 <code>POST https://api.anthropic.com/v1/messages?beta=true</code>。</li>
                     </ul>
                 `
             },
@@ -3759,10 +3759,10 @@
                 html: `
                     <p>这里展示本地生成的 Claude OAuth 认证文件。</p>
                     <ul>
-                        <li>认证文件保存在 <code>data/oauth/claude</code>。</li>
-                        <li>文件格式参考 CLIProxyAPI 的 Claude OAuth token storage。</li>
-                        <li>已禁用的认证文件保留在本地，并且不参与请求调度。</li>
-                        <li>当前页面负责生成和删除认证文件，不会自动修改 Provider 配置。</li>
+                        <li><strong>存储位置</strong>：认证文件保存在 <code>data/oauth/claude</code>。</li>
+                        <li><strong>文件格式</strong>：参考 CLIProxyAPI 的 Claude OAuth token storage。</li>
+                        <li><strong>禁用行为</strong>：已禁用的认证文件保留在本地，并且不参与请求调度。</li>
+                        <li><strong>职责边界</strong>：当前页面负责生成和删除认证文件，不会自动修改 Provider 配置。</li>
                     </ul>
                 `
             }
