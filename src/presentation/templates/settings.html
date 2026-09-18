@@ -10,7 +10,7 @@
             visibility: hidden;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/settings.css?v=20260807-1" id="settingsPageStyles">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260918-1" id="settingsPageStyles">
     <script>
         (function () {
             const root = document.documentElement;
@@ -422,12 +422,12 @@
 {% endblock %}
 
 {% block after_container %}
-    <div class="settings-help-popover" id="settingsHelpPopover" data-placement="bottom" hidden>
-        <div class="settings-help-popover-header">
-            <div class="settings-help-popover-title" id="settingsHelpTitle">说明</div>
-            <button type="button" class="settings-help-popover-close" onclick="hideSettingsHelpPopover()" aria-label="关闭说明">×</button>
+    <div class="help-popover" id="settingsHelpPopover" data-placement="bottom" hidden>
+        <div class="help-popover-header">
+            <div class="help-popover-title" id="settingsHelpTitle">说明</div>
+            <button type="button" class="help-popover-close" onclick="hideSettingsHelpPopover()" aria-label="关闭说明">×</button>
         </div>
-        <div class="settings-help-popover-body" id="settingsHelpBody"></div>
+        <div class="help-popover-body" id="settingsHelpBody"></div>
     </div>
 {% endblock %}
 
@@ -546,14 +546,17 @@
                 `
             },
             oauth_safe_desensitization: {
-                title: "OAuth 安全脱敏",
+                title: "OAuth 安全脱敏怎么用",
                 html: `
-                    <p>默认关闭。开启后，经 OAuth 上游（Codex / Claude）发出的请求体会先替换为请求级占位符，响应返回下游前再恢复原值。</p>
+                    <p>启用后，经 OAuth 上游（Codex / Claude）发出的请求会先把常见敏感信息替换为请求级占位符；上游响应回到下游前再把占位符恢复为原值。</p>
                     <ul>
-                        <li><strong>覆盖范围</strong>：与 Provider 的安全脱敏一致，含图片生成 prompt。</li>
+                        <li><strong>覆盖</strong>：密码与口令赋值、AK/SK、Token、云厂商与 SaaS 密钥、连接串凭据、私钥与 SSH 公钥、邮箱、手机号、身份证号、银行卡号、IP 地址等，图片生成 prompt 同样处理。</li>
+                        <li><strong>请求头</strong>：同时不再向上游转发 <code>Cookie</code>、<code>x-api-key</code> 等凭据类请求头。</li>
                         <li><strong>映射级开关</strong>：模型映射开启脱敏时，即使这里关闭，该映射的请求也会脱敏。</li>
-                        <li><strong>已知误伤</strong>：版本号（如 <code>2.5.7.1</code>）可能被识别为 IP；11 位订单号可能被识别为手机号；恰好通过银行卡校验的长数字会被当作卡号。</li>
+                        <li><strong>已知误伤</strong>：版本号（如 <code>2.5.7.1</code>）可能被识别为 IP；11 位订单号可能被识别为手机号；恰好通过银行卡校验的长数字会被当作卡号；<code>cookie:</code> 等头样式后面的整行说明文字可能被吞。</li>
+                        <li><strong>已知漏报</strong>：纯字母口令、中文姓名、地址等不在规则覆盖内。</li>
                     </ul>
+                    <p>这是规则型假名化，不是完整匿名化；更复杂的业务语义需要后续本地 NER 或策略规则补充。</p>
                 `
             }
         };

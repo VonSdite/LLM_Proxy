@@ -1,7 +1,7 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}Provider 管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260807-2">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/providers.css?v=20260918-1">{% endblock %}
 {% block body_class %}providers-page{% endblock %}
 {% block header_title %}Provider 管理{% endblock %}
 {% block header_subtitle %}维护 providers 配置{% endblock %}
@@ -585,12 +585,12 @@
             <button type="button" class="btn-action btn-delete inline-confirm-action" id="confirmDeleteAuthGroupBtn" onclick="confirmDeleteAuthGroup(event)">确认</button>
         </div>
     </div>
-    <div class="provider-help-popover" id="providerHelpPopover" data-placement="bottom" hidden>
-        <div class="provider-help-popover-header">
-            <div class="provider-help-popover-title" id="providerHelpTitle"></div>
-            <button type="button" class="provider-help-popover-close" onclick="hideProviderHelpPopover()" aria-label="关闭说明">×</button>
+    <div class="help-popover" id="providerHelpPopover" data-placement="bottom" hidden>
+        <div class="help-popover-header">
+            <div class="help-popover-title" id="providerHelpTitle"></div>
+            <button type="button" class="help-popover-close" onclick="hideProviderHelpPopover()" aria-label="关闭说明">×</button>
         </div>
-        <div class="provider-help-popover-body" id="providerHelpBody"></div>
+        <div class="help-popover-body" id="providerHelpBody"></div>
     </div>
 {% endblock %}
 
@@ -675,6 +675,7 @@
                     <ul>
                         <li><strong>覆盖</strong>：密码与口令赋值、AK/SK、Token、云厂商与 SaaS 密钥、连接串凭据、私钥与 SSH 公钥、邮箱、手机号、身份证号、银行卡号、IP 地址等。</li>
                         <li><strong>请求头</strong>：同时不再向上游转发 <code>Cookie</code>、<code>x-api-key</code> 等凭据类请求头。</li>
+                        <li><strong>映射级开关</strong>：模型映射开启脱敏时，即使这里关闭，该映射的请求也会脱敏。</li>
                         <li><strong>已知误伤</strong>：版本号（如 <code>2.5.7.1</code>）可能被识别为 IP；11 位订单号可能被识别为手机号；恰好通过银行卡校验的长数字会被当作卡号；<code>cookie:</code> 等头样式后面的整行说明文字可能被吞。</li>
                         <li><strong>已知漏报</strong>：纯字母口令、中文姓名、地址等不在规则覆盖内。</li>
                     </ul>

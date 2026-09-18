@@ -1187,108 +1187,7 @@
     cursor: wait;
 }
 
-.providers-page .provider-help-popover {
-    position: fixed;
-    z-index: 1080;
-    width: min(460px, calc(100vw - 24px));
-    max-height: min(72vh, 520px);
-    overflow: hidden;
-    border: 1px solid var(--line-strong);
-    border-radius: 16px;
-    background: #ffffff;
-    box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
-}
-
-.providers-page .provider-help-popover[hidden] {
-    display: none;
-}
-
-.providers-page .provider-help-popover::after,
-.providers-page .provider-help-popover::before {
-    content: "";
-    position: absolute;
-    left: var(--popover-arrow-left, 24px);
-    transform: translateX(-50%);
-    border-left: 9px solid transparent;
-    border-right: 9px solid transparent;
-}
-
-.providers-page .provider-help-popover[data-placement="top"]::after {
-    bottom: -17px;
-    border-top: 9px solid #ffffff;
-}
-
-.providers-page .provider-help-popover[data-placement="top"]::before {
-    bottom: -19px;
-    border-top: 10px solid var(--line-strong);
-}
-
-.providers-page .provider-help-popover[data-placement="bottom"]::after {
-    top: -17px;
-    border-bottom: 9px solid #ffffff;
-}
-
-.providers-page .provider-help-popover[data-placement="bottom"]::before {
-    top: -19px;
-    border-bottom: 10px solid var(--line-strong);
-}
-
-.providers-page .provider-help-popover-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 18px 12px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-}
-
-.providers-page .provider-help-popover-title {
-    color: var(--text-primary);
-    font-size: 15px;
-    font-weight: 800;
-}
-
-.providers-page .provider-help-popover-close {
-    width: 30px;
-    height: 30px;
-    border: 1px solid var(--line-strong);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.92);
-    color: var(--text-secondary);
-    font-size: 18px;
-    line-height: 1;
-}
-
-.providers-page .provider-help-popover-body {
-    overflow: auto;
-    max-height: calc(min(72vh, 520px) - 58px);
-    padding: 8px 18px 18px;
-    color: var(--text-primary);
-    font-size: 13px;
-    line-height: 1.65;
-}
-
-.providers-page .provider-help-popover-body p {
-    margin: 0 0 10px;
-}
-
-.providers-page .provider-help-popover-body ul {
-    margin: 0 0 12px;
-    padding-left: 18px;
-}
-
-.providers-page .provider-help-popover-body li + li {
-    margin-top: 6px;
-}
-
-.providers-page .provider-help-popover-body code {
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: rgba(59, 130, 246, 0.1);
-    color: #c2185b;
-    font-size: 12px;
-    font-weight: 700;
-}
+/* 帮助浮窗样式统一由 admin-base.css 的 .help-popover 组件提供。 */
 
 :root[data-theme="dark"] .providers-page .btn-action {
     background: #0d1117;
@@ -2470,12 +2369,6 @@
     background: #161b22;
 }
 
-:root[data-theme="dark"] .providers-page .provider-help-popover {
-    border-color: #30363d;
-    background: #161b22;
-    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
-}
-
 :root[data-theme="dark"] .providers-page .inline-confirm-popover::after {
     border-top-color: #30363d;
 }
@@ -2492,41 +2385,6 @@
 :root[data-theme="dark"] .providers-page .inline-confirm-popover[data-placement="bottom"]::before {
     border-top-color: transparent;
     border-bottom-color: #161b22;
-}
-
-:root[data-theme="dark"] .providers-page .provider-help-popover[data-placement="top"]::after {
-    border-top-color: #161b22;
-}
-
-:root[data-theme="dark"] .providers-page .provider-help-popover[data-placement="top"]::before {
-    border-top-color: #30363d;
-}
-
-:root[data-theme="dark"] .providers-page .provider-help-popover[data-placement="bottom"]::after {
-    border-bottom-color: #161b22;
-}
-
-:root[data-theme="dark"] .providers-page .provider-help-popover[data-placement="bottom"]::before {
-    border-bottom-color: #30363d;
-}
-
-:root[data-theme="dark"] .providers-page .provider-help-popover-header {
-    border-bottom-color: rgba(99, 110, 123, 0.35);
-}
-
-:root[data-theme="dark"] .providers-page .provider-help-popover-close {
-    border-color: #3d4754;
-    background: rgba(255, 255, 255, 0.05);
-    color: #b6c1cd;
-}
-
-:root[data-theme="dark"] .providers-page .provider-help-popover-close:hover {
-    color: #ffffff;
-}
-
-:root[data-theme="dark"] .providers-page .provider-help-popover-body code {
-    background: rgba(108, 167, 255, 0.14);
-    color: #ff8ac2;
 }
 
 :root[data-theme="dark"] .providers-page .inline-confirm-action:disabled {

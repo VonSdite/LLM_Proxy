@@ -149,106 +149,7 @@
     position: relative;
 }
 
-.oauth-page .oauth-help-wrap {
-    position: relative;
-    display: inline-flex;
-    flex: 0 0 auto;
-}
-
-.oauth-page .oauth-help-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 1px solid var(--line);
-    border-radius: 50%;
-    background: var(--surface-soft);
-    color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 800;
-    line-height: 1;
-    cursor: help;
-    transition: border-color var(--transition), color var(--transition), background-color var(--transition), box-shadow var(--transition);
-}
-
-.oauth-page .oauth-help-button:hover,
-.oauth-page .oauth-help-button:focus-visible {
-    border-color: var(--primary);
-    color: var(--primary);
-    background: #fff;
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(95, 143, 190, 0.14);
-}
-
-.oauth-page .oauth-help-popover {
-    position: absolute;
-    z-index: 30;
-    top: calc(100% + 10px);
-    left: 50%;
-    width: min(520px, calc(100vw - 48px));
-    padding: 14px 16px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: #fff;
-    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
-    color: var(--text-primary);
-    font-size: 13px;
-    line-height: 1.6;
-    transform: translate(-28px, 4px);
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transition: opacity var(--transition), transform var(--transition), visibility var(--transition);
-}
-
-.oauth-page .oauth-help-popover::before {
-    content: "";
-    position: absolute;
-    top: -6px;
-    left: 20px;
-    width: 10px;
-    height: 10px;
-    border-top: 1px solid var(--line);
-    border-left: 1px solid var(--line);
-    background: inherit;
-    transform: rotate(45deg);
-}
-
-.oauth-page .oauth-help-wrap:hover .oauth-help-popover,
-.oauth-page .oauth-help-wrap:focus-within .oauth-help-popover {
-    opacity: 1;
-    visibility: visible;
-    transform: translate(-28px, 0);
-    pointer-events: auto;
-}
-
-.oauth-page .oauth-help-popover p {
-    margin: 0 0 8px;
-}
-
-.oauth-page .oauth-help-popover p:last-child {
-    margin-bottom: 0;
-}
-
-.oauth-page .oauth-help-popover ul {
-    margin: 8px 0;
-    padding-left: 18px;
-}
-
-.oauth-page .oauth-help-popover li + li {
-    margin-top: 6px;
-}
-
-.oauth-page .oauth-help-popover code {
-    padding: 1px 5px;
-    border-radius: 5px;
-    background: var(--surface-soft);
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 12px;
-}
+/* 问号按钮与帮助浮窗样式统一由 admin-base.css 的 field-help-button / .help-popover 组件提供。 */
 
 .oauth-page .oauth-card-header p {
     margin: 6px 0 0;
@@ -1406,33 +1307,6 @@
     color: var(--primary);
 }
 
-:root[data-theme="dark"] .oauth-page .oauth-help-button {
-    border-color: #3d444d;
-    background: #0d1117;
-    color: #9da7b3;
-}
-
-:root[data-theme="dark"] .oauth-page .oauth-help-button:hover,
-:root[data-theme="dark"] .oauth-page .oauth-help-button:focus-visible {
-    border-color: var(--primary);
-    color: var(--primary);
-    background: #111820;
-}
-
-:root[data-theme="dark"] .oauth-page .oauth-help-popover {
-    border-color: #3d444d;
-    background: #161b22;
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
-}
-
-:root[data-theme="dark"] .oauth-page .oauth-help-popover::before {
-    border-color: #3d444d;
-}
-
-:root[data-theme="dark"] .oauth-page .oauth-help-popover code {
-    background: #0d1117;
-}
-
 :root[data-theme="dark"] .oauth-page .oauth-delete-popover {
     border-color: #3d444d;
     background: #161b22;
@@ -1510,23 +1384,6 @@
 @media (max-width: 720px) {
     .oauth-page .oauth-callback-row {
         grid-template-columns: 1fr;
-    }
-
-    .oauth-page .oauth-help-popover {
-        left: auto;
-        right: -8px;
-        width: min(360px, calc(100vw - 40px));
-        transform: translate(0, 4px);
-    }
-
-    .oauth-page .oauth-help-popover::before {
-        left: auto;
-        right: 14px;
-    }
-
-    .oauth-page .oauth-help-wrap:hover .oauth-help-popover,
-    .oauth-page .oauth-help-wrap:focus-within .oauth-help-popover {
-        transform: translate(0, 0);
     }
 
     .oauth-page .oauth-model-editor-row {
