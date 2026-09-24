@@ -1931,6 +1931,9 @@ class CodexOAuthServiceTests(unittest.TestCase):
 
         model_ids = [model["id"] for model in result["models"]]
         self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), model_ids)
+        self.assertIn("gpt-6-sol", model_ids)
+        self.assertIn("gpt-6-luna", model_ids)
+        self.assertIn("gpt-5.3-codex", model_ids)
         self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), result["built_in_models"])
         self.assertNotIn("source", result)
         self.assertNotIn("updated_at", result)
@@ -1992,6 +1995,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
         initial_model_ids = [model["id"] for model in initial["models"]]
         restored_model_ids = [model["id"] for model in restored["models"]]
         self.assertEqual(list(DEFAULT_CODEX_IMAGE_MODEL_IDS), initial_model_ids)
+        self.assertNotIn("gpt-image-1.5", initial_model_ids)
+        self.assertNotIn("gpt-image-1", initial_model_ids)
         self.assertEqual(DEFAULT_CODEX_IMAGE_MODEL_ID, initial["default_model"])
         self.assertIn("gpt-image-custom", restored_model_ids)
         self.assertTrue(set(DEFAULT_CODEX_IMAGE_MODEL_IDS).issubset(set(restored_model_ids)))
