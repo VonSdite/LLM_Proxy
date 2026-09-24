@@ -828,7 +828,7 @@ class CodexProxyServiceTests(unittest.TestCase):
                 response, status_code, failure = proxy_service.proxy_image_request(
                     {
                         "prompt": "draw",
-                        "model": "gpt-image-1.5",
+                        "model": "gpt-image-2.5-sunburst",
                         "response_format": "url",
                         "size": "1024x1024",
                     },
@@ -844,16 +844,16 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual({"type": "image_generation"}, captured_body["tool_choice"])
         self.assertEqual("image_generation", captured_body["tools"][0]["type"])
         self.assertEqual("generate", captured_body["tools"][0]["action"])
-        self.assertEqual("gpt-image-1.5", captured_body["tools"][0]["model"])
+        self.assertEqual("gpt-image-2.5-sunburst", captured_body["tools"][0]["model"])
         self.assertEqual("1024x1024", captured_body["tools"][0]["size"])
         self.assertEqual("draw", captured_body["input"][0]["content"][0]["text"])
         self.assertEqual(1770000000, payload["created"])
         self.assertEqual("data:image/png;base64,aGVsbG8=", payload["data"][0]["url"])
         self.assertEqual("draw a tidy diagram", payload["data"][0]["revised_prompt"])
         self.assertEqual(10, payload["usage"]["total_tokens"])
-        self.assertEqual("gpt-image-1.5", complete_meta["response_model"])
+        self.assertEqual("gpt-image-2.5-sunburst", complete_meta["response_model"])
         self.assertEqual(10, complete_meta["total_tokens"])
-        self.assertAlmostEqual(0.000212, complete_meta["estimated_cost_usd"])
+        self.assertAlmostEqual(0.0002, complete_meta["estimated_cost_usd"])
         self.assertEqual({"image_tokens": 0, "text_tokens": 4}, complete_meta["input_tokens_details"])
         self.assertEqual({"image_tokens": 6, "text_tokens": 0}, complete_meta["output_tokens_details"])
 
@@ -1663,7 +1663,9 @@ class CodexProxyServiceTests(unittest.TestCase):
                 return FakeHTTPResponse(
                     status_code=200,
                     chunks=[
-                        f'data: {{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"echo {placeholder}"}}\n\n'.encode("utf-8"),
+                        f'data: {{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"echo {placeholder}"}}\n\n'.encode(
+                            "utf-8"
+                        ),
                         b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","created_at":1770000000,"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}\n\n',
                     ],
                 )

@@ -143,6 +143,10 @@ decoder
   - 维护用户、IP 白名单状态和模型权限
   - 支持用户迁移 JSON 导入导出与批量删除；导出包包含用户表配置
   - 导入用户迁移 JSON 时按 IP 创建或更新用户
+- `OpenAIModelCatalog`
+  - 数据保存在 `src/config/openai_model_catalog.json`，由 `src/config/openai_model_catalog.py` 加载
+  - 提供 Codex OAuth 内置文本模型、内置图片模型、默认图片模型、OpenAI API 价格快照、价格来源和快照日期
+  - `CodexOAuthService` 从该配置模块读取内置模型目录；`openai_model_pricing` 从该配置模块读取价格表并执行请求费用估算
 - `LogService`
   - 读取请求日志、统计汇总、用户用量汇总和筛选项
   - 按 Codex 认证文件、账号和七天窗口边界聚合请求数、Token 与请求发生时保存的预计费用
@@ -190,7 +194,7 @@ decoder
   - 额度快照显示窗口耗尽时，认证文件等待全部已耗尽 Codex 窗口到达 `reset_at`；截止时间跨进程重启生效，到点后自动恢复；缺少 `reset_at` 时保留已有截止时间或使用 60 秒兜底
   - 主动或后台配额刷新确认已启用账号的全部 Codex 额度窗口均有剩余额度时，通知模型映射服务立即清理 `codex_quota_exhausted` 目标冷却；Free 账号不恢复图片映射目标
   - 维护本地 Codex OAuth 文本模型目录、图片模型目录和默认图片模型
-  - 内置常用 Codex 文本模型和图片模型 ID；添加内置模型只把缺失的内置 ID 加回本地目录，保留用户自行添加的模型 ID
+  - 从配置层模型目录读取内置 Codex 文本模型和图片模型 ID；添加内置模型只把缺失的内置 ID 加回本地目录，保留用户自行添加的模型 ID
   - 按本地模型目录、人工禁用状态、持久化额度禁用、认证失败状态和最近成功认证文件提供 Codex 请求候选账号
   - 认证文件进入新的粘滞使用段时先查询一次配额；查询失败不阻断模型请求，确认额度耗尽时跳过该认证文件
 - `ClaudeOAuthService`
@@ -363,8 +367,8 @@ route family 直接决定当前请求的下游接口协议：
 OAuth 模型是数据平面的例外路由：
 
 - Provider 配置模型仍使用 `{provider}/{model}` key
-- Codex / Claude OAuth 模型使用原始模型名，例如 `gpt-5-codex`、`claude-sonnet-4-5`
-- Codex OAuth 图片模型使用原始模型名，例如 `gpt-image-2`
+- Codex / Claude OAuth 模型使用原始模型名，例如 `gpt-5.3-codex`、`claude-sonnet-4-5`
+- Codex OAuth 图片模型使用原始模型名，例如 `gpt-image-2.5-sunburst`
 - 模型映射 ID 使用原始 ID，不增加 Provider 前缀；它可以映射 Provider、Codex OAuth 文本、Codex OAuth 图片和 Claude OAuth 文本模型，并可用于对应的 Chat、Responses、Messages 和 Images API
 - 用户模型权限和 API Key 模型权限的可选目录同时包含 Provider 模型和当前可用 OAuth 模型
 - 权限字段保存显式列表时，Provider 模型保存 `{provider}/{model}`，OAuth 模型保存原始模型名

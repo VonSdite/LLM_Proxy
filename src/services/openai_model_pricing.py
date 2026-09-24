@@ -5,201 +5,31 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
-OPENAI_MODEL_PRICING_SOURCE = "https://developers.openai.com/api/docs/pricing/"
-OPENAI_MODEL_PRICING_SNAPSHOT_DATE = "2026-09-15"
-LONG_CONTEXT_THRESHOLD_TOKENS = 272_000
+from ..config.openai_model_catalog import (
+    LONG_CONTEXT_THRESHOLD_TOKENS,
+    OPENAI_FAST_MODEL_PRICES,
+    OPENAI_IMAGE_MODEL_PRICES,
+    OPENAI_MODEL_PRICES,
+    OPENAI_MODEL_PRICING_SNAPSHOT_DATE,
+    OPENAI_MODEL_PRICING_SOURCE,
+    OpenAIImageModelPrice,
+    OpenAIModelPrice,
+)
+
 MODEL_SNAPSHOT_SUFFIX_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}(?:$|[-.].*)")
-
-
-@dataclass(frozen=True)
-class OpenAIModelPrice:
-    """描述一个模型按 Token 计费的美元单价。"""
-
-    input_cost_per_token: float
-    cache_read_input_token_cost: float | None
-    output_cost_per_token: float
-    cache_creation_input_token_cost: float | None = None
-    input_cost_per_token_above_272k_tokens: float | None = None
-    cache_read_input_token_cost_above_272k_tokens: float | None = None
-    cache_creation_input_token_cost_above_272k_tokens: float | None = None
-    output_cost_per_token_above_272k_tokens: float | None = None
-    long_context_pricing_available: bool = True
-
-
-@dataclass(frozen=True)
-class OpenAIImageModelPrice:
-    """描述图片模型按文本和图片 Token 计费的美元单价。"""
-
-    text_input_cost_per_token: float
-    cached_text_input_cost_per_token: float
-    image_input_cost_per_token: float
-    cached_image_input_cost_per_token: float
-    image_output_cost_per_token: float
-    text_output_cost_per_token: float | None = None
-
-
-# 价格是 API 零售价的等价估算，不表示 Codex OAuth 账号会产生对应账单。
-OPENAI_MODEL_PRICES: dict[str, OpenAIModelPrice] = {
-    "gpt-6-astra": OpenAIModelPrice(
-        input_cost_per_token=0.00001,
-        cache_read_input_token_cost=0.000001,
-        cache_creation_input_token_cost=0.0000125,
-        output_cost_per_token=0.00005,
-        input_cost_per_token_above_272k_tokens=0.00002,
-        cache_read_input_token_cost_above_272k_tokens=0.000002,
-        cache_creation_input_token_cost_above_272k_tokens=0.000025,
-        output_cost_per_token_above_272k_tokens=0.000075,
-    ),
-    "gpt-5.6-sol": OpenAIModelPrice(
-        input_cost_per_token=0.000004,
-        cache_read_input_token_cost=0.0000004,
-        cache_creation_input_token_cost=0.000005,
-        output_cost_per_token=0.00002,
-        input_cost_per_token_above_272k_tokens=0.000008,
-        cache_read_input_token_cost_above_272k_tokens=0.0000008,
-        cache_creation_input_token_cost_above_272k_tokens=0.00001,
-        output_cost_per_token_above_272k_tokens=0.00003,
-    ),
-    "gpt-5.6-terra": OpenAIModelPrice(
-        input_cost_per_token=0.000002,
-        cache_read_input_token_cost=0.0000002,
-        cache_creation_input_token_cost=0.0000025,
-        output_cost_per_token=0.000012,
-        input_cost_per_token_above_272k_tokens=0.000004,
-        cache_read_input_token_cost_above_272k_tokens=0.0000004,
-        cache_creation_input_token_cost_above_272k_tokens=0.000005,
-        output_cost_per_token_above_272k_tokens=0.000018,
-    ),
-    "gpt-5.6-luna": OpenAIModelPrice(
-        input_cost_per_token=0.0000002,
-        cache_read_input_token_cost=0.00000002,
-        cache_creation_input_token_cost=0.00000025,
-        output_cost_per_token=0.0000012,
-        input_cost_per_token_above_272k_tokens=0.0000004,
-        cache_read_input_token_cost_above_272k_tokens=0.00000004,
-        cache_creation_input_token_cost_above_272k_tokens=0.0000005,
-        output_cost_per_token_above_272k_tokens=0.0000018,
-    ),
-    "gpt-5.5": OpenAIModelPrice(
-        input_cost_per_token=0.000005,
-        cache_read_input_token_cost=0.0000005,
-        output_cost_per_token=0.00003,
-        input_cost_per_token_above_272k_tokens=0.00001,
-        cache_read_input_token_cost_above_272k_tokens=0.000001,
-        output_cost_per_token_above_272k_tokens=0.000045,
-    ),
-    "gpt-5.5-pro": OpenAIModelPrice(
-        input_cost_per_token=0.00003,
-        cache_read_input_token_cost=None,
-        output_cost_per_token=0.00018,
-        input_cost_per_token_above_272k_tokens=0.00006,
-        output_cost_per_token_above_272k_tokens=0.00027,
-    ),
-    "gpt-5.4": OpenAIModelPrice(
-        input_cost_per_token=0.0000025,
-        cache_read_input_token_cost=0.00000025,
-        output_cost_per_token=0.000015,
-        input_cost_per_token_above_272k_tokens=0.000005,
-        cache_read_input_token_cost_above_272k_tokens=0.0000005,
-        output_cost_per_token_above_272k_tokens=0.0000225,
-    ),
-    "gpt-5.4-pro": OpenAIModelPrice(
-        input_cost_per_token=0.00003,
-        cache_read_input_token_cost=None,
-        output_cost_per_token=0.00018,
-        input_cost_per_token_above_272k_tokens=0.00006,
-        output_cost_per_token_above_272k_tokens=0.00027,
-    ),
-    "gpt-5.6-cyber": OpenAIModelPrice(
-        input_cost_per_token=0.0000125,
-        cache_read_input_token_cost=0.00000125,
-        cache_creation_input_token_cost=0.000015625,
-        output_cost_per_token=0.000075,
-        long_context_pricing_available=False,
-    ),
-    "gpt-5.5-cyber": OpenAIModelPrice(
-        input_cost_per_token=0.0000125,
-        cache_read_input_token_cost=0.00000125,
-        output_cost_per_token=0.000075,
-        long_context_pricing_available=False,
-    ),
-}
-
-OPENAI_FAST_MODEL_PRICES: dict[str, OpenAIModelPrice] = {
-    "gpt-6-astra": OpenAIModelPrice(
-        input_cost_per_token=0.00002,
-        cache_read_input_token_cost=0.000002,
-        cache_creation_input_token_cost=0.000025,
-        output_cost_per_token=0.0001,
-        input_cost_per_token_above_272k_tokens=0.00004,
-        cache_read_input_token_cost_above_272k_tokens=0.000004,
-        cache_creation_input_token_cost_above_272k_tokens=0.00005,
-        output_cost_per_token_above_272k_tokens=0.00015,
-    ),
-    "gpt-5.6-sol": OpenAIModelPrice(
-        input_cost_per_token=0.000008,
-        cache_read_input_token_cost=0.0000008,
-        cache_creation_input_token_cost=0.00001,
-        output_cost_per_token=0.00004,
-        input_cost_per_token_above_272k_tokens=0.000016,
-        cache_read_input_token_cost_above_272k_tokens=0.0000016,
-        cache_creation_input_token_cost_above_272k_tokens=0.00002,
-        output_cost_per_token_above_272k_tokens=0.00006,
-    ),
-    "gpt-5.6-terra": OpenAIModelPrice(
-        input_cost_per_token=0.000004,
-        cache_read_input_token_cost=0.0000004,
-        cache_creation_input_token_cost=0.000005,
-        output_cost_per_token=0.000024,
-        input_cost_per_token_above_272k_tokens=0.000008,
-        cache_read_input_token_cost_above_272k_tokens=0.0000008,
-        cache_creation_input_token_cost_above_272k_tokens=0.00001,
-        output_cost_per_token_above_272k_tokens=0.000036,
-    ),
-    "gpt-5.6-luna": OpenAIModelPrice(
-        input_cost_per_token=0.0000004,
-        cache_read_input_token_cost=0.00000004,
-        cache_creation_input_token_cost=0.0000005,
-        output_cost_per_token=0.0000024,
-        input_cost_per_token_above_272k_tokens=0.0000008,
-        cache_read_input_token_cost_above_272k_tokens=0.00000008,
-        cache_creation_input_token_cost_above_272k_tokens=0.000001,
-        output_cost_per_token_above_272k_tokens=0.0000036,
-    ),
-    "gpt-5.5": OpenAIModelPrice(
-        input_cost_per_token=0.0000125,
-        cache_read_input_token_cost=0.00000125,
-        output_cost_per_token=0.000075,
-        long_context_pricing_available=False,
-    ),
-    "gpt-5.4": OpenAIModelPrice(
-        input_cost_per_token=0.000005,
-        cache_read_input_token_cost=0.0000005,
-        output_cost_per_token=0.00003,
-        long_context_pricing_available=False,
-    ),
-}
-
-OPENAI_IMAGE_MODEL_PRICES: dict[str, OpenAIImageModelPrice] = {
-    "gpt-image-1": OpenAIImageModelPrice(
-        text_input_cost_per_token=0.000005,
-        cached_text_input_cost_per_token=0.00000125,
-        image_input_cost_per_token=0.00001,
-        cached_image_input_cost_per_token=0.0000025,
-        image_output_cost_per_token=0.00004,
-    ),
-    "gpt-image-1.5": OpenAIImageModelPrice(
-        text_input_cost_per_token=0.000005,
-        cached_text_input_cost_per_token=0.00000125,
-        text_output_cost_per_token=0.00001,
-        image_input_cost_per_token=0.000008,
-        cached_image_input_cost_per_token=0.000002,
-        image_output_cost_per_token=0.000032,
-    ),
-}
+__all__ = [
+    "LONG_CONTEXT_THRESHOLD_TOKENS",
+    "OPENAI_FAST_MODEL_PRICES",
+    "OPENAI_IMAGE_MODEL_PRICES",
+    "OPENAI_MODEL_PRICES",
+    "OPENAI_MODEL_PRICING_SNAPSHOT_DATE",
+    "OPENAI_MODEL_PRICING_SOURCE",
+    "OpenAIImageModelPrice",
+    "OpenAIModelPrice",
+    "estimate_openai_request_cost_usd",
+]
 
 
 def estimate_openai_request_cost_usd(model_name: Any, usage: dict[str, Any]) -> float | None:

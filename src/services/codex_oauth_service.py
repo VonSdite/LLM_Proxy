@@ -22,6 +22,12 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import requests
 
 from ..application.app_context import AppContext
+from ..config.openai_model_catalog import (
+    CODEX_MODEL_REFERENCE_URLS,
+    DEFAULT_CODEX_IMAGE_MODEL_ID,
+    DEFAULT_CODEX_IMAGE_MODEL_IDS,
+    DEFAULT_CODEX_MODEL_IDS,
+)
 from ..utils.local_time import format_local_datetime
 from ..utils.net import (
     PROXY_MODE_CUSTOM,
@@ -49,10 +55,6 @@ CODEX_SCOPE = "openid email profile offline_access"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CODEX_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 CODEX_RESET_CREDIT_CONSUME_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
-CODEX_MODEL_REFERENCE_URLS = (
-    "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json",
-    "https://models.router-for.me/models.json",
-)
 CODEX_USER_AGENT = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.135.0)"
 CODEX_QUOTA_USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
 CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS = 60 * 60
@@ -67,19 +69,6 @@ CODEX_AUTH_FILE_PLAN_SORT_ORDER = {
     "free": 3,
 }
 OAUTH_SESSION_TTL_SECONDS = 10 * 60
-DEFAULT_CODEX_MODEL_IDS: tuple[str, ...] = (
-    "gpt-6-astra",
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5",
-)
-DEFAULT_CODEX_IMAGE_MODEL_IDS: tuple[str, ...] = (
-    "gpt-image-2",
-    "gpt-image-1.5",
-    "gpt-image-1",
-)
-DEFAULT_CODEX_IMAGE_MODEL_ID = "gpt-image-2"
 AUTH_FAILURE_ERROR_TYPES = {
     "authentication_error",
     "invalid_api_key",
