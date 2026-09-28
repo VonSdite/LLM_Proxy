@@ -16,7 +16,7 @@ from .reasoning_utils import (
     extract_openai_reasoning_text,
     openai_reasoning_effort_from_claude_thinking,
 )
-from .tool_result_utils import normalize_tool_result_content
+from .tool_result_utils import split_tool_result_content
 
 
 def convert_claude_request_to_openai_chat_request(
@@ -440,13 +440,19 @@ def _convert_claude_blocks_to_openai_parts(
                 }
             )
         elif part_type == "tool_result":
+            tool_text, binary_parts = split_tool_result_content(part.get("content"))
             tool_results.append(
                 {
                     "role": "tool",
                     "tool_call_id": str(part.get("tool_use_id") or ""),
-                    "content": normalize_tool_result_content(part.get("content")),
+                    "content": tool_text,
                 }
             )
+            # 图片和文档块随本条消息的 user 角色内容发出，OpenAI 的 role:"tool" 只接受字符串。
+            for binary_part in binary_parts:
+                hoisted = _convert_claude_part_to_openai_content(binary_part)
+                if hoisted is not None:
+                    content_items.append(hoisted)
 
     return content_items, reasoning_parts, tool_calls, tool_results
 
