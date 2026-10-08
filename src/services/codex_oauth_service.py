@@ -121,6 +121,8 @@ class CodexOAuthService:
         self._quota_cooldowns: dict[str, float] = {}
         self._quota_refresh_locks: dict[str, threading.Lock] = {}
         self._quota_refresh_lock_guard = threading.RLock()
+        self._token_refresh_locks: dict[str, threading.Lock] = {}
+        self._token_refresh_lock_guard = threading.RLock()
         self._quota_auto_refresh_worker: Any | None = None
         self._quota_recovered_callback: Callable[[str], Any] | None = None
         self._log_repository = log_repository
@@ -777,13 +779,16 @@ class CodexOAuthService:
             },
         )
 
-    def refresh_auth_candidate(self, name: str) -> CodexAuthCandidate:
-        """刷新指定认证文件并返回新的请求候选。"""
+    def refresh_auth_candidate(self, name: str, *, failed_access_token: str | None = None) -> CodexAuthCandidate:
+        """刷新指定认证文件，或复用其他请求已更新的 access token。"""
         auth_file = self._resolve_auth_file(name)
-        payload = self._read_auth_file(auth_file)
-        if not str(payload.get("refresh_token") or "").strip():
-            raise ValueError("Auth file does not contain refresh_token")
-        refreshed_payload = self._refresh_auth_file(auth_file, payload)
+        if failed_access_token is None:
+            payload = self._read_auth_file(auth_file)
+            failed_access_token = str(payload.get("access_token") or "")
+        refreshed_payload = self._refresh_auth_file(
+            auth_file,
+            failed_access_token=failed_access_token,
+        )
         access_token = str(refreshed_payload.get("access_token") or "").strip()
         if not access_token:
             raise ValueError("Token refresh response missing access_token")
@@ -1880,15 +1885,8 @@ class CodexOAuthService:
 
     @staticmethod
     def _is_quota_failure_state(file_state: dict[str, Any]) -> bool:
-        status_code = file_state.get("usage_status_code")
-        if status_code is not None:
-            try:
-                if int(status_code) == 429:
-                    return True
-            except (TypeError, ValueError):
-                pass
         error_type = str(file_state.get("usage_error_type") or "").strip().lower()
-        return error_type in {"usage_limit_reached", "rate_limit_exceeded", "codex_quota_exhausted"}
+        return error_type in {"usage_limit_reached", "codex_quota_exhausted"}
 
     @classmethod
     def _is_auth_error_response(cls, response: requests.Response) -> bool:
@@ -1966,7 +1964,7 @@ class CodexOAuthService:
             refresh_token = str(payload.get("refresh_token") or "").strip()
             if refresh_token:
                 try:
-                    payload = self._refresh_auth_file(path, payload)
+                    payload = self._refresh_auth_file(path)
                 except Exception as exc:
                     self._logger.warning("Codex auth file refresh failed: file=%s error=%s", path.name, exc)
                     self.record_auth_file_failure(
@@ -2138,8 +2136,35 @@ class CodexOAuthService:
             raise ValueError("Token response missing access_token")
         return payload
 
-    def _refresh_auth_file(self, auth_file: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    def _get_token_refresh_lock(self, name: str) -> threading.Lock:
+        """返回单个认证文件的 token 刷新锁。"""
+        with self._token_refresh_lock_guard:
+            token_lock = self._token_refresh_locks.get(name)
+            if token_lock is None:
+                token_lock = threading.Lock()
+                self._token_refresh_locks[name] = token_lock
+            return token_lock
+
+    def _refresh_auth_file(
+        self,
+        auth_file: Path,
+        *,
+        failed_access_token: str | None = None,
+    ) -> dict[str, Any]:
+        """串行刷新同一账号，锁内读取最新凭据并复用已更新的有效 token。"""
+        with self._get_token_refresh_lock(auth_file.name):
+            current_payload = self._read_auth_file(auth_file)
+            access_token = str(current_payload.get("access_token") or "").strip()
+            if access_token and not self._is_auth_payload_expired(current_payload):
+                if failed_access_token is None or access_token != failed_access_token:
+                    return current_payload
+            return self._request_auth_file_token_refresh(auth_file, current_payload)
+
+    def _request_auth_file_token_refresh(self, auth_file: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        """使用锁内读取的 refresh token 交换并保存新的认证凭据。"""
         refresh_token = str(payload.get("refresh_token") or "").strip()
+        if not refresh_token:
+            raise ValueError("Auth file does not contain refresh_token")
         response = self._request_with_proxy_warning_retry(
             "POST",
             CODEX_TOKEN_URL,
