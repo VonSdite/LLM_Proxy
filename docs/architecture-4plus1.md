@@ -1026,7 +1026,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - `src/proxy_core/`
   - decoder、encoder、shared contracts
 - `src/translators/`
-  - protocol translators and shared reasoning helpers
+  - 请求与回包协议转换、共享 reasoning 语义和工具多模态内容处理
 - `src/hooks/`
   - hook contracts
 
@@ -1089,7 +1089,9 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - [src/services/outbound_privacy.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/outbound_privacy.py)
   - 安全脱敏的规则型出站替换与请求级响应恢复，供 Provider、Codex OAuth、Claude OAuth 与模型映射链路复用
 - [src/translators/registry.py](/root/.ww/code/002llm/000LLM_Proxy/src/translators/registry.py)
-  - 4x4 translator registry
+  - Chat、Responses 与 Claude 的 3×3 translator registry
+- `src/translators/tool_result_utils.py`
+  - 跨协议工具文本、图片和文件转换，Chat 媒体补传标记，以及目标协议不可承载来源的转换错误
 - [src/translators/reasoning_utils.py](/root/.ww/code/002llm/000LLM_Proxy/src/translators/reasoning_utils.py)
   - reasoning / thinking 语义映射与 OpenAI 兼容 reasoning 字段提取
 - [src/presentation/templates/providers.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/providers.html)
@@ -1150,6 +1152,12 @@ sequenceDiagram
     end
     Controller->>Service: proxy_request()
     Service->>Translator: openai_chat -> openai_responses
+    Note over Translator: 工具结果按 input_text / input_image / input_file 保留，并关联原调用 ID
+    break 工具媒体来源无法由上游协议承载
+        Translator-->>Service: UnsupportedToolResultContent
+        Service-->>Controller: 400 invalid_request_error / unsupported_tool_result_content
+        Controller-->>Client: 当前下游协议的错误响应
+    end
     Translator-->>Service: translated upstream request
     Service->>Executor: execute HTTP request
     Executor-->>Service: HTTP response + lazy stream
@@ -1201,6 +1209,7 @@ sequenceDiagram
     CodexOAuth->>CodexOAuth: 过滤人工禁用/认证失败/额度禁用文件，并优先最近成功认证文件
     Note over CodexOAuth: 过期 token 刷新取得单账号锁后重读凭据，复用已更新的有效 token
     Controller->>CodexProxy: proxy_request()
+    Note over CodexProxy: 跨协议工具图片和文件使用原生 function_call_output.output 内容块
     CodexProxy->>ChatGPT: POST /backend-api/codex/responses
     Note over CodexProxy,ChatGPT: 对齐 Codex backend 要求：stream=true、store=false、parallel_tool_calls=true、include encrypted content，并移除不支持字段
     alt 代理风险确认页
@@ -1322,6 +1331,7 @@ sequenceDiagram
     Client->>Controller: POST /v1/messages
     Controller->>Service: proxy_request()
     Service->>Translator: claude_chat -> openai_chat
+    Note over Translator: tool 消息保留文本；媒体在全部并行 tool 消息之后补传到 user 消息，并标注调用 ID
     Translator-->>Service: upstream chat request
     Service->>Executor: execute HTTP request
     Executor-->>Service: HTTP response + lazy chat SSE stream

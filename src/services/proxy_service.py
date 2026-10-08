@@ -26,6 +26,7 @@ from ..translators.stream_aggregator import (
     StreamAggregationError,
     infer_stream_aggregation_status_code,
 )
+from ..translators.tool_result_utils import UnsupportedToolResultContent
 from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_requests_proxy_settings, build_requests_request_proxies
 from ..utils.proxy_warning import (
@@ -554,6 +555,15 @@ class ProxyService:
                 )
                 if attempt < max_retries - 1:
                     continue
+            except UnsupportedToolResultContent as exc:
+                finalize_attempt()
+                failure = ProxyErrorInfo(
+                    message=str(exc),
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="unsupported_tool_result_content",
+                )
+                return None, failure.status_code, failure
             except Exception:
                 finalize_attempt()
                 raise

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Helpers for bridging OpenAI chat payloads into Claude messages output."""
+"""Claude 请求到 Chat 的转换与 Chat 回包到 Claude 的桥接。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from .reasoning_utils import (
     extract_openai_reasoning_text,
     openai_reasoning_effort_from_claude_thinking,
 )
-from .tool_result_utils import normalize_tool_result_content
+from .tool_result_utils import split_tool_result_content, tool_result_media_relay
 
 
 def convert_claude_request_to_openai_chat_request(
@@ -60,7 +60,7 @@ def convert_claude_request_to_openai_chat_request(
     if system_message is not None:
         translated["messages"].append(system_message)
 
-    for message in body.get("messages") or []:
+    for message in _combine_claude_user_messages(body.get("messages") or []):
         if not isinstance(message, dict):
             continue
         role = str(message.get("role") or "").strip().lower()
@@ -68,13 +68,20 @@ def convert_claude_request_to_openai_chat_request(
             role = "user"
 
         content = message.get("content")
-        content_items, reasoning_parts, tool_calls, tool_results = _convert_claude_blocks_to_openai_parts(
-            content,
-            role,
+        content_items, reasoning_parts, tool_calls, tool_results, relayed_media = (
+            _convert_claude_blocks_to_openai_parts(
+                content,
+                role,
+            )
         )
 
         if tool_results:
             translated["messages"].extend(tool_results)
+        if relayed_media:
+            if role == "user":
+                content_items = [*relayed_media, *content_items]
+            else:
+                translated["messages"].append({"role": "user", "content": relayed_media})
 
         if content_items or reasoning_parts or tool_calls:
             openai_message: dict[str, Any] = {
@@ -403,18 +410,39 @@ def _convert_claude_system_to_openai(system: Any) -> dict[str, Any] | None:
     return {"role": "system", "content": _compact_openai_content(content_items)}
 
 
+def _combine_claude_user_messages(messages: list[Any]) -> list[dict[str, Any]]:
+    """按 Claude 的连续 user 合并语义保留并行工具结果的批次边界。"""
+    combined: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role == "user" and combined and str(combined[-1].get("role") or "").strip().lower() == "user":
+            parts: list[dict[str, Any]] = []
+            for content in (combined[-1].get("content"), message.get("content")):
+                if isinstance(content, list):
+                    parts.extend(content)
+                elif isinstance(content, str) and content:
+                    parts.append({"type": "text", "text": content})
+            combined[-1]["content"] = parts
+        else:
+            combined.append(dict(message))
+    return combined
+
+
 def _convert_claude_blocks_to_openai_parts(
     content: Any, role: str
-) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     if isinstance(content, str):
-        return ([{"type": "text", "text": content}] if content else []), [], [], []
+        return ([{"type": "text", "text": content}] if content else []), [], [], [], []
     if not isinstance(content, list):
-        return [], [], [], []
+        return [], [], [], [], []
 
     content_items: list[dict[str, Any]] = []
     reasoning_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     tool_results: list[dict[str, Any]] = []
+    relayed_media: list[dict[str, Any]] = []
 
     for part in content:
         if not isinstance(part, dict):
@@ -440,15 +468,18 @@ def _convert_claude_blocks_to_openai_parts(
                 }
             )
         elif part_type == "tool_result":
+            call_id = str(part.get("tool_use_id") or "")
+            text, media = split_tool_result_content(part.get("content"), _convert_claude_part_to_openai_content)
             tool_results.append(
                 {
                     "role": "tool",
-                    "tool_call_id": str(part.get("tool_use_id") or ""),
-                    "content": normalize_tool_result_content(part.get("content")),
+                    "tool_call_id": call_id,
+                    "content": text,
                 }
             )
+            relayed_media.extend(tool_result_media_relay(call_id, media))
 
-    return content_items, reasoning_parts, tool_calls, tool_results
+    return content_items, reasoning_parts, tool_calls, tool_results, relayed_media
 
 
 def _convert_claude_part_to_openai_content(part: dict[str, Any]) -> dict[str, Any] | None:
@@ -479,13 +510,18 @@ def _convert_claude_part_to_openai_content(part: dict[str, Any]) -> dict[str, An
         if not isinstance(source, dict):
             return None
         source_type = str(source.get("type") or "").strip().lower()
+        if source_type == "text" and isinstance(source.get("data"), str):
+            return {"type": "text", "text": source["data"]}
         if source_type == "base64" and source.get("data"):
             media_type = str(source.get("media_type") or "application/octet-stream")
             file_payload: dict[str, Any] = {
                 "file_data": f"data:{media_type};base64,{source['data']}",
             }
-            if part.get("title"):
-                file_payload["filename"] = str(part["title"])
+            filename = part.get("filename") or part.get("title")
+            if filename:
+                file_payload["filename"] = str(filename)
+            elif media_type == "application/pdf":
+                file_payload["filename"] = "document.pdf"
             return {"type": "file", "file": file_payload}
     return None
 

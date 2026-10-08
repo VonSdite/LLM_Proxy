@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Provider request/response translators for OpenAI, Claude, and Codex families."""
+"""OpenAI Chat、Responses 与 Claude 的请求和响应协议转换。"""
 
 from __future__ import annotations
 
@@ -37,6 +37,9 @@ from .responses_bridge import (
     translate_openai_chat_downstream_chunk_to_responses as _translate_openai_chat_downstream_chunk_to_responses,
 )
 from .responses_claude_bridge import (
+    _openai_file_to_claude_document,
+)
+from .responses_claude_bridge import (
     convert_claude_request_to_openai_responses as _convert_claude_request_to_openai_responses,
 )
 from .responses_claude_bridge import (
@@ -54,7 +57,7 @@ from .responses_claude_bridge import (
 from .responses_claude_bridge import (
     translate_openai_responses_stream_to_claude as _translate_openai_responses_stream_to_claude,
 )
-from .tool_result_utils import normalize_tool_result_content
+from .tool_result_utils import convert_tool_result_content
 
 
 class Translator(Protocol):
@@ -762,16 +765,23 @@ class ClaudeChatTranslator:
             if role == "tool":
                 tool_use_id = str(message.get("tool_call_id") or "").strip()
                 if tool_use_id:
+                    tool_content = convert_tool_result_content(
+                        message.get("content"),
+                        lambda part: next(iter(_to_claude_content_blocks([part], strict_files=True)), None),
+                        text_type="text",
+                        target_format="claude_chat",
+                    )
+                    tool_result = {"type": "tool_result", "tool_use_id": tool_use_id, "content": tool_content}
+                    if isinstance(tool_content, list):
+                        for part in tool_content:
+                            cache_control = part.pop("cache_control", None)
+                            if isinstance(cache_control, dict):
+                                tool_result["cache_control"] = cache_control
+                    _copy_cache_control(message, tool_result)
                     translated["messages"].append(
                         {
                             "role": "user",
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_use_id,
-                                    "content": normalize_tool_result_content(message.get("content")),
-                                }
-                            ],
+                            "content": [tool_result],
                         }
                     )
                 continue
@@ -1273,7 +1283,7 @@ def build_default_translator_registry() -> TranslatorRegistry:
     return registry
 
 
-def _to_claude_content_blocks(content: Any) -> list[dict[str, Any]]:
+def _to_claude_content_blocks(content: Any, *, strict_files: bool = False) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
     if not isinstance(content, list):
@@ -1284,7 +1294,7 @@ def _to_claude_content_blocks(content: Any) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         item_type = str(item.get("type") or "").strip().lower()
-        if item_type in {"text", "input_text"} and isinstance(item.get("text"), str):
+        if item_type in {"text", "input_text", "output_text"} and isinstance(item.get("text"), str):
             block = {"type": "text", "text": item["text"]}
             _copy_cache_control(item, block)
             blocks.append(block)
@@ -1295,11 +1305,18 @@ def _to_claude_content_blocks(content: Any) -> list[dict[str, Any]]:
                 if block is not None:
                     _copy_cache_control(item, block)
                     blocks.append(block)
+        elif item_type == "input_image" and isinstance(item.get("image_url"), str):
+            block = _openai_url_to_claude_content("image", item["image_url"])
+            if block is not None:
+                _copy_cache_control(item, block)
+                blocks.append(block)
         elif item_type in {"file", "input_file"}:
             file_payload = item.get("file") if isinstance(item.get("file"), dict) else item
-            file_data = file_payload.get("file_data") if isinstance(file_payload, dict) else None
-            if isinstance(file_data, str):
-                block = _openai_url_to_claude_content("document", file_data)
+            if isinstance(file_payload, dict):
+                block = _openai_file_to_claude_document(file_payload)
+                file_data = file_payload.get("file_data")
+                if block is None and not strict_files and isinstance(file_data, str):
+                    block = _openai_url_to_claude_content("document", file_data)
                 if block is not None:
                     _copy_cache_control(item, block)
                     blocks.append(block)
@@ -1312,6 +1329,8 @@ def _copy_cache_control(source: dict[str, Any], target: dict[str, Any]) -> None:
 
 
 def _openai_url_to_claude_content(content_type: str, value: str) -> dict[str, Any] | None:
+    if not value:
+        return None
     if value.startswith("data:") and ";base64," in value:
         metadata, data = value[5:].split(";base64,", 1)
         if not data:
@@ -1480,7 +1499,12 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]
                         if tool_call_id in custom_call_ids
                         else "function_call_output",
                         "call_id": tool_call_id,
-                        "output": normalize_tool_result_content(message.get("content")),
+                        "output": convert_tool_result_content(
+                            message.get("content"),
+                            lambda part: next(iter(_to_openai_responses_message_content([part], "user")), None),
+                            text_type="input_text",
+                            target_format="openai_responses",
+                        ),
                     }
                 )
             continue
@@ -1544,10 +1568,21 @@ def _to_openai_responses_message_content(content: Any, role: str) -> list[dict[s
             translated.append({"type": content_type, "text": item.get("text")})
         elif item_type == "image_url":
             image_url = item.get("image_url")
-            if isinstance(image_url, dict) and isinstance(image_url.get("url"), str):
+            if isinstance(image_url, dict) and isinstance(image_url.get("url"), str) and image_url["url"]:
                 image_part: dict[str, Any] = {"type": "input_image", "image_url": image_url["url"]}
                 if image_url.get("detail") is not None:
                     image_part["detail"] = image_url["detail"]
+                translated.append(image_part)
+        elif item_type == "input_image":
+            image_part = {
+                "type": "input_image",
+                **{
+                    key: copy.deepcopy(item[key])
+                    for key in ("image_url", "file_id", "detail")
+                    if item.get(key) is not None
+                },
+            }
+            if image_part.get("image_url") or image_part.get("file_id"):
                 translated.append(image_part)
         elif item_type in {"file", "input_file"}:
             file_payload = item.get("file") if isinstance(item.get("file"), dict) else item
@@ -1561,7 +1596,7 @@ def _to_openai_responses_message_content(content: Any, role: str) -> list[dict[s
                     if file_payload.get(key) is not None
                 },
             }
-            if len(file_part) > 1:
+            if any(file_part.get(key) for key in ("file_id", "file_data", "file_url")):
                 translated.append(file_part)
     return translated
 
