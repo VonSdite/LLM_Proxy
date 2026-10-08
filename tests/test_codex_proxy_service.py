@@ -149,6 +149,107 @@ def write_auth_file(root: Path, name: str, token: str, *, mtime: int) -> None:
 
 
 class CodexProxyServiceTests(unittest.TestCase):
+    def test_temporary_429_preserves_retry_after_without_quota_cooldown_or_probe(self) -> None:
+        bodies = (
+            b'{"error":{"type":"rate_limit_exceeded","message":"try later"}}',
+            b'{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"try later"}}',
+            b'{"error":{"message":"try later"}}',
+            b"Too many requests",
+        )
+        for target_format in ("openai_chat", "openai_images"):
+            for body in bodies:
+                with self.subTest(target_format=target_format, body=body), tempfile.TemporaryDirectory() as tmp_dir:
+                    root = Path(tmp_dir)
+                    write_auth_file(root, "codex-only.json", "access-only", mtime=2000)
+                    ctx = build_context(root)
+                    oauth_service = CodexOAuthService(ctx)
+                    oauth_service.add_model("gpt-5.4")
+                    proxy_service = CodexProxyService(ctx, oauth_service)
+                    upstream_response = FakeHTTPResponse(
+                        status_code=429,
+                        body=body,
+                        headers={"Content-Type": "application/json", "Retry-After": "15"},
+                    )
+                    with (
+                        patch("src.services.codex_proxy_service.requests.post", return_value=upstream_response),
+                        patch.object(oauth_service, "mark_auth_file_quota_exhausted") as cooldown_mock,
+                        patch.object(oauth_service, "refresh_auth_file_quota_snapshot") as quota_mock,
+                    ):
+                        if target_format == "openai_images":
+                            response, status_code, failure = proxy_service.proxy_image_request(
+                                {"model": "gpt-image-2", "prompt": "draw"}, {}, action="generate"
+                            )
+                        else:
+                            response, status_code, failure = proxy_service.proxy_request(
+                                {"model": "gpt-5.4", "messages": [{"role": "user", "content": "hi"}]},
+                                {},
+                                resolved_target_format=target_format,
+                            )
+                        cooldown_mock.assert_not_called()
+                        quota_mock.assert_not_called()
+
+                    self.assertIsNone(response)
+                    self.assertEqual(429, status_code)
+                    self.assertIsNotNone(failure)
+                    self.assertNotEqual("codex_quota_exhausted", failure.error_code)
+                    self.assertEqual("15", failure.response_headers["Retry-After"])
+                    self.assertIsNone(oauth_service.get_quota_retry_after_seconds())
+                    self.assertEqual(
+                        ["codex-only.json"],
+                        [candidate.name for candidate in oauth_service.iter_auth_candidates_for_model("gpt-5.4")],
+                    )
+                    oauth_service.reset_auth_file_quota_state("codex-only.json")
+                    entry = oauth_service.list_auth_files()["files"][0]
+                    self.assertEqual("error", entry["usage_status"])
+                    self.assertEqual("available", entry["availability_status"])
+
+    def test_authentication_error_reuses_credentials_updated_by_another_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-only.json", "access-old", mtime=2000)
+            auth_file = root / "data" / "oauth" / "codex" / "codex-only.json"
+            payload = json.loads(auth_file.read_text(encoding="utf-8"))
+            payload["refresh_token"] = "refresh-old"
+            auth_file.write_text(json.dumps(payload), encoding="utf-8")
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            authorizations: list[str] = []
+
+            def fake_post(url: str, **kwargs: Any) -> FakeHTTPResponse:
+                authorization = kwargs["headers"]["Authorization"]
+                authorizations.append(authorization)
+                if authorization == "Bearer access-old":
+                    payload.update({"access_token": "access-new", "refresh_token": "refresh-new"})
+                    auth_file.write_text(json.dumps(payload), encoding="utf-8")
+                    return FakeHTTPResponse(
+                        status_code=401,
+                        body=b'{"error":{"type":"authentication_error","message":"invalid or expired token"}}',
+                    )
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}\n\n'
+                    ],
+                )
+
+            with (
+                patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post),
+                patch.object(oauth_service, "_request_auth_file_token_refresh") as token_mock,
+            ):
+                response, status_code, failure = proxy_service.proxy_request(
+                    {"model": "gpt-5.4", "messages": [{"role": "user", "content": "hi"}]},
+                    {},
+                    resolved_target_format="openai_chat",
+                )
+                token_mock.assert_not_called()
+
+            self.assertIsNone(failure)
+            self.assertEqual(200, status_code)
+            self.assertIsNotNone(response)
+            self.assertEqual(["Bearer access-old", "Bearer access-new"], authorizations)
+
     def test_codex_body_defaults_normalize_responses_payload(self) -> None:
         body: dict[str, Any] = {
             "model": "ignored",

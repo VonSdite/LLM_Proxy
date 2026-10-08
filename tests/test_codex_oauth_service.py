@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -155,6 +156,109 @@ class CodexOAuthServiceTests(unittest.TestCase):
             flask_app=Flask(__name__),
         )
         return CodexOAuthService(ctx)
+
+    def test_expiry_and_unauthorized_refresh_share_one_token_exchange(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_file = root / "data" / "oauth" / "codex" / "codex-demo.json"
+            auth_file.parent.mkdir(parents=True)
+            auth_file.write_text(
+                json.dumps(
+                    {
+                        "type": "codex",
+                        "access_token": "access-old",
+                        "refresh_token": "refresh-old",
+                        "expired": "2000-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = self._build_service(root)
+            refresh_started = threading.Event()
+            refresh_waiter = threading.Event()
+            release_refresh = threading.Event()
+            refresh_tokens: list[str] = []
+            get_lock = service._get_token_refresh_lock
+
+            def tracked_get_lock(name: str) -> threading.Lock:
+                token_lock = get_lock(name)
+                if refresh_started.is_set():
+                    refresh_waiter.set()
+                return token_lock
+
+            def fake_post(url: str, **kwargs: Any) -> FakeResponse:
+                self.assertEqual("refresh-old", kwargs["data"]["refresh_token"])
+                refresh_tokens.append(kwargs["data"]["refresh_token"])
+                refresh_started.set()
+                self.assertTrue(release_refresh.wait(5), "Token exchange was not released")
+                return FakeResponse({"access_token": "access-new", "refresh_token": "refresh-new", "expires_in": 3600})
+
+            with (
+                patch.object(service, "_get_token_refresh_lock", side_effect=tracked_get_lock),
+                patch_requests_session(post=fake_post),
+                ThreadPoolExecutor(max_workers=2) as executor,
+            ):
+                try:
+                    expiry_refresh = executor.submit(service._build_auth_candidate, auth_file)
+                    self.assertTrue(refresh_started.wait(5), "Expiry refresh did not start")
+                    unauthorized_refresh = executor.submit(
+                        service.refresh_auth_candidate,
+                        auth_file.name,
+                        failed_access_token="access-old",
+                    )
+                    self.assertTrue(refresh_waiter.wait(5), "Unauthorized refresh did not reach the account lock")
+                finally:
+                    release_refresh.set()
+                expiry_candidate = expiry_refresh.result(timeout=5)
+                unauthorized_candidate = unauthorized_refresh.result(timeout=5)
+
+            self.assertIsNotNone(expiry_candidate)
+            self.assertEqual("access-new", expiry_candidate.access_token)
+            self.assertEqual("access-new", unauthorized_candidate.access_token)
+            self.assertEqual("refresh-new", unauthorized_candidate.payload["refresh_token"])
+            self.assertEqual(["refresh-old"], refresh_tokens)
+            self.assertEqual("refresh-new", json.loads(auth_file.read_text(encoding="utf-8"))["refresh_token"])
+
+    def test_token_refresh_of_another_account_does_not_wait_for_first_account(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            auth_dir = root / "data" / "oauth" / "codex"
+            auth_dir.mkdir(parents=True)
+            for name in ("first", "second"):
+                (auth_dir / f"codex-{name}.json").write_text(
+                    json.dumps(
+                        {
+                            "type": "codex",
+                            "access_token": f"access-{name}",
+                            "refresh_token": f"refresh-{name}",
+                            "expired": "2000-01-01T00:00:00Z",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            service = self._build_service(root)
+            first_started = threading.Event()
+            release_first = threading.Event()
+
+            def fake_post(url: str, **kwargs: Any) -> FakeResponse:
+                refresh_token = kwargs["data"]["refresh_token"]
+                if refresh_token == "refresh-first":
+                    first_started.set()
+                    self.assertTrue(release_first.wait(5), "First token exchange was not released")
+                return FakeResponse({"access_token": f"new-{refresh_token}", "expires_in": 3600})
+
+            with patch_requests_session(post=fake_post), ThreadPoolExecutor(max_workers=2) as executor:
+                first = executor.submit(service.refresh_auth_candidate, "codex-first.json")
+                try:
+                    self.assertTrue(first_started.wait(5), "First account refresh did not start")
+                    second = executor.submit(service.refresh_auth_candidate, "codex-second.json")
+                    second_candidate = second.result(timeout=3)
+                finally:
+                    release_first.set()
+                first_candidate = first.result(timeout=5)
+
+            self.assertEqual("new-refresh-first", first_candidate.access_token)
+            self.assertEqual("new-refresh-second", second_candidate.access_token)
 
     def test_start_quota_auto_refresh_worker_spawns_default_loop_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

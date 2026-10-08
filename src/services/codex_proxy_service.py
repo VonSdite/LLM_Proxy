@@ -834,6 +834,7 @@ class CodexProxyService:
                             upstream_response.status_code,
                             error_type=error_type,
                         ),
+                        response_headers=dict(upstream_response.headers),
                     ),
                 )
             self._codex_oauth_service.record_auth_file_failure(
@@ -854,6 +855,7 @@ class CodexProxyService:
                         upstream_response.status_code,
                         error_type=error_type,
                     ),
+                    response_headers=dict(upstream_response.headers),
                 ),
             )
 
@@ -1518,7 +1520,9 @@ class CodexProxyService:
                     ProxyResponseBuilder._update_meta_from_stream_state(meta, state)
                     for chunk in chunks:
                         for restored_chunk in stream_privacy_restorer.restore_chunk(chunk):
-                            terminal_chunk = restored_chunk.kind == "done" or is_terminal_chunk(restored_chunk, target_format)
+                            terminal_chunk = restored_chunk.kind == "done" or is_terminal_chunk(
+                                restored_chunk, target_format
+                            )
                             if restored_chunk.kind == "done":
                                 if terminal_sent:
                                     continue
@@ -2239,7 +2243,10 @@ class CodexProxyService:
         model_name: str,
     ) -> tuple[CodexAuthCandidate | None, ProxyErrorInfo | None]:
         try:
-            refreshed_candidate = self._codex_oauth_service.refresh_auth_candidate(candidate.name)
+            refreshed_candidate = self._codex_oauth_service.refresh_auth_candidate(
+                candidate.name,
+                failed_access_token=candidate.access_token,
+            )
         except Exception as exc:
             message = f"Token refresh failed: {exc}"
             self._logger.warning(
@@ -2302,21 +2309,18 @@ class CodexProxyService:
 
     @staticmethod
     def _is_quota_exhausted_response(status_code: int, body: bytes) -> bool:
+        """仅把上游明确的套餐额度耗尽信号识别为账号配额错误。"""
         if status_code not in {400, 429}:
             return False
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return status_code == 429
-        error = payload.get("error") if isinstance(payload, dict) else None
-        if not isinstance(error, dict):
-            if isinstance(payload, dict) and str(payload.get("type") or "").strip() == "usage_limit_reached":
-                return True
-            return status_code == 429
-        error_type = str(error.get("type") or payload.get("type") or "").strip()
-        if error_type == "usage_limit_reached":
-            return True
-        return status_code == 429 and error_type in {"rate_limit_exceeded", ""}
+            return False
+        if not isinstance(payload, dict):
+            return False
+        error = payload.get("error")
+        error_type = error.get("type") if isinstance(error, dict) else None
+        return str(error_type or payload.get("type") or "").strip().lower() == "usage_limit_reached"
 
     @staticmethod
     def _is_model_capacity_response(status_code: int, body: bytes) -> bool:

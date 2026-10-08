@@ -813,6 +813,9 @@ OAuth Codex tab
   -> list auth file token/status/quota snapshot
   -> manually refresh quota to query wham/usage and wham/rate-limit-reset-credits with the auth file access token
   -> render available reset-credit title and expiry time on one line in the card dropdown
+  -> update auth-file filter selection and counts in place while retaining the button nodes
+  -> apply a 60-second browser deadline to auth-file-list, quota, and reset-card reads, including response-body reads
+  -> schedule reset-card expiry redraws with bounded timer segments and rearm future segments without rebuilding the list
   -> select one reset card
   -> click “使用” to consume the selected credit_id through wham/rate-limit-reset-credits/consume
   -> clear the old local quota state and refresh quota and reset-credit details after a successful consume response
@@ -823,6 +826,8 @@ OAuth Codex tab
   -> check reset_at on the open page every minute, hide expired windows, refresh due windows through the quota and reset-card APIs, and render the updated snapshot
   -> optional reset local quota snapshot and cooldown state
 ```
+
+Codex 配额刷新频率、触发条件、认证文件范围和请求边界见 [Codex 额度刷新规则](codex-quota-refresh.md)。
 
 Claude OAuth 登录链路如下：
 
@@ -882,6 +887,8 @@ OAuth Claude tab
 - Codex 查询配额时直接使用认证文件当前的 access token，不执行 token 刷新或认证失败后的刷新重试
 - Codex 配额查询的代理优先级为认证文件 `proxy_url`、全局 OAuth 代理设置、直连
 - Codex 数据面请求遇到 401 或认证类错误时，如果认证文件存在 refresh token，会先刷新认证文件并使用当前认证文件重试一次
+- Codex access token 过期和认证失败后的刷新共用单账号进程内锁；锁内重读认证文件，其他请求已更新有效 token 时直接复用；认证失败刷新携带本次被拒绝的 access token，当前 token 与它相同时执行交换
+- Codex 各账号分别维护 token 刷新锁，不同账号的 token 交换可以并行执行；token 刷新锁与额度查询锁分别维护
 - Claude OAuth 数据面请求前如果认证文件 access token 已过期，且存在 refresh token，会先刷新认证文件
 - Codex / Claude 候选列表仍会按请求重建；人工禁用的认证文件不会进入候选列表；其余文件默认按认证文件修改时间倒序排列，最近一次真实请求成功的认证文件如果未被过滤，会被提升为第一候选
 - Codex 候选认证文件进入新的粘滞使用段时会在真实模型请求前查询一次 `wham/usage`；同一粘滞使用段不按请求重复查询，服务重启后的第一次使用会重新查询
@@ -894,6 +901,7 @@ OAuth Claude tab
 - Codex 数据面请求成功后，如果本地配额快照中的 Codex 窗口重置时间已经到期，会最佳努力刷新该认证文件的前端配额快照；刷新失败不会阻断本次模型响应
 - Codex 数据面请求成功后会为当前粘滞认证文件调度一次延迟 60 秒的配额刷新，同一认证文件的主动用量刷新间隔不小于 10 分钟；刷新在后台执行，不增加模型响应等待时间
 - Codex 数据面请求收到上游额度耗尽响应后，会立即真实刷新该认证文件的配额快照；刷新结果写入 OAuth 页面展示数据，刷新失败写入配额错误且不阻断候选账号切换
+- Codex HTTP 400 或 429 响应中的 `error.type` 或顶层 `type` 为 `usage_limit_reached` 时进入套餐额度耗尽流程；普通 429、临时限流和缺少明确额度信号的响应保留上游错误、`Retry-After`，并按已有数据面流程尝试其他候选账号
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
 - token 交换、token 刷新与 OAuth 数据面代理使用系统设置中的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`；Codex 配额查询在认证文件没有 `proxy_url` 时使用该网络设置
@@ -1103,6 +1111,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - 一组滚动日志文件
 - 一个 Codex 配额后台刷新 greenlet
 - 一组本地 OAuth 认证文件
+- 一组 Codex 单账号 token 刷新锁与一组独立的额度查询锁
 - 一组本地 OAuth 模型目录缓存
 - 一组本地 Codex 图片模型默认设置
 - 多个 provider 指向多个真实上游
@@ -1190,6 +1199,7 @@ sequenceDiagram
     Controller->>Controller: Provider 未命中后查 Codex 模型目录
     Controller->>CodexOAuth: iter_auth_candidates_for_model()
     CodexOAuth->>CodexOAuth: 过滤人工禁用/认证失败/额度禁用文件，并优先最近成功认证文件
+    Note over CodexOAuth: 过期 token 刷新取得单账号锁后重读凭据，复用已更新的有效 token
     Controller->>CodexProxy: proxy_request()
     CodexProxy->>ChatGPT: POST /backend-api/codex/responses
     Note over CodexProxy,ChatGPT: 对齐 Codex backend 要求：stream=true、store=false、parallel_tool_calls=true、include encrypted content，并移除不支持字段
@@ -1207,10 +1217,17 @@ sequenceDiagram
         CodexProxy->>CodexOAuth: record_auth_file_failure()
         CodexProxy->>CodexOAuth: refresh_auth_file_quota_snapshot()
         CodexProxy->>ChatGPT: 使用下一个认证文件重试
+    else 临时限流或缺少明确额度信号的 429
+        ChatGPT-->>CodexProxy: 429 rate_limit_exceeded / rate_limit_error
+        CodexProxy->>CodexOAuth: record_auth_file_failure()
+        Note over CodexProxy,CodexOAuth: 保留上游错误与 Retry-After，账号后续继续参与候选选择
+        CodexProxy->>ChatGPT: 使用下一个认证文件重试
     else 账号认证失败
         ChatGPT-->>CodexProxy: 401 authentication_error
         opt 当前认证文件存在 refresh_token
-            CodexProxy->>CodexOAuth: refresh_auth_candidate()
+            CodexProxy->>CodexOAuth: refresh_auth_candidate(failed_access_token)
+            CodexOAuth->>CodexOAuth: 单账号锁内重读：复用已更新的有效 token，或交换并保存新凭据
+            CodexOAuth-->>CodexProxy: 最新认证文件快照
             CodexProxy->>ChatGPT: 使用当前认证文件重试一次
         end
         alt 刷新不可用或重试后仍认证失败

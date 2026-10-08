@@ -508,6 +508,8 @@
     <script src="/static/js/ui-message.js?v=20260630-1"></script>
     <script>
         const CODEX_AUTH_FILE_SYNC_INTERVAL_MS = 60 * 1000;
+        const CODEX_AUTH_FILE_REQUEST_TIMEOUT_MS = 60 * 1000;
+        const CODEX_RESET_CARD_TIMER_MAX_DELAY_MS = 2 ** 31 - 1;
         let activeOAuthTab = 'codex';
         let codexAuthFileSyncTimer = null;
         let codexResetCardExpiryTimer = null;
@@ -1962,20 +1964,32 @@
                 { key: 'other_unavailable', label: '其他', count: counts.other_unavailable },
             ];
             container.hidden = false;
-            container.innerHTML = filters.map(item => {
+            if (!container.querySelector('.oauth-auth-file-filter-pill')) {
+                container.innerHTML = filters.map(item => {
+                    const isActive = currentFilter === item.key;
+                    return `
+                        <button
+                            type="button"
+                            data-codex-auth-filter="${item.key}"
+                            class="oauth-auth-file-filter-pill${isActive ? ' is-active' : ''}"
+                            aria-pressed="${isActive ? 'true' : 'false'}"
+                            onclick="setCodexAuthFileFilter('${item.key}')"
+                        >
+                            <span>${item.label}</span>
+                            <strong>${item.count}</strong>
+                        </button>
+                    `;
+                }).join('');
+            }
+            // 保留筛选按钮节点，避免后台重绘打断正在进行的点击。
+            filters.forEach(item => {
+                const button = container.querySelector(`[data-codex-auth-filter="${item.key}"]`);
+                if (!button) return;
                 const isActive = currentFilter === item.key;
-                return `
-                    <button
-                        type="button"
-                        class="oauth-auth-file-filter-pill${isActive ? ' is-active' : ''}"
-                        aria-pressed="${isActive ? 'true' : 'false'}"
-                        onclick="setCodexAuthFileFilter('${item.key}')"
-                    >
-                        <span>${item.label}</span>
-                        <strong>${item.count}</strong>
-                    </button>
-                `;
-            }).join('');
+                button.classList.toggle('is-active', isActive);
+                button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                button.querySelector('strong').textContent = String(item.count);
+            });
         }
 
         function getCodexAuthFileFilterCounts(files) {
@@ -2912,16 +2926,31 @@
                 window.clearTimeout(codexResetCardExpiryTimer);
                 codexResetCardExpiryTimer = null;
             }
-            const expiryTimes = Object.values(codexAuthState.resetCardsByFile)
-                .flatMap(cards => Array.isArray(cards) ? cards : [])
-                .map(card => parseCodexQuotaTimestamp(card?.expires_at ?? card?.expiresAt))
-                .filter(expiresAt => expiresAt !== null && expiresAt > Date.now());
-            if (!expiryTimes.length) return;
-            const nextExpiryAt = Math.min(...expiryTimes);
+            const now = Date.now();
+            let nextExpiryAt = Infinity;
+            Object.values(codexAuthState.resetCardsByFile).forEach(cards => {
+                if (!Array.isArray(cards)) return;
+                cards.forEach(card => {
+                    const expiresAt = parseCodexQuotaTimestamp(card?.expires_at ?? card?.expiresAt);
+                    if (expiresAt !== null && expiresAt > now) {
+                        nextExpiryAt = Math.min(nextExpiryAt, expiresAt);
+                    }
+                });
+            });
+            if (!Number.isFinite(nextExpiryAt)) return;
+            // 浏览器定时器使用有符号 32 位延迟，远期过期时间按安全上限分段等待。
+            const delay = Math.min(
+                Math.max(nextExpiryAt - now + 100, 100),
+                CODEX_RESET_CARD_TIMER_MAX_DELAY_MS,
+            );
             codexResetCardExpiryTimer = window.setTimeout(() => {
                 codexResetCardExpiryTimer = null;
-                renderCodexAuthFiles();
-            }, Math.max(nextExpiryAt - Date.now() + 100, 100));
+                if (nextExpiryAt <= Date.now()) {
+                    renderCodexAuthFiles();
+                } else {
+                    scheduleCodexResetCardExpiryRedraw();
+                }
+            }, delay);
         }
 
         function formatCodexResetCardExpiry(card) {
@@ -3331,6 +3360,23 @@
             delete codexAuthState.resetCardConsumingByFile[name];
         }
 
+        async function fetchCodexAuthFileJson(url) {
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), CODEX_AUTH_FILE_REQUEST_TIMEOUT_MS);
+            try {
+                const response = await fetch(url, { cache: 'no-store', signal: controller.signal });
+                const result = await response.json();
+                return { response, result };
+            } catch (error) {
+                if (controller.signal.aborted) {
+                    throw new Error('请求超时（60 秒），请稍后重试');
+                }
+                throw error;
+            } finally {
+                window.clearTimeout(timer);
+            }
+        }
+
         async function loadCodexAuthFiles(options = {}) {
             const showLoading = options.showLoading !== false;
             if (codexAuthState.authFilesLoading) return false;
@@ -3340,8 +3386,7 @@
                 container.innerHTML = '<div class="empty-state">正在加载认证文件...</div>';
             }
             try {
-                const response = await fetch('/api/oauth/codex/auth-files', { cache: 'no-store' });
-                const result = await response.json();
+                const { response, result } = await fetchCodexAuthFileJson('/api/oauth/codex/auth-files');
                 if (!response.ok) {
                     throw new Error(result.error || '加载认证文件失败');
                 }
@@ -3460,10 +3505,9 @@
         }
 
         async function refreshCodexResetCardsByName(name) {
-            const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-cards`, {
-                cache: 'no-store',
-            });
-            const result = await response.json();
+            const { response, result } = await fetchCodexAuthFileJson(
+                `/api/oauth/codex/auth-files/${encodeURIComponent(name)}/reset-cards`,
+            );
             if (!response.ok) {
                 const error = new Error(result.error || '获取重置卡失败');
                 error.authFailed = result.auth_failed === true || response.status === 401;
@@ -3612,8 +3656,9 @@
             let resetCardError = null;
             try {
                 try {
-                    const response = await fetch(`/api/oauth/codex/auth-files/${encodeURIComponent(name)}/quota`, { cache: 'no-store' });
-                    const result = await response.json();
+                    const { response, result } = await fetchCodexAuthFileJson(
+                        `/api/oauth/codex/auth-files/${encodeURIComponent(name)}/quota`,
+                    );
                     if (!response.ok) {
                         const error = new Error(result.error || '刷新配额失败');
                         error.quotaRefreshedAt = result.quota_refreshed_at || result.refreshed_at || '';
