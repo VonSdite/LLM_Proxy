@@ -1931,9 +1931,11 @@ class CodexOAuthServiceTests(unittest.TestCase):
 
         model_ids = [model["id"] for model in result["models"]]
         self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), model_ids)
-        self.assertIn("gpt-6-sol", model_ids)
+        self.assertIn("gpt-6.1-sol", model_ids)
         self.assertIn("gpt-6-luna", model_ids)
-        self.assertIn("gpt-5.3-codex", model_ids)
+        self.assertNotIn("gpt-6-sol", model_ids)
+        self.assertNotIn("gpt-5.5", model_ids)
+        self.assertNotIn("gpt-5.3-codex", model_ids)
         self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), result["built_in_models"])
         self.assertNotIn("source", result)
         self.assertNotIn("updated_at", result)
