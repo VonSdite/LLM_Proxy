@@ -20,6 +20,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
         }
 
         self.assertAlmostEqual(27.5, estimate_openai_request_cost_usd("gpt-6-astra", usage) or 0)
+        self.assertAlmostEqual(5.5, estimate_openai_request_cost_usd("gpt-6.1-sol", usage) or 0)
         self.assertAlmostEqual(5.5, estimate_openai_request_cost_usd("gpt-6-sol", usage) or 0)
         self.assertAlmostEqual(0.275, estimate_openai_request_cost_usd("gpt-6-luna", usage) or 0)
         self.assertAlmostEqual(11.0, estimate_openai_request_cost_usd("gpt-5.6-sol", usage) or 0)
@@ -41,6 +42,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
         }
 
         self.assertAlmostEqual(1.5, estimate_openai_request_cost_usd("gpt-6-astra", usage) or 0)
+        self.assertAlmostEqual(0.3, estimate_openai_request_cost_usd("gpt-6.1-sol", usage) or 0)
         self.assertAlmostEqual(0.3, estimate_openai_request_cost_usd("gpt-6-sol", usage) or 0)
         self.assertAlmostEqual(0.015, estimate_openai_request_cost_usd("gpt-6-luna", usage) or 0)
         self.assertAlmostEqual(0.6, estimate_openai_request_cost_usd("gpt-5.6", usage) or 0)
@@ -66,6 +68,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
         }
 
         self.assertAlmostEqual(3.0, estimate_openai_request_cost_usd("gpt-6-astra", usage) or 0)
+        self.assertAlmostEqual(0.6, estimate_openai_request_cost_usd("gpt-6.1-sol", usage) or 0)
         self.assertAlmostEqual(0.6, estimate_openai_request_cost_usd("gpt-6-sol", usage) or 0)
         self.assertAlmostEqual(0.03, estimate_openai_request_cost_usd("gpt-6-luna", usage) or 0)
         self.assertAlmostEqual(1.2, estimate_openai_request_cost_usd("gpt-5.6-sol", usage) or 0)
@@ -97,6 +100,24 @@ class OpenAIModelPricingTests(unittest.TestCase):
         cost = estimate_openai_request_cost_usd("gpt-6-astra-2026-09-14", usage)
 
         self.assertAlmostEqual(5.05, cost or 0)
+
+    def test_gpt_6_1_sol_cache_prices_at_long_context_boundary(self) -> None:
+        usage = {
+            "usage_status": "known",
+            "completion_tokens": 10_000,
+            "cache_read_input_tokens": 100_000,
+            "cache_creation_input_tokens": 20_000,
+        }
+
+        for service_tier, multiplier in (("standard", 1), ("fast", 2), ("priority", 2)):
+            for prompt_tokens, standard_cost in ((272_000, 0.464), (272_001, 0.878004)):
+                with self.subTest(service_tier=service_tier, prompt_tokens=prompt_tokens):
+                    cost = estimate_openai_request_cost_usd(
+                        "gpt-6.1-sol",
+                        {**usage, "service_tier": service_tier, "prompt_tokens": prompt_tokens},
+                    )
+                    self.assertIsNotNone(cost)
+                    self.assertAlmostEqual(standard_cost * multiplier, cost)
 
     def test_unknown_model_or_incomplete_usage_is_not_zero_cost(self) -> None:
         usage = {
