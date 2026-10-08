@@ -1839,7 +1839,9 @@
                     || isAuthenticationUnavailable;
                 const isConfirmingDelete = codexAuthState.deleteConfirmName === (file.name || '');
                 const isSelected = codexAuthState.selectedAuthFiles.has(file.name || '');
-                const availabilityClass = availabilityStatus.replace(/_/g, '-');
+                const availabilityClass = ['refresh_required', 'auth_check_required'].includes(availabilityStatus)
+                    ? 'available'
+                    : availabilityStatus.replace(/_/g, '-');
                 const availabilityLabel = formatCodexAvailabilityStatusLabel(file, availabilityStatus);
                 const usageInfo = getCodexAuthFileInfo(file);
                 return `
@@ -2094,11 +2096,10 @@
 
         function formatCodexAvailabilityStatusLabel(file, status) {
             if (status === 'quota_cooldown' || status === 'quota_exhausted') return '额度用完';
+            if (status === 'refresh_required' || status === 'auth_check_required') return '可用';
             const message = String(file?.availability_status_message || '').trim();
             if (message) return message;
             if (status === 'available') return '可用';
-            if (status === 'refresh_required') return '待刷新';
-            if (status === 'auth_check_required') return '待验证';
             if (status === 'auth_failed') return '认证失败';
             if (status === 'disabled') return '已禁用';
             if (status === 'filtered') return '已过滤';
@@ -3775,9 +3776,7 @@
                 html: `
                     <p>状态来自认证文件内容、最近一次数据面请求结果和已保存的配额快照。</p>
                     <ul>
-                        <li><strong>可用</strong>：未命中过滤条件，或最近一次请求成功。</li>
-                        <li><strong>待刷新</strong>：access_token 已过期，但有 refresh_token，请求前会自动刷新。</li>
-                        <li><strong>待验证</strong>：access_token 已过期且缺少 refresh_token，会先用当前 access_token 真实请求一次。</li>
+                        <li><strong>可用</strong>：认证文件可参与请求调度，系统在请求时自动处理认证刷新与验证。</li>
                         <li><strong>认证失败</strong>：上游认证错误、缺少 access_token 或 refresh_token 刷新失败；会跳过，直到重新登录、刷新 token 成功或后续请求成功。</li>
                         <li><strong>额度用完</strong>：上游返回配额限制，或最近一次配额刷新显示 Codex 窗口无剩余额度；请求时会优先跳过该文件。</li>
                         <li><strong>已禁用</strong>：人工停止调度；重新启用后继续按认证和额度状态参与候选选择。</li>
