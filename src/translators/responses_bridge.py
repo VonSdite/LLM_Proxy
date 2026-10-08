@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Helpers for bridging OpenAI chat payloads into OpenAI responses output."""
+"""Responses 请求到 Chat 的转换与 Chat 回包到 Responses 的桥接。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .reasoning_utils import (
     openai_reasoning_effort_from_responses_reasoning,
 )
 from .responses_claude_bridge import _responses_tool_identities, _responses_tool_winners
-from .tool_result_utils import normalize_tool_result_content
+from .tool_result_utils import split_tool_result_content, tool_result_media_relay
 
 
 def convert_openai_responses_request_to_chat_request(
@@ -56,6 +56,7 @@ def convert_openai_responses_request_to_chat_request(
         pending_reasoning: list[str] = []
         awaiting_tool_outputs: set[str] = set()
         deferred_messages: list[dict[str, Any]] = []
+        pending_tool_media: list[dict[str, Any]] = []
 
         def take_reasoning() -> str:
             text = "\n\n".join(part for part in pending_reasoning if part)
@@ -100,6 +101,18 @@ def convert_openai_responses_request_to_chat_request(
         def flush_deferred() -> None:
             if awaiting_tool_outputs & output_call_ids:
                 return
+            if pending_tool_media:
+                if deferred_messages and deferred_messages[0].get("role") == "user":
+                    content = deferred_messages[0].get("content")
+                    parts = (
+                        content
+                        if isinstance(content, list)
+                        else ([{"type": "text", "text": content}] if content else [])
+                    )
+                    deferred_messages[0]["content"] = [*pending_tool_media, *parts]
+                else:
+                    translated["messages"].append({"role": "user", "content": list(pending_tool_media)})
+                pending_tool_media.clear()
             translated["messages"].extend(deferred_messages)
             deferred_messages.clear()
 
@@ -151,13 +164,15 @@ def convert_openai_responses_request_to_chat_request(
                 pending_tool_call_ids.append(call_id)
             elif item_type in {"function_call_output", "custom_tool_call_output"}:
                 call_id = str(item.get("call_id") or "").strip()
+                text, media = _responses_tool_output_to_chat(item.get("output"))
                 translated["messages"].append(
                     {
                         "role": "tool",
                         "tool_call_id": call_id,
-                        "content": _responses_tool_output_to_chat(item.get("output")),
+                        "content": text,
                     }
                 )
+                pending_tool_media.extend(tool_result_media_relay(call_id, media))
                 awaiting_tool_outputs.discard(call_id)
                 flush_deferred()
         flush_tool_calls()
@@ -262,14 +277,14 @@ def _from_openai_responses_message_content(content: Any) -> Any:
         item_type = str(item.get("type") or "").strip().lower()
         if item_type in {"input_text", "output_text", "text"} and isinstance(item.get("text"), str):
             translated.append({"type": "text", "text": item.get("text")})
-        elif item_type == "input_image" and isinstance(item.get("image_url"), str):
+        elif item_type == "input_image" and isinstance(item.get("image_url"), str) and item["image_url"]:
             image_url: dict[str, Any] = {"url": item.get("image_url")}
             if item.get("detail") is not None:
                 image_url["detail"] = item["detail"]
             translated.append({"type": "image_url", "image_url": image_url})
         elif item_type == "input_file":
             file_payload = {key: item[key] for key in ("file_data", "file_id", "filename") if item.get(key) is not None}
-            if file_payload:
+            if file_payload.get("file_data") or file_payload.get("file_id"):
                 translated.append({"type": "file", "file": file_payload})
     return translated
 
@@ -292,21 +307,10 @@ def _qualified_responses_tool_name(namespace: Any, name: Any) -> str:
     return f"{namespace_text}{separator}{name_text}"
 
 
-def _responses_tool_output_to_chat(output: Any) -> Any:
-    structured = output
-    if isinstance(output, str):
-        try:
-            structured = json.loads(output)
-        except (TypeError, ValueError):
-            return output
-    if not isinstance(structured, list):
-        return normalize_tool_result_content(output)
-    parts = _from_openai_responses_message_content(structured)
-    if any(isinstance(part, dict) and part.get("type") in {"image_url", "file"} for part in parts):
-        return parts
-    return "".join(
-        str(part.get("text") or "") for part in structured if isinstance(part, dict)
-    ) or normalize_tool_result_content(output)
+def _responses_tool_output_to_chat(output: Any) -> tuple[str, list[dict[str, Any]]]:
+    return split_tool_result_content(
+        output, lambda part: next(iter(_from_openai_responses_message_content([part])), None)
+    )
 
 
 def _responses_tool_parameters(tool: dict[str, Any]) -> Any:

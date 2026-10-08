@@ -23,6 +23,7 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..proxy_core.usage import public_usage_meta
+from ..translators.tool_result_utils import UnsupportedToolResultContent
 from ..utils.http_headers import merge_http_headers
 from ..utils.net import build_module_request_proxies, build_requests_proxy_settings
 from ..utils.proxy_warning import (
@@ -170,6 +171,7 @@ class ClaudeProxyService:
                 if failure.error_code in {
                     CLAUDE_PROXY_WARNING_ERROR_CODE,
                     CLAUDE_UPSTREAM_REDIRECT_ERROR_CODE,
+                    "unsupported_tool_result_content",
                 }:
                     return response, status_code, failure
                 last_failure = failure
@@ -201,11 +203,20 @@ class ClaudeProxyService:
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         translator = self._translator_registry.get("claude_chat", target_format)
         requested_stream = bool(request_data.get("stream", False))
-        upstream_body = translator.translate_request(
-            model_name,
-            dict(request_data),
-            requested_stream,
-        )
+        try:
+            upstream_body = translator.translate_request(
+                model_name,
+                dict(request_data),
+                requested_stream,
+            )
+        except UnsupportedToolResultContent as exc:
+            failure = ProxyErrorInfo(
+                message=str(exc),
+                status_code=400,
+                error_type="invalid_request_error",
+                error_code="unsupported_tool_result_content",
+            )
+            return None, failure.status_code, failure
         extra_betas, upstream_body = self._extract_betas(upstream_body)
         self._apply_claude_body_defaults(upstream_body, model_name, requested_stream)
         # 脱敏必须在重签 cch 之前完成，保证签名覆盖实际上送的请求体。
@@ -563,7 +574,9 @@ class ClaudeProxyService:
                     ProxyResponseBuilder._update_meta_from_stream_state(meta, state)
                     for chunk in chunks:
                         for restored_chunk in stream_privacy_restorer.restore_chunk(chunk):
-                            terminal_chunk = restored_chunk.kind == "done" or is_terminal_chunk(restored_chunk, target_format)
+                            terminal_chunk = restored_chunk.kind == "done" or is_terminal_chunk(
+                                restored_chunk, target_format
+                            )
                             if restored_chunk.kind == "done":
                                 if terminal_sent:
                                     continue

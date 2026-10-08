@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
 import requests
 from flask import Flask, Response
@@ -321,6 +322,97 @@ class ContextRecordingHook(BaseHook):
 
 
 class ProxyControllerErrorFormatTests(unittest.TestCase):
+    def test_unrepresentable_tool_media_returns_400_before_upstream_request(self) -> None:
+        cases = (
+            (
+                "/v1/chat/completions",
+                "claude_chat",
+                {
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {"id": "call_0", "type": "function", "function": {"name": "read", "arguments": "{}"}}
+                            ],
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": "call_0",
+                            "content": [{"type": "file", "file": {"file_id": "file-1"}}],
+                        },
+                    ]
+                },
+            ),
+            (
+                "/v1/responses",
+                "openai_chat",
+                {
+                    "input": [
+                        {"type": "function_call", "call_id": "call_0", "name": "read", "arguments": "{}"},
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_0",
+                            "output": [{"type": "input_file", "file_url": "https://example.com/a.pdf"}],
+                        },
+                    ]
+                },
+            ),
+            (
+                "/v1/messages",
+                "openai_chat",
+                {
+                    "max_tokens": 100,
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": [{"type": "tool_use", "id": "call_0", "name": "read", "input": {}}],
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "call_0",
+                                    "content": [
+                                        {
+                                            "type": "document",
+                                            "source": {"type": "url", "url": "https://example.com/a.pdf"},
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    ],
+                },
+            ),
+        )
+        for route, source_format, body in cases:
+            with self.subTest(route=route):
+                provider = LLMProvider(
+                    name="demo",
+                    api="https://example.com/v1/chat/completions",
+                    source_format=source_format,
+                    model_list=("model",),
+                    target_formats=("openai_chat", "openai_responses", "claude_chat"),
+                    max_retries=1,
+                )
+                app = Flask(__name__)
+                ctx = AppContext(
+                    logger=FakeLogger(),
+                    config_manager=FakeConfigManager(),
+                    root_path=Path(__file__).resolve().parents[1],
+                    flask_app=app,
+                )
+                proxy_service = ProxyService(ctx)
+                ProxyController(ctx, proxy_service, FakeUserService(), FakeLogService(), FakeProviderManager(provider))
+                with patch.object(proxy_service, "_open_upstream_response") as open_mock:
+                    response = app.test_client().post(route, json={"model": "demo/model", **body})
+                    open_mock.assert_not_called()
+                self.assertEqual(400, response.status_code)
+                self.assertEqual("invalid_request_error", response.get_json()["error"]["type"])
+                self.assertIn("unsupported or missing media source", response.get_json()["error"]["message"])
+
     def test_list_models_includes_provider_protocol_metadata(self) -> None:
         provider = LLMProvider(
             name="demo",

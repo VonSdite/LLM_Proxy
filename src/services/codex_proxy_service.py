@@ -25,6 +25,7 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..proxy_core.usage import public_usage_meta
+from ..translators.tool_result_utils import UnsupportedToolResultContent
 from ..utils.net import build_module_request_proxies, build_requests_proxy_settings
 from ..utils.proxy_warning import (
     PROXY_WARNING_ERROR_CODE,
@@ -199,6 +200,7 @@ class CodexProxyService:
                 if failure.error_code in {
                     CODEX_PROXY_WARNING_ERROR_CODE,
                     CODEX_UPSTREAM_REDIRECT_ERROR_CODE,
+                    "unsupported_tool_result_content",
                 }:
                     return response, status_code, failure
                 last_failure = failure
@@ -411,11 +413,20 @@ class CodexProxyService:
         desensitize: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         translator = self._translator_registry.get("openai_responses", target_format)
-        upstream_body = translator.translate_request(
-            model_name,
-            dict(request_data),
-            True,
-        )
+        try:
+            upstream_body = translator.translate_request(
+                model_name,
+                dict(request_data),
+                True,
+            )
+        except UnsupportedToolResultContent as exc:
+            failure = ProxyErrorInfo(
+                message=str(exc),
+                status_code=400,
+                error_type="invalid_request_error",
+                error_code="unsupported_tool_result_content",
+            )
+            return None, failure.status_code, failure
         if target_format == "claude_chat":
             self._sanitize_codex_claude_compat_body(upstream_body)
         responses_lite = self._is_codex_responses_lite_request(upstream_body, request_headers)

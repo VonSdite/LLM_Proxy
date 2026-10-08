@@ -20,7 +20,7 @@ from .reasoning_utils import (
     openai_reasoning_effort_from_claude_thinking,
     openai_reasoning_effort_to_claude_thinking,
 )
-from .tool_result_utils import normalize_tool_result_content
+from .tool_result_utils import convert_tool_result_content
 
 CLAUDE_REDACTED_THINKING_PREFIX = "claude-redacted-thinking:"
 _CLAUDE_TOOL_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_-]")
@@ -111,7 +111,12 @@ def convert_claude_request_to_openai_responses(
                         if str(block.get("tool_use_id") or "") in custom_tool_call_ids
                         else "function_call_output",
                         "call_id": str(block.get("tool_use_id") or ""),
-                        "output": normalize_tool_result_content(block.get("content")),
+                        "output": convert_tool_result_content(
+                            block.get("content"),
+                            lambda part: _claude_content_to_responses(part, "user"),
+                            text_type="input_text",
+                            target_format="openai_responses",
+                        ),
                     }
                 )
         if message_parts:
@@ -261,15 +266,21 @@ def convert_openai_responses_request_to_claude(
                 )
             elif item_type in {"function_call_output", "custom_tool_call_output"}:
                 raw_call_id = str(item.get("call_id") or "")
+                tool_content = _responses_tool_output_to_claude(item.get("output"))
+                tool_result = {
+                    "type": "tool_result",
+                    "tool_use_id": tool_call_ids.get(raw_call_id) or _sanitize_claude_tool_id(raw_call_id),
+                    "content": tool_content,
+                }
+                if isinstance(tool_content, list):
+                    for part in tool_content:
+                        cache_control = part.pop("cache_control", None)
+                        if isinstance(cache_control, dict):
+                            tool_result["cache_control"] = cache_control
+                _copy_cache_control(item, tool_result)
                 append_blocks(
                     "user",
-                    [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": tool_call_ids.get(raw_call_id) or _sanitize_claude_tool_id(raw_call_id),
-                            "content": _responses_tool_output_to_claude(item.get("output")),
-                        }
-                    ],
+                    [tool_result],
                 )
     flush_pending_message()
 
@@ -795,7 +806,7 @@ def _parse_data_url(value: str) -> tuple[str, str] | None:
     return metadata or "application/octet-stream", data
 
 
-def _responses_content_to_claude(content: Any) -> list[dict[str, Any]]:
+def _responses_content_to_claude(content: Any, *, strict_files: bool = False) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
     if not isinstance(content, list):
@@ -810,7 +821,7 @@ def _responses_content_to_claude(content: Any) -> list[dict[str, Any]]:
             block = {"type": "text", "text": part["text"]}
         elif part_type == "input_image":
             url = part.get("image_url") or part.get("url")
-            if isinstance(url, str):
+            if isinstance(url, str) and url:
                 parsed = _parse_data_url(url)
                 if parsed is not None:
                     block = {
@@ -819,18 +830,51 @@ def _responses_content_to_claude(content: Any) -> list[dict[str, Any]]:
                     }
                 else:
                     block = {"type": "image", "source": {"type": "url", "url": url}}
-        elif part_type == "input_file" and isinstance(part.get("file_data"), str):
-            file_data = part["file_data"]
-            parsed = _parse_data_url(file_data)
-            media_type, data = parsed or ("application/octet-stream", file_data)
-            block = {
-                "type": "document",
-                "source": {"type": "base64", "media_type": media_type, "data": data},
-            }
+        elif part_type == "input_file":
+            block = _openai_file_to_claude_document(part)
+            file_data = part.get("file_data")
+            if block is None and not strict_files and isinstance(file_data, str):
+                media_type, data = _parse_data_url(file_data) or ("application/octet-stream", file_data)
+                block = {
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": media_type, "data": data},
+                }
         if block is not None:
             _copy_cache_control(part, block)
             blocks.append(block)
     return blocks
+
+
+def _openai_file_to_claude_document(file_payload: dict[str, Any]) -> dict[str, Any] | None:
+    """把 OpenAI 文件映射为 Claude 支持的 PDF、UTF-8 文本或 URL 来源。"""
+    file_data = file_payload.get("file_data")
+    source: dict[str, Any]
+    if isinstance(file_data, str) and file_data:
+        parsed = _parse_data_url(file_data)
+        if parsed is None:
+            if file_data.startswith("data:") or not str(file_payload.get("filename") or "").lower().endswith(".pdf"):
+                return None
+            parsed = ("application/pdf", file_data)
+        media_type, data = parsed
+        media_type = media_type.split(";", 1)[0].strip().lower()
+        if media_type == "application/pdf":
+            source = {"type": "base64", "media_type": media_type, "data": data}
+        elif media_type.startswith("text/") or media_type in {"application/json", "application/xml"}:
+            try:
+                text = base64.b64decode(data, validate=True).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return None
+            source = {"type": "text", "media_type": "text/plain", "data": text}
+        else:
+            return None
+    elif isinstance(file_payload.get("file_url"), str) and file_payload["file_url"].startswith(("https://", "http://")):
+        source = {"type": "url", "url": file_payload["file_url"]}
+    else:
+        return None
+    document: dict[str, Any] = {"type": "document", "source": source}
+    if isinstance(file_payload.get("filename"), str):
+        document["title"] = file_payload["filename"]
+    return document
 
 
 def _responses_system_content_to_claude(content: Any) -> list[dict[str, Any]]:
@@ -892,21 +936,36 @@ def _claude_content_to_responses(block: dict[str, Any], role: str) -> dict[str, 
         return part
     if block_type == "document":
         source = block.get("source") or {}
-        if not isinstance(source, dict) or not source.get("data"):
+        if not isinstance(source, dict):
             return None
-        part = {
-            "type": "input_file",
-            "file_data": f"data:{source.get('media_type') or 'application/octet-stream'};base64,{source['data']}",
-        }
+        source_type = str(source.get("type") or "").strip().lower()
+        if source_type == "text" and isinstance(source.get("data"), str):
+            return {"type": "input_text", "text": source["data"]}
+        if source_type == "base64" and source.get("data"):
+            part = {
+                "type": "input_file",
+                "file_data": f"data:{source.get('media_type') or 'application/octet-stream'};base64,{source['data']}",
+            }
+        elif source_type == "url" and source.get("url"):
+            part = {"type": "input_file", "file_url": str(source["url"])}
+        else:
+            return None
+        filename = block.get("filename") or block.get("title")
+        if filename:
+            part["filename"] = str(filename)
+        elif source_type == "base64" and source.get("media_type") == "application/pdf":
+            part["filename"] = "document.pdf"
         return part
     return None
 
 
 def _responses_tool_output_to_claude(output: Any) -> Any:
-    if isinstance(output, list):
-        blocks = _responses_content_to_claude(output)
-        return blocks or normalize_tool_result_content(output)
-    return normalize_tool_result_content(output)
+    return convert_tool_result_content(
+        output,
+        lambda part: next(iter(_responses_content_to_claude([part], strict_files=True)), None),
+        text_type="text",
+        target_format="claude_chat",
+    )
 
 
 def _append_claude_message(messages: list[dict[str, Any]], role: str, blocks: list[dict[str, Any]]) -> None:

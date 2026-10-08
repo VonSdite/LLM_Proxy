@@ -149,6 +149,74 @@ def write_auth_file(root: Path, name: str, token: str, *, mtime: int) -> None:
 
 
 class CodexProxyServiceTests(unittest.TestCase):
+    def test_claude_tool_media_survives_codex_request_sanitization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-only.json", "access-only", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+            captured: dict[str, Any] = {}
+
+            def fake_post(url: str, **kwargs: Any) -> FakeHTTPResponse:
+                captured.update(kwargs["json"])
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[
+                        b'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}\n\n'
+                    ],
+                )
+
+            request = {
+                "model": "gpt-5.4",
+                "tools": [{"name": "capture", "input_schema": {"type": "object"}}],
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "call_0", "name": "capture", "input": {}}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "call_0",
+                                "content": [
+                                    {"type": "text", "text": "screenshot"},
+                                    {
+                                        "type": "image",
+                                        "source": {"type": "base64", "media_type": "image/png", "data": "aW1hZ2U="},
+                                    },
+                                    {
+                                        "type": "document",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": "application/pdf",
+                                            "data": "JVBERi0xLjQK",
+                                        },
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+            with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                response, status_code, failure = proxy_service.proxy_request(
+                    request, {}, resolved_target_format="claude_chat"
+                )
+
+            self.assertEqual(200, status_code)
+            self.assertIsNone(failure)
+            self.assertIsNotNone(response)
+            output = next(item for item in captured["input"] if item["type"] == "function_call_output")
+            call = next(item for item in captured["input"] if item["type"] == "function_call")
+            self.assertEqual(call["call_id"], output["call_id"])
+            self.assertEqual(["input_text", "input_image", "input_file"], [part["type"] for part in output["output"]])
+            self.assertEqual("data:image/png;base64,aW1hZ2U=", output["output"][1]["image_url"])
+            self.assertEqual("data:application/pdf;base64,JVBERi0xLjQK", output["output"][2]["file_data"])
+
     def test_temporary_429_preserves_retry_after_without_quota_cooldown_or_probe(self) -> None:
         bodies = (
             b'{"error":{"type":"rate_limit_exceeded","message":"try later"}}',
@@ -977,7 +1045,10 @@ class CodexProxyServiceTests(unittest.TestCase):
                     headers={"Content-Type": "application/json"},
                 )
 
-            with patch.object(oauth_service, "refresh_auth_file_quota_snapshot") as refresh_mock:
+            with (
+                patch("src.services.codex_oauth_service.time.time", return_value=1000.0),
+                patch.object(oauth_service, "refresh_auth_file_quota_snapshot") as refresh_mock,
+            ):
                 with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
                     response, status_code, failure = proxy_service.proxy_image_request(
                         {"prompt": "draw", "model": "gpt-image-2"},

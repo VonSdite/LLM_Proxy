@@ -448,6 +448,7 @@ Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照�
 - 客户端取消会关闭上游响应，不触发成功完成统计
 - 内置 translator 会在 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 和 Claude `thinking` 之间转换思考意图；无法精确映射的档位会使用 `xhigh`
 - OpenAI Chat 上游响应里的 `reasoning_content` 和 `reasoning_details` 会按下游协议转换为 Claude thinking 或 OpenAI Responses reasoning 输出
+- Chat、Responses 与 Claude 跨协议请求中的工具图片、PDF 和文本文件使用目标协议内容块；发往 Chat 的工具媒体补传到 user 消息，保留工具调用关联。来源支持范围见 [工具结果媒体转换](docs/tool-result-media.md)
 - `GET /v1/models` 会返回当前已启用 Provider 中允许公开的模型和 Codex / Claude OAuth 模型列表，以及 `provider_name`、`source_format` 等元信息
 
 ### 2. Provider 与 Auth Group 管理
