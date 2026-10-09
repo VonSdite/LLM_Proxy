@@ -165,6 +165,7 @@ class OpenAIChatTranslator:
 class OpenAIResponsesTranslator:
     source_format: str = "openai_responses"
     target_format: str = "openai_chat"
+    codex_mode: bool = False
 
     def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
         translated: dict[str, Any] = {
@@ -173,7 +174,7 @@ class OpenAIResponsesTranslator:
             "stream": bool(stream),
         }
 
-        instructions, input_items = _to_openai_responses_input(body.get("messages"))
+        instructions, input_items = _to_openai_responses_input(body.get("messages"), codex_mode=self.codex_mode)
         if instructions:
             translated["instructions"] = instructions
         if input_items:
@@ -1159,6 +1160,7 @@ class OpenAIResponsesClaudeTranslator:
 
     source_format: str = "openai_responses"
     target_format: str = "claude_chat"
+    reasoning_provider: str | None = None
 
     def translate_request(self, model_name: str, body: dict[str, Any], stream: bool) -> dict[str, Any]:
         return _convert_claude_request_to_openai_responses(model_name, body, stream)
@@ -1171,12 +1173,14 @@ class OpenAIResponsesClaudeTranslator:
         event: StreamEvent,
         state: dict[str, Any],
     ) -> list[DownstreamChunk]:
+        bridge_state = state.setdefault("responses_claude_bridge", {})
+        bridge_state["reasoning_provider"] = self.reasoning_provider
         return _translate_openai_responses_stream_to_claude(
             model_name,
             original_request,
             translated_request,
             event,
-            state.setdefault("responses_claude_bridge", {}),
+            bridge_state,
         )
 
     def translate_nonstream_response(
@@ -1191,6 +1195,7 @@ class OpenAIResponsesClaudeTranslator:
             original_request,
             translated_request,
             payload,
+            reasoning_provider=self.reasoning_provider,
         )
 
 
@@ -1466,7 +1471,7 @@ def _extract_text_content(content: Any) -> str:
     return "\n".join(parts)
 
 
-def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]]:
+def _to_openai_responses_input(messages: Any, *, codex_mode: bool = False) -> tuple[str, list[dict[str, Any]]]:
     if not isinstance(messages, list):
         return "", []
 
@@ -1488,7 +1493,12 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]
         if role in {"system", "developer"}:
             text = _extract_text_content(message.get("content"))
             if text:
-                instructions.append(text)
+                if codex_mode:
+                    items.append(
+                        {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": text}]}
+                    )
+                else:
+                    instructions.append(text)
             continue
         if role == "tool":
             tool_call_id = str(message.get("tool_call_id") or "").strip()
@@ -1509,7 +1519,18 @@ def _to_openai_responses_input(messages: Any) -> tuple[str, list[dict[str, Any]]
                 )
             continue
 
+        if codex_mode and role == "assistant":
+            for detail in message.get("reasoning_details") or []:
+                if (
+                    isinstance(detail, dict)
+                    and detail.get("type") == "reasoning"
+                    and isinstance(detail.get("encrypted_content"), str)
+                    and detail["encrypted_content"]
+                ):
+                    items.append(copy.deepcopy(detail))
         content = _to_openai_responses_message_content(message.get("content"), role)
+        if codex_mode and role == "assistant":
+            content = [part for part in content if part.get("type") != "output_text" or part.get("text")]
         if content:
             items.append(
                 {

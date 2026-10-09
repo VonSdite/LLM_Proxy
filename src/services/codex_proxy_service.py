@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -25,6 +26,8 @@ from ..proxy_core import (
     should_emit_terminal_chunk,
 )
 from ..proxy_core.usage import public_usage_meta
+from ..translators.codex_compat import CodexRequestCompatibility, CodexResponseAdapter
+from ..translators.registry import OpenAIResponsesClaudeTranslator, OpenAIResponsesTranslator
 from ..translators.tool_result_utils import UnsupportedToolResultContent
 from ..utils.net import build_module_request_proxies, build_requests_proxy_settings
 from ..utils.proxy_warning import (
@@ -38,6 +41,7 @@ from .codex_oauth_service import (
     CodexAuthCandidate,
     CodexOAuthService,
 )
+from .codex_reasoning_cache import CodexReasoningCache
 from .openai_model_pricing import estimate_openai_request_cost_usd
 from .outbound_privacy import OutboundPrivacyContext, OutboundPrivacyService
 from .proxy_response_builder import ProxyResponseBuilder, StreamPrivacyRestorer
@@ -51,7 +55,6 @@ CODEX_PROXY_WARNING_ERROR_CODE = PROXY_WARNING_ERROR_CODE
 CODEX_PROXY_WARNING_STATUS_CODE = PROXY_WARNING_STATUS_CODE
 CODEX_RESPONSES_LITE_HEADER = "X-OpenAI-Internal-Codex-Responses-Lite"
 CODEX_UPSTREAM_REDIRECT_ERROR_CODE = "codex_upstream_redirect"
-CODEX_TOOL_IDENTIFIER_MAX_LENGTH = 64
 
 
 class CodexProxyService:
@@ -65,6 +68,9 @@ class CodexProxyService:
         from ..translators import build_default_translator_registry
 
         self._translator_registry = build_default_translator_registry()
+        self._translator_registry.register(OpenAIResponsesTranslator(codex_mode=True))
+        self._translator_registry.register(OpenAIResponsesClaudeTranslator(reasoning_provider="codex"))
+        self._reasoning_cache = CodexReasoningCache()
 
     def _is_safe_desensitization_enabled(self, *, force: bool = False) -> bool:
         """OAuth 上游脱敏开关：系统设置或模型映射强制任一开启即生效。"""
@@ -80,7 +86,16 @@ class CodexProxyService:
         *,
         model_name: str,
     ) -> tuple[dict[str, Any], OutboundPrivacyContext | None]:
-        privacy_result = self._privacy.sanitize_request_body(upstream_body)
+        protected_body = copy.deepcopy(upstream_body)
+        opaque_items: dict[int, dict[str, Any]] = {}
+        for index, item in enumerate(protected_body.get("input") or []):
+            if isinstance(item, dict) and item.get("encrypted_content"):
+                opaque_items[index] = {key: item[key] for key in ("encrypted_content", "id") if key in item}
+                for key in opaque_items[index]:
+                    item[key] = ""
+        privacy_result = self._privacy.sanitize_request_body(protected_body)
+        for index, fields in opaque_items.items():
+            privacy_result.body["input"][index].update(fields)
         context = privacy_result.context
         if context.enabled:
             self._logger.info(
@@ -123,12 +138,22 @@ class CodexProxyService:
         client_ip: str | None = None,
         on_stream_failure: Callable[[dict[str, Any]], None] | None = None,
         force_safe_desensitization: bool = False,
+        replay_identity: str | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """按账号配额顺序代理 Codex 请求。"""
         del trace_id
+        request_headers = self._prepare_codex_session_headers(request_data, request_headers)
         model_name = str(request_data.get("model") or "").strip()
         target_format = str(resolved_target_format or "").strip().lower()
         desensitize = self._is_safe_desensitization_enabled(force=force_safe_desensitization)
+        if route_name == "responses_compact" and (target_format != "openai_responses" or request_data.get("stream")):
+            failure = ProxyErrorInfo(
+                message="Compaction requires a nonstream Responses request",
+                status_code=400,
+                error_type="invalid_request_error",
+                error_code="invalid_compact_request",
+            )
+            return None, failure.status_code, failure
         if not model_name:
             return (
                 None,
@@ -195,6 +220,7 @@ class CodexProxyService:
                 client_ip=client_ip,
                 on_stream_failure=on_stream_failure,
                 desensitize=desensitize,
+                replay_identity=replay_identity,
             )
             if failure is not None:
                 if failure.error_code in {
@@ -240,6 +266,7 @@ class CodexProxyService:
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """把 OpenAI Images 请求包装成 Codex image_generation 工具调用。"""
         del trace_id
+        request_headers = self._prepare_codex_session_headers(request_data, request_headers)
         desensitize = self._is_safe_desensitization_enabled(force=force_safe_desensitization)
         normalized_action = self._normalize_image_action(action)
         if not normalized_action:
@@ -411,12 +438,15 @@ class CodexProxyService:
         on_stream_failure: Callable[[dict[str, Any]], None] | None,
         allow_auth_refresh_retry: bool = True,
         desensitize: bool = False,
+        replay_identity: str | None = None,
+        omit_reasoning_history: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
+        compact = route_name == "responses_compact"
         translator = self._translator_registry.get("openai_responses", target_format)
         try:
             upstream_body = translator.translate_request(
                 model_name,
-                dict(request_data),
+                copy.deepcopy(request_data),
                 True,
             )
         except UnsupportedToolResultContent as exc:
@@ -427,38 +457,66 @@ class CodexProxyService:
                 error_code="unsupported_tool_result_content",
             )
             return None, failure.status_code, failure
+        if target_format == "openai_chat" and "service_tier" in request_data:
+            upstream_body["service_tier"] = request_data["service_tier"]
         if target_format == "claude_chat":
-            self._sanitize_codex_claude_compat_body(upstream_body)
-        responses_lite = self._is_codex_responses_lite_request(upstream_body, request_headers)
-        self._apply_codex_body_defaults(
-            upstream_body,
-            model_name,
-            image_generation_model=self._codex_oauth_service.get_default_image_model(),
-            allow_image_generation=self._should_enable_image_generation_tool(
-                upstream_body,
-                request_headers,
-                model_name=model_name,
-                candidate=candidate,
-            ),
-            responses_lite=responses_lite,
+            self._strip_codex_claude_cache_control(upstream_body)
+        claude_parallel_tool_calls = (
+            upstream_body.get("parallel_tool_calls") if target_format == "claude_chat" else None
         )
+        responses_lite = self._is_codex_responses_lite_request(upstream_body, request_headers)
+        if compact:
+            self._prepare_compact_body(upstream_body, model_name)
+        else:
+            self._apply_codex_body_defaults(
+                upstream_body,
+                model_name,
+                image_generation_model=self._codex_oauth_service.get_default_image_model(),
+                allow_image_generation=self._should_enable_image_generation_tool(
+                    upstream_body,
+                    request_headers,
+                    model_name=model_name,
+                    candidate=candidate,
+                ),
+                responses_lite=responses_lite,
+            )
+            if claude_parallel_tool_calls is False and self._has_codex_tools(upstream_body):
+                upstream_body["parallel_tool_calls"] = False
+        compatibility = CodexRequestCompatibility()
+        compatibility.prepare(upstream_body, target_format)
         privacy_context: OutboundPrivacyContext | None = None
         if desensitize:
             upstream_body, privacy_context = self._sanitize_upstream_body(upstream_body, model_name=model_name)
+        caller = replay_identity or client_ip or request_headers["Session-Id"]
+        scope = hashlib.sha256(
+            json.dumps([caller, model_name, candidate.name, candidate.account_id, target_format, desensitize]).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        if omit_reasoning_history:
+            upstream_body["input"] = [
+                item
+                for item in upstream_body.get("input") or []
+                if not isinstance(item, dict) or item.get("type") != "reasoning"
+            ]
+        else:
+            self._reasoning_cache.restore(scope, upstream_body)
+        translator = CodexResponseAdapter(translator, compatibility, self._reasoning_cache, scope, upstream_body)
         upstream_headers = self._build_codex_headers(
             request_headers,
             candidate,
-            stream=True,
+            stream=not compact,
+            upstream_body=upstream_body,
         )
         request_options = self._build_request_options()
 
         try:
             upstream_response = request_with_proxy_warning_retry(
                 lambda: requests.post(
-                    CODEX_BACKEND_RESPONSES_URL,
+                    CODEX_BACKEND_RESPONSES_URL + ("/compact" if compact else ""),
                     headers=upstream_headers,
                     json=upstream_body,
-                    stream=True,
+                    stream=not compact,
                     timeout=1200,
                     allow_redirects=False,
                     **request_options,
@@ -530,6 +588,32 @@ class CodexProxyService:
                 target_format=target_format,
             )
             if (
+                not omit_reasoning_history
+                and upstream_response.status_code == 400
+                and any(
+                    isinstance(item, dict) and item.get("type") == "reasoning"
+                    for item in upstream_body.get("input") or []
+                )
+                and self._is_invalid_reasoning_error(error_type, error_message)
+            ):
+                self._reasoning_cache.clear(scope)
+                return self._proxy_with_candidate(
+                    candidate=candidate,
+                    model_name=model_name,
+                    request_data=request_data,
+                    request_headers=request_headers,
+                    on_complete=on_complete,
+                    forward_stream_usage=forward_stream_usage,
+                    target_format=target_format,
+                    route_name=route_name,
+                    client_ip=client_ip,
+                    on_stream_failure=on_stream_failure,
+                    allow_auth_refresh_retry=allow_auth_refresh_retry,
+                    desensitize=desensitize,
+                    replay_identity=replay_identity,
+                    omit_reasoning_history=True,
+                )
+            if (
                 allow_auth_refresh_retry
                 and str(candidate.payload.get("refresh_token") or "").strip()
                 and self._is_authentication_error_response(upstream_response.status_code, error_type, error_message)
@@ -552,6 +636,8 @@ class CodexProxyService:
                         on_stream_failure=on_stream_failure,
                         allow_auth_refresh_retry=False,
                         desensitize=desensitize,
+                        replay_identity=replay_identity,
+                        omit_reasoning_history=omit_reasoning_history,
                     )
                 if refresh_failure is not None:
                     return None, refresh_failure.status_code, refresh_failure
@@ -623,6 +709,16 @@ class CodexProxyService:
                 ),
             )
 
+        if compact:
+            return self._build_compact_response(
+                response=upstream_response,
+                compatibility=compatibility,
+                model_name=model_name,
+                candidate=candidate,
+                on_complete=on_complete,
+                privacy_context=privacy_context,
+            )
+
         if bool(request_data.get("stream", False)):
             try:
                 stream_response = self._build_stream_response(
@@ -677,6 +773,108 @@ class CodexProxyService:
                 response_started=True,
             )
 
+    @staticmethod
+    def _prepare_compact_body(body: dict[str, Any], model_name: str) -> None:
+        """独立压缩请求保留完整历史与工具定义，使用 JSON 返回窗口。"""
+        body["model"] = model_name
+        if isinstance(body.get("input"), str):
+            body["input"] = [
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": body["input"]}]}
+            ]
+        for field in (
+            "stream",
+            "stream_options",
+            "store",
+            "include",
+            "max_output_tokens",
+            "max_completion_tokens",
+            "temperature",
+            "top_p",
+            "truncation",
+            "context_management",
+            "user",
+            "metadata",
+            "generate",
+            "prompt_cache_options",
+            "prompt_cache_retention",
+            "safety_identifier",
+            "previous_response_id",
+        ):
+            body.pop(field, None)
+        if body.get("instructions") is None:
+            body["instructions"] = ""
+        CodexProxyService._normalize_codex_input_items(body)
+
+    @staticmethod
+    def _is_invalid_reasoning_error(error_type: str | None, message: str) -> bool:
+        """仅对明确的推理密文或签名错误执行一次无历史重试。"""
+        value = f"{error_type or ''} {message}".lower()
+        return "invalid_encrypted_content" in value or (
+            ("reasoning" in value or "encrypted" in value)
+            and any(word in value for word in ("invalid", "signature", "decrypt", "verification"))
+        )
+
+    def _build_compact_response(
+        self,
+        *,
+        response: requests.Response,
+        compatibility: CodexRequestCompatibility,
+        model_name: str,
+        candidate: CodexAuthCandidate,
+        on_complete: Callable[[dict[str, Any]], None] | None,
+        privacy_context: OutboundPrivacyContext | None,
+    ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
+        """返回上游的完整压缩窗口并使用统一的用量记录。"""
+        try:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if not isinstance(payload, dict) or not isinstance(payload.get("output"), list):
+                failure = ProxyErrorInfo(
+                    message="Codex compaction returned an invalid output window",
+                    status_code=502,
+                    error_type="upstream_error",
+                    error_code="codex_compact_invalid_response",
+                )
+                self._codex_oauth_service.record_auth_file_failure(
+                    candidate.name, failure.message, status_code=502, error_type=failure.error_code
+                )
+                return None, failure.status_code, failure
+            restored = compatibility.restore_payload(payload)
+            if privacy_context is not None:
+                restored = privacy_context.restore_payload(restored)
+            meta = ProxyResponseBuilder._create_empty_meta()
+            ProxyResponseBuilder._update_meta_from_payload(meta, payload, source_format="openai_responses")
+            if on_complete is not None:
+                try:
+                    on_complete(
+                        self._build_auth_usage_meta(
+                            public_usage_meta(meta),
+                            model_name=model_name,
+                            auth_file_name=candidate.name,
+                            auth_account_id=self._get_candidate_usage_account_id(candidate),
+                        )
+                    )
+                except Exception as exc:
+                    self._logger.error("Error in Codex on_complete callback: %s", exc)
+            self._codex_oauth_service.record_auth_file_success(candidate.name)
+            return (
+                Response(
+                    encode_downstream_response_body(restored, "openai_responses"),
+                    status=response.status_code,
+                    content_type="application/json",
+                ),
+                response.status_code,
+                None,
+            )
+        except (requests.exceptions.RequestException, OSError) as exc:
+            return self._build_candidate_transport_failure(
+                candidate_name=candidate.name, model_name=model_name, exc=exc, response_started=False
+            )
+        finally:
+            response.close()
+
     def _proxy_image_with_candidate(
         self,
         *,
@@ -705,6 +903,7 @@ class CodexProxyService:
             request_headers,
             candidate,
             stream=True,
+            upstream_body=upstream_body,
         )
         request_options = self._build_request_options()
 
@@ -949,7 +1148,11 @@ class CodexProxyService:
         body["stream"] = True
         body["store"] = False
         body["parallel_tool_calls"] = False if responses_lite else True
+        include = body.get("include")
+        include_sources = isinstance(include, list) and "web_search_call.action.sources" in include
         body["include"] = ["reasoning.encrypted_content"]
+        if include_sources:
+            body["include"].append("web_search_call.action.sources")
         if isinstance(body.get("input"), str):
             body["input"] = [
                 {
@@ -963,12 +1166,18 @@ class CodexProxyService:
                     ],
                 }
             ]
-        for item in body.get("input") or []:
-            role = str(item.get("role") or "").strip().lower() if isinstance(item, dict) else ""
-            if role == "system":
-                item["role"] = "developer"
-        if str(body.get("service_tier") or "").strip() not in {"priority", "fast"}:
+        CodexProxyService._normalize_codex_input_items(body)
+        tier = body.get("service_tier")
+        normalized_tier = tier.strip().lower() if isinstance(tier, str) else ""
+        if normalized_tier in {"priority", "fast"}:
+            body["service_tier"] = "priority"
+        elif normalized_tier == "ultrafast":
+            body["service_tier"] = "ultrafast"
+        else:
             body.pop("service_tier", None)
+        stream_options = body.pop("stream_options", None)
+        if isinstance(stream_options, dict) and "reasoning_summary_delivery" in stream_options:
+            body["stream_options"] = {"reasoning_summary_delivery": stream_options["reasoning_summary_delivery"]}
         body.pop("max_output_tokens", None)
         body.pop("max_completion_tokens", None)
         for field in (
@@ -978,9 +1187,9 @@ class CodexProxyService:
             "context_management",
             "user",
             "generate",
+            "prompt_cache_options",
             "prompt_cache_retention",
             "safety_identifier",
-            "stream_options",
         ):
             body.pop(field, None)
         body.pop("previous_response_id", None)
@@ -990,116 +1199,30 @@ class CodexProxyService:
             CodexProxyService._ensure_image_generation_tool(body, image_generation_model)
         if not responses_lite and not CodexProxyService._has_codex_tools(body):
             body.pop("parallel_tool_calls", None)
-        body.setdefault("instructions", "")
-
-    @classmethod
-    def _sanitize_codex_claude_compat_body(cls, body: dict[str, Any]) -> None:
-        """清理 Claude 请求中 Codex Responses 不接受的历史上下文细节。"""
-        cls._strip_codex_claude_cache_control(body)
-
-        tool_name_map: dict[str, str] = {}
-        tools = body.get("tools")
-        if isinstance(tools, list):
-            for tool in tools:
-                if isinstance(tool, dict):
-                    cls._sanitize_codex_claude_tool(tool, tool_name_map)
-
-        call_id_map: dict[str, str] = {}
-        input_items = body.get("input")
-        if isinstance(input_items, list):
-            sanitized_items: list[Any] = []
-            for item in input_items:
-                if not isinstance(item, dict):
-                    sanitized_items.append(item)
-                    continue
-                item_type = str(item.get("type") or "").strip().lower()
-                if item_type == "reasoning":
-                    continue
-                if item_type in {"function_call", "custom_tool_call"}:
-                    cls._apply_codex_tool_name_map(item, tool_name_map)
-                    cls._apply_codex_call_id_map(item, call_id_map)
-                elif item_type in {"function_call_output", "custom_tool_call_output"}:
-                    cls._apply_codex_call_id_map(item, call_id_map)
-                sanitized_items.append(item)
-            body["input"] = sanitized_items
-
-        cls._sanitize_codex_tool_choice(body.get("tool_choice"), tool_name_map)
-
-    @classmethod
-    def _sanitize_codex_claude_tool(cls, tool: dict[str, Any], tool_name_map: dict[str, str]) -> None:
-        original_name = str(tool.get("name") or "").strip()
-        if original_name:
-            shortened_name = cls._shorten_codex_identifier(original_name, prefer_mcp_leaf=True)
-            tool_name_map[original_name] = shortened_name
-            tool["name"] = shortened_name
-        tool.pop("input_schema", None)
-        tool.pop("cache_control", None)
-        tool.pop("defer_loading", None)
-        parameters = tool.get("parameters")
-        if isinstance(parameters, dict):
-            parameters.pop("$schema", None)
-        if str(tool.get("type") or "").strip().lower() == "function":
-            tool["strict"] = False
-
-    @classmethod
-    def _sanitize_codex_tool_choice(cls, tool_choice: Any, tool_name_map: dict[str, str]) -> None:
-        if not isinstance(tool_choice, dict):
-            return
-        cls._apply_codex_tool_name_map(tool_choice, tool_name_map)
-        function_choice = tool_choice.get("function")
-        if isinstance(function_choice, dict):
-            cls._apply_codex_tool_name_map(function_choice, tool_name_map)
-        choice_type = str(tool_choice.get("type") or "").strip()
-        nested_choice = tool_choice.get(choice_type)
-        if isinstance(nested_choice, dict):
-            cls._apply_codex_tool_name_map(nested_choice, tool_name_map)
-        nested_tools = tool_choice.get("tools")
-        if isinstance(nested_tools, list):
-            for nested_tool in nested_tools:
-                if isinstance(nested_tool, dict):
-                    cls._apply_codex_tool_name_map(nested_tool, tool_name_map)
-
-    @classmethod
-    def _apply_codex_tool_name_map(cls, payload: dict[str, Any], tool_name_map: dict[str, str]) -> None:
-        if "name" not in payload:
-            return
-        original_name = str(payload.get("name") or "").strip()
-        if not original_name:
-            return
-        shortened_name = tool_name_map.get(original_name)
-        if shortened_name is None:
-            shortened_name = cls._shorten_codex_identifier(original_name, prefer_mcp_leaf=True)
-            tool_name_map[original_name] = shortened_name
-        payload["name"] = shortened_name
-
-    @classmethod
-    def _apply_codex_call_id_map(cls, payload: dict[str, Any], call_id_map: dict[str, str]) -> None:
-        if "call_id" not in payload:
-            return
-        original_call_id = str(payload.get("call_id") or "").strip()
-        if not original_call_id:
-            return
-        shortened_call_id = call_id_map.get(original_call_id)
-        if shortened_call_id is None:
-            shortened_call_id = cls._shorten_codex_identifier(original_call_id)
-            call_id_map[original_call_id] = shortened_call_id
-        payload["call_id"] = shortened_call_id
+        if not responses_lite and body.get("instructions") is None:
+            body["instructions"] = ""
 
     @staticmethod
-    def _shorten_codex_identifier(value: str, *, prefer_mcp_leaf: bool = False) -> str:
-        text = str(value or "").strip()
-        if len(text) <= CODEX_TOOL_IDENTIFIER_MAX_LENGTH:
-            return text
-        if prefer_mcp_leaf and text.startswith("mcp__"):
-            separator_index = text.rfind("__")
-            if separator_index > 0:
-                candidate = f"mcp__{text[separator_index + 2 :]}"
-                if len(candidate) <= CODEX_TOOL_IDENTIFIER_MAX_LENGTH:
-                    return candidate
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-        suffix = f"_{digest}"
-        prefix_length = max(CODEX_TOOL_IDENTIFIER_MAX_LENGTH - len(suffix), 0)
-        return f"{text[:prefix_length]}{suffix}"[:CODEX_TOOL_IDENTIFIER_MAX_LENGTH]
+    def _normalize_codex_input_items(body: dict[str, Any]) -> None:
+        """清理输入项的缓存提示和空函数参数，保留原生工具与推理历史。"""
+        input_items = body.get("input")
+        if not isinstance(input_items, list):
+            return
+        for item in input_items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role") or "").strip().lower() == "system":
+                item["role"] = "developer"
+            item.pop("prompt_cache_breakpoint", None)
+            for field in ("content", "output"):
+                parts = item.get(field)
+                if isinstance(parts, list):
+                    for part in parts:
+                        if isinstance(part, dict):
+                            part.pop("prompt_cache_breakpoint", None)
+            arguments = item.get("arguments")
+            if item.get("type") == "function_call" and isinstance(arguments, str) and not arguments.strip():
+                item["arguments"] = "{}"
 
     @staticmethod
     def _strip_codex_claude_cache_control(value: Any) -> None:
@@ -1337,12 +1460,43 @@ class CodexProxyService:
             return str(mask.get("image_url") or mask.get("url") or "").strip()
         return ""
 
+    @classmethod
+    def _prepare_codex_session_headers(
+        cls, request_data: dict[str, Any], request_headers: dict[str, str]
+    ) -> dict[str, str]:
+        """在同一次请求的账号切换和认证重试之间保持会话标识。"""
+        headers = dict(request_headers or {})
+        cache_key = request_data.get("prompt_cache_key")
+        metadata = request_data.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        metadata_session = metadata.get("session_id")
+        if not metadata_session and isinstance(metadata.get("user_id"), str):
+            user_id = metadata["user_id"]
+            try:
+                parsed = json.loads(user_id)
+                metadata_session = parsed.get("session_id") if isinstance(parsed, dict) else None
+            except ValueError:
+                if "_session_" in user_id:
+                    metadata_session = user_id.rsplit("_session_", 1)[1]
+        session_id = (
+            (cache_key.strip() if isinstance(cache_key, str) else "")
+            or cls._get_header(headers, "Session-Id")
+            or cls._get_header(headers, "Session_id")
+            or cls._get_header(headers, "Thread-Id")
+            or (metadata_session.strip() if isinstance(metadata_session, str) else "")
+            or str(uuid4())
+        )
+        headers["Session-Id"] = session_id
+        headers["Session_id"] = session_id
+        return headers
+
     def _build_codex_headers(
         self,
         request_headers: dict[str, str],
         candidate: CodexAuthCandidate,
         *,
         stream: bool,
+        upstream_body: dict[str, Any],
     ) -> dict[str, str]:
         source_headers = request_headers or {}
         originator = self._get_header(source_headers, "Originator") or CODEX_ORIGINATOR
@@ -1358,15 +1512,31 @@ class CodexProxyService:
         for header_name in (
             "X-Codex-Beta-Features",
             "X-Codex-Turn-Metadata",
+            "X-Codex-Turn-State",
             "X-Client-Request-Id",
+            "X-Codex-Window-Id",
+            "Thread-Id",
+            CODEX_RESPONSES_LITE_HEADER,
         ):
             header_value = self._get_header(source_headers, header_name)
             if header_value:
                 headers[header_name] = header_value
         if client_version:
             headers["Version"] = client_version
-        if "Mac OS" in CODEX_USER_AGENT:
-            headers["Session_id"] = self._get_header(source_headers, "Session_id") or str(uuid4())
+        session_headers = self._prepare_codex_session_headers(upstream_body, source_headers)
+        session_id = session_headers["Session-Id"]
+        headers["Session-Id"] = session_id
+        headers["Session_id"] = session_id
+        upstream_body["prompt_cache_key"] = session_id
+        if self._is_codex_responses_lite_request(upstream_body, source_headers):
+            headers[CODEX_RESPONSES_LITE_HEADER] = "true"
+        model_name = str(upstream_body.get("model") or "").strip()
+        if model_name:
+            routing_hint = f"model={model_name}"
+            tier = str(upstream_body.get("service_tier") or "").strip()
+            if tier:
+                routing_hint += f";tier={tier}"
+            headers["X-Codex-Routing-Hint"] = routing_hint
         if candidate.account_id:
             headers["Chatgpt-Account-Id"] = candidate.account_id
         return headers
@@ -1697,9 +1867,10 @@ class CodexProxyService:
             for event in decode_stream_events(response.iter_content(chunk_size=None), "sse_json"):
                 if event.kind != "json" or not isinstance(event.payload, dict):
                     continue
+                payload = translator.observe(event.payload)
                 event_type = str(event.payload.get("type") or event.event or "").strip()
                 if event_type in {"response.completed", "response.done", "response.incomplete"}:
-                    completed_payload = event.payload
+                    completed_payload = payload
                 elif event_type in {"response.failed", "response.cancelled", "error"}:
                     failed_payload = event.payload
 

@@ -384,7 +384,7 @@ class CodexProxyServiceTests(unittest.TestCase):
         CodexProxyService._apply_codex_body_defaults(body, "gpt-5.4")
 
         self.assertEqual("developer", body["input"][0]["role"])
-        self.assertEqual("fast", body["service_tier"])
+        self.assertEqual("priority", body["service_tier"])
         self.assertNotIn("prompt_cache_retention", body)
         self.assertNotIn("safety_identifier", body)
         self.assertNotIn("generate", body)
@@ -419,20 +419,20 @@ class CodexProxyServiceTests(unittest.TestCase):
                 response, status_code, failure = proxy_service.proxy_request(
                     {
                         "model": "gpt-5.4",
-                        "input": "hi",
+                        "messages": [{"role": "user", "content": "hi"}],
                         "stream": False,
                         "service_tier": "fast",
                     },
                     {"Authorization": "Bearer downstream-token"},
                     on_complete=complete_meta.update,
-                    resolved_target_format="openai_responses",
+                    resolved_target_format="openai_chat",
                 )
 
         self.assertIsNone(failure)
         self.assertEqual(200, status_code)
         self.assertIsNotNone(response)
-        self.assertEqual("fast", captured_body["service_tier"])
-        self.assertEqual("fast", complete_meta["service_tier"])
+        self.assertEqual("priority", captured_body["service_tier"])
+        self.assertEqual("priority", complete_meta["service_tier"])
         self.assertAlmostEqual(0.8, complete_meta["estimated_cost_usd"])
 
     def test_codex_body_defaults_normalize_builtin_tool_aliases(self) -> None:
@@ -736,7 +736,10 @@ class CodexProxyServiceTests(unittest.TestCase):
                     headers={"Content-Type": "application/json"},
                 )
 
-            with patch.object(oauth_service, "refresh_auth_file_quota_snapshot") as refresh_mock:
+            with (
+                patch.object(oauth_service, "refresh_auth_file_quota_snapshot") as refresh_mock,
+                patch("src.services.codex_oauth_service.time.time", return_value=1770000000.0),
+            ):
                 with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
                     response, status_code, failure = proxy_service.proxy_request(
                         {
@@ -868,9 +871,16 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertTrue(all(body["store"] is False for body in captured_bodies))
         self.assertTrue(all(body["parallel_tool_calls"] is True for body in captured_bodies))
         self.assertTrue(all(headers.get("Version", "") == CODEX_CLIENT_VERSION for headers in captured_headers))
-        self.assertTrue(all("codex-tui/0.135.0" in headers["User-Agent"] for headers in captured_headers))
+        self.assertTrue(all(headers["User-Agent"] == CODEX_USER_AGENT for headers in captured_headers))
         self.assertTrue(all(headers["Originator"] == "codex-tui" for headers in captured_headers))
         self.assertTrue(all(headers["Session_id"] for headers in captured_headers))
+        self.assertEqual(captured_headers[0]["Session-Id"], captured_headers[1]["Session-Id"])
+        self.assertTrue(
+            all(
+                body["prompt_cache_key"] == headers["Session-Id"]
+                for body, headers in zip(captured_bodies, captured_headers)
+            )
+        )
         self.assertTrue(all(body["include"] == ["reasoning.encrypted_content"] for body in captured_bodies))
         self.assertTrue(all("max_output_tokens" not in body for body in captured_bodies))
         self.assertTrue(all("temperature" not in body for body in captured_bodies))
@@ -925,6 +935,10 @@ class CodexProxyServiceTests(unittest.TestCase):
                         "Originator": "custom-origin",
                         "X-Codex-Beta-Features": "responses",
                         "X-Codex-Turn-Metadata": "turn-meta",
+                        "X-Codex-Turn-State": "turn-state",
+                        "X-Codex-Window-Id": "window-id",
+                        "Thread-Id": "thread-id",
+                        "Session-Id": "session-id",
                         "X-Client-Request-Id": "request-id",
                         "Cookie": "session=downstream",
                         "Host": "example.invalid",
@@ -940,9 +954,183 @@ class CodexProxyServiceTests(unittest.TestCase):
         self.assertEqual("custom-origin", captured_headers["Originator"])
         self.assertEqual("responses", captured_headers["X-Codex-Beta-Features"])
         self.assertEqual("turn-meta", captured_headers["X-Codex-Turn-Metadata"])
+        self.assertEqual("turn-state", captured_headers["X-Codex-Turn-State"])
+        self.assertEqual("window-id", captured_headers["X-Codex-Window-Id"])
+        self.assertEqual("thread-id", captured_headers["Thread-Id"])
+        self.assertEqual("session-id", captured_headers["Session-Id"])
+        self.assertEqual("session-id", captured_headers["Session_id"])
         self.assertEqual("request-id", captured_headers["X-Client-Request-Id"])
         self.assertNotIn("Cookie", captured_headers)
         self.assertNotIn("Host", captured_headers)
+
+    def test_native_codex_responses_forward_headers_fields_and_sse_without_mutating_input(self) -> None:
+        request_data = {
+            "model": "gpt-5.4",
+            "instructions": None,
+            "stream": True,
+            "service_tier": "FAST",
+            "prompt_cache_key": "native-cache-key",
+            "prompt_cache_options": {"retention": "24h"},
+            "include": ["web_search_call.action.sources", "reasoning.encrypted_content"],
+            "stream_options": {"include_usage": True, "reasoning_summary_delivery": "auto"},
+            "client_metadata": {"x-codex-window-id": "native-window"},
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "lookup",
+                    "parameters": {"type": "object", "properties": {"prompt_cache_breakpoint": {"type": "string"}}},
+                }
+            ],
+            "input": [
+                {
+                    "type": "message",
+                    "role": "system",
+                    "prompt_cache_breakpoint": True,
+                    "content": [{"type": "input_text", "text": "rules", "prompt_cache_breakpoint": True}],
+                },
+                {"type": "reasoning", "id": "rs_native", "encrypted_content": "native-encrypted-history"},
+                {"type": "function_call", "name": "lookup", "call_id": "call_1", "arguments": "  "},
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": [{"type": "input_text", "text": "result", "prompt_cache_breakpoint": True}],
+                },
+                {"type": "custom_tool_call", "name": "shell", "call_id": "call_2", "input": "  "},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]},
+            ],
+        }
+        original_request = json.loads(json.dumps(request_data))
+        captured: dict[str, Any] = {}
+        events = [
+            {"type": "response.created", "response": {"id": "resp_native", "model": "gpt-5.4", "output": []}},
+            {"type": "response.output_text.delta", "item_id": "msg_native", "output_index": 0, "delta": "ok"},
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_native",
+                    "model": "gpt-5.4",
+                    "output": [
+                        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}
+                    ],
+                },
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            write_auth_file(root, "codex-native.json", "access-native", mtime=2000)
+            ctx = build_context(root)
+            oauth_service = CodexOAuthService(ctx)
+            oauth_service.add_model("gpt-5.4")
+            proxy_service = CodexProxyService(ctx, oauth_service)
+
+            def fake_post(url: str, **kwargs: Any) -> FakeHTTPResponse:
+                captured.update(kwargs)
+                return FakeHTTPResponse(
+                    status_code=200,
+                    chunks=[("data: " + json.dumps(event) + "\n\n").encode("utf-8") for event in events],
+                )
+
+            with (
+                ctx.flask_app.test_request_context("/v1/responses"),
+                patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post),
+            ):
+                response, status_code, failure = proxy_service.proxy_request(
+                    request_data,
+                    {
+                        "Authorization": "Bearer downstream-key",
+                        "ChatGPT-Account-Id": "downstream-account",
+                        "Session-Id": "different-client-session",
+                        "Thread-Id": "native-thread",
+                        "X-Codex-Turn-State": "native-state",
+                        "X-Codex-Routing-Hint": "model=wrong-model;tier=fast",
+                    },
+                    resolved_target_format="openai_responses",
+                )
+                self.assertIsNone(failure)
+                self.assertEqual(200, status_code)
+                self.assertIsNotNone(response)
+                stream_text = response.get_data(as_text=True)
+
+        headers = captured["headers"]
+        body = captured["json"]
+        self.assertEqual("Bearer access-native", headers["Authorization"])
+        self.assertEqual("account-access-native", headers["Chatgpt-Account-Id"])
+        self.assertEqual("native-cache-key", headers["Session-Id"])
+        self.assertEqual("native-cache-key", headers["Session_id"])
+        self.assertEqual("native-thread", headers["Thread-Id"])
+        self.assertEqual("native-state", headers["X-Codex-Turn-State"])
+        self.assertEqual("model=gpt-5.4;tier=priority", headers["X-Codex-Routing-Hint"])
+        self.assertEqual("text/event-stream", headers["Accept"])
+        self.assertEqual("priority", body["service_tier"])
+        self.assertEqual("", body["instructions"])
+        self.assertEqual(["reasoning.encrypted_content", "web_search_call.action.sources"], body["include"])
+        self.assertEqual({"reasoning_summary_delivery": "auto"}, body["stream_options"])
+        self.assertNotIn("prompt_cache_options", body)
+        self.assertEqual("developer", body["input"][0]["role"])
+        self.assertNotIn("prompt_cache_breakpoint", body["input"][0])
+        self.assertNotIn("prompt_cache_breakpoint", body["input"][0]["content"][0])
+        self.assertNotIn("prompt_cache_breakpoint", body["input"][3]["output"][0])
+        self.assertEqual("{}", body["input"][2]["arguments"])
+        self.assertEqual(original_request["input"][1], body["input"][1])
+        self.assertEqual(original_request["input"][4], body["input"][4])
+        self.assertEqual(original_request["tools"][0], body["tools"][0])
+        self.assertEqual(original_request["client_metadata"], body["client_metadata"])
+        self.assertEqual(original_request, request_data)
+        forwarded_events = [
+            json.loads(line.removeprefix("data:").strip())
+            for line in stream_text.splitlines()
+            if line.startswith("data:")
+        ]
+        self.assertEqual(events, forwarded_events)
+        self.assertNotIn("[DONE]", stream_text)
+
+    def test_native_codex_lite_request_keeps_tools_and_uses_legacy_session_header(self) -> None:
+        for lite_headers, client_metadata in (
+            ({"X-OpenAI-Internal-Codex-Responses-Lite": "true"}, {}),
+            ({}, {"ws_request_header_x_openai_internal_codex_responses_lite": True}),
+        ):
+            with self.subTest(lite_headers=lite_headers), tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                write_auth_file(root, "codex-lite.json", "access-lite", mtime=2000)
+                ctx = build_context(root)
+                oauth_service = CodexOAuthService(ctx)
+                oauth_service.add_model("gpt-5.4")
+                proxy_service = CodexProxyService(ctx, oauth_service)
+                captured: dict[str, Any] = {}
+                native_tools = [{"type": "namespace", "name": "shell", "tools": [{"type": "custom", "name": "exec"}]}]
+
+                def fake_post(url: str, **kwargs: Any) -> FakeHTTPResponse:
+                    captured.update(kwargs)
+                    return FakeHTTPResponse(
+                        status_code=200,
+                        chunks=[b'data: {"type":"response.completed","response":{"id":"resp_lite","output":[]}}\n\n'],
+                    )
+
+                with patch("src.services.codex_proxy_service.requests.post", side_effect=fake_post):
+                    response, status_code, failure = proxy_service.proxy_request(
+                        {
+                            "model": "gpt-5.4",
+                            "input": "hello",
+                            "tools": native_tools,
+                            "client_metadata": client_metadata,
+                            "service_tier": "ultrafast",
+                            "stream": False,
+                        },
+                        {"Session_id": "legacy-session", **lite_headers},
+                        resolved_target_format="openai_responses",
+                    )
+
+                self.assertIsNone(failure)
+                self.assertEqual(200, status_code)
+                self.assertIsNotNone(response)
+                self.assertEqual("true", captured["headers"]["X-OpenAI-Internal-Codex-Responses-Lite"])
+                self.assertEqual("legacy-session", captured["headers"]["Session-Id"])
+                self.assertEqual("legacy-session", captured["json"]["prompt_cache_key"])
+                self.assertEqual("model=gpt-5.4;tier=ultrafast", captured["headers"]["X-Codex-Routing-Hint"])
+                self.assertFalse(captured["json"]["parallel_tool_calls"])
+                self.assertEqual(native_tools, captured["json"]["tools"])
+                self.assertEqual(client_metadata, captured["json"]["client_metadata"])
+                self.assertNotIn("instructions", captured["json"])
 
     def test_image_generation_request_uses_codex_tool_and_returns_images_response(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

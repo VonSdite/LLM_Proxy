@@ -275,6 +275,7 @@ class ProxyController:
     def _register_routes(self) -> None:
         self._app.route("/v1/chat/completions", methods=["POST"])(self.chat_completions)
         self._app.route("/v1/responses", methods=["POST"])(self.responses)
+        self._app.route("/v1/responses/compact", methods=["POST"])(self.responses_compact)
         self._app.route("/v1/messages", methods=["POST"])(self.messages)
         self._app.route("/v1/images/generations", methods=["POST"])(self.images_generations)
         self._app.route("/v1/images/edits", methods=["POST"])(self.images_edits)
@@ -526,6 +527,12 @@ class ProxyController:
             route_name="messages",
             target_format="claude_chat",
             inspect_stream_usage=False,
+        )
+
+    def responses_compact(self) -> ResponseReturnValue:
+        """通过统一鉴权、模型权限与日志链路压缩 Codex 历史。"""
+        return self._proxy_completion_request(
+            route_name="responses_compact", target_format="openai_responses", inspect_stream_usage=False
         )
 
     def images_generations(self) -> ResponseReturnValue:
@@ -811,6 +818,15 @@ class ProxyController:
             else:
                 request_data = dict(raw_request_data)
 
+            if route_name == "responses_compact" and request_data.get("stream"):
+                return self._error_response(
+                    "Compaction does not support streaming",
+                    400,
+                    error_type="invalid_request_error",
+                    code="invalid_compact_request",
+                    error_format=resolved_error_format,
+                )
+
             model_name_value = request_data.get("model")
             if not isinstance(model_name_value, str) or not model_name_value.strip():
                 self._logger.warning("Proxy rejected: missing model in request body route=%s", route_name)
@@ -888,6 +904,14 @@ class ProxyController:
                     error_format=resolved_error_format,
                 )
 
+            if route_name == "responses_compact" and not (is_codex_model or is_model_mapping):
+                return self._error_response(
+                    "Compaction requires a Codex OAuth model",
+                    400,
+                    error_type="invalid_request_error",
+                    code="unsupported_compact_target",
+                    error_format=resolved_error_format,
+                )
             provider_name = getattr(provider, "name", None)
             if is_codex_model:
                 provider_name = CODEX_PROVIDER_NAME
@@ -918,6 +942,8 @@ class ProxyController:
             headers = self._filter_request_headers(request.headers)
             start_time = now_local_datetime()
             api_key_id = self._get_api_key_id(api_key)
+
+            replay_identity = f"api_key:{api_key_id}" if api_key_id is not None else f"ip:{client_ip}"
 
             def on_proxy_complete(response_meta: dict[str, Any]) -> None:
                 self._logger.info(
@@ -962,6 +988,7 @@ class ProxyController:
                     trace_id=trace_id,
                     route_name=route_name,
                     client_ip=client_ip,
+                    replay_identity=replay_identity,
                 )
             elif is_codex_model:
                 result, status_code, failure_info = self._codex_proxy_service.proxy_request(
@@ -973,6 +1000,7 @@ class ProxyController:
                     trace_id=trace_id,
                     route_name=route_name,
                     client_ip=client_ip,
+                    replay_identity=replay_identity,
                 )
             elif is_claude_model:
                 result, status_code, failure_info = self._claude_proxy_service.proxy_request(
@@ -1365,6 +1393,7 @@ class ProxyController:
         trace_id: str,
         route_name: str,
         client_ip: str,
+        replay_identity: str | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """依次调用映射目标，并在目标自身候选耗尽后执行故障切换。"""
         if self._model_mapping_service is None:
@@ -1405,6 +1434,18 @@ class ProxyController:
                 )
                 return None, failure.status_code, failure
             excluded_targets.add(target_model_id)
+            if route_name == "responses_compact" and not (
+                self._codex_proxy_service is not None
+                and self._codex_proxy_service.has_model(target_model_id)
+                and self._provider_manager.get_provider_for_model(target_model_id) is None
+            ):
+                last_failure = ProxyErrorInfo(
+                    message="Compaction requires a Codex OAuth mapping target",
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    error_code="unsupported_compact_target",
+                )
+                continue
             target_request_data = dict(request_data)
             target_request_data["model"] = target_model_id
             stream_failed = False
@@ -1440,6 +1481,7 @@ class ProxyController:
                     route_name=route_name,
                     client_ip=client_ip,
                     force_safe_desensitization=force_desensitization,
+                    replay_identity=replay_identity,
                 )
             except Exception as exc:
                 self._logger.error("Mapped target raised an exception: model=%s error=%s", target_model_id, exc)
@@ -1495,8 +1537,21 @@ class ProxyController:
         route_name: str,
         client_ip: str,
         force_safe_desensitization: bool = False,
+        replay_identity: str | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         provider = self._provider_manager.get_provider_for_model(target_model_id)
+        if route_name == "responses_compact" and (
+            provider is not None
+            or self._codex_proxy_service is None
+            or not self._codex_proxy_service.has_model(target_model_id)
+        ):
+            failure = ProxyErrorInfo(
+                message="Compaction requires a Codex OAuth target",
+                status_code=400,
+                error_type="invalid_request_error",
+                error_code="unsupported_compact_target",
+            )
+            return None, failure.status_code, failure
         common_kwargs = {
             "on_complete": on_complete,
             "on_stream_failure": on_stream_failure,
@@ -1519,6 +1574,7 @@ class ProxyController:
                 request_data,
                 request_headers,
                 force_safe_desensitization=force_safe_desensitization,
+                replay_identity=replay_identity,
                 **common_kwargs,
             )
         if self._claude_proxy_service is not None and self._claude_proxy_service.has_model(target_model_id):

@@ -307,6 +307,8 @@ def convert_openai_responses_response_to_claude(
     original_request: dict[str, Any],
     translated_request: dict[str, Any],
     payload: Any,
+    *,
+    reasoning_provider: str | None = None,
 ) -> Any:
     """把 Responses 非流式响应直接映射为 Claude 响应。"""
     del original_request
@@ -330,7 +332,7 @@ def convert_openai_responses_response_to_claude(
                 if block is not None:
                     content.append(block)
         elif item_type == "reasoning":
-            block = _responses_reasoning_to_claude(item)
+            block = _responses_reasoning_to_claude(item, reasoning_provider=reasoning_provider)
             if block is not None:
                 content.append(block)
         elif item_type in {"function_call", "custom_tool_call"}:
@@ -605,7 +607,7 @@ def translate_openai_responses_stream_to_claude(
                 state["response_model"] = str(response["model"])
             if isinstance(response.get("usage"), dict):
                 state["usage"] = openai_usage_to_claude(response["usage"])
-            state["finish_reason"] = _responses_stop_reason(response)
+            state["finish_reason"] = "tool_use" if state.get("saw_tool") else _responses_stop_reason(response)
         outputs.extend(_finalize_responses_to_claude_stream(model_name, translated_request, state))
         return outputs
 
@@ -987,7 +989,19 @@ def _responses_reasoning_text(item: dict[str, Any]) -> str:
     return ""
 
 
-def _responses_reasoning_to_claude(item: dict[str, Any]) -> dict[str, Any] | None:
+def _responses_reasoning_to_claude(
+    item: dict[str, Any], *, reasoning_provider: str | None = None
+) -> dict[str, Any] | None:
+    if reasoning_provider == "codex":
+        from .codex_reasoning import encode_codex_reasoning
+
+        if item.get("encrypted_content"):
+            return {
+                "type": "thinking",
+                "thinking": _responses_reasoning_text(item),
+                "signature": encode_codex_reasoning(item),
+            }
+        return None
     encrypted = str(item.get("encrypted_content") or "").strip()
     if encrypted.startswith(CLAUDE_REDACTED_THINKING_PREFIX):
         data = encrypted[len(CLAUDE_REDACTED_THINKING_PREFIX) :].strip()
@@ -1620,7 +1634,19 @@ def _close_claude_stream_block(state: dict[str, Any]) -> list[DownstreamChunk]:
     if not isinstance(active, dict):
         return []
     state["active_block"] = None
-    return [
+    outputs = []
+    if active.get("type") == "thinking" and active.get("signature"):
+        outputs.append(
+            _claude_event(
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": active["index"],
+                    "delta": {"type": "signature_delta", "signature": active["signature"]},
+                },
+            )
+        )
+    return outputs + [
         _claude_event(
             "content_block_stop",
             {"type": "content_block_stop", "index": active["index"]},
@@ -1656,6 +1682,7 @@ def _start_responses_tool_block(
     state: dict[str, Any], item: dict[str, Any], payload: dict[str, Any]
 ) -> list[DownstreamChunk]:
     outputs = _close_claude_stream_block(state)
+    state["saw_tool"] = True
     index = safe_int(state.get("next_block_index"))
     state["next_block_index"] = index + 1
     item_type = str(item.get("type") or "").strip().lower()
@@ -1708,7 +1735,12 @@ def _start_responses_reasoning_block(
         )
         outputs.append(_claude_event("content_block_stop", {"type": "content_block_stop", "index": index}))
         return outputs
-    compatible_signature = _compatible_claude_signature(encrypted)
+    if state.get("reasoning_provider") == "codex":
+        from .codex_reasoning import encode_codex_reasoning
+
+        compatible_signature = encode_codex_reasoning(item) if encrypted else None
+    else:
+        compatible_signature = _compatible_claude_signature(encrypted)
     if compatible_signature is None:
         return []
     outputs = _ensure_claude_stream_block(state, "thinking", payload)
@@ -1724,7 +1756,9 @@ def _complete_responses_item_to_claude(
     item_type = str(item.get("type") or "").strip().lower()
     outputs: list[DownstreamChunk] = []
     active = state.get("active_block")
-    if item_type == "message" and not (isinstance(active, dict) and active.get("type") == "text"):
+    key = item.get("id") or payload.get("item_id") or payload.get("output_index")
+    same_item = isinstance(active, dict) and active.get("key") == key
+    if item_type == "message" and not (same_item and active.get("type") == "text"):
         for part in item.get("content") or []:
             if not isinstance(part, dict) or not isinstance(part.get("text"), str):
                 continue
@@ -1742,7 +1776,7 @@ def _complete_responses_item_to_claude(
                     )
                 )
     elif item_type in {"function_call", "custom_tool_call"}:
-        if not (isinstance(active, dict) and active.get("type") == "tool_use"):
+        if not (same_item and active.get("type") == "tool_use"):
             outputs.extend(_start_responses_tool_block(state, item, payload))
             active = state.get("active_block")
         if isinstance(active, dict) and not active.get("arguments"):
@@ -1763,10 +1797,10 @@ def _complete_responses_item_to_claude(
                     },
                 )
             )
-    elif item_type == "reasoning" and not (isinstance(active, dict) and active.get("type") == "thinking"):
+    elif item_type == "reasoning" and not (same_item and active.get("type") == "thinking"):
         outputs.extend(_start_responses_reasoning_block(state, item, payload))
         text = _responses_reasoning_text(item)
-        if text and isinstance(state.get("active_block"), dict):
+        if text and isinstance(state.get("active_block"), dict) and state["active_block"].get("type") == "thinking":
             outputs.append(
                 _claude_event(
                     "content_block_delta",
@@ -1788,18 +1822,6 @@ def _finalize_responses_to_claude_stream(
     if state.get("completed"):
         return []
     outputs = _ensure_claude_stream_started(model_name, translated_request, state)
-    active = state.get("active_block")
-    if isinstance(active, dict) and active.get("type") == "thinking" and active.get("signature"):
-        outputs.append(
-            _claude_event(
-                "content_block_delta",
-                {
-                    "type": "content_block_delta",
-                    "index": active["index"],
-                    "delta": {"type": "signature_delta", "signature": active["signature"]},
-                },
-            )
-        )
     outputs.extend(_close_claude_stream_block(state))
     usage = state.get("usage") or {}
     outputs.append(
