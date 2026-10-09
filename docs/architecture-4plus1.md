@@ -13,6 +13,7 @@
 - 下游协议面
   - `POST /v1/chat/completions`
   - `POST /v1/responses`
+  - `POST /v1/responses/compact`，使用 Codex OAuth 模型或含 Codex OAuth 目标的映射
   - `POST /v1/messages`
   - `POST /v1/images/generations`
   - `POST /v1/images/edits`
@@ -208,6 +209,22 @@ decoder
 - `CodexProxyService`
   - 代理下游直接使用的 Codex 普通模型名
   - 使用 `data/oauth/codex/*.json` 中的 OAuth access token 请求 Codex backend
+  - 通过 HTTP Responses / SSE 处理原生 Codex 请求，透传轮次、窗口、线程和 Responses-Lite 请求头，上游认证头来自候选 OAuth 账号
+  - 会话标识优先采用 `prompt_cache_key`，其后采用 `Session-Id`、`Session_id`、`Thread-Id` 或 Claude metadata 中的 session；缺少标识时为当前请求生成 UUID，账号切换和认证重试复用同一标识
+  - 上游 `prompt_cache_key`、`Session-Id` 和 `Session_id` 使用同一会话标识，`X-Codex-Routing-Hint` 采用最终上游模型和服务档位
+  - `service_tier=fast` 规范化为 `priority`，同时支持 `ultrafast`；保留搜索来源 include 和 `stream_options.reasoning_summary_delivery`
+  - 原生 Responses 请求保留 `client_metadata`、客户端工具定义和加密推理历史，清理输入缓存断点和不支持的请求字段，空函数调用参数使用 `{}`
+  - 在独立请求副本上执行字段规范化，原始下游请求保持可供响应翻译和账号重试使用
+  - Chat 与 Claude 系统消息使用 developer 输入项，Chat 系统消息保留原始顺序；跨协议请求默认 reasoning effort 为 medium，显式 effort 保持原值
+  - Claude `tool_choice.disable_parallel_tool_use=true` 对应上游 `parallel_tool_calls=false`
+  - `CodexRequestCompatibility` 为三种协议统一处理工具 schema、64 字符工具名和调用标识限制、输入项 ID 前缀与冲突；响应中的工具名及关联标识使用原始下游值
+  - schema 处理覆盖 namespace 中的工具、已知 schema 关键字位置、不支持的正则和至少八个互异纯常量分支的枚举；默认值、业务枚举数据、整数声明和含额外校验的分支保留原值
+  - Chat 使用 `reasoning_details` 携带完整加密推理项；Claude 使用 `codex#` 标记的 thinking signature 携带完整推理项，解码仅在 Codex 请求路径生效
+  - `CodexResponseAdapter` 收集 output item、补齐终态响应缺少的 output、还原标识并记录成功响应的推理历史；Chat 与 Claude 流式响应支持只含终态 output 的上游返回
+  - `CodexReasoningCache` 按下游 API Key ID 或 IP、最终模型、OAuth 认证文件与账号、协议和脱敏模式隔离；系统指令、工具定义及完整消息历史前缀一致时补齐客户端遗漏的加密推理项
+  - 推理缓存采用进程内有界 LRU，保留一小时，最多 512 项和 8 MiB，单项最多 1 MiB；服务重启后缓存清空
+  - 上游明确拒绝推理密文或签名时，清除对应范围缓存并在同一账号上重试一次，仅移除 reasoning 历史；脱敏处理保留签名密文及关联 ID
+  - `/v1/responses/compact` 使用独立的 JSON 请求与返回窗口，保留上游完整 output，复用鉴权、模型权限、额度检查、认证刷新、账号切换及用量日志；模型映射仅选择具备 Codex OAuth 压缩能力的目标
   - 按默认图片模型为普通 Codex 请求补齐 `image_generation` 工具配置
   - 将 OpenAI Images 兼容请求包装成 Codex `image_generation` 工具调用
   - 遇到账号配额耗尽时持久化额度禁用截止时间、刷新该认证文件配额快照并尝试下一个账号；全部账号额度禁用时向模型映射传播最早恢复时间
@@ -345,6 +362,7 @@ route family 直接决定当前请求的下游接口协议：
 | --- | --- |
 | `/v1/chat/completions` | `openai_chat` |
 | `/v1/responses` | `openai_responses` |
+| `/v1/responses/compact` | `openai_responses`，非流式压缩窗口 |
 | `/v1/messages` | `claude_chat` |
 | `/v1/images/generations` | `openai_images` |
 | `/v1/images/edits` | `openai_images` |
@@ -476,7 +494,7 @@ OAuth 模型是数据平面的例外路由：
   - 归类为“API Key 管理”
   - 页面修改后自动生效
   - 保存后立即影响后台顶部 API Key 管理页签是否显示
-  - 保存后立即影响数据平面 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 是否要求下游携带 API Key
+  - 保存后立即影响数据平面 `/v1/chat/completions`、`/v1/responses`、`/v1/responses/compact`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 是否要求下游携带 API Key
   - 默认值为 `false`
 - `model_mapping.enabled`
   - 归类为“模型映射”
@@ -980,7 +998,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 数据面不要求下游 key
   - API Key 管理页签不显示
 - `api_keys.enabled=true`
-  - `/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 必须携带有效且启用的 key
+  - `/v1/chat/completions`、`/v1/responses`、`/v1/responses/compact`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 必须携带有效且启用的 key
   - 支持 `Authorization: Bearer sk-...`
   - 支持 `X-API-Key`
   - 缺少 key 返回 `missing_api_key`
@@ -1115,6 +1133,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - 一组本地 OAuth 认证文件
 - 一组 Codex 单账号 token 刷新锁与一组独立的额度查询锁
 - 一组本地 OAuth 模型目录缓存
+- 一个按调用方、账号、模型和历史前缀隔离的有界 Codex 推理重放缓存
 - 一组本地 Codex 图片模型默认设置
 - 多个 provider 指向多个真实上游
 - 下游统一接入这个代理
@@ -1201,17 +1220,21 @@ sequenceDiagram
     participant ModelMapping
     participant CodexOAuth
     participant CodexProxy
+    participant ReasoningCache
     participant ChatGPT
 
-    Client->>Controller: POST /v1/chat/completions model=gpt-5-codex
+    Client->>Controller: POST Chat / Responses / Messages model=gpt-5-codex
     Controller->>Controller: Provider 未命中后查 Codex 模型目录
     Controller->>CodexOAuth: iter_auth_candidates_for_model()
     CodexOAuth->>CodexOAuth: 过滤人工禁用/认证失败/额度禁用文件，并优先最近成功认证文件
     Note over CodexOAuth: 过期 token 刷新取得单账号锁后重读凭据，复用已更新的有效 token
     Controller->>CodexProxy: proxy_request()
+    CodexProxy->>CodexProxy: 转换协议、规范化 schema 与标识、解码 Codex 思考载体
+    CodexProxy->>ReasoningCache: 按调用方、账号和模型匹配完整历史前缀
+    ReasoningCache-->>CodexProxy: 补齐缺失的推理项
     Note over CodexProxy: 跨协议工具图片和文件使用原生 function_call_output.output 内容块
     CodexProxy->>ChatGPT: POST /backend-api/codex/responses
-    Note over CodexProxy,ChatGPT: 对齐 Codex backend 要求：stream=true、store=false、parallel_tool_calls=true、include encrypted content，并移除不支持字段
+    Note over CodexProxy,ChatGPT: stream=true、store=false、include encrypted content；parallel_tool_calls 遵循 Claude 工具配置和 Lite 约定
     alt 代理风险确认页
         ChatGPT-->>CodexProxy: 302 proxycontrolwarn
         CodexProxy->>ChatGPT: GET warning page and check endpoint
@@ -1245,6 +1268,10 @@ sequenceDiagram
         end
     end
     ChatGPT-->>CodexProxy: Responses SSE lazy stream
+    CodexProxy->>CodexProxy: 还原工具名与标识，编码 Chat / Claude 思考载体
+    opt response.completed / response.done
+        CodexProxy->>ReasoningCache: 保存加密推理项与输出锚点指纹
+    end
     CodexProxy->>CodexProxy: 翻译、编码并预取首个非空下游字节
     alt 提交前 transport 失败
         CodexProxy->>CodexOAuth: record_auth_file_failure()
@@ -1279,6 +1306,34 @@ sequenceDiagram
         CodexOAuth->>ModelMapping: 清理 codex_quota_exhausted 目标冷却
     end
     Note over CodexProxy,ChatGPT: response.completed 后的 HTTP framing error 保持逻辑完成状态
+```
+
+#### 6.2.1 Codex Standalone Compaction
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Controller
+    participant ModelMapping
+    participant CodexProxy
+    participant ChatGPT
+    participant LogService
+
+    Client->>Controller: POST /v1/responses/compact
+    Controller->>Controller: 校验白名单、API Key、模型权限与 Token 上限
+    opt 请求模型使用映射 ID
+        Controller->>ModelMapping: 选择具备 Codex OAuth 压缩能力的目标
+        ModelMapping-->>Controller: 最终 Codex 模型
+    end
+    Controller->>CodexProxy: proxy_request(route=responses_compact)
+    CodexProxy->>CodexProxy: 保留完整 input，规范化工具与标识，准备 OAuth 账号
+    CodexProxy->>ChatGPT: POST /backend-api/codex/responses/compact，Accept JSON
+    Note over CodexProxy,ChatGPT: 认证刷新和账号额度切换复用普通 Codex 请求机制
+    ChatGPT-->>CodexProxy: JSON output 压缩窗口与 usage
+    CodexProxy->>Controller: 原始窗口中全部 output 项与认证账号用量
+    Controller->>LogService: 记录映射目标、账号及 Token 用量
+    Controller-->>Client: 完整压缩窗口
+    Note over Client: 后续 Responses 请求使用完整 output 作为历史窗口
 ```
 
 ### 6.3 OpenAI Images Downstream -> Codex Image Generation Tool
