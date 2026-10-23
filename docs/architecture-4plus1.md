@@ -880,7 +880,8 @@ OAuth Claude tab
 - `request_logs` 为 Codex 请求保存最终 `auth_file_name`、稳定 `auth_account_id` 和请求发生时的 `estimated_cost_usd`；历史价格变化不重算已保存费用
 - 当前窗口从认证文件首次接管时的上游 `used_percent` 建立基线；本地消耗占比为“当前已用百分比减首次基线”，等价于“首次剩余额度减当前剩余额度”
 - 当前和上一窗口的满额度预计价值分别使用“窗口内本地累计费用 × 100 ÷ 窗口内本地消耗占比”；消耗占比不大于零、Token 不完整或模型价格未知时不显示金额
-- 配额刷新确认 `reset_at` 后移或 `used_percent` 显著下降时切换窗口；新窗口优先使用 `reset_at - limit_window_seconds` 作为真实边界，上一窗口只保留一份
+- 配额刷新确认已使用窗口的 `reset_at` 后移或 `used_percent` 显著下降时切换窗口；基线和最近用量均为零、且原重置时间尚未到达时，重置时间后移只更新当前窗口并保留记账起点与上一窗口
+- 新窗口优先使用 `reset_at - limit_window_seconds` 作为边界；推算边界不晚于上次观测时间时使用本次观测时间，上一窗口只保留一份
 - OAuth 卡片始终显示当前窗口的请求数、Token、累计 API 等价费用和“7天预估”；上一窗口存在请求或 Token 时显示同一组数据，只有 Token 使用 `K/M/B` 缩写
 - Claude 认证文件的人工禁用状态、最近一次数据面使用状态和最近成功认证文件保存在 `data/oauth/claude/.state/auth_files.json`
 - 认证文件列表会把候选筛选结果和触发原因作为状态显示；最近一次数据面错误摘要单独作为信息显示
