@@ -1434,8 +1434,17 @@ class CodexOAuthService:
             and current_used_percent is not None
             and latest_used_percent - current_used_percent >= CODEX_USAGE_RESET_DROP_PERCENT
         )
-        if reset_at_moved or usage_dropped:
+        window_pending = bool(
+            latest_used_percent == 0.0
+            and self._parse_float(current.get("baseline_used_percent")) == 0.0
+            and previous_reset_at is not None
+            and observed_at < previous_reset_at
+        )
+        if (reset_at_moved and not window_pending) or usage_dropped:
             new_window_start = self._resolve_usage_window_start(window, observed_at)
+            previous_observed_at = self._parse_epoch_or_datetime(current.get("observed_at"))
+            if previous_observed_at is not None and new_window_start <= previous_observed_at:
+                new_window_start = observed_at
             previous = dict(current)
             previous["end_at"] = self._format_datetime(new_window_start)
             tracking["previous"] = previous
@@ -1446,6 +1455,11 @@ class CodexOAuthService:
                 observed_at=observed_at,
             )
         else:
+            # 零用量窗口在首次请求前可能持续后移，保留上期与已记录的首批请求。
+            if reset_at_moved and window_pending:
+                current["window_start_at"] = self._format_datetime(
+                    self._resolve_usage_window_start(window, observed_at)
+                )
             current["latest_used_percent"] = current_used_percent
             current["observed_at"] = self._format_datetime(observed_at)
             if current_reset_at is not None:

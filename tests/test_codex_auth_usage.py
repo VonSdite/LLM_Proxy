@@ -268,6 +268,133 @@ class CodexAuthUsageTests(unittest.TestCase):
         self.assertEqual(5_000, auth_file["current_usage"]["total_tokens"])
         self.assertAlmostEqual(2_500, auth_file["current_usage"]["estimated_full_cost_usd"])
 
+    def test_unused_reset_window_drift_preserves_previous_usage_and_first_requests(self) -> None:
+        baseline_quota = self._quota(
+            used_percent=40,
+            reset_at="2026-10-22T00:00:00Z",
+            refreshed_at="2026-10-19T00:00:00Z",
+        )
+        self.service._store_auth_file_quota(self.auth_file.name, baseline_quota)
+        self.service._ensure_auth_file_usage_tracking(self.auth_file.name, "account-demo", baseline_quota)
+        self._insert_usage("2026-10-20T00:00:00Z", tokens=12_000, cost=120)
+        self.service._store_auth_file_quota(
+            self.auth_file.name,
+            self._quota(
+                used_percent=46,
+                reset_at="2026-10-22T00:00:00Z",
+                refreshed_at="2026-10-21T00:00:00Z",
+            ),
+        )
+
+        for minute in (0, 10, 20):
+            self.service._store_auth_file_quota(
+                self.auth_file.name,
+                self._quota(
+                    used_percent=0,
+                    reset_at=f"2026-10-30T00:{minute:02d}:00Z",
+                    refreshed_at=f"2026-10-23T00:{minute:02d}:00Z",
+                ),
+            )
+        self._insert_usage("2026-10-23T00:25:00Z", tokens=100, cost=1)
+        self.service._store_auth_file_quota(
+            self.auth_file.name,
+            self._quota(
+                used_percent=0,
+                reset_at="2026-10-30T00:26:00Z",
+                refreshed_at="2026-10-23T00:26:00Z",
+            ),
+        )
+        self._insert_usage("2026-10-23T00:27:00Z", tokens=5_000, cost=50)
+        self.service._store_auth_file_quota(
+            self.auth_file.name,
+            self._quota(
+                used_percent=2,
+                reset_at="2026-10-30T00:27:00Z",
+                refreshed_at="2026-10-23T00:30:00Z",
+            ),
+        )
+        auth_file = self.service.list_auth_files()["files"][0]
+
+        self.assertIsNotNone(auth_file["previous_usage"])
+        self.assertEqual(1, auth_file["previous_usage"]["request_count"])
+        self.assertEqual(12_000, auth_file["previous_usage"]["total_tokens"])
+        self.assertEqual(120, auth_file["previous_usage"]["estimated_cost_usd"])
+        self.assertEqual(6, auth_file["previous_usage"]["consumed_percent"])
+        self.assertEqual(2, auth_file["current_usage"]["request_count"])
+        self.assertEqual(5_100, auth_file["current_usage"]["total_tokens"])
+        self.assertEqual(51, auth_file["current_usage"]["estimated_cost_usd"])
+
+    def test_zero_percent_initial_window_drift_keeps_local_requests(self) -> None:
+        quota = self._quota(
+            used_percent=0,
+            reset_at="2026-10-30T00:00:00Z",
+            refreshed_at="2026-10-23T00:00:00Z",
+        )
+        self.service._store_auth_file_quota(self.auth_file.name, quota)
+        self.service._ensure_auth_file_usage_tracking(self.auth_file.name, "account-demo", quota)
+        self._insert_usage("2026-10-23T00:01:00Z", tokens=100, cost=1)
+        self.service._store_auth_file_quota(
+            self.auth_file.name,
+            self._quota(
+                used_percent=1,
+                reset_at="2026-10-30T00:02:00Z",
+                refreshed_at="2026-10-23T00:03:00Z",
+            ),
+        )
+        auth_file = self.service.list_auth_files()["files"][0]
+
+        self.assertIsNone(auth_file["previous_usage"])
+        self.assertEqual(1, auth_file["current_usage"]["request_count"])
+        self.assertEqual(1, auth_file["current_usage"]["estimated_cost_usd"])
+
+    def test_expired_zero_percent_window_still_archives_local_requests(self) -> None:
+        quota = self._quota(
+            used_percent=0,
+            reset_at="2026-10-22T00:00:00Z",
+            refreshed_at="2026-10-21T00:00:00Z",
+        )
+        self.service._store_auth_file_quota(self.auth_file.name, quota)
+        self.service._ensure_auth_file_usage_tracking(self.auth_file.name, "account-demo", quota)
+        self._insert_usage("2026-10-21T00:01:00Z", tokens=100, cost=1)
+        self.service._store_auth_file_quota(
+            self.auth_file.name,
+            self._quota(
+                used_percent=0,
+                reset_at="2026-10-30T00:00:00Z",
+                refreshed_at="2026-10-23T00:00:00Z",
+            ),
+        )
+        auth_file = self.service.list_auth_files()["files"][0]
+
+        self.assertEqual(1, auth_file["previous_usage"]["request_count"])
+        self.assertEqual(1, auth_file["previous_usage"]["estimated_cost_usd"])
+        self.assertEqual(0, auth_file["current_usage"]["request_count"])
+
+    def test_early_usage_reset_with_unchanged_deadline_uses_observed_boundary(self) -> None:
+        quota = self._quota(
+            used_percent=40,
+            reset_at="2026-10-25T00:00:00Z",
+            refreshed_at="2026-10-19T00:00:00Z",
+        )
+        self.service._store_auth_file_quota(self.auth_file.name, quota)
+        self.service._ensure_auth_file_usage_tracking(self.auth_file.name, "account-demo", quota)
+        self._insert_usage("2026-10-20T00:00:00Z", tokens=12_000, cost=120)
+        self.service._store_auth_file_quota(
+            self.auth_file.name,
+            self._quota(
+                used_percent=0,
+                reset_at="2026-10-25T00:00:00Z",
+                refreshed_at="2026-10-21T00:00:00Z",
+            ),
+        )
+        self._insert_usage("2026-10-21T00:01:00Z", tokens=5_000, cost=50)
+        auth_file = self.service.list_auth_files()["files"][0]
+
+        self.assertEqual(1, auth_file["previous_usage"]["request_count"])
+        self.assertEqual(120, auth_file["previous_usage"]["estimated_cost_usd"])
+        self.assertEqual(1, auth_file["current_usage"]["request_count"])
+        self.assertEqual(50, auth_file["current_usage"]["estimated_cost_usd"])
+
     def test_same_sticky_auth_file_refreshes_quota_only_once(self) -> None:
         candidate = CodexAuthCandidate(
             name=self.auth_file.name,
