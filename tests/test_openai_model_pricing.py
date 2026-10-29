@@ -21,6 +21,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
 
         self.assertAlmostEqual(27.5, estimate_openai_request_cost_usd("gpt-6-astra", usage) or 0)
         self.assertAlmostEqual(5.5, estimate_openai_request_cost_usd("gpt-6.1-sol", usage) or 0)
+        self.assertAlmostEqual(2.75, estimate_openai_request_cost_usd("gpt-6.1-terra", usage) or 0)
         self.assertAlmostEqual(5.5, estimate_openai_request_cost_usd("gpt-6-sol", usage) or 0)
         self.assertAlmostEqual(0.275, estimate_openai_request_cost_usd("gpt-6-luna", usage) or 0)
         self.assertAlmostEqual(11.0, estimate_openai_request_cost_usd("gpt-5.6-sol", usage) or 0)
@@ -43,6 +44,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
 
         self.assertAlmostEqual(1.5, estimate_openai_request_cost_usd("gpt-6-astra", usage) or 0)
         self.assertAlmostEqual(0.3, estimate_openai_request_cost_usd("gpt-6.1-sol", usage) or 0)
+        self.assertAlmostEqual(0.15, estimate_openai_request_cost_usd("gpt-6.1-terra", usage) or 0)
         self.assertAlmostEqual(0.3, estimate_openai_request_cost_usd("gpt-6-sol", usage) or 0)
         self.assertAlmostEqual(0.015, estimate_openai_request_cost_usd("gpt-6-luna", usage) or 0)
         self.assertAlmostEqual(0.6, estimate_openai_request_cost_usd("gpt-5.6", usage) or 0)
@@ -69,6 +71,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
 
         self.assertAlmostEqual(3.0, estimate_openai_request_cost_usd("gpt-6-astra", usage) or 0)
         self.assertAlmostEqual(0.6, estimate_openai_request_cost_usd("gpt-6.1-sol", usage) or 0)
+        self.assertAlmostEqual(0.3, estimate_openai_request_cost_usd("gpt-6.1-terra", usage) or 0)
         self.assertAlmostEqual(0.6, estimate_openai_request_cost_usd("gpt-6-sol", usage) or 0)
         self.assertAlmostEqual(0.03, estimate_openai_request_cost_usd("gpt-6-luna", usage) or 0)
         self.assertAlmostEqual(1.2, estimate_openai_request_cost_usd("gpt-5.6-sol", usage) or 0)
@@ -101,7 +104,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
 
         self.assertAlmostEqual(5.05, cost or 0)
 
-    def test_gpt_6_1_sol_cache_prices_at_long_context_boundary(self) -> None:
+    def test_gpt_6_1_cache_prices_at_long_context_boundary(self) -> None:
         usage = {
             "usage_status": "known",
             "completion_tokens": 10_000,
@@ -110,10 +113,15 @@ class OpenAIModelPricingTests(unittest.TestCase):
         }
 
         for service_tier, multiplier in (("standard", 1), ("fast", 2), ("priority", 2)):
-            for prompt_tokens, standard_cost in ((272_000, 0.464), (272_001, 0.878004)):
-                with self.subTest(service_tier=service_tier, prompt_tokens=prompt_tokens):
+            for model_name, prompt_tokens, standard_cost in (
+                ("gpt-6.1-sol", 272_000, 0.464),
+                ("gpt-6.1-sol", 272_001, 0.878004),
+                ("gpt-6.1-terra", 272_000, 0.232),
+                ("gpt-6.1-terra", 272_001, 0.439002),
+            ):
+                with self.subTest(model_name=model_name, service_tier=service_tier, prompt_tokens=prompt_tokens):
                     cost = estimate_openai_request_cost_usd(
-                        "gpt-6.1-sol",
+                        model_name,
                         {**usage, "service_tier": service_tier, "prompt_tokens": prompt_tokens},
                     )
                     self.assertIsNotNone(cost)

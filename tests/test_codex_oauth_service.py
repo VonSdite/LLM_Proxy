@@ -2036,6 +2036,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
         model_ids = [model["id"] for model in result["models"]]
         self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), model_ids)
         self.assertIn("gpt-6.1-sol", model_ids)
+        self.assertNotIn("gpt-6.1-terra", model_ids)
         self.assertIn("gpt-6-luna", model_ids)
         self.assertNotIn("gpt-6-sol", model_ids)
         self.assertNotIn("gpt-5.5", model_ids)
