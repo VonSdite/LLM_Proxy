@@ -5,9 +5,10 @@
 from __future__ import annotations
 
 import json
-import threading
 from collections.abc import Iterable, Sequence
 from typing import Any
+
+from gevent.lock import RLock
 
 from ..application.app_context import AppContext
 from ..repositories import UserRepository
@@ -30,7 +31,7 @@ class UserService:
         self._logger = ctx.logger
         self._model_catalog_service = model_catalog_service or ModelCatalogService(ctx)
         self._repository = repository
-        self._cache_lock = threading.RLock()
+        self._cache_lock = RLock()
         self._user_by_ip_cache: dict[str, dict[str, Any] | None] = {}
 
     def _get_cached_user_by_ip(self, ip_address: str) -> tuple[bool, dict[str, Any] | None]:
@@ -522,10 +523,11 @@ class UserService:
             if not ip_address:
                 return None
 
-            hit, cached_user = self._get_cached_user_by_ip(ip_address)
-            if not hit:
-                cached_user = self._repository.get_by_ip(ip_address)
-                self._set_cached_user_by_ip(ip_address, cached_user)
+            with self._cache_lock:
+                hit, cached_user = self._get_cached_user_by_ip(ip_address)
+                if not hit:
+                    cached_user = self._repository.get_by_ip(ip_address)
+                    self._set_cached_user_by_ip(ip_address, cached_user)
 
             if not cached_user:
                 return None

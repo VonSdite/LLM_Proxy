@@ -2494,8 +2494,9 @@ process.stdout.write(JSON.stringify({{
 }}));
 """
         completed = subprocess.run(
-            ["node", "-e", node_script],
+            ["node", "-"],
             cwd=Path(__file__).resolve().parents[1],
+            input=node_script.encode("utf-8"),
             check=True,
             capture_output=True,
         )

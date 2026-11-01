@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..utils.database import ConnectionFactory
+from ..utils.database import ConnectionFactory, database_operation
 from ..utils.local_time import now_local_datetime_text
 
 
@@ -30,6 +30,7 @@ class UserRepository:
         self._get_connection = get_connection
         self._ensure_table()
 
+    @database_operation(write=True)
     def _ensure_table(self) -> None:
         """初始化用户表与索引。"""
         with self._get_connection() as conn:
@@ -53,6 +54,7 @@ class UserRepository:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_ip ON users(ip_address)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
 
+    @database_operation(write=True)
     def create(
         self,
         username: str,
@@ -82,6 +84,7 @@ class UserRepository:
             )
             return cursor.lastrowid
 
+    @database_operation()
     def get_by_id(self, user_id: int) -> dict[str, Any] | None:
         """按 ID 查询用户。"""
         with self._get_connection() as conn:
@@ -135,6 +138,7 @@ class UserRepository:
         direction = cls._normalize_sort_direction(sort_direction)
         return f"ORDER BY {cls._SORT_COLUMNS[normalized_key]} {direction}, u.id ASC"
 
+    @database_operation()
     def get(
         self,
         page: int = 1,
@@ -182,6 +186,7 @@ class UserRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation()
     def get_sorted_by_allowed_model_count(
         self,
         page: int,
@@ -243,6 +248,7 @@ class UserRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation()
     def get_count(self, keyword: str | None = None) -> int:
         """查询用户总数。"""
         with self._get_connection() as conn:
@@ -258,6 +264,7 @@ class UserRepository:
             )
             return cursor.fetchone()["count"]
 
+    @database_operation(write=True)
     def update(
         self,
         user_id: int,
@@ -295,6 +302,7 @@ class UserRepository:
             cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
             return cursor.rowcount > 0
 
+    @database_operation(write=True)
     def delete(self, user_id: int) -> bool:
         """删除用户记录。"""
         with self._get_connection() as conn:
@@ -302,6 +310,7 @@ class UserRepository:
             cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
             return cursor.rowcount > 0
 
+    @database_operation()
     def get_by_ip(self, ip_address: str) -> dict[str, Any] | None:
         """按 IP 查询用户。"""
         with self._get_connection() as conn:
@@ -317,6 +326,7 @@ class UserRepository:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    @database_operation()
     def get_by_ids(self, user_ids: list[int]) -> list[dict[str, Any]]:
         """按 ID 列表查询用户。"""
         normalized_user_ids = [int(user_id) for user_id in user_ids]
@@ -336,6 +346,7 @@ class UserRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation()
     def list_all(self) -> list[dict[str, Any]]:
         """查询全部用户，用于权限同步与批量设置。"""
         with self._get_connection() as conn:
@@ -349,6 +360,7 @@ class UserRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation(write=True)
     def batch_update_model_permissions(self, user_ids: list[int], model_permissions: str) -> int:
         """批量更新用户模型权限。"""
         normalized_user_ids = [int(user_id) for user_id in user_ids]

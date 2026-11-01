@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
+from gevent.lock import RLock
+
 from ..application.app_context import AppContext
 from ..config.model_mapping_config import (
     MODEL_MAPPING_ID_MAX_LENGTH,
@@ -19,6 +21,7 @@ from ..config.model_mapping_config import (
     normalize_model_mapping_id,
 )
 from ..repositories.model_mapping_repository import ModelMappingRepository
+from ..utils.concurrency import synchronized
 from ..utils.local_time import format_local_datetime, now_local_datetime, parse_local_datetime
 
 
@@ -58,6 +61,7 @@ class ModelMappingService:
         self._config_manager = ctx.config_manager
         self._logger = ctx.logger
         self._repository = repository
+        self._state_lock = RLock()
         self._provider_manager = provider_manager
         self._codex_oauth_service = codex_oauth_service
         self._claude_oauth_service = claude_oauth_service
@@ -125,6 +129,7 @@ class ModelMappingService:
         normalized_id = str(mapping_id or "").strip()
         return next((item for item in self.list_mappings() if item["id"] == normalized_id), None)
 
+    @synchronized("_state_lock")
     def create_mapping(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """创建模型映射。"""
         mapping = self._build_mapping(payload)
@@ -133,6 +138,7 @@ class ModelMappingService:
         self._group_mapping_order()
         return self.get_mapping(mapping.id) or mapping.to_mapping()
 
+    @synchronized("_state_lock")
     def update_mapping(self, current_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """更新模型映射并重置当前目标。"""
         normalized_current_id = normalize_model_mapping_id(current_id)
@@ -154,10 +160,12 @@ class ModelMappingService:
         self._repository.update_mapping(normalized_current_id, mapping)
         return self.get_mapping(mapping.id) or mapping.to_mapping()
 
+    @synchronized("_state_lock")
     def delete_mapping(self, mapping_id: str) -> None:
         """删除模型映射及其运行状态。"""
         self._repository.delete_mapping(normalize_model_mapping_id(mapping_id))
 
+    @synchronized("_state_lock")
     def delete_mappings(self, mapping_ids: Iterable[str]) -> int:
         """批量删除模型映射及其运行状态。"""
         normalized_ids = [normalize_model_mapping_id(mapping_id) for mapping_id in mapping_ids]
@@ -165,6 +173,7 @@ class ModelMappingService:
             raise ValueError("模型映射 ID 必须是非空数组")
         return self._repository.delete_mappings(normalized_ids)
 
+    @synchronized("_state_lock")
     def copy_mapping(self, mapping_id: str) -> dict[str, Any]:
         """复制模型映射定义，并把副本插入到源映射下方。"""
         normalized_mapping_id = normalize_model_mapping_id(mapping_id)
@@ -190,6 +199,7 @@ class ModelMappingService:
         self._repository.create_mapping_after(normalized_mapping_id, copied)
         return self.get_mapping(copied_id) or copied.to_mapping()
 
+    @synchronized("_state_lock")
     def set_mapping_enabled(self, mapping_id: str, *, enabled: bool) -> dict[str, Any]:
         """更新映射级启用状态。"""
         normalized_mapping_id = normalize_model_mapping_id(mapping_id)
@@ -202,6 +212,7 @@ class ModelMappingService:
             raise ValueError(f"模型映射不存在: {normalized_mapping_id}")
         return mapping
 
+    @synchronized("_state_lock")
     def reorder_mappings(self, mapping_ids: list[str]) -> dict[str, Any]:
         """更新映射顺序，并保持已启用映射位于已禁用映射之前。"""
         normalized_ids = [normalize_model_mapping_id(mapping_id) for mapping_id in mapping_ids]
@@ -221,6 +232,7 @@ class ModelMappingService:
         self._repository.reorder_mappings(normalized_ids)
         return {"count": len(normalized_ids), "ids": normalized_ids}
 
+    @synchronized("_state_lock")
     def set_target_enabled(self, mapping_id: str, target_model_id: str, *, enabled: bool) -> dict[str, Any]:
         """更新目标配置启用状态；启用时同步清除运行故障状态。"""
         normalized_mapping_id = normalize_model_mapping_id(mapping_id)
@@ -254,6 +266,7 @@ class ModelMappingService:
             "model_mappings": definitions,
         }
 
+    @synchronized("_state_lock")
     def import_mappings(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """事务导入模型映射定义，并为冲突 ID 生成唯一后缀。"""
         if not isinstance(payload, Mapping):
@@ -283,6 +296,7 @@ class ModelMappingService:
         self._group_mapping_order()
         return {"count": len(mappings), "ids": mapping_ids}
 
+    @synchronized("_state_lock")
     def acquire_target(self, mapping_id: str, excluded_target_ids: Iterable[str] = ()) -> SelectedModelMappingTarget:
         """按映射策略选择目标，正常候选为空时始终选择最高优先级运行时目标。"""
         normalized_id = normalize_model_mapping_id(mapping_id)
@@ -320,6 +334,7 @@ class ModelMappingService:
             self._repository.set_current_target(normalized_id, selected["model_id"])
         return SelectedModelMappingTarget(normalized_id, selected["model_id"], is_fallback=using_failure_fallback)
 
+    @synchronized("_state_lock")
     def record_success(self, selection: SelectedModelMappingTarget) -> None:
         """清理成功目标的运行故障状态并记录当前目标。"""
         mapping = self._repository.get_mapping(selection.mapping_id)
@@ -328,6 +343,7 @@ class ModelMappingService:
         self._repository.restore_target(selection.mapping_id, selection.target_model_id)
         self._repository.set_current_target(selection.mapping_id, selection.target_model_id)
 
+    @synchronized("_state_lock")
     def restore_codex_quota_targets(self, recovered_plan_type: str) -> int:
         """额度刷新确认恢复后清理 Codex 映射目标的额度冷却。"""
         text_model_ids = set(self._read_oauth_catalog_ids(self._codex_oauth_service, "list_models"))
@@ -349,6 +365,7 @@ class ModelMappingService:
             self._logger.info("Codex quota recovery restored model mapping targets: count=%s", restored_count)
         return restored_count
 
+    @synchronized("_state_lock")
     def record_failure(
         self,
         selection: SelectedModelMappingTarget,

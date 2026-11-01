@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
-from ..utils.database import ConnectionFactory
+from ..utils.database import ConnectionFactory, database_operation
 from ..utils.local_time import format_local_date, format_local_datetime, now_local_datetime_text
 
 
@@ -19,6 +19,7 @@ class AuthGroupRepository:
         self._get_connection = get_connection
         self._ensure_tables()
 
+    @database_operation(write=True)
     def _ensure_tables(self) -> None:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -88,6 +89,7 @@ class AuthGroupRepository:
             "day_total_tokens": 0,
         }
 
+    @database_operation()
     def get_entry_runtime_state(self, auth_group_name: str, entry_id: str) -> dict[str, Any]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -115,6 +117,7 @@ class AuthGroupRepository:
             "updated_at": row["updated_at"],
         }
 
+    @database_operation()
     def list_group_runtime_states(self, auth_group_name: str) -> dict[str, dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -144,6 +147,7 @@ class AuthGroupRepository:
             }
         return result
 
+    @database_operation()
     def export_runtime_states(self, auth_group_names: Iterable[str]) -> list[dict[str, Any]]:
         """按 Auth Group 名称导出运行态表项。"""
         normalized_names = self._normalize_auth_group_names(auth_group_names)
@@ -180,6 +184,7 @@ class AuthGroupRepository:
             for row in rows
         ]
 
+    @database_operation()
     def export_usage_buckets(self, auth_group_names: Iterable[str]) -> list[dict[str, Any]]:
         """按 Auth Group 名称导出用量桶表项。"""
         normalized_names = self._normalize_auth_group_names(auth_group_names)
@@ -216,6 +221,7 @@ class AuthGroupRepository:
             for row in rows
         ]
 
+    @database_operation(write=True)
     def purge_legacy_provider_runtime_state(
         self,
         active_auth_group_names: Iterable[str] = (),
@@ -280,6 +286,7 @@ class AuthGroupRepository:
             )
         return runtime_row_count, usage_row_count
 
+    @database_operation(write=True)
     def save_entry_runtime_state(
         self,
         auth_group_name: str,
@@ -336,6 +343,7 @@ class AuthGroupRepository:
             last_error_message=None,
         )
 
+    @database_operation(write=True)
     def import_runtime_states(self, rows: Iterable[dict[str, Any]]) -> dict[str, int]:
         """导入运行态表项，主键相同的表项保持现有数据。"""
         now_text = now_local_datetime_text()
@@ -378,6 +386,7 @@ class AuthGroupRepository:
             "skipped_count": skipped_count,
         }
 
+    @database_operation(write=True)
     def import_usage_buckets(self, rows: Iterable[dict[str, Any]]) -> dict[str, int]:
         """导入用量桶表项，主键相同的表项保持现有数据。"""
         now_text = now_local_datetime_text()
@@ -420,6 +429,7 @@ class AuthGroupRepository:
             "skipped_count": skipped_count,
         }
 
+    @database_operation(write=True)
     def reset_current_minute_usage(self, auth_group_name: str, entry_id: str, when: datetime) -> None:
         minute_bucket = self._minute_bucket_start(when)
         with self._get_connection() as conn:
@@ -433,6 +443,7 @@ class AuthGroupRepository:
                 (auth_group_name, entry_id, minute_bucket),
             )
 
+    @database_operation(write=True)
     def reset_current_day_usage(self, auth_group_name: str, entry_id: str, when: datetime) -> None:
         day_bucket = self._day_bucket_start(when)
         with self._get_connection() as conn:
@@ -454,6 +465,7 @@ class AuthGroupRepository:
     def _day_bucket_start(value: datetime) -> str:
         return format_local_date(value)
 
+    @database_operation(write=True)
     def _increment_usage_bucket(
         self,
         auth_group_name: str,
@@ -496,6 +508,7 @@ class AuthGroupRepository:
                 ),
             )
 
+    @database_operation(write=True)
     def increment_request_usage(self, auth_group_name: str, entry_id: str, when: datetime) -> None:
         minute_bucket = self._minute_bucket_start(when)
         day_bucket = self._day_bucket_start(when)
@@ -514,6 +527,7 @@ class AuthGroupRepository:
             request_count=1,
         )
 
+    @database_operation(write=True)
     def increment_token_usage(
         self,
         auth_group_name: str,
@@ -537,6 +551,7 @@ class AuthGroupRepository:
                 total_tokens=total_tokens,
             )
 
+    @database_operation()
     def get_current_usage(self, auth_group_name: str, entry_id: str, when: datetime) -> dict[str, int]:
         minute_bucket = self._minute_bucket_start(when)
         day_bucket = self._day_bucket_start(when)
@@ -564,6 +579,7 @@ class AuthGroupRepository:
             usage[f"{prefix}_total_tokens"] = int(row["total_tokens"] or 0)
         return usage
 
+    @database_operation()
     def list_current_usage(
         self,
         auth_group_name: str,

@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from ..utils.database import ConnectionFactory, SQLiteCursor, SQLiteRow
+from ..utils.database import ConnectionFactory, SQLiteCursor, SQLiteRow, database_operation
 from ..utils.local_time import (
     ensure_local_datetime,
     format_local_date,
@@ -91,6 +91,7 @@ class LogRepository:
         self._get_connection = get_connection
         self._ensure_table()
 
+    @database_operation(write=True)
     def _ensure_table(self) -> None:
         """初始化日志相关数据表与索引。"""
         with self._get_connection() as conn:
@@ -284,6 +285,7 @@ class LogRepository:
         )
         cursor.execute("DROP TABLE daily_request_stats_old")
 
+    @database_operation(write=True)
     def insert(
         self,
         request_model: str,
@@ -436,6 +438,7 @@ class LogRepository:
                 )
             return log_id
 
+    @database_operation()
     def get_auth_file_usage(
         self,
         auth_file_name: str,
@@ -550,6 +553,7 @@ class LogRepository:
         direction = cls._normalize_sort_direction(sort_direction)
         return f"ORDER BY {sort_columns[normalized_key]} {direction}, {tie_breaker}"
 
+    @database_operation()
     def get_statistics(
         self,
         start_date: str | None = None,
@@ -625,6 +629,7 @@ class LogRepository:
             cursor.execute(query, params)
             return cursor.fetchall()
 
+    @database_operation()
     def get_user_usage_summary(
         self,
         start_date: str | None = None,
@@ -697,6 +702,7 @@ class LogRepository:
             cursor.execute(query, params)
             return cursor.fetchall()
 
+    @database_operation()
     def get_api_key_usage_summary(
         self,
         start_date: str | None = None,
@@ -781,6 +787,7 @@ class LogRepository:
             cursor.execute(query, params)
             return cursor.fetchall()
 
+    @database_operation()
     def get_logs(
         self,
         page: int = 1,
@@ -857,6 +864,7 @@ class LogRepository:
                 "logs": [dict(log) for log in logs],
             }
 
+    @database_operation()
     def get_all_logs(
         self,
         start_date: str | None = None,
@@ -911,6 +919,7 @@ class LogRepository:
             cursor.execute(query, params)
             return cursor.fetchall()
 
+    @database_operation()
     def export_request_logs(
         self,
         start_date: str | None = None,
@@ -965,6 +974,7 @@ class LogRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation()
     def export_daily_stats(
         self,
         start_date: str | None = None,
@@ -1017,6 +1027,7 @@ class LogRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation(write=True)
     def import_daily_stats(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         """导入日聚合统计，遇到相同唯一维度时累加数值。"""
         now_text = now_local_datetime_text()
@@ -1095,6 +1106,7 @@ class LogRepository:
             "merged_count": updated_count,
         }
 
+    @database_operation(write=True)
     def import_request_logs(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         """导入请求明细，遇到相同明细数据时跳过。"""
         now_text = now_local_datetime_text()
@@ -1151,6 +1163,7 @@ class LogRepository:
             "duplicate_count": skipped_count,
         }
 
+    @database_operation()
     def get_unique_request_models(self) -> list[str]:
         """查询有日志记录的请求模型列表。"""
         with self._get_connection() as conn:
@@ -1165,6 +1178,7 @@ class LogRepository:
             )
             return [row["request_model"] for row in cursor.fetchall()]
 
+    @database_operation()
     def get_unique_usernames(self) -> list[str]:
         """查询有日志记录的用户名列表。"""
         with self._get_connection() as conn:

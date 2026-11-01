@@ -10,6 +10,7 @@ from typing import Any
 
 from ..application.app_context import AppContext
 from ..config.provider_config import parse_optional_bool
+from ..utils.concurrency import synchronized
 from ..utils.net import (
     DEFAULT_PROXY_MODE,
     DEFAULT_REAL_CLIENT_IP_HEADER,
@@ -71,6 +72,7 @@ class SettingsService:
             "auth_enabled": self._config_manager.is_auth_enabled(),
         }
 
+    @synchronized("_config_manager.write_lock")
     def update_chat_whitelist_enabled(self, enabled: Any) -> bool:
         parsed_enabled = parse_optional_bool(enabled)
         if parsed_enabled is None:
@@ -88,6 +90,7 @@ class SettingsService:
         self._config_manager.write_raw_config(config)
         return parsed_enabled
 
+    @synchronized("_config_manager.write_lock")
     def update_basic_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
@@ -129,6 +132,7 @@ class SettingsService:
             "server_restart_required": server_restart_required,
         }
 
+    @synchronized("_config_manager.write_lock")
     def update_client_ip_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
@@ -156,6 +160,7 @@ class SettingsService:
             "settings": self.get_system_settings(),
         }
 
+    @synchronized("_config_manager.write_lock")
     def update_debug_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
@@ -190,6 +195,7 @@ class SettingsService:
             "settings": self.get_system_settings(),
         }
 
+    @synchronized("_config_manager.write_lock")
     def update_oauth_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
@@ -236,6 +242,7 @@ class SettingsService:
             "settings": self.get_system_settings(),
         }
 
+    @synchronized("_config_manager.write_lock")
     def update_api_key_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
@@ -260,6 +267,7 @@ class SettingsService:
             "settings": self.get_system_settings(),
         }
 
+    @synchronized("_config_manager.write_lock")
     def update_model_mapping_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         """更新模型映射总开关并同步权限模型目录。"""
         if not isinstance(payload, dict):
@@ -286,6 +294,7 @@ class SettingsService:
             "settings": self.get_system_settings(),
         }
 
+    @synchronized("_config_manager.write_lock")
     def update_system_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")

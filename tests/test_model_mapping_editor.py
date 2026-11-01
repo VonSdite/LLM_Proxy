@@ -11,6 +11,7 @@ class ModelMappingEditorTests(unittest.TestCase):
             cwd=root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
         )
 
