@@ -10,9 +10,12 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
+from gevent.lock import RLock
+
 from ..application.app_context import AppContext, Logger
 from ..hooks import HookErrorType
 from ..repositories import AuthGroupRepository
+from ..utils.concurrency import synchronized
 from ..utils.local_time import format_local_datetime, now_local_datetime, parse_local_datetime
 from .provider_config import (
     AUTH_GROUP_STRATEGY_STICKY_FAILOVER,
@@ -57,10 +60,12 @@ class AuthGroupManager:
     def __init__(self, ctx: AppContext, repository: AuthGroupRepository):
         self._logger: Logger = ctx.logger
         self._repository = repository
+        self._state_lock = RLock()
         self._groups_by_name: dict[str, AuthGroupSchema] = {}
         self._inflight_counts: dict[tuple[str, str], int] = {}
         self._rotation_cursor_by_group: dict[str, int] = {}
 
+    @synchronized("_state_lock")
     def load_auth_groups(self, auth_groups: Sequence[AuthGroupSchema]) -> None:
         self._groups_by_name = {group.name: group for group in auth_groups}
         self._inflight_counts.clear()
@@ -76,6 +81,7 @@ class AuthGroupManager:
             )
         self._logger.info("Loaded auth groups: %s", list(sorted(self._groups_by_name.keys())))
 
+    @synchronized("_state_lock")
     def acquire(self, auth_group_name: str | None) -> SelectedAuthEntry | None:
         normalized_group_name = str(auth_group_name or "").strip()
         if not normalized_group_name:
@@ -117,6 +123,7 @@ class AuthGroupManager:
             headers=selected_entry.headers,
         )
 
+    @synchronized("_state_lock")
     def mark_request_dispatched(self, selection: SelectedAuthEntry | None) -> None:
         if selection is None:
             return
@@ -126,6 +133,7 @@ class AuthGroupManager:
             now_local_datetime(),
         )
 
+    @synchronized("_state_lock")
     def finish(
         self,
         selection: SelectedAuthEntry | None,
@@ -219,9 +227,11 @@ class AuthGroupManager:
             last_error_message=last_error_message,
         )
 
+    @synchronized("_state_lock")
     def list_auth_group_summaries(self) -> list[dict[str, Any]]:
         return [self._build_group_summary(group) for group in self.list_explicit_auth_groups()]
 
+    @synchronized("_state_lock")
     def get_auth_group_runtime(self, auth_group_name: str) -> dict[str, Any]:
         group = self._groups_by_name.get(str(auth_group_name).strip())
         if group is None:
@@ -248,6 +258,7 @@ class AuthGroupManager:
             "entries": entries,
         }
 
+    @synchronized("_state_lock")
     def restore_entry(self, auth_group_name: str, entry_id: str) -> None:
         group = self._groups_by_name.get(str(auth_group_name).strip())
         if group is None:
@@ -256,6 +267,7 @@ class AuthGroupManager:
             raise ValueError(f"Auth entry not found: {entry_id}")
         self._repository.restore_entry(group.name, entry_id)
 
+    @synchronized("_state_lock")
     def clear_entry_cooldown(self, auth_group_name: str, entry_id: str) -> None:
         group, entry = self._resolve_explicit_entry(auth_group_name, entry_id)
         runtime_state = self._repository.get_entry_runtime_state(group.name, entry.id)
@@ -270,6 +282,7 @@ class AuthGroupManager:
             last_error_message=runtime_state.get("last_error_message"),
         )
 
+    @synchronized("_state_lock")
     def set_entry_disabled(self, auth_group_name: str, entry_id: str, *, disabled: bool) -> None:
         group, entry = self._resolve_explicit_entry(auth_group_name, entry_id)
         runtime_state = self._repository.get_entry_runtime_state(group.name, entry.id)
@@ -284,10 +297,12 @@ class AuthGroupManager:
             last_error_message=runtime_state.get("last_error_message"),
         )
 
+    @synchronized("_state_lock")
     def reset_entry_minute_usage(self, auth_group_name: str, entry_id: str) -> None:
         group, entry = self._resolve_explicit_entry(auth_group_name, entry_id)
         self._repository.reset_current_minute_usage(group.name, entry.id, now_local_datetime())
 
+    @synchronized("_state_lock")
     def reset_entry_runtime(self, auth_group_name: str, entry_id: str) -> None:
         group, entry = self._resolve_explicit_entry(auth_group_name, entry_id)
         now = now_local_datetime()

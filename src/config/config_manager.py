@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from gevent.lock import RLock
 
+from ..utils.blocking_io import blocking_io
 from ..utils.net import (
     DEFAULT_REAL_CLIENT_IP_HEADER,
     PROXY_MODE_CUSTOM,
@@ -27,6 +29,7 @@ class ConfigManager:
     """提供配置项的类型化读取方法。"""
 
     def __init__(self, config_path: Path, root_path: Path):
+        self._write_lock = RLock()
         self._config_path = Path(config_path).resolve()
         self._config = self._load_config(self._config_path)
         self._root_path = Path(root_path).resolve()
@@ -108,18 +111,26 @@ class ConfigManager:
     def get_raw_config(self) -> dict[str, Any]:
         return deepcopy(self._config)
 
+    @property
+    def write_lock(self) -> RLock:
+        """配置读改写与运行时重载共用的协作锁。"""
+        return self._write_lock
+
     def write_raw_config(self, config: dict[str, Any]) -> None:
         if not isinstance(config, dict):
             raise ValueError("Configuration file must contain a top-level mapping")
 
-        normalized, _ = self._normalize_config(config)
-        self._write_config(normalized)
-        self._config = deepcopy(normalized)
+        with self._write_lock:
+            normalized, _ = self._normalize_config(config)
+            self._write_config(normalized)
+            self._config = deepcopy(normalized)
 
     def reload(self) -> None:
-        self._config = self._load_config(self._config_path)
+        with self._write_lock:
+            self._config = self._load_config(self._config_path)
 
     @classmethod
+    @blocking_io
     def _load_config(cls, config_path: str | Path) -> dict[str, Any]:
         path = Path(config_path).resolve()
         if not path.exists():
@@ -145,12 +156,14 @@ class ConfigManager:
         self._write_config_file(self._config_path, config)
 
     @staticmethod
+    @blocking_io
     def _write_config_file(config_path: Path, config: dict[str, Any]) -> None:
         temp_file_path: str | None = None
         try:
             with tempfile.NamedTemporaryFile(
                 "w",
                 encoding="utf-8",
+                newline="\n",
                 dir=config_path.parent,
                 delete=False,
             ) as temp_file:

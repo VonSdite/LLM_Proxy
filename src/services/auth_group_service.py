@@ -16,6 +16,7 @@ from ..config.provider_config import (
     AuthGroupSchema,
     validate_auth_group_provider_definitions,
 )
+from ..utils.concurrency import synchronized
 from .config_sections import read_auth_group_entries, read_provider_entries
 
 
@@ -60,6 +61,7 @@ class AuthGroupService:
         normalized["provider_count"] = self._count_providers_by_auth_group(providers).get(normalized["name"], 0)
         return normalized
 
+    @synchronized("_config_manager.write_lock")
     def create_auth_group(self, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         auth_groups = read_auth_group_entries(config)
@@ -74,6 +76,7 @@ class AuthGroupService:
         self._save_auth_groups(config, auth_groups, providers)
         return normalized
 
+    @synchronized("_config_manager.write_lock")
     def update_auth_group(self, current_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         auth_groups = read_auth_group_entries(config)
@@ -98,6 +101,7 @@ class AuthGroupService:
         self._save_auth_groups(config, auth_groups, providers)
         return normalized
 
+    @synchronized("_config_manager.write_lock")
     def delete_auth_group(self, name: str) -> None:
         config = self._config_manager.get_raw_config()
         auth_groups = read_auth_group_entries(config)

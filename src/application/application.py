@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, cast
 
@@ -54,6 +53,8 @@ from ..services import (
     UserService,
 )
 from ..utils import resolve_client_ip
+from ..utils.async_logging import AsyncLogHandler, NativeLogListener, RotatingLogHandler
+from ..utils.blocking_io import run_blocking
 from ..utils.database import create_connection_factory
 from .app_context import AppContext, Logger
 
@@ -85,7 +86,7 @@ class Application:
         log_path = Path(self._config_manager.get_log_path())
         log_level = self._config_manager.get_log_level()
 
-        log_path.mkdir(parents=True, exist_ok=True)
+        run_blocking(log_path.mkdir, parents=True, exist_ok=True)
         level = getattr(logging, log_level.upper(), logging.INFO)
 
         formatter = logging.Formatter(
@@ -94,26 +95,27 @@ class Application:
         )
 
         logger = logging.getLogger("app")
-        app_log_handler = RotatingFileHandler(
+        app_log_handler = RotatingLogHandler(
             log_path / "app.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=3,
             encoding="utf-8",
+            delay=True,
         )
         app_log_handler.setFormatter(formatter)
         app_log_handler.setLevel(level)
-        logger.addHandler(app_log_handler)
 
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(formatter)
         console_handler.setLevel(level)
 
         access_logger = logging.getLogger("access")
-        access_handler = RotatingFileHandler(
+        access_handler = RotatingLogHandler(
             log_path / "access.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=3,
             encoding="utf-8",
+            delay=True,
         )
         access_handler.setFormatter(
             logging.Formatter(
@@ -124,28 +126,41 @@ class Application:
         access_handler.setLevel(level)
 
         trace_logger = logging.getLogger("llm_request_trace")
-        trace_handler = RotatingFileHandler(
+        trace_handler = RotatingLogHandler(
             log_path / "llm_request_trace.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=3,
             encoding="utf-8",
+            delay=True,
         )
         trace_handler.setFormatter(formatter)
         trace_handler.setLevel(level)
 
+        listener = NativeLogListener(
+            {
+                "app": [app_log_handler, console_handler],
+                "access": [access_handler],
+                "llm_request_trace": [trace_handler],
+            }
+        )
+        listener.start()
+        previous_listener = getattr(self, "_log_listener", None)
+
         self._replace_logger_handlers(
             logger,
-            [app_log_handler, console_handler],
+            [AsyncLogHandler(listener.queue)],
             level,
+            propagate=False,
         )
         self._replace_logger_handlers(
             access_logger,
-            [access_handler],
+            [AsyncLogHandler(listener.queue)],
             level,
+            propagate=False,
         )
         self._replace_logger_handlers(
             trace_logger,
-            [trace_handler],
+            [AsyncLogHandler(listener.queue)],
             level,
             propagate=False,
         )
@@ -153,7 +168,10 @@ class Application:
         self._logger = logger
         self._access_logger = access_logger
         self._trace_logger = trace_logger
+        self._log_listener = listener
         cast(Any, self._flask_app).logger = logger
+        if previous_listener is not None:
+            previous_listener.close()
 
     @staticmethod
     def _replace_logger_handlers(
@@ -405,7 +423,15 @@ class Application:
         self._start_background_workers()
         server = WSGIServer((host, port), self._flask_app)
         self._logger.info("Starting LLM Proxy on %s:%s...", host, port)
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        finally:
+            server.stop()
+            self.close()
+
+    def close(self) -> None:
+        """排空运行日志并关闭应用持有的日志资源。"""
+        self._log_listener.close()
 
     def _start_background_workers(self) -> None:
         """启动应用后台任务。"""

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..utils.database import ConnectionFactory
+from ..utils.database import ConnectionFactory, database_operation
 from ..utils.local_time import now_local_datetime_text
 
 
@@ -32,6 +32,7 @@ class ApiKeyRepository:
         self._get_connection = get_connection
         self._ensure_table()
 
+    @database_operation(write=True)
     def _ensure_table(self) -> None:
         """初始化 API Key 表与索引。"""
         with self._get_connection() as conn:
@@ -103,6 +104,7 @@ class ApiKeyRepository:
             k.key_prefix || '...' || k.key_suffix AS key_preview
         """
 
+    @database_operation(write=True)
     def create(
         self,
         *,
@@ -188,6 +190,7 @@ class ApiKeyRepository:
         direction = cls._normalize_sort_direction(sort_direction)
         return f"ORDER BY {cls._SORT_COLUMNS[normalized_key]} {direction}, k.id ASC"
 
+    @database_operation()
     def get(
         self,
         page: int = 1,
@@ -214,6 +217,7 @@ class ApiKeyRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation()
     def get_sorted_by_allowed_model_count(
         self,
         page: int,
@@ -254,6 +258,7 @@ class ApiKeyRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation()
     def get_count(self, keyword: str | None = None) -> int:
         """查询 API Key 总数。"""
         with self._get_connection() as conn:
@@ -269,6 +274,7 @@ class ApiKeyRepository:
             )
             return cursor.fetchone()["count"]
 
+    @database_operation()
     def get_by_id(self, key_id: int) -> dict[str, Any] | None:
         """按 ID 查询 API Key。"""
         with self._get_connection() as conn:
@@ -284,6 +290,7 @@ class ApiKeyRepository:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    @database_operation()
     def get_by_hash(self, key_hash: str) -> dict[str, Any] | None:
         """按 key hash 查询 API Key。"""
         with self._get_connection() as conn:
@@ -299,6 +306,7 @@ class ApiKeyRepository:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    @database_operation()
     def list_all(self) -> list[dict[str, Any]]:
         """查询全部 API Key，用于权限同步。"""
         with self._get_connection() as conn:
@@ -312,6 +320,7 @@ class ApiKeyRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    @database_operation(write=True)
     def update(
         self,
         key_id: int,
@@ -351,6 +360,7 @@ class ApiKeyRepository:
             cursor.execute(f"UPDATE api_keys SET {', '.join(updates)} WHERE id = ?", params)
             return cursor.rowcount > 0
 
+    @database_operation(write=True)
     def delete(self, key_id: int) -> bool:
         """删除 API Key 记录。"""
         with self._get_connection() as conn:
@@ -358,6 +368,7 @@ class ApiKeyRepository:
             cursor.execute("DELETE FROM api_keys WHERE id = ?", (key_id,))
             return cursor.rowcount > 0
 
+    @database_operation(write=True)
     def record_usage(
         self,
         key_id: int,

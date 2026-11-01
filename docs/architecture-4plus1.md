@@ -58,6 +58,7 @@ downstream request
   -> prefetch first non-empty encoded downstream bytes (stream only)
   -> downstream response
   -> response outcome finalization
+  -> cooperative wait for native-thread request-log transaction commit
 ```
 
 Provider 开启 `force_upstream_stream=true` 且下游请求未开启流式时，链路在 decoder 之后走聚合分支：
@@ -695,9 +696,12 @@ Codex / Claude OAuth 流分别以 `response.completed` / `response.done` 和 `me
 - 应用会写入 `logs/llm_request_trace.log`
 - 与 `app.log`、`access.log` 分离
 - 采用相同的滚动策略：
-  - `RotatingFileHandler`
+  - `RotatingLogHandler`，继承 `RotatingFileHandler`，使用 UTF-8 和 LF
   - `maxBytes = 10 MiB`
   - `backupCount = 3`
+- `app.log`、`access.log`、trace 文件和控制台输出共用有界运行日志队列，由专用原生线程消费。
+- 队列上限为 10000 条及约 16 MiB 的消息与记录字典；达到上限时丢弃新运行日志，消费线程记录丢弃数量。数据库请求明细和统计使用独立的事务持久化链路。
+- 日志重载和正常退出会排空已入队记录，再关闭文件句柄。进程被强制终止时，队列中的运行日志可能尚未落盘。
 
 ### 3.7 Control-Plane Model Fetching And Testing
 
@@ -1030,6 +1034,34 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 
 统计管理页面在调用汇总和请求明细中使用“模型流向”展示请求模型、映射目标模型和响应模型；未经过模型映射的记录展示请求模型到响应模型。统计管理页面显示缓存读取 Token 和缓存命中率。Excel 导出同时显示 Token 状态和缓存写入 Token：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 4 并保留原始 `usage_status`、映射目标模型、缓存 Token 和 `cache_usage_status` 值；版本 2 包中的缓存状态按 `unknown` 导入，旧版本没有映射目标模型时按空值导入。
 
+### 3.10 Blocking I/O Execution
+
+HTTP 请求协程和 Hub 在服务线程中运行。上游 HTTP、客户端连接和 SSE 网络等待使用 gevent socket；SQLite 与配置文件操作通过 `run_blocking()` 交给 Hub 的原生线程池，调用协程等待任务结果。
+
+- 五个 Repository 的数据库入口使用 `database_operation`，同一任务内完成连接创建、SQL、结果读取、提交或回滚和连接关闭。
+- SQLite 使用 WAL 和默认同步策略。连接工厂的写锁在协程侧串行提交写任务，读任务独立提交到原生线程池。
+- 请求日志、日聚合统计及 API Key 累计用量保持同事务提交，仓储成功返回时提交已经完成。
+- 调用协程取消时，等待已提交的原生任务收尾后再释放写锁。
+- Auth Group 的选择、派发记账、完成状态和管理操作使用实例级协作锁；模型映射的复合选择与更新使用独立的实例锁。
+- 用户 IP 缓存的首次查询和填充共用缓存锁，用户变更后的失效操作与正在执行的填充互斥。
+- YAML 加载、原子写入和 `fsync` 在原生线程执行；Provider、Auth Group 和系统设置共用配置实例的写锁，覆盖读取快照、修改、保存和运行时重载，配置快照在调用线程更新。
+- 运行日志使用独立的 `ThreadPool(1)` 消费原生队列，文件输出和控制台等待占用该专用线程。
+- 模板首次加载、静态文件访问和自定义 Hook 的文件或第三方库调用仍由对应组件执行；Hook 实现负责使用协作 I/O 或显式的阻塞任务边界。
+
+```mermaid
+flowchart LR
+    Client[Client / Agent / Console] --> Hub[gevent HTTP greenlets and Hub]
+    Hub -->|cooperative socket I/O| Upstream[Provider upstream]
+    Hub -->|submit repository or config task| Workers[Native I/O thread pool]
+    Workers --> DB[(SQLite WAL)]
+    Workers --> YAML[Config YAML / fsync]
+    Workers -->|result / exception| Hub
+    Hub -->|nonblocking enqueue| Queue[Bounded runtime log queue]
+    Queue --> Logger[Dedicated native log worker]
+    Logger --> Files[Rotating log files]
+    Logger --> Console[Console output]
+```
+
 ## 4. Development View
 
 ### 4.1 Directory Responsibilities
@@ -1129,6 +1161,9 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 - 一个 Flask 应用
 - 一个配置文件
 - 一个 SQLite 数据库，保存用户、请求日志、日聚合统计、API Key、模型映射定义和映射运行状态
+- 一个 gevent Hub 原生线程池，执行仓储事务和配置文件任务
+- 一个运行日志专用原生线程与有界队列
+- 一组 Auth Group、模型映射、配置保存和用户缓存协作锁
 - 一组滚动日志文件
 - 一个 Codex 配额后台刷新 greenlet
 - 一组本地 OAuth 认证文件
@@ -1164,6 +1199,8 @@ sequenceDiagram
     participant Service
     participant Translator
     participant Executor
+    participant NativeIO
+    participant SQLite
 
     Client->>Controller: POST /v1/chat/completions
     Controller->>Controller: 按 client_ip.* 解析客户端 IP
@@ -1199,7 +1236,11 @@ sequenceDiagram
             Controller-->>Client: chat.completion.chunk
         end
         alt 目标协议终止事件完成
-            Service->>Service: 成功完成回调与统计
+            Service->>Service: 成功完成回调
+            Service->>NativeIO: 提交请求明细、日统计与 API Key 用量事务
+            NativeIO->>SQLite: BEGIN / INSERT / UPSERT / COMMIT
+            SQLite-->>NativeIO: 提交结果
+            NativeIO-->>Service: 唤醒等待协程
         else 提交后 transport 或流处理失败
             Service-->>Controller: OpenAI error data + [DONE]
             Controller-->>Client: protocol error in stream

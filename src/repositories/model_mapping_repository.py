@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from ..config.model_mapping_config import DEFAULT_MODEL_MAPPING_STRATEGY, ModelMappingSchema
-from ..utils.database import ConnectionFactory
+from ..utils.database import ConnectionFactory, database_operation
 from ..utils.local_time import now_local_datetime_text
 
 
@@ -19,6 +19,7 @@ class ModelMappingRepository:
         self._get_connection = get_connection
         self._ensure_tables()
 
+    @database_operation(write=True)
     def _ensure_tables(self) -> None:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -94,6 +95,7 @@ class ModelMappingRepository:
                 "CREATE INDEX IF NOT EXISTS idx_model_mappings_order ON model_mappings(sort_order, created_at)"
             )
 
+    @database_operation()
     def list_mappings(self) -> list[dict[str, Any]]:
         with self._get_connection() as conn:
             mappings = conn.execute(
@@ -141,6 +143,7 @@ class ModelMappingRepository:
     def get_mapping(self, mapping_id: str) -> dict[str, Any] | None:
         return next((item for item in self.list_mappings() if item["id"] == mapping_id), None)
 
+    @database_operation(write=True)
     def create_mapping(self, mapping: ModelMappingSchema) -> None:
         now_text = now_local_datetime_text()
         with self._get_connection() as conn:
@@ -148,6 +151,7 @@ class ModelMappingRepository:
                 raise ValueError(f"模型映射已存在: {mapping.id}")
             self._insert_mapping(conn, mapping, now_text, sort_order=self._next_mapping_sort_order(conn))
 
+    @database_operation(write=True)
     def create_mapping_after(self, source_id: str, mapping: ModelMappingSchema) -> None:
         """创建模型映射，并插入到源映射下方。"""
         now_text = now_local_datetime_text()
@@ -164,6 +168,7 @@ class ModelMappingRepository:
             )
             self._insert_mapping(conn, mapping, now_text, sort_order=source_order + 1)
 
+    @database_operation(write=True)
     def update_mapping(self, current_id: str, mapping: ModelMappingSchema) -> None:
         now_text = now_local_datetime_text()
         with self._get_connection() as conn:
@@ -186,12 +191,14 @@ class ModelMappingRepository:
                 sort_order=int(current["sort_order"]),
             )
 
+    @database_operation(write=True)
     def delete_mapping(self, mapping_id: str) -> None:
         with self._get_connection() as conn:
             if not conn.execute("SELECT 1 FROM model_mappings WHERE id = ?", (mapping_id,)).fetchone():
                 raise ValueError(f"模型映射不存在: {mapping_id}")
             self._delete_mapping_rows(conn, mapping_id)
 
+    @database_operation(write=True)
     def delete_mappings(self, mapping_ids: Sequence[str]) -> int:
         """批量删除模型映射及其运行状态。"""
         normalized_ids = list(dict.fromkeys(mapping_ids))
@@ -210,6 +217,7 @@ class ModelMappingRepository:
                 self._delete_mapping_rows(conn, mapping_id)
         return len(normalized_ids)
 
+    @database_operation(write=True)
     def set_mapping_enabled(self, mapping_id: str, *, enabled: bool) -> None:
         """更新一个映射的启用状态。"""
         now_text = now_local_datetime_text()
@@ -230,6 +238,7 @@ class ModelMappingRepository:
                     (now_text, mapping_id),
                 )
 
+    @database_operation(write=True)
     def reorder_mappings(self, mapping_ids: Sequence[str]) -> None:
         """按给定完整 ID 列表更新映射顺序。"""
         with self._get_connection() as conn:
@@ -242,6 +251,7 @@ class ModelMappingRepository:
                 [(index, now_text, mapping_id) for index, mapping_id in enumerate(mapping_ids)],
             )
 
+    @database_operation(write=True)
     def set_target_enabled(self, mapping_id: str, target_model_id: str, *, enabled: bool) -> None:
         """只更新一个目标的配置启用状态。"""
         with self._get_connection() as conn:
@@ -264,6 +274,7 @@ class ModelMappingRepository:
                 (now_local_datetime_text(), mapping_id, target_model_id),
             )
 
+    @database_operation(write=True)
     def import_mappings(self, mappings: Sequence[ModelMappingSchema]) -> None:
         now_text = now_local_datetime_text()
         with self._get_connection() as conn:
@@ -280,6 +291,7 @@ class ModelMappingRepository:
             for offset, mapping in enumerate(mappings):
                 self._insert_mapping(conn, mapping, now_text, sort_order=next_sort_order + offset)
 
+    @database_operation()
     def list_target_runtime_states(self, mapping_id: str) -> dict[str, dict[str, Any]]:
         with self._get_connection() as conn:
             rows = conn.execute(
@@ -304,6 +316,7 @@ class ModelMappingRepository:
             for row in rows
         }
 
+    @database_operation(write=True)
     def save_target_runtime_state(
         self,
         mapping_id: str,
@@ -357,6 +370,7 @@ class ModelMappingRepository:
             last_error_message=None,
         )
 
+    @database_operation()
     def get_current_target(self, mapping_id: str) -> str | None:
         with self._get_connection() as conn:
             row = conn.execute(
@@ -365,6 +379,7 @@ class ModelMappingRepository:
             ).fetchone()
         return str(row["current_target_model_id"]) if row and row["current_target_model_id"] else None
 
+    @database_operation(write=True)
     def set_current_target(self, mapping_id: str, target_model_id: str | None) -> None:
         with self._get_connection() as conn:
             conn.execute(

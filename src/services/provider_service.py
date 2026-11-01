@@ -19,6 +19,7 @@ from ..config.provider_config import (
     validate_auth_group_provider_definitions,
 )
 from ..repositories.auth_group_repository import AuthGroupRepository
+from ..utils.concurrency import synchronized
 from .config_sections import read_auth_group_entries, read_provider_entries
 
 
@@ -49,6 +50,7 @@ class ProviderService:
             return None
         return self._normalize_provider_mapping(provider)
 
+    @synchronized("_config_manager.write_lock")
     def create_provider(self, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -63,6 +65,7 @@ class ProviderService:
         self._save_providers(config, providers)
         return normalized
 
+    @synchronized("_config_manager.write_lock")
     def update_provider(self, current_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -89,6 +92,7 @@ class ProviderService:
         self._save_providers(config, providers)
         return normalized
 
+    @synchronized("_config_manager.write_lock")
     def delete_provider(self, name: str) -> None:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -99,6 +103,7 @@ class ProviderService:
         providers.remove(target)
         self._save_providers(config, providers)
 
+    @synchronized("_config_manager.write_lock")
     def copy_provider(self, name: str) -> dict[str, Any]:
         """复制 Provider，并把新项插入到源 Provider 下方。"""
         config = self._config_manager.get_raw_config()
@@ -158,6 +163,7 @@ class ProviderService:
             "auth_entry_usage_buckets": auth_entry_usage_buckets,
         }
 
+    @synchronized("_config_manager.write_lock")
     def import_providers(self, payload: Any) -> dict[str, Any]:
         """导入 Provider 配置；同名 Provider 追加数字后缀，同名 Auth Group 合并缺失 Entry。"""
         if not isinstance(payload, dict):
@@ -283,6 +289,7 @@ class ProviderService:
             "auth_entry_usage_buckets_skipped_count": usage_bucket_result.get("skipped_count", 0),
         }
 
+    @synchronized("_config_manager.write_lock")
     def set_provider_enabled(self, name: str, enabled: bool) -> dict[str, Any]:
         config = self._config_manager.get_raw_config()
         providers = read_provider_entries(config)
@@ -299,6 +306,7 @@ class ProviderService:
         self._save_providers(config, providers)
         return provider_config.to_mapping()
 
+    @synchronized("_config_manager.write_lock")
     def batch_set_provider_enabled(self, names: list[str], enabled: bool) -> dict[str, Any]:
         normalized_names = self._normalize_provider_names(names, reject_duplicates=False)
         config = self._config_manager.get_raw_config()
@@ -321,6 +329,7 @@ class ProviderService:
             "enabled": bool(enabled),
         }
 
+    @synchronized("_config_manager.write_lock")
     def reorder_providers(self, names: list[str]) -> dict[str, Any]:
         normalized_names = self._normalize_provider_names(names, reject_duplicates=True)
         config = self._config_manager.get_raw_config()
@@ -343,6 +352,7 @@ class ProviderService:
             "names": normalized_names,
         }
 
+    @synchronized("_config_manager.write_lock")
     def batch_delete_providers(self, names: list[str]) -> dict[str, Any]:
         normalized_names = self._normalize_provider_names(names, reject_duplicates=False)
         config = self._config_manager.get_raw_config()
