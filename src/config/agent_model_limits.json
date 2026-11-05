@@ -1,0 +1,2509 @@
+[
+  {
+    "ids": [
+      "glm-5.3-flash"
+    ],
+    "label": "智谱 GLM-5.3-Flash 官方参数",
+    "context": 1048576,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1,048,576",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash",
+          "checkedAt": "2026-09-06"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash",
+          "checkedAt": "2026-09-06"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-5.3"
+    ],
+    "label": "智谱 GLM-5.3 官方参数",
+    "context": 1048576,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1,048,576",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
+          "checkedAt": "2026-09-06"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
+          "checkedAt": "2026-09-06"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-5.2"
+    ],
+    "label": "智谱 GLM-5.2 官方参数",
+    "context": 1000000,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1,000,000",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-5.1"
+    ],
+    "label": "智谱 GLM-5.1 官方参数",
+    "context": 204800,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方上下文 204,800",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.1",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.1",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-5"
+    ],
+    "label": "智谱 GLM-5 官方参数",
+    "context": 204800,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方上下文 204,800",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-5-turbo"
+    ],
+    "label": "智谱 GLM-5-Turbo 官方参数",
+    "context": 204800,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方上下文 204,800",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5-turbo",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5-turbo",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-4.7"
+    ],
+    "label": "智谱 GLM-4.7 官方参数",
+    "context": 204800,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方上下文 204,800",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-4.7",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-4.7",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-4.6"
+    ],
+    "label": "智谱 GLM-4.6 官方参数",
+    "context": 204800,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方上下文 204,800",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-4.6",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-4.6",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-4.5"
+    ],
+    "label": "智谱 GLM-4.5 官方参数",
+    "context": 131072,
+    "output": 98304,
+    "candidates": {
+      "context": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方上下文 131,072",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-4.5",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 98304,
+          "kind": "official",
+          "label": "官方最大输出 98,304",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/text/glm-4.5",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "deepseek-flash",
+      "deepseek-4.1-flash",
+      "deepseek-v4.1-flash",
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp"
+    ],
+    "label": "DeepSeek V4.1 Flash 官方参数",
+    "context": 1048576,
+    "output": 393216,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1,048,576",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 393216,
+          "kind": "official",
+          "label": "官方最大输出 393,216",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "deepseek-v4-pro"
+    ],
+    "label": "DeepSeek V4 Pro 官方参数",
+    "context": 1048576,
+    "output": 393216,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1,048,576",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 393216,
+          "kind": "official",
+          "label": "官方最大输出 393,216",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "deepseek-v3.2",
+      "deepseek-v3.2-thinking",
+      "deepseek-v3.2-exp",
+      "deepseek-v3.2-exp-thinking"
+    ],
+    "label": "DeepSeek V3.2 模型目录参数",
+    "context": 163840,
+    "output": 65536,
+    "candidates": {
+      "context": [
+        {
+          "value": 163840,
+          "kind": "official",
+          "label": "模型目录上下文 163,840",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 65536,
+          "kind": "official",
+          "label": "模型目录最大输出 65,536",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "deepseek-chat"
+    ],
+    "label": "DeepSeek Chat 官方参数",
+    "context": 128000,
+    "output": 8192,
+    "candidates": {
+      "context": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "官方上下文 128,000",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 8192,
+          "kind": "official",
+          "label": "官方最大输出 8,192",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "deepseek-reasoner"
+    ],
+    "label": "DeepSeek Reasoner 官方参数",
+    "context": 128000,
+    "output": 65536,
+    "candidates": {
+      "context": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "官方上下文 128,000",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 65536,
+          "kind": "official",
+          "label": "官方最大输出 65,536",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "qwen3.8-max",
+      "qwen3.8-flash"
+    ],
+    "label": "通义千问官方上下文和内置输出参数",
+    "context": 1000000,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1,000,000",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+          "checkedAt": "2026-09-06"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "fallback",
+          "label": "内置最大输出 131,072"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "qwen3.7-plus",
+      "qwen3.7-flash"
+    ],
+    "label": "通义千问官方上下文，输出使用通用候选",
+    "context": 1000000,
+    "output": 32000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1,000,000",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 32000,
+          "kind": "fallback",
+          "label": "通用最大输出 32,000（待确认）"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "qwen3.7-max"
+    ],
+    "label": "Qwen3.7 Max 官方上下文，输出使用通用参考",
+    "context": 1000000,
+    "output": 32000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1,000,000",
+          "sourceUrl": "https://www.alibabacloud.com/help/en/model-studio/text-generation-model",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 32000,
+          "kind": "fallback",
+          "label": "通用输出预算 32,000（官方上限待确认）"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "qwen3-coder-flash"
+    ],
+    "label": "Qwen3 Coder Flash 官方上下文，输出使用通用参考",
+    "context": 1000000,
+    "output": 32000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1,000,000",
+          "sourceUrl": "https://www.alibabacloud.com/help/en/model-studio/text-generation-model",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 32000,
+          "kind": "fallback",
+          "label": "通用输出预算 32,000（官方上限待确认）"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "minimax-m3"
+    ],
+    "label": "MiniMax 官方上下文和输出参数",
+    "context": 1000000,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1,000,000",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方推荐输出 131,072",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 524288,
+          "kind": "official",
+          "label": "官方输出上限 524,288",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "minimax-m2.7",
+      "minimax-m2.5",
+      "minimax-m2.1"
+    ],
+    "aliases": [
+      "minimax-m2.7-highspeed",
+      "minimax-m2.5-highspeed",
+      "minimax-m2.1-highspeed"
+    ],
+    "label": "MiniMax 官方上下文和输出参数",
+    "context": 204800,
+    "output": 65536,
+    "candidates": {
+      "context": [
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方上下文 204,800",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 65536,
+          "kind": "official",
+          "label": "官方推荐输出 65,536",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方输出上限 204,800",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "minimax-m2"
+    ],
+    "aliases": [
+      "minimax-m2-highspeed"
+    ],
+    "label": "MiniMax 官方上下文和输出参数",
+    "context": 204800,
+    "output": 65536,
+    "candidates": {
+      "context": [
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方上下文 204,800",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 65536,
+          "kind": "official",
+          "label": "官方推荐输出 65,536",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 204800,
+          "kind": "official",
+          "label": "官方输出上限 204,800",
+          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "kimi-k3"
+    ],
+    "label": "Moonshot Kimi K3 官方参数",
+    "context": 1048576,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1,048,576",
+          "sourceUrl": "https://platform.kimi.com/docs/pricing/chat",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方默认输出 131,072",
+          "sourceUrl": "https://platform.kimi.com/docs/api/chat",
+          "checkedAt": "2026-11-05"
+        },
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方输出上限 1,048,576（受剩余上下文限制）",
+          "sourceUrl": "https://platform.kimi.com/docs/api/chat",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "kimi-k3.1-pro",
+      "kimi-k3.1-pro-highspeed"
+    ],
+    "aliases": [
+      "kimi-k3.1",
+      "kimi-k3-1-pro",
+      "kimi-k3-1-pro-highspeed"
+    ],
+    "label": "Moonshot Kimi K3.1 Pro 官方参数",
+    "context": 1048576,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1,048,576",
+          "sourceUrl": "https://platform.kimi.com/docs/pricing/chat",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方默认输出 131,072",
+          "sourceUrl": "https://platform.kimi.com/docs/api/chat",
+          "checkedAt": "2026-11-05"
+        },
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方输出上限 1,048,576（受剩余上下文限制）",
+          "sourceUrl": "https://platform.kimi.com/docs/api/chat",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "kimi-k3-1-pro-261024"
+    ],
+    "label": "火山方舟 Kimi K3.1 Pro 官方参数",
+    "context": 1048576,
+    "output": 1048576,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1,048,576",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方最大回答 1,048,576（受剩余上下文限制）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        },
+        {
+          "value": 4096,
+          "kind": "official",
+          "label": "Chat API 默认回答 4,096",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/chat-api?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "kimi-k2.7-code"
+    ],
+    "aliases": [
+      "kimi-k2.7-code-highspeed"
+    ],
+    "label": "Moonshot Kimi K2.7 Code 官方参数",
+    "context": 262144,
+    "output": 32768,
+    "candidates": {
+      "context": [
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方上下文 262,144",
+          "sourceUrl": "https://platform.moonshot.cn/docs/guide/kimi-k2-7-code-quickstart",
+          "checkedAt": "2026-09-06"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 32768,
+          "kind": "official",
+          "label": "官方默认输出 32,768",
+          "sourceUrl": "https://platform.moonshot.cn/docs/guide/kimi-k2-7-code-quickstart",
+          "checkedAt": "2026-09-06"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "kimi-k2.6"
+    ],
+    "label": "Moonshot Kimi K2.6 官方参数",
+    "context": 262144,
+    "output": 32768,
+    "candidates": {
+      "context": [
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方上下文 262,144",
+          "sourceUrl": "https://platform.moonshot.cn/docs/guide/kimi-k2-6-quickstart",
+          "checkedAt": "2026-09-06"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 32768,
+          "kind": "official",
+          "label": "官方默认输出 32,768",
+          "sourceUrl": "https://platform.moonshot.cn/docs/guide/kimi-k2-6-quickstart",
+          "checkedAt": "2026-09-06"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "hy4",
+      "hy4-preview"
+    ],
+    "label": "腾讯混元 Hy4 / Hy4 Preview 官方参数",
+    "context": 1048576,
+    "output": 65536,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1M（1,048,576）",
+          "sourceUrl": "https://cloud.tencent.com/document/product/1823/130051",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 65536,
+          "kind": "official",
+          "label": "官方最大输出 64K（65,536）",
+          "sourceUrl": "https://cloud.tencent.com/document/product/1823/130051",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "hy3"
+    ],
+    "label": "腾讯混元 Hy3 官方参数",
+    "context": 262144,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方上下文 256K（262,144）",
+          "sourceUrl": "https://cloud.tencent.com/document/product/1823/130051",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 128K（131,072）",
+          "sourceUrl": "https://cloud.tencent.com/document/product/1823/130051",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "doubao-seed-evolving"
+    ],
+    "label": "豆包 Seed Evolving 官方参数",
+    "context": 1048576,
+    "output": 262144,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1024K（1,048,576）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方最大回答 256K（262,144，思考另计）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        },
+        {
+          "value": 4096,
+          "kind": "official",
+          "label": "Chat API 默认回答 4,096",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/chat-api?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "doubao-seed-2-1-pro-260915",
+      "doubao-seed-2-1-lite-260915"
+    ],
+    "label": "豆包 Seed 2.1 Pro / Lite 260915 官方参数",
+    "context": 1048576,
+    "output": 262144,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1024K（1,048,576）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方最大回答 256K（262,144，思考另计）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        },
+        {
+          "value": 4096,
+          "kind": "official",
+          "label": "Chat API 默认回答 4,096",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/chat-api?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "doubao-seed-2-1-turbo-260628",
+      "doubao-seed-2-1-pro-260628"
+    ],
+    "label": "豆包 Seed 2.1 Turbo / Pro 260628 官方参数",
+    "context": 262144,
+    "output": 262144,
+    "candidates": {
+      "context": [
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方上下文 256K（262,144）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方最大回答 256K（262,144，受剩余上下文限制）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        },
+        {
+          "value": 4096,
+          "kind": "official",
+          "label": "Chat API 默认回答 4,096",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/chat-api?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "doubao-seed-2-0-lite-260428",
+      "doubao-seed-2-0-mini-260428"
+    ],
+    "label": "豆包 Seed 2.0 Lite / Mini LTS 官方参数",
+    "context": 262144,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方上下文 256K（262,144）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大回答 128K（131,072，思考另计）",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+          "checkedAt": "2026-11-05"
+        },
+        {
+          "value": 4096,
+          "kind": "official",
+          "label": "Chat API 默认回答 4,096",
+          "sourceUrl": "https://docs.volcengine.com/docs/ark/chat-api?lang=zh",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-flash",
+      "mimo-v2.6-pro-ultraspeed"
+    ],
+    "label": "小米 MiMo V2.6 官方参数",
+    "context": 1048576,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1M（1,048,576）",
+          "sourceUrl": "https://mimo.mi.com/static/docs/quick-start/summary/model.md",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方默认及最大输出 131,072（含思考）",
+          "sourceUrl": "https://mimo.mi.com/static/docs/api/chat/openai-api-post.md",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-opus-5-5",
+      "claude-opus-5",
+      "claude-opus-4-8"
+    ],
+    "label": "Anthropic Claude Opus 新模型参数",
+    "context": 1000000,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "模型目录上下文 1,000,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "模型目录最大输出 128,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-sonnet-5-5"
+    ],
+    "label": "Anthropic Claude Sonnet 5.5 系统卡上下文和系列输出建议",
+    "context": 1000000,
+    "output": 64000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "系统卡上下文 1,000,000",
+          "sourceUrl": "https://www.anthropic.com/claude-sonnet-5-5-system-card",
+          "checkedAt": "2026-10-08"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 64000,
+          "kind": "fallback",
+          "label": "Claude 系列建议最大输出 64,000"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-sonnet-5"
+    ],
+    "label": "Anthropic Claude Sonnet 5 模型参数",
+    "context": 1000000,
+    "output": 64000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "模型目录上下文 1,000,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 64000,
+          "kind": "official",
+          "label": "模型目录最大输出 64,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-fable-5-1",
+      "claude-fable-5",
+      "claude-mythos-5-1",
+      "claude-mythos-5",
+      "claude-mythos-preview"
+    ],
+    "label": "Anthropic Claude Fable/Mythos 模型参数",
+    "context": 1000000,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "模型目录上下文 1,000,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "模型目录最大输出 128,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-opus-4-7"
+    ],
+    "label": "Anthropic Claude Opus 4.7 模型参数",
+    "context": 1000000,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "模型目录上下文 1,000,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "模型目录最大输出 128,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-opus-4-6"
+    ],
+    "label": "Anthropic Claude Opus 4.6 模型参数",
+    "context": 1000000,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "模型目录上下文 1,000,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "模型目录最大输出 128,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-sonnet-4-6"
+    ],
+    "label": "Anthropic Claude Sonnet 4.6 模型参数",
+    "context": 1000000,
+    "output": 64000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "模型目录上下文 1,000,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 64000,
+          "kind": "official",
+          "label": "模型目录最大输出 64,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-opus-4-5"
+    ],
+    "label": "Anthropic Claude Opus 4.5 模型参数",
+    "context": 200000,
+    "output": 64000,
+    "candidates": {
+      "context": [
+        {
+          "value": 200000,
+          "kind": "official",
+          "label": "模型目录上下文 200,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 64000,
+          "kind": "official",
+          "label": "模型目录最大输出 64,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-sonnet-4-5"
+    ],
+    "label": "Anthropic Claude Sonnet 4.5 模型参数",
+    "context": 200000,
+    "output": 64000,
+    "candidates": {
+      "context": [
+        {
+          "value": 200000,
+          "kind": "official",
+          "label": "模型目录上下文 200,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 64000,
+          "kind": "official",
+          "label": "模型目录最大输出 64,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-haiku-5-5"
+    ],
+    "label": "Anthropic Claude Haiku 5.5 系统卡上下文和系列输出建议",
+    "context": 1000000,
+    "output": 64000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "系统卡上下文 1,000,000",
+          "sourceUrl": "https://www.anthropic.com/claude-haiku-5-5-system-card",
+          "checkedAt": "2026-10-08"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 64000,
+          "kind": "fallback",
+          "label": "Claude 系列建议最大输出 64,000"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-haiku-4-5"
+    ],
+    "label": "Anthropic Claude Haiku 4.5 模型参数",
+    "context": 200000,
+    "output": 64000,
+    "candidates": {
+      "context": [
+        {
+          "value": 200000,
+          "kind": "official",
+          "label": "模型目录上下文 200,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 64000,
+          "kind": "official",
+          "label": "模型目录最大输出 64,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-opus-4-1"
+    ],
+    "label": "Anthropic Claude Opus 4.1 模型参数",
+    "context": 200000,
+    "output": 32000,
+    "candidates": {
+      "context": [
+        {
+          "value": 200000,
+          "kind": "official",
+          "label": "模型目录上下文 200,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 32000,
+          "kind": "official",
+          "label": "模型目录最大输出 32,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "claude-sonnet-4-0"
+    ],
+    "aliases": [
+      "claude-sonnet-4"
+    ],
+    "label": "Anthropic Claude Sonnet 4 模型参数",
+    "context": 200000,
+    "output": 64000,
+    "candidates": {
+      "context": [
+        {
+          "value": 200000,
+          "kind": "official",
+          "label": "模型目录上下文 200,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 64000,
+          "kind": "official",
+          "label": "模型目录最大输出 64,000",
+          "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-6.1-sol"
+    ],
+    "label": "GPT-6.1 Sol Codex 目录参数和 GPT 系列输出建议",
+    "context": 272000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 272000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 272,000",
+          "checkedAt": "2026-10-08"
+        },
+        {
+          "value": 872000,
+          "kind": "client-default",
+          "label": "客户端扩展上下文 872,000",
+          "checkedAt": "2026-10-08"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "fallback",
+          "label": "GPT 系列建议最大输出 128,000"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-6.1-terra"
+    ],
+    "aliases": [
+      "gpt-6.1-terra-pro",
+      "gpt-6.1-terra-fast"
+    ],
+    "label": "GPT-6.1 Terra Codex 目录参数和 OpenAI 文档候选",
+    "context": 272000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 272000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 272,000",
+          "checkedAt": "2026-10-29"
+        },
+        {
+          "value": 872000,
+          "kind": "client-default",
+          "label": "客户端扩展上下文 872,000",
+          "checkedAt": "2026-10-29"
+        },
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-6.1-terra",
+          "checkedAt": "2026-10-29"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-6.1-terra",
+          "checkedAt": "2026-10-29"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-6-astra"
+    ],
+    "label": "GPT-6 Astra Codex 默认值和最大上下文候选",
+    "context": 272000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 272000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 272,000",
+          "checkedAt": "2026-09-06"
+        },
+        {
+          "value": 872000,
+          "kind": "client-default",
+          "label": "客户端扩展上下文 872,000",
+          "checkedAt": "2026-09-06"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "client-default",
+          "label": "默认最大输出 128,000",
+          "checkedAt": "2026-09-06"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-6-sol",
+      "gpt-6-luna"
+    ],
+    "label": "OpenAI Codex 最新模型目录参数",
+    "context": 272000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 272000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 272,000",
+          "checkedAt": "2026-09-24"
+        },
+        {
+          "value": 872000,
+          "kind": "client-default",
+          "label": "客户端扩展上下文 872,000",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "client-default",
+          "label": "客户端默认最大输出 128,000",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-daybreak-blue-latest"
+    ],
+    "label": "OpenAI Codex Daybreak Blue 模型目录参数",
+    "context": 272000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 272000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 272,000",
+          "checkedAt": "2026-09-24"
+        },
+        {
+          "value": 872000,
+          "kind": "client-default",
+          "label": "客户端扩展上下文 872,000",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "client-default",
+          "label": "客户端默认最大输出 128,000",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-daybreak-red-latest"
+    ],
+    "label": "OpenAI Codex Daybreak Red 模型目录参数",
+    "context": 372000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 372000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 372,000",
+          "checkedAt": "2026-09-24"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "client-default",
+          "label": "客户端默认最大输出 128,000",
+          "checkedAt": "2026-09-24"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.6-sol"
+    ],
+    "aliases": [
+      "gpt-5.6"
+    ],
+    "label": "Codex 默认值和 OpenAI 文档候选",
+    "context": 372000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 372000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 372,000",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 400000,
+          "kind": "official",
+          "label": "文档上下文 400,000",
+          "sourceUrl": "https://openai.com/index/introducing-gpt-5-5/",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.6-terra"
+    ],
+    "label": "Codex 默认值和 OpenAI 文档候选",
+    "context": 372000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 372000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 372,000",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 400000,
+          "kind": "official",
+          "label": "文档上下文 400,000",
+          "sourceUrl": "https://openai.com/index/introducing-gpt-5-5/",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.6-luna"
+    ],
+    "label": "Codex 默认值和 OpenAI 文档候选",
+    "context": 372000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 372000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 372,000",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 400000,
+          "kind": "official",
+          "label": "文档上下文 400,000",
+          "sourceUrl": "https://openai.com/index/introducing-gpt-5-5/",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.5"
+    ],
+    "label": "Codex 默认值和 OpenAI 文档候选",
+    "context": 372000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 372000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 372,000",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 400000,
+          "kind": "official",
+          "label": "文档上下文 400,000",
+          "sourceUrl": "https://openai.com/index/introducing-gpt-5-5/",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.5",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.5",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.4"
+    ],
+    "label": "Codex 默认值和 OpenAI 文档候选",
+    "context": 372000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 372000,
+          "kind": "client-default",
+          "label": "客户端默认上下文 372,000",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 400000,
+          "kind": "official",
+          "label": "文档上下文 400,000",
+          "sourceUrl": "https://openai.com/index/introducing-gpt-5-5/",
+          "checkedAt": "2026-08-26"
+        },
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.4",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.4",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.5-pro"
+    ],
+    "label": "OpenAI 模型目录参数",
+    "context": 1050000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.4-pro"
+    ],
+    "label": "OpenAI 模型目录参数",
+    "context": 1050000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.4-mini",
+      "gpt-5.4-nano"
+    ],
+    "label": "OpenAI 模型目录参数",
+    "context": 400000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 400000,
+          "kind": "official",
+          "label": "API 文档上下文 400,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "client-default",
+          "label": "GPT 建议压缩阈值 85",
+          "checkedAt": "2026-08-26"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models",
+          "checkedAt": "2026-08-26"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gemini-4-argon"
+    ],
+    "label": "Google Gemini 4 Argon 官方同步请求参数",
+    "context": 1048576,
+    "output": 65536,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方总上下文 1,048,576（输入与输出共享）",
+          "sourceUrl": "https://aistudio.google.com/docs/models/gemini-4-argon",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 65536,
+          "kind": "official",
+          "label": "官方同步请求输出上限 65,536",
+          "sourceUrl": "https://aistudio.google.com/docs/models/gemini-4-argon",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gemini-3.8-flash"
+    ],
+    "label": "Google Gemini 3.8 Flash 官方参数",
+    "context": 1048576,
+    "output": 65536,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方最大输入 1,048,576",
+          "sourceUrl": "https://aistudio.google.com/docs/models/gemini-3.8-flash",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 65536,
+          "kind": "official",
+          "label": "官方最大输出 65,536",
+          "sourceUrl": "https://aistudio.google.com/docs/models/gemini-3.8-flash",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "grok-4.7"
+    ],
+    "label": "xAI Grok 4.7 官方上下文，输出使用通用参考",
+    "context": 500000,
+    "output": 32000,
+    "candidates": {
+      "context": [
+        {
+          "value": 500000,
+          "kind": "official",
+          "label": "官方上下文 500,000",
+          "sourceUrl": "https://docs.x.ai/developers/models/grok-4.7",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 32000,
+          "kind": "fallback",
+          "label": "通用输出预算 32,000（官方上限待确认）"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "mistral-large-4",
+      "mistral-large-4-0"
+    ],
+    "label": "Mistral Large 4 公开预览官方上下文，输出使用通用参考",
+    "context": 1048576,
+    "output": 32000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1048576,
+          "kind": "official",
+          "label": "官方上下文 1M（1,048,576）",
+          "sourceUrl": "https://docs.mistral.ai/models/mistral-large-4-0",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 32000,
+          "kind": "fallback",
+          "label": "通用输出预算 32,000（官方上限待确认）"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-5.3-codex"
+    ],
+    "label": "OpenAI GPT-5.3-Codex 官方参数",
+    "context": 400000,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 400000,
+          "kind": "official",
+          "label": "官方总上下文 400,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+          "checkedAt": "2026-11-05"
+        },
+        {
+          "value": 272000,
+          "kind": "official",
+          "label": "官方最大输入 272,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+          "checkedAt": "2026-11-05"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "官方最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+          "checkedAt": "2026-11-05"
+        }
+      ]
+    }
+  }
+]

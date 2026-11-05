@@ -10,7 +10,7 @@ LLM_Proxy 把模型服务、鉴权方式、协议转换和后台运维收敛到�
 
 - 统一接入多种上游协议：同一个代理服务可同时对接 OpenAI Chat Completions、OpenAI Responses、Claude Messages 和 Codex 风格接口
 - 多下游兼容内建：同一个 Provider 不需要额外配置下游格式，默认即可同时服务 `/v1/chat/completions`、`/v1/responses` 和 `/v1/messages`
-- OAuth 账号文件代理：内置 Codex / Claude 登录、认证文件管理、模型目录维护、Codex 配额查看、账号状态记录和账号候选切换
+- OAuth 账号文件代理：支持 Codex / Claude 认证文件代理、账号状态记录和账号候选切换；后台提供 Codex 登录、认证文件管理、模型目录维护和配额查看
 - Hook 扩展机制：用于补充 Header、请求护栏和成功响应清洗
 - 多 Key 池化调度：`auth_group` 支持并发限制、429 冷却、分钟/日请求配额、分钟/日 Token 配额
 - 控制平面模型测试：Provider 编辑页可按当前表单快照直接测试模型可用性、首字延迟和 TPS
@@ -111,8 +111,27 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 - `/statistics`：统计与日志面板
 - `/users`：用户与白名单管理
 - `/providers`：Provider / Auth Group 管理
-- `/oauth`：Codex / Claude OAuth 认证文件与模型管理；开启 `oauth.enabled` 后会显示在后台导航中
+- `/agents`：本机与 SSH 机器上的 Claude、Codex、opencode 配置管理
+- `/oauth`：Codex OAuth 认证文件与模型管理；开启 `oauth.enabled` 后会显示在后台导航中
 - `/settings`：系统、登录、日志和 OAuth 网络设置
+
+### Agent 配置
+
+Claude 支持权限模式（含 `bypassPermissions`）、命令沙箱和运行参数。字段含义、平台限制及版本依据见 [Claude 配置兼容性](docs/claude-config-compatibility.md)。
+
+`/agents` 左侧管理机器，右侧按 Claude、Codex、opencode 编辑模型、API 地址、下游 API Key 和运行设置。API 地址可自由填写，指向本服务时，模型下拉来自当前启用的 Provider、OAuth 与模型映射；指向外部服务时，模型 ID 使用手动输入，切换地址时保留当前模型值。保存预览展示逐字段变化，已有文件保留最近五份 `.bak.1` 至 `.bak.5` 备份。点击已存在文件的路径可在网页内编辑和载入备份，编辑器提供 JSON / JSONC / TOML 语法高亮；点击保存自动校验并写入当前打开的文件。关闭有未保存修改的编辑器时，可选择保存并关闭、不保存或继续编辑。
+
+“本机”指运行 LLM_Proxy 的机器与用户。Windows 与 Linux 均可编辑本机文件，SSH 机器使用远程用户的真实主目录。文件路径旁的设置按钮支持 Claude `.json` 文件、Codex 配置目录和 opencode `.json` / `.jsonc` 文件；Codex 目录同时定位 `config.toml` 与 `auth.json`。路径按机器和 Agent 持久保存，重新访问和服务重启后继续使用，清空或恢复默认后使用默认位置。本机默认路径支持 `CODEX_HOME` 与 `CLAUDE_CONFIG_DIR`。原有其他配置及 JSONC、TOML 注释保留，单文件上限为 2 MiB，保存遇到文件版本变化时提示刷新。
+
+模型参数输入显示当前文件值，推荐菜单保留模型对应的全部候选值、模型名称及来源说明；切换模型和手填外部模型 ID 更新候选，选择候选后填入参数。Claude 优先参考主模型或唯一已配置模型；主模型为空且其他模型不一致时，菜单直接列出各模型的候选值。各模型旁的问号提供上下文和最大输出参考值，未识别模型显示通用候选。Codex 的压缩上限与 opencode 的压缩预留显示在压缩阈值标题旁，数值输入失焦且内容变化时更新，选择候选值时即时更新。
+
+Codex 记忆设置对应 `features.memories`，支持启用、禁用和不设置；未配置时显示不设置，主动选择不设置时移除该字段。
+
+模型参数表位于 [`src/config/agent_model_limits.json`](src/config/agent_model_limits.json)，新增模型、别名和候选值的格式见 [Agent 模型参数表维护](docs/agent-model-limits.md)。执行 `uv run python scripts/check_agent_model_limits.py` 可检查表内命名、数值与候选一致性。
+
+SSH 支持密码或服务进程可用的 SSH Agent / 默认密钥，首次未知主机显示指纹确认。代理模式包括直连、服务进程的系统代理及自定义 `http://`、`https://`、`socks5://`、`socks5h://`，HTTP(S) 使用 CONNECT 隧道，HTTPS 校验证书。密码及代理认证信息在当前浏览器会话中暂存，闲置三十分钟清理，服务重启后重新填写。机器和路径登记保存在数据库同级的 `agent-config/state.json`。
+
+已启用管理账号时使用现有登录认证；管理账号关闭时，此页面仅允许本机回环地址访问。远程访问此页面需要配置管理账号。Agent 在远程机器运行时，API 地址填写该机器可访问的代理或外部服务地址。
 
 ## 使用场景
 
@@ -328,7 +347,7 @@ providers:
 
 ## OAuth 代理（Codex / Claude）
 
-OAuth 代理是独立于常规 Provider 的运行时能力。它不需要在 `providers[]` 中配置 API Key，而是通过后台 OAuth 登录生成本地认证文件，再把下游 OpenAI/Claude 兼容请求转换后转发到 Codex Responses 或 Claude Messages 上游。
+OAuth 代理是独立于常规 Provider 的运行时能力。它不需要在 `providers[]` 中配置 API Key，而是通过 OAuth 登录生成本地认证文件，再把下游 OpenAI/Claude 兼容请求转换后转发到 Codex Responses 或 Claude Messages 上游。管理页面提供 Codex 登录与配置；Claude OAuth 的认证与模型管理通过 `/api/oauth/claude/*` 接口提供。
 
 ### 1. 开启 OAuth 管理入口
 
@@ -347,7 +366,7 @@ oauth:
 
 ### 2. 生成 OAuth 认证文件
 
-在 `/oauth` 页面点击“刷新授权链接”，用浏览器完成登录后，将完整回调 URL 粘贴回页面提交。服务会把认证信息写入：
+在 `/oauth` 页面点击“刷新授权链接”，用浏览器完成 Codex 登录后，将完整回调 URL 粘贴回页面提交。服务使用以下认证文件与目录：
 
 - `data/oauth/codex/*.json`：Codex 认证文件
 - `data/oauth/codex/models.json`：手动维护的 Codex 模型目录
@@ -360,7 +379,7 @@ oauth:
 
 ### 3. 维护模型目录
 
-Codex / Claude OAuth 模型需要在 `/oauth` 页面手动添加。添加后，如果至少有一个对应类型的认证文件，`GET /v1/models` 会返回这些模型。Codex 模型示例：
+Codex OAuth 模型在 `/oauth` 页面维护，Claude OAuth 模型通过 `/api/oauth/claude/models` 接口维护。添加后，如果至少有一个对应类型的认证文件，`GET /v1/models` 会返回这些模型。Codex 模型示例：
 
 ```json
 {
