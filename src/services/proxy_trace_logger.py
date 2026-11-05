@@ -130,11 +130,29 @@ class ProxyTraceLogger:
             return "<empty-header>"
         return "-".join(part.capitalize() for part in normalized_name.split("-"))
 
+    # Header names whose values must never reach the trace log.
+    _REDACTED_TRACE_HEADERS = frozenset(
+        {
+            "authorization",
+            "proxy-authorization",
+            "x-api-key",
+            "api-key",
+            "x-goog-api-key",
+            "cookie",
+            "set-cookie",
+        }
+    )
+    _REDACTED_TRACE_VALUE = "***REDACTED***"
+
     @staticmethod
     def _normalize_trace_headers(headers: dict[str, Any]) -> dict[str, Any]:
         normalized: dict[str, Any] = {}
         for key, value in dict(headers or {}).items():
-            normalized[str(key)] = ProxyTraceLogger._normalize_trace_scalar(value)
+            name = str(key)
+            if name.strip().lower() in ProxyTraceLogger._REDACTED_TRACE_HEADERS:
+                normalized[name] = ProxyTraceLogger._REDACTED_TRACE_VALUE
+            else:
+                normalized[name] = ProxyTraceLogger._normalize_trace_scalar(value)
         return normalized
 
     @classmethod
