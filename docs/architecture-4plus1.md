@@ -27,6 +27,7 @@
 - 在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成、查看、启停、导入、导出和归档删除 CLI/OAuth 类本地认证文件
 - 在启用 `api_keys.enabled` 后提供 API Key 管理入口，用于创建下游访问 key、设置模型权限、设置总 token 上限并查看 key 级用量
 - 在启用 `model_mapping.enabled` 后提供模型映射入口，用于维护独立对外模型 ID，以及跨 Provider / OAuth 模型的最高优先级或粘滞故障切换目标
+- 在 `/agents` 提供本机和 SSH 机器上的 Claude、Codex、opencode 配置编辑、逐字段预览、文件编辑和备份恢复
 
 ## 2. Logical View
 
@@ -117,6 +118,17 @@ decoder
 
 ### 2.2 Major Components
 
+- `AgentConfigController` / `AgentConfigService`
+  - 提供 `/agents` 页面与 `/api/agent-config/*` 控制平面接口，使用现有管理员认证、同源请求校验和浏览器隔离的会话标识
+  - 管理员认证关闭时，仅接受回环地址和回环主机名访问；读取响应使用 `Cache-Control: no-store`
+  - 汇总当前可见 Provider、已启用 OAuth 和模型映射目录，API Key 候选使用下游访问凭据
+  - 根据真实用户主目录读取配置，以文件摘要核对读取、预览、写入之间的版本，预览票据保存实际待写字节
+  - 受管字段按路径数组及值摘要登记，自动清理仅作用于本页面管理且未被手动修改的旧值；用户主动清空的表单字段列入删除预览，其他配置和 JSONC / TOML 注释保留
+- `AgentConfigRepository` / `agent_config_documents` / `agent_config_transport`
+  - 状态文件位于数据库同级目录的 `agent-config/state.json`，保存机器、已确认主机指纹、自定义路径及受管字段摘要
+  - JSONC 与 TOML 局部编辑、本机原子替换、SSH 主机验证及 SFTP 文件访问分别承担格式与传输职责
+  - SSH 支持直连、进程系统代理及 HTTP / HTTPS CONNECT、SOCKS5、SOCKS5h 自定义代理；HTTPS 代理校验证书
+  - SSH 密码与代理凭据按浏览器在内存中暂存，登记文件中的代理地址移除认证信息
 - `ProxyController`
   - 根据当前 route family 选择下游接口协议
   - 根据 `client_ip.real_ip_enabled` 和 `client_ip.real_ip_header` 解析白名单、模型权限、统计和 trace 使用的客户端 IP
@@ -779,7 +791,7 @@ provider editor form snapshot
 
 ### 3.8 Control-Plane OAuth Management
 
-OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并在页面内提供 `Codex` 与 `Claude` 子 tab。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
+OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，页面直接展示 Codex 登录、模型目录和认证文件管理。页面初始化只请求 Codex 管理接口，认证文件自动同步按页面可见性和操作状态调度。Claude OAuth 管理能力由 `/api/oauth/claude/*` 接口提供。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
 
 页面与 API：
 
@@ -822,7 +834,7 @@ OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，并�
 Codex OAuth 登录链路如下：
 
 ```text
-OAuth Codex tab
+Codex OAuth management page
   -> create session
   -> generate PKCE verifier / challenge and state
   -> return auth.openai.com authorization URL
@@ -851,10 +863,10 @@ OAuth Codex tab
 
 Codex 配额刷新频率、触发条件、认证文件范围和请求边界见 [Codex 额度刷新规则](codex-quota-refresh.md)。
 
-Claude OAuth 登录链路如下：
+Claude OAuth 管理接口的登录链路如下：
 
 ```text
-OAuth Claude tab
+Claude OAuth management API
   -> create session
   -> generate PKCE verifier / challenge and state
   -> return claude.ai authorization URL
@@ -905,7 +917,7 @@ OAuth Claude tab
 - Codex 图片模型 ID 由用户在 OAuth 页面维护，初始目录包含项目内置常用 Codex 图片模型 ID
 - Codex 图片默认模型由用户在 OAuth 页面对应图片模型项中设置；当前默认值优先使用内置默认图片模型，目录中不存在时使用图片模型目录第一项
 - Codex 文本模型和图片模型都支持添加内置模型；添加操作只追加缺失的项目内置模型 ID，不删除用户自行添加的模型 ID
-- Claude 模型 ID 由用户在 OAuth 页面手动维护，默认列表为空
+- Claude 模型 ID 通过 `/api/oauth/claude/models` 接口维护，默认列表为空
 - OAuth 页面提供 `router-for-me/models` 仓库的 `models.json` 与 `https://models.router-for.me/models.json` 作为外部参考链接，不自动拉取
 - Codex 查询配额时直接使用认证文件当前的 access token，不执行 token 刷新或认证失败后的刷新重试
 - Codex 配额查询的代理优先级为认证文件 `proxy_url`、全局 OAuth 代理设置、直连
@@ -1062,6 +1074,48 @@ flowchart LR
     Logger --> Console[Console output]
 ```
 
+### 3.11 Control-Plane Agent Configuration
+
+- `GET /api/agent-config/bootstrap` 返回机器、当前模型目录、下游 Key 候选及页面和写入逻辑共用的模型限制候选。
+- `/api/agent-config/machines` 和 `/machines/<id>` 提供机器登记、更新和删除；`local` 表示服务进程所属用户所在的机器。
+- `/machines/<id>/connect`、`disconnect` 和 `snapshot` 提供 SSH 会话和文件快照。`PUT /machines/<id>/path` 接收 `target` 与 `path`，支持 Claude 配置文件、Codex 配置目录和 opencode 配置文件；未提供 `target` 的旧请求按 opencode 处理。
+- `agent-config/state.json` 使用版本 2，路径按机器 ID 与 Agent 保存；读取版本 1 时将 opencode 路径字符串转换为对应的路径记录。Codex 目录同时定位 `config.toml` 与 `auth.json`，清空某一 Agent 的路径后使用该 Agent 的默认位置。候选路径成功读取且登记文件写入成功后更新内存状态；配置内容格式错误通过快照的 `parseError` 展示。
+- 浏览器使用模型台账中的完整参数候选，配置输入与推荐独立。Claude 优先参考主模型或唯一已配置模型；多个模型且没有主模型时，菜单直接展示各模型的候选值与名称。切换模型和手填模型 ID 更新候选，选择候选时即时修改参数草稿，手填数值在失焦且值变化时提交草稿。Codex 压缩上限和 opencode 压缩预留显示在压缩阈值标题旁；每个模型的悬停说明显示上下文和最大输出参考值。
+- `/machines/<id>/<agent>/preview` 接受表单或文件编辑内容与读取版本，生成有效期五分钟的预览票据；进程内最多保留四十份票据。原文编辑的票据仅包含 `raw` 中提交的文件及其读取版本。
+- `/machines/<id>/apply` 核对浏览器、SSH 会话、路径、文件版本与受管字段摘要，轮转五份备份后原子替换票据中的文件。Codex 表单将配置与认证文件作为一组写入，文件路径入口单独编辑对应文件。写入失败时回滚已写文件；回滚遇到外部修改时返回需要人工恢复的文件。
+- `/machines/<id>/<agent>/files?backup=0..5` 提供文件编辑器和备份内容。浏览器复用本地 Ace 资源提供 JSON / JSONC / TOML 高亮，以当前文件文本为修改基线；关闭未保存的编辑器时提供保存、放弃和继续编辑选项。
+- 文件编辑器的保存动作依次请求 `/preview` 和 `/apply`，以最新校验票据写入当前文件。校验或写入失败时，浏览器保留编辑内容；保存期间编辑器只读，关闭后释放编辑器实例及主题观察器。
+- SSH 连接和密码按浏览器与机器隔离，闲置三十分钟释放；每分钟运行清理任务，应用退出关闭全部会话。管理操作使用独立协作锁，本机磁盘与状态文件操作使用原生 I/O 线程池，Paramiko 的协作网络连接保留在服务线程的 Hub 中。
+- Claude 默认路径为 `~/.claude/settings.json`；Codex 为 `~/.codex/config.toml` 和 `auth.json`；opencode 为 `~/.config/opencode/opencode.json`。本机支持 `CLAUDE_CONFIG_DIR` 和 `CODEX_HOME`；远程主目录由 SFTP 查询。每个文件上限为 2 MiB。
+
+```mermaid
+sequenceDiagram
+    participant Browser as Agent 配置页面
+    participant API as AgentConfigController
+    participant Service as AgentConfigService
+    participant Files as 本机文件 / SSH SFTP
+    participant State as AgentConfigRepository
+    Browser->>API: 同源请求 + 管理会话
+    opt 保存自定义路径或恢复默认
+        API->>Service: 机器 ID + Agent + 路径
+        Service->>Files: 读取候选路径的配置快照
+        Service->>State: 原子保存各机器各 Agent 的路径
+        Service-->>Browser: 新路径与文件快照
+    end
+    API->>Service: 读取机器文件
+    Service->>Files: 查询主目录与配置
+    Files-->>Browser: 文件字段 + 版本摘要
+    Note over Browser: 模型推荐独立于配置草稿，选择候选时填入参数
+    Browser->>Service: 表单或文件内容 + 读取版本
+    Note over Browser,Files: 表单按 Agent 生成写入计划，原文编辑按提交的文件生成计划；文件编辑器单次保存自动完成预览与写入
+    Service->>Files: 复核当前版本
+    Service-->>Browser: 字段预览 + 票据
+    Browser->>Service: 保存票据
+    Service->>Files: 复核、备份、原子写入
+    Service->>State: 原子保存受管字段摘要
+    Service-->>Browser: 最新文件快照
+```
+
 ## 4. Development View
 
 ### 4.1 Directory Responsibilities
@@ -1083,6 +1137,14 @@ flowchart LR
 
 ### 4.2 Key Files
 
+- `src/presentation/agent_config_controller.py`、`templates/agents.html`、`static/js/agents.js`、`static/css/agents.css`
+  - Agent 配置管理路由、机器侧边栏、连接弹窗、表单与文件编辑器
+- `src/services/agent_config_service.py`、`agent_config_documents.py`
+  - 机器会话、预览写入事务、格式保留与允许管理的字段
+- `src/external/agent_config_transport.py`、`src/repositories/agent_config_repository.py`
+  - 本机与 SSH 文件访问、代理隧道和目标状态持久化
+- `src/config/agent_model_limits.json`
+  - 页面与配置写入共用的模型限制候选
 - [src/services/proxy_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/proxy_service.py)
   - 主代理 orchestration
 - [src/services/proxy_response_builder.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/proxy_response_builder.py)
@@ -1152,7 +1214,7 @@ flowchart LR
 - [src/presentation/templates/api_keys.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/api_keys.html)
   - API Key 管理页面、创建/编辑弹窗、模型权限选择、Key 复制气泡和用量表格
 - [src/presentation/templates/oauth.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/oauth.html)
-  - OAuth 管理页面、Codex 文本模型与图片模型设置、Claude 子 tab
+  - Codex OAuth 管理页面、文本模型与图片模型设置
 
 ## 5. Physical View
 
@@ -1166,6 +1228,8 @@ flowchart LR
 - 一组 Auth Group、模型映射、配置保存和用户缓存协作锁
 - 一组滚动日志文件
 - 一个 Codex 配额后台刷新 greenlet
+- 一个 Agent 会话与预览清理 greenlet，一组按浏览器隔离的 SSH/SFTP 连接和临时凭据
+- 一个 Agent 配置登记文件，以及本机或远程用户目录内的 Agent 配置和最多五份备份
 - 一组本地 OAuth 认证文件
 - 一组 Codex 单账号 token 刷新锁与一组独立的额度查询锁
 - 一组本地 OAuth 模型目录缓存
@@ -1186,6 +1250,8 @@ Client / Agent / IDE
         +--> Codex upstream
         +--> auth.openai.com / chatgpt.com OAuth control-plane endpoints
         +--> claude.ai / api.anthropic.com OAuth control-plane endpoints
+        +--> local Agent configuration files
+        +--> optional HTTP / HTTPS / SOCKS proxy --> remote SSH / SFTP --> Agent configuration files
 ```
 
 ## 6. Scenarios

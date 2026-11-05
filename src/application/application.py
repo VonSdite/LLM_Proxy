@@ -17,6 +17,7 @@ from ..config import (
     build_provider_schemas,
 )
 from ..presentation import (
+    AgentConfigController,
     ApiKeyController,
     AuthenticationController,
     ModelMappingController,
@@ -52,6 +53,7 @@ from ..services import (
     SettingsService,
     UserService,
 )
+from ..services.agent_config_service import AgentConfigService
 from ..utils import resolve_client_ip
 from ..utils.async_logging import AsyncLogHandler, NativeLogListener, RotatingLogHandler
 from ..utils.blocking_io import run_blocking
@@ -344,6 +346,15 @@ class Application:
         self._auth_controller = AuthenticationController(self._ctx, auth_service)
         self._user_controller = UserController(self._ctx, user_service, auth_service)
         self._api_key_controller = ApiKeyController(self._ctx, api_key_service, auth_service)
+        self._agent_config_service = AgentConfigService(
+            self._ctx,
+            self._provider_manager,
+            api_key_service,
+            model_mapping_service,
+            codex_oauth_service,
+            claude_oauth_service,
+        )
+        self._agent_config_controller = AgentConfigController(self._ctx, self._agent_config_service, auth_service)
         self._provider_controller = ProviderController(
             self._ctx,
             provider_service,
@@ -430,11 +441,15 @@ class Application:
             self.close()
 
     def close(self) -> None:
-        """排空运行日志并关闭应用持有的日志资源。"""
+        """关闭 Agent 会话并排空应用持有的日志资源。"""
+        if hasattr(self, "_agent_config_service"):
+            self._agent_config_service.close()
         self._log_listener.close()
 
     def _start_background_workers(self) -> None:
         """启动应用后台任务。"""
+        if hasattr(self, "_agent_config_service"):
+            self._agent_config_service.start_cleanup()
         if hasattr(self, "_codex_oauth_service"):
             self._codex_oauth_service.start_quota_auto_refresh_worker()
 
