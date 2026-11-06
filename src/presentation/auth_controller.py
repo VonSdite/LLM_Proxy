@@ -4,12 +4,13 @@
 
 from __future__ import annotations
 
-from flask import jsonify, make_response, redirect, render_template, request
+from flask import jsonify, make_response, redirect, request
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..services import AuthenticationService
 from .controller_utils import get_json_object
+from .ui import render_ui
 
 
 class AuthenticationController:
@@ -35,7 +36,7 @@ class AuthenticationController:
         if self._auth_service.validate_session(session_token):
             return redirect("/")
 
-        return render_template("login.html")
+        return render_ui()
 
     def api_login(self) -> ResponseReturnValue:
         if not self._auth_service.is_auth_enabled():

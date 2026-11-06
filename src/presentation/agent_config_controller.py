@@ -9,9 +9,10 @@ import secrets
 from functools import wraps
 from urllib.parse import urlsplit
 
-from flask import g, jsonify, make_response, redirect, render_template, request
+from flask import g, jsonify, make_response, redirect, request
 
 from ..external.agent_config_transport import AgentConfigError
+from .ui import render_ui
 
 
 class AgentConfigController:
@@ -132,18 +133,7 @@ class AgentConfigController:
         return data
 
     def page(self):
-        config = self.ctx.config_manager
-        return render_template(
-            "agents.html",
-            active_page="agents",
-            current_username=self.auth.get_session_username(request.cookies.get("session_token"))
-            if self.auth.is_auth_enabled()
-            else "",
-            auth_enabled=self.auth.is_auth_enabled(),
-            oauth_enabled=config.is_oauth_enabled(),
-            api_key_management_enabled=config.is_api_key_management_enabled(),
-            model_mapping_enabled=config.is_model_mapping_enabled(),
-        )
+        return render_ui()
 
     def bootstrap(self):
         return jsonify(self.service.bootstrap(g.agent_config_owner, request.host_url.rstrip("/")))

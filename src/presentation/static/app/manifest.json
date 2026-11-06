@@ -1,0 +1,230 @@
+{
+  "_ConfigFileEditor-DkSLl-uh.css": {
+    "file": "assets/ConfigFileEditor-DkSLl-uh.css",
+    "src": "_ConfigFileEditor-DkSLl-uh.css"
+  },
+  "_ConfigFileEditor-_bbpGInV.js": {
+    "file": "assets/ConfigFileEditor-_bbpGInV.js",
+    "name": "ConfigFileEditor",
+    "imports": [
+      "index.html"
+    ],
+    "css": [
+      "assets/ConfigFileEditor-DkSLl-uh.css"
+    ]
+  },
+  "_JsonImportDialog-gdsfLfOA.js": {
+    "file": "assets/JsonImportDialog-gdsfLfOA.js",
+    "name": "JsonImportDialog",
+    "imports": [
+      "index.html",
+      "_useLifetime-I1k_7Wo5.js"
+    ]
+  },
+  "_ModelPermissionPicker-C1c5k75q.css": {
+    "file": "assets/ModelPermissionPicker-C1c5k75q.css",
+    "src": "_ModelPermissionPicker-C1c5k75q.css"
+  },
+  "_ModelPermissionPicker-DC2sc5F1.js": {
+    "file": "assets/ModelPermissionPicker-DC2sc5F1.js",
+    "name": "ModelPermissionPicker",
+    "imports": [
+      "index.html",
+      "_useRequest-D8HUvvLQ.js"
+    ],
+    "css": [
+      "assets/ModelPermissionPicker-C1c5k75q.css"
+    ]
+  },
+  "_ModelTestResult-DA118i86.js": {
+    "file": "assets/ModelTestResult-DA118i86.js",
+    "name": "ModelTestResult",
+    "imports": [
+      "index.html"
+    ]
+  },
+  "_ProxySettings-BGe5q1UN.js": {
+    "file": "assets/ProxySettings-BGe5q1UN.js",
+    "name": "ProxySettings",
+    "imports": [
+      "index.html"
+    ]
+  },
+  "_format-Ddrbrrzx.js": {
+    "file": "assets/format-Ddrbrrzx.js",
+    "name": "format",
+    "imports": [
+      "index.html",
+      "_useLifetime-I1k_7Wo5.js"
+    ]
+  },
+  "_useLifetime-I1k_7Wo5.js": {
+    "file": "assets/useLifetime-I1k_7Wo5.js",
+    "name": "useLifetime",
+    "imports": [
+      "index.html"
+    ]
+  },
+  "_useRequest-D8HUvvLQ.js": {
+    "file": "assets/useRequest-D8HUvvLQ.js",
+    "name": "useRequest",
+    "imports": [
+      "index.html"
+    ]
+  },
+  "index.html": {
+    "file": "assets/index-BRWdpQxc.js",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "dynamicImports": [
+      "src/pages/StatisticsPage.vue",
+      "src/pages/OAuthPage.vue",
+      "src/pages/ProvidersPage.vue",
+      "src/pages/ModelMappingsPage.vue",
+      "src/pages/UsersPage.vue",
+      "src/pages/ApiKeysPage.vue",
+      "src/pages/AgentsPage.vue",
+      "src/pages/LoginPage.vue",
+      "src/pages/SettingsPage.vue"
+    ],
+    "css": [
+      "assets/index-Yj3JUsmE.css"
+    ]
+  },
+  "src/pages/AgentsPage.vue": {
+    "file": "assets/AgentsPage-DMT77x4R.js",
+    "name": "AgentsPage",
+    "src": "src/pages/AgentsPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_ProxySettings-BGe5q1UN.js",
+      "_ConfigFileEditor-_bbpGInV.js"
+    ],
+    "css": [
+      "assets/AgentsPage-DLd3mVl-.css"
+    ]
+  },
+  "src/pages/ApiKeysPage.vue": {
+    "file": "assets/ApiKeysPage-DicqICT8.js",
+    "name": "ApiKeysPage",
+    "src": "src/pages/ApiKeysPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_ModelPermissionPicker-DC2sc5F1.js",
+      "_format-Ddrbrrzx.js",
+      "_useLifetime-I1k_7Wo5.js"
+    ],
+    "css": [
+      "assets/ApiKeysPage-CLqUFm3I.css"
+    ]
+  },
+  "src/pages/LoginPage.vue": {
+    "file": "assets/LoginPage-CWx7lhUm.js",
+    "name": "LoginPage",
+    "src": "src/pages/LoginPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_useLifetime-I1k_7Wo5.js"
+    ],
+    "css": [
+      "assets/LoginPage-Cw-MxK5a.css"
+    ]
+  },
+  "src/pages/ModelMappingsPage.vue": {
+    "file": "assets/ModelMappingsPage-BiP5P5RF.js",
+    "name": "ModelMappingsPage",
+    "src": "src/pages/ModelMappingsPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_useRequest-D8HUvvLQ.js",
+      "_format-Ddrbrrzx.js",
+      "_ModelTestResult-DA118i86.js",
+      "_useLifetime-I1k_7Wo5.js",
+      "_JsonImportDialog-gdsfLfOA.js"
+    ],
+    "css": [
+      "assets/ModelMappingsPage-4FrGaSTy.css"
+    ]
+  },
+  "src/pages/OAuthPage.vue": {
+    "file": "assets/OAuthPage-BO846Yvw.js",
+    "name": "OAuthPage",
+    "src": "src/pages/OAuthPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_useRequest-D8HUvvLQ.js",
+      "_format-Ddrbrrzx.js"
+    ],
+    "css": [
+      "assets/OAuthPage-Cl_vAcpr.css"
+    ]
+  },
+  "src/pages/ProvidersPage.vue": {
+    "file": "assets/ProvidersPage-Cy3gg7lr.js",
+    "name": "ProvidersPage",
+    "src": "src/pages/ProvidersPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_ModelTestResult-DA118i86.js",
+      "_useRequest-D8HUvvLQ.js",
+      "_format-Ddrbrrzx.js",
+      "_JsonImportDialog-gdsfLfOA.js",
+      "_useLifetime-I1k_7Wo5.js",
+      "_ProxySettings-BGe5q1UN.js",
+      "_ConfigFileEditor-_bbpGInV.js"
+    ],
+    "css": [
+      "assets/ProvidersPage-Bwn2x7g5.css"
+    ]
+  },
+  "src/pages/SettingsPage.vue": {
+    "file": "assets/SettingsPage-Csfkt_Jy.js",
+    "name": "SettingsPage",
+    "src": "src/pages/SettingsPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_useRequest-D8HUvvLQ.js",
+      "_useLifetime-I1k_7Wo5.js",
+      "_ProxySettings-BGe5q1UN.js"
+    ],
+    "css": [
+      "assets/SettingsPage-CK6FOULD.css"
+    ]
+  },
+  "src/pages/StatisticsPage.vue": {
+    "file": "assets/StatisticsPage-BHOhK74-.js",
+    "name": "StatisticsPage",
+    "src": "src/pages/StatisticsPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_useRequest-D8HUvvLQ.js",
+      "_format-Ddrbrrzx.js",
+      "_JsonImportDialog-gdsfLfOA.js"
+    ],
+    "css": [
+      "assets/StatisticsPage--6NQtXbh.css"
+    ]
+  },
+  "src/pages/UsersPage.vue": {
+    "file": "assets/UsersPage-DwZLXob_.js",
+    "name": "UsersPage",
+    "src": "src/pages/UsersPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html",
+      "_ModelPermissionPicker-DC2sc5F1.js",
+      "_format-Ddrbrrzx.js",
+      "_JsonImportDialog-gdsfLfOA.js",
+      "_useLifetime-I1k_7Wo5.js"
+    ]
+  }
+}

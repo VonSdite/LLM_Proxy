@@ -24,6 +24,7 @@ from ..presentation import (
     OAuthController,
     ProviderController,
     ProxyController,
+    UiController,
     UserController,
     WebController,
     create_flask_app,
@@ -289,6 +290,7 @@ class Application:
     def _setup_controllers(self) -> None:
         """初始化服务层并完成路由注册。"""
         auth_service = AuthenticationService(self._ctx)
+        self._ui_controller = UiController(self._ctx, auth_service)
         codex_oauth_service = CodexOAuthService(self._ctx, self._log_repository)
         claude_oauth_service = ClaudeOAuthService(self._ctx)
         self._codex_oauth_service = codex_oauth_service

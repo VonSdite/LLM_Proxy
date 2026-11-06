@@ -4,9 +4,8 @@
 
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, request
 
-from ..utils.app_version import get_app_version
 from .cors import register_data_plane_cors
 
 
@@ -24,13 +23,13 @@ def create_flask_app() -> Flask:
     app.config["JSON_AS_ASCII"] = False
     register_data_plane_cors(app)
 
-    app_version = get_app_version()
-
-    @app.context_processor
-    def inject_template_versions() -> dict[str, str]:
-        """注入模板统一使用的版本信息。"""
-        return {
-            "app_version": app_version,
-        }
+    @app.after_request
+    def cache_frontend_assets(response):
+        """内容哈希资源长期缓存，构建清单每次重新校验。"""
+        if request.path.startswith("/static/app/assets/") and response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif request.path == "/static/app/manifest.json":
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     return app

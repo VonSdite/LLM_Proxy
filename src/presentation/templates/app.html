@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>LLM Proxy</title>
+    <script>
+        try { document.documentElement.dataset.theme = localStorage.getItem('theme') === 'light' ? 'light' : 'dark'; }
+        catch { document.documentElement.dataset.theme = 'dark'; }
+    </script>
+    {% for href in style_urls %}<link rel="stylesheet" href="{{ href }}">{% endfor %}
+    {% for href in preload_urls %}<link rel="modulepreload" href="{{ href }}">{% endfor %}
+    <script type="module" src="{{ script_url }}"></script>
+</head>
+<body>
+    <div id="app"></div>
+    <noscript>请启用 JavaScript 后使用管理界面。</noscript>
+</body>
+</html>

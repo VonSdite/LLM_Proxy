@@ -1,0 +1,47 @@
+{
+  "name": "llm-proxy-admin",
+  "version": "2.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.13.0 <25"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.node.json",
+    "lint": "eslint . && stylelint \"src/**/*.{css,vue}\" && prettier --check .",
+    "format": "prettier --write .",
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test --project=chromium",
+    "test:visual": "playwright test --project=visual",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@tanstack/vue-table": "8.21.3",
+    "@lucide/vue": "1.69.0",
+    "pinia": "3.0.4",
+    "reka-ui": "2.11.0",
+    "vue": "3.5.45",
+    "vue-router": "4.6.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.10.1",
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vue/test-utils": "2.4.6",
+    "eslint": "10.14.0",
+    "eslint-plugin-vue": "10.12.0",
+    "jsdom": "26.1.0",
+    "postcss-html": "2.0.0",
+    "prettier": "3.9.10",
+    "stylelint": "16.26.1",
+    "stylelint-config-standard": "39.0.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.6",
+    "vitest": "5.1.0",
+    "vue-tsc": "3.3.14"
+  }
+}

@@ -31,6 +31,31 @@
 
 ## 2. Logical View
 
+### 2.0 管理界面装配
+
+`frontend/` 包含 Vue 3、TypeScript 和 Vite 工程。页面依赖领域组件，领域组件通过统一 API 客户端访问控制平面，共享控件通过 Reka UI 与 TanStack Table 提供交互。Pinia 保存界面会话、功能可见性和主题，业务草稿属于领域组件。
+
+`UiController` 提供 `/api/ui/bootstrap`，返回版本、认证状态、当前用户、功能开关和 Agent 页面能力。该响应不包含配置内容或凭据，采用 `no-store`；Agent 能力按已认证会话或本机回环 Host 与连接对端判定，文件 API 继续执行原有完整保护链路。
+
+`render_ui` 从 `static/app/manifest.json` 解析内容哈希资源。HTML 使用 `no-store`，manifest 使用 `no-cache`，内容哈希资源使用长期不可变缓存。Vue 生产资源由 Flask 同源提供，Node.js 属于开发与构建工具。实现与验证状态记录在 [前端迁移验收记录](frontend-migration-audit.md)。
+
+`/login`、`/`、`/providers`、`/users`、`/api-keys`、`/model-mappings`、`/oauth`、`/agents`、`/statistics`、`/settings` 使用同一 Vue 入口。Flask 保留页面认证、API Key / 模型映射功能跳转与 Agent 访问保护；Vue Router 处理站内导航和界面功能门控。API、数据平面与未知路径使用各自 Flask 路由，不进入页面兜底。旧业务模板、页面脚本、Bootstrap 资源不参与生产装配；Ace 由本地 vendor 按需加载。
+
+表单草稿与服务器快照分开保存，列表使用稳定业务 ID。`useRequest` 管理替换读取与迟到响应，`useAction` 管理串行操作、错误和操作后刷新，页面与弹窗卸载时取消未完成请求。Agent 预览按当前机器、Agent 和草稿版本关联，原始文件编辑期间暂停表单预览。OAuth 首次读取本地账号快照，每分钟按已到期窗口同步，页面隐藏或操作忙碌时跳过，卸载时移除定时器和监听器。客户端取消不回滚已经完成的服务端事务。
+
+浏览器非敏感偏好使用 `localStorage.theme` 和 `table-widths:*`。API Key、SSH 密码和文件内容仅处于当前页面或既有服务器隔离会话中。样式、菜单、帮助和对话框来自共享控件，文件编辑器实例随所属弹窗销毁。
+
+```mermaid
+flowchart LR
+    Vue[Vue 页面与领域组件] --> UI[共享 UI 与主题]
+    Vue --> API[类型化 API 客户端]
+    API --> Bootstrap[UiController /api/ui/bootstrap]
+    API --> Control[现有管理控制器与服务]
+    Vite[Vite 构建] --> Assets[static/app 内容哈希资源]
+    Assets --> Flask[Flask 同源页面与静态资源]
+    DataClient[模型调用客户端] --> Data[现有 /v1/* 数据平面]
+```
+
 ### 2.1 Core Pipeline
 
 系统按下面的统一链路工作：
@@ -597,7 +622,7 @@ SQLite 表：
 
 目标行的性能测试复用 `POST /api/providers/test-models`，展示可用性、首字延迟、TPS 和错误详情。测试使用所选 Provider 的配置、真实上游模型 ID 和 Auth Entry；Auth Group 默认选择首个启用条目，支持在行内调整测试凭据。该测试能力面向 Provider 目标；OAuth 目标使用对应调用接口验证。测试结果仅保留在当前编辑弹窗中，与映射的启停、冷却和自动禁用状态独立。更换模型 ID、删除目标行或关闭弹窗时清理测试状态，已失效请求的结果不回填到新目标。
 
-Provider、模型映射、API Key、用户管理主表和统计概览的三张表使用共享列宽拖动组件。组件在首次拖动时读取当前渲染宽度，在相邻两列之间重新分配宽度并保持表格总宽度不变，只在当前页面生命周期内同步同组表格的列宽；刷新页面后按各表 CSS 默认宽度重新布局。Provider 与模型映射弹窗内的模型列表不启用列宽拖动。
+Provider、模型映射、API Key、用户、Auth Group 运行态和统计表使用共享 `UiTable`。列宽独立调整，表格超出容器时内部横向滚动；配置 `storageKey` 的表格将列宽持久保存至 `table-widths:*`，其余表格使用当前组件内状态。表头分隔条支持鼠标拖动和键盘左右键。Provider 弹窗模型使用同一表格，映射目标使用 `UiSortableList`；两者均使用稳定行 ID、拖动和上下移动按钮。
 
 ### 3.4 Provider Runtime Contract
 
@@ -1137,8 +1162,14 @@ sequenceDiagram
 
 ### 4.2 Key Files
 
-- `src/presentation/agent_config_controller.py`、`templates/agents.html`、`static/js/agents.js`、`static/css/agents.css`
-  - Agent 配置管理路由、机器侧边栏、连接弹窗、表单与文件编辑器
+- [src/presentation/ui.py](../src/presentation/ui.py)、[app.html](../src/presentation/templates/app.html)
+  - Vue 页面入口、内容哈希资源装配与启动上下文
+- [frontend/src/app](../frontend/src/app)、[components/ui](../frontend/src/components/ui)、[styles](../frontend/src/styles)
+  - 路由外壳、共享控件、主题与设计变量
+- [Agent 配置控制器](../src/presentation/agent_config_controller.py)、[AgentsPage.vue](../frontend/src/pages/AgentsPage.vue)、[features/agents](../frontend/src/features/agents)
+  - Agent 路由、机器侧边栏、连接弹窗、参数表单与预览状态
+- [ConfigFileEditor.vue](../frontend/src/features/shared/ConfigFileEditor.vue)
+  - 原始文件编辑、备份、保存和未保存关闭确认
 - `src/services/agent_config_service.py`、`agent_config_documents.py`
   - 机器会话、预览写入事务、格式保留与允许管理的字段
 - `src/external/agent_config_transport.py`、`src/repositories/agent_config_repository.py`
@@ -1171,10 +1202,10 @@ sequenceDiagram
   - 模型映射定义、启用状态、显示顺序、目标配置和运行状态 SQLite 持久化
 - [src/presentation/model_mapping_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/model_mapping_controller.py)
   - 模型映射管理 API
-- [src/presentation/templates/model_mappings.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/model_mappings.html)
+- [ModelMappingsPage.vue](../frontend/src/pages/ModelMappingsPage.vue)、[features/model-mappings](../frontend/src/features/model-mappings)
   - 模型映射列表、可搜索目标选择、编辑和 JSON 导入导出页面
-- [src/presentation/static/js/table-column-resize.js](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/static/js/table-column-resize.js)
-  - 后台主表列宽拖动、同组表格同步和页面内临时状态管理
+- [UiTable.vue](../frontend/src/components/ui/UiTable.vue)、[UiSortableList.vue](../frontend/src/components/ui/UiSortableList.vue)
+  - 统一表格、选择、排序、列宽持久保存和列表移动
 - [src/repositories/api_key_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/api_key_repository.py)
   - API Key 持久化、列表排序和累计用量字段
 - [src/services/codex_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/codex_oauth_service.py)
@@ -1207,20 +1238,25 @@ sequenceDiagram
   - 跨协议工具文本、图片和文件转换，Chat 媒体补传标记，以及目标协议不可承载来源的转换错误
 - [src/translators/reasoning_utils.py](/root/.ww/code/002llm/000LLM_Proxy/src/translators/reasoning_utils.py)
   - reasoning / thinking 语义映射与 OpenAI 兼容 reasoning 字段提取
-- [src/presentation/templates/providers.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/providers.html)
+- [ProvidersPage.vue](../frontend/src/pages/ProvidersPage.vue)、[features/providers](../frontend/src/features/providers)
   - Provider 页面与 `source_format` / Auth Group 编辑
-- [src/presentation/templates/settings.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/settings.html)
+- [SettingsPage.vue](../frontend/src/pages/SettingsPage.vue)
   - 系统设置页面与帮助说明
-- [src/presentation/templates/api_keys.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/api_keys.html)
+- [ApiKeysPage.vue](../frontend/src/pages/ApiKeysPage.vue)、[features/api-keys](../frontend/src/features/api-keys)
   - API Key 管理页面、创建/编辑弹窗、模型权限选择、Key 复制气泡和用量表格
-- [src/presentation/templates/oauth.html](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/templates/oauth.html)
+- [OAuthPage.vue](../frontend/src/pages/OAuthPage.vue)、[features/oauth](../frontend/src/features/oauth)
   - Codex OAuth 管理页面、文本模型与图片模型设置
+- [StatisticsPage.vue](../frontend/src/pages/StatisticsPage.vue)、[features/statistics](../frontend/src/features/statistics)
+  - 统计筛选、调用与用户/Key 用量、请求日志、排序分页、导入导出
+- [UsersPage.vue](../frontend/src/pages/UsersPage.vue)、[features/users](../frontend/src/features/users)
+  - 用户、白名单、共享模型权限和批量管理
 
 ## 5. Physical View
 
 部署上是单体服务：
 
 - 一个 Flask 应用
+- 一套预构建 Vue 静态资源，Node.js 仅在开发、测试和构建环境使用
 - 一个配置文件
 - 一个 SQLite 数据库，保存用户、请求日志、日聚合统计、API Key、模型映射定义和映射运行状态
 - 一个 gevent Hub 原生线程池，执行仓储事务和配置文件任务

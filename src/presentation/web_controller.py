@@ -12,13 +12,14 @@ from urllib.parse import quote
 from xml.sax.saxutils import escape
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from flask import jsonify, make_response, redirect, render_template, request
+from flask import jsonify, make_response, redirect, request
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
 from ..services import AuthenticationService, LogService, SettingsService
 from .controller_utils import require_json_object
 from .decorators import require_authentication
+from .ui import render_ui
 
 
 class WebController:
@@ -69,103 +70,33 @@ class WebController:
         self._app.route("/api/settings/system/api-keys", methods=["PUT"])(auth(self.update_api_key_settings))
         self._app.route("/api/settings/system/model-mapping", methods=["PUT"])(auth(self.update_model_mapping_settings))
 
-    def home(self) -> str:
+    def home(self) -> ResponseReturnValue:
         return self.providers_page()
 
-    def statistics_page(self) -> str:
-        return render_template(
-            "index.html",
-            active_page="index",
-            current_username=self._get_current_username(),
-            auth_enabled=self._auth_service.is_auth_enabled(),
-            oauth_enabled=self._is_oauth_enabled(),
-            api_key_management_enabled=self._is_api_key_management_enabled(),
-            model_mapping_enabled=self._is_model_mapping_enabled(),
-        )
+    def statistics_page(self) -> ResponseReturnValue:
+        return render_ui()
 
-    def users_page(self) -> str:
-        return render_template(
-            "users.html",
-            active_page="users",
-            chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
-            current_username=self._get_current_username(),
-            auth_enabled=self._auth_service.is_auth_enabled(),
-            oauth_enabled=self._is_oauth_enabled(),
-            api_key_management_enabled=self._is_api_key_management_enabled(),
-            model_mapping_enabled=self._is_model_mapping_enabled(),
-        )
+    def users_page(self) -> ResponseReturnValue:
+        return render_ui()
 
-    def oauth_page(self) -> str:
-        return render_template(
-            "oauth.html",
-            active_page="oauth",
-            current_username=self._get_current_username(),
-            auth_enabled=self._auth_service.is_auth_enabled(),
-            oauth_enabled=self._is_oauth_enabled(),
-            api_key_management_enabled=self._is_api_key_management_enabled(),
-            model_mapping_enabled=self._is_model_mapping_enabled(),
-        )
+    def oauth_page(self) -> ResponseReturnValue:
+        return render_ui()
 
     def model_mappings_page(self) -> ResponseReturnValue:
         if not self._is_model_mapping_enabled():
             return redirect("/settings")
-        return render_template(
-            "model_mappings.html",
-            active_page="model_mappings",
-            current_username=self._get_current_username(),
-            auth_enabled=self._auth_service.is_auth_enabled(),
-            oauth_enabled=self._is_oauth_enabled(),
-            api_key_management_enabled=self._is_api_key_management_enabled(),
-            model_mapping_enabled=True,
-        )
+        return render_ui()
 
     def api_keys_page(self) -> ResponseReturnValue:
         if not self._is_api_key_management_enabled():
             return redirect("/settings")
-        return render_template(
-            "api_keys.html",
-            active_page="api_keys",
-            current_username=self._get_current_username(),
-            auth_enabled=self._auth_service.is_auth_enabled(),
-            oauth_enabled=self._is_oauth_enabled(),
-            api_key_management_enabled=self._is_api_key_management_enabled(),
-            model_mapping_enabled=self._is_model_mapping_enabled(),
-        )
+        return render_ui()
 
-    def providers_page(self) -> str:
-        return render_template(
-            "providers.html",
-            active_page="providers",
-            chat_whitelist_enabled=self._config_manager.is_chat_whitelist_enabled(),
-            current_username=self._get_current_username(),
-            auth_enabled=self._auth_service.is_auth_enabled(),
-            oauth_enabled=self._is_oauth_enabled(),
-            api_key_management_enabled=self._is_api_key_management_enabled(),
-            model_mapping_enabled=self._is_model_mapping_enabled(),
-        )
+    def providers_page(self) -> ResponseReturnValue:
+        return render_ui()
 
-    def settings_page(self) -> str:
-        return render_template(
-            "settings.html",
-            active_page="settings",
-            current_username=self._get_current_username(),
-            auth_enabled=self._auth_service.is_auth_enabled(),
-            oauth_enabled=self._is_oauth_enabled(),
-            api_key_management_enabled=self._is_api_key_management_enabled(),
-            model_mapping_enabled=self._is_model_mapping_enabled(),
-        )
-
-    def _get_current_username(self) -> str:
-        if not self._auth_service.is_auth_enabled():
-            return ""
-
-        session_token = request.cookies.get("session_token")
-        return self._auth_service.get_session_username(session_token) or ""
-
-    def _is_oauth_enabled(self) -> bool:
-        if self._config_manager is None:
-            return False
-        return self._config_manager.is_oauth_enabled()
+    def settings_page(self) -> ResponseReturnValue:
+        return render_ui()
 
     def _is_api_key_management_enabled(self) -> bool:
         if self._config_manager is None:

@@ -23,7 +23,7 @@ LLM_Proxy 把模型服务、鉴权方式、协议转换和后台运维收敛到�
 ### 1. 安装依赖
 
 ```bash
-pip install flask gevent requests pyyaml urllib3
+uv sync
 ```
 
 ### 2. 准备配置文件
@@ -72,13 +72,13 @@ providers:
 ### 3. 启动服务
 
 ```bash
-python main.py
+uv run python main.py
 ```
 
 或者显式指定配置文件：
 
 ```bash
-python main.py --config path/to/config.yaml
+uv run python main.py --config path/to/config.yaml
 ```
 
 ### 4. 验证服务是否可用
@@ -111,9 +111,24 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 - `/statistics`：统计与日志面板
 - `/users`：用户与白名单管理
 - `/providers`：Provider / Auth Group 管理
+- `/model-mappings`：模型映射；开启模型映射功能后显示
+- `/api-keys`：下游 API Key、模型权限与配额；开启 API Key 功能后显示
 - `/agents`：本机与 SSH 机器上的 Claude、Codex、opencode 配置管理
 - `/oauth`：Codex OAuth 认证文件与模型管理；开启 `oauth.enabled` 后会显示在后台导航中
 - `/settings`：系统、登录、日志和 OAuth 网络设置
+
+### 前端开发与部署
+
+管理界面使用 Vue 3、TypeScript 和共享组件，支持明暗主题。仓库包含生产构建资源，部署启动 Python 服务即可。修改前端时使用 Node.js 24 与锁文件：
+
+```text
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+开发地址为 `http://127.0.0.1:5173`，API 默认代理到 `http://127.0.0.1:8080`，后端地址可通过 `LLM_PROXY_DEV_URL` 环境变量指定。生产构建使用 `npm --prefix frontend run build`，源码、锁文件与 `src/presentation/static/app/` 产物一同交付。
+
+组件选择、测试、截图和部署步骤见 [前端开发指南](docs/frontend-development.md)，本次迁移的验证结果和覆盖范围见 [迁移验收记录](docs/frontend-migration-audit.md)。
 
 ### Agent 配置
 

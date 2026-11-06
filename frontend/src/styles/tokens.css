@@ -1,0 +1,88 @@
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #18181b;
+  --surface: #222225;
+  --overlay: #2c2c30;
+  --input: #19191c;
+  --text: #f5f5f7;
+  --muted: #a1a1aa;
+  --primary: #0a66d8;
+  --on-primary: #fff;
+  --link: #78adff;
+  --border: #3a3a40;
+  --hover: #303036;
+  --selected: #22334b;
+  --danger: #ff8c90;
+  --danger-surface: #44292e;
+  --success: #80d9a0;
+  --success-surface: #213b30;
+  --warning: #edc27a;
+  --warning-surface: #3c3324;
+  --backdrop: rgb(0 0 0 / 45%);
+  --shadow-overlay: 0 8px 32px rgb(0 0 0 / 28%), 0 0 0 1px var(--border);
+  --shadow-dialog: 0 24px 80px rgb(0 0 0 / 40%);
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  --font-code: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-section: 16px;
+  --text-title: 24px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --control: 36px;
+  --control-sm: 32px;
+  --radius-control: 8px;
+  --radius-group: 12px;
+  --radius-dialog: 16px;
+  --radius-pill: 999px;
+  --focus: 0 0 0 3px color-mix(in srgb, var(--link) 35%, transparent);
+  --motion: 150ms;
+  --z-header: 10;
+  --z-overlay: 40;
+  --z-dialog: 50;
+  --z-popup: 60;
+  --z-toast: 80;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --background: #f5f5f7;
+  --surface: #fff;
+  --overlay: #fff;
+  --input: #f5f5f7;
+  --text: #1d1d1f;
+  --muted: #606068;
+  --primary: #06c;
+  --link: #06c;
+  --border: #d9d9de;
+  --hover: #ededf0;
+  --selected: #e8f1fc;
+  --danger: #b32635;
+  --danger-surface: #fcebed;
+  --success: #216d40;
+  --success-surface: #e7f4ec;
+  --warning: #805510;
+  --warning-surface: #faf0da;
+  --backdrop: rgb(20 20 25 / 25%);
+  --shadow-overlay: 0 8px 32px rgb(20 20 25 / 12%), 0 0 0 1px var(--border);
+  --shadow-dialog: 0 24px 80px rgb(20 20 25 / 24%);
+}
+
+@media (pointer: coarse) {
+  :root {
+    --control: 44px;
+    --control-sm: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0ms;
+  }
+}
