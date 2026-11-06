@@ -10,3 +10,10 @@ logs
 uv.lock
 *.db
 .codegraph
+node_modules/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/.vite/
+frontend/.review-artifacts/
+*.tsbuildinfo

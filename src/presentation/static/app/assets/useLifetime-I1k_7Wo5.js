@@ -1,0 +1,1 @@
+import{Q as e}from"./index-BRWdpQxc.js";function t(){let t=new AbortController;return e(()=>t.abort()),t.signal}export{t};

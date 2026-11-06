@@ -10,6 +10,7 @@ from .model_mapping_controller import ModelMappingController
 from .oauth_controller import OAuthController
 from .provider_controller import ProviderController
 from .proxy_controller import ProxyController
+from .ui import UiController
 from .user_controller import UserController
 from .web_controller import WebController
 
@@ -24,4 +25,5 @@ __all__ = [
     "ProxyController",
     "UserController",
     "WebController",
+    "UiController",
 ]

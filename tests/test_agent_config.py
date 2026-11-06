@@ -871,7 +871,8 @@ class AgentConfigControllerTests(AgentConfigFixture):
     def test_page_template_and_no_store_header(self):
         response = self.client.get("/agents")
         self.assertEqual(200, response.status_code)
-        self.assertIn(b"/static/js/agents.js", response.data)
+        self.assertIn(b"/static/app/assets/", response.data)
+        self.assertIn(b'id="app"', response.data)
         self.assertEqual("no-store", response.headers["Cache-Control"])
         self.assertIn("HttpOnly", response.headers["Set-Cookie"])
         self.assertIn("SameSite=Strict", response.headers["Set-Cookie"])
