@@ -15,13 +15,14 @@ const props = withDefaults(
 )
 const emit = defineEmits<{ 'update:page': [value: number]; 'update:pageSize': [value: number] }>()
 const pages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
+const visible = computed(() => props.total > Math.min(props.pageSize, ...props.sizes))
 function pageSizeChanged(value: string) {
   emit('update:pageSize', Number(value))
   emit('update:page', 1)
 }
 </script>
 <template>
-  <div class="ui-pagination">
+  <div v-if="visible" class="ui-pagination">
     <span class="muted number">共 {{ total }} 项</span>
     <div class="ui-pagination-size">
       <UiSelect

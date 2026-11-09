@@ -71,6 +71,8 @@ test('用户表覆盖加载、错误重试、空数据与千条数据的分页�
   await expect(page.getByRole('checkbox', { name: '选择当前列表' })).not.toBeChecked()
   await page.getByRole('textbox', { name: '搜索用户' }).fill('user-1000')
   await expect(page.locator('tbody tr')).toHaveCount(1)
+  await expect(page.locator('.ui-pagination')).toHaveCount(0)
+  await page.getByRole('textbox', { name: '搜索用户' }).fill('')
   await expect(page.getByRole('textbox', { name: '跳转页码' })).toHaveValue('1')
 })
 
