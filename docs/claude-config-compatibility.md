@@ -2,6 +2,8 @@
 
 核对日期：2026-11-05。本机核对版本：Claude Code `2.1.310`。以下结论来自当前官方文档及本机安装程序；SSH 目标机器的实际行为取决于其 Claude Code 版本、配置作用域和上游服务。
 
+`attribution` 文档核对日期：2026-11-07。该项依据官方设置参考及本项目配置文件读写测试，未运行实际 Git 提交或 PR 创建会话。
+
 ## 表单字段
 
 | 配置项 | 当前行为 | 页面管理方式 |
@@ -10,6 +12,7 @@
 | `ANTHROPIC_REASONING_MODEL` | 官方环境变量文档未列出，本机 `2.1.310` 程序也未发现该变量；没有当前有效的支持依据，不能据此断言它曾是官方接口或已有正式弃用公告 | 常规模型表单仅管理上述四项；历史字段可在文件编辑器查看 |
 | `IS_SANDBOX` | 当前程序仍使用它识别运行环境；值为 `1` 时参与 Linux/macOS root 用户启动 `bypassPermissions` 的隔离条件判断，本身不创建沙箱 | “隔离环境标记”独立管理 `env.IS_SANDBOX`，启用写 `1`、禁用写 `0`；“命令沙箱”管理 `sandbox.enabled` |
 | `CLAUDE_CODE_ATTRIBUTION_HEADER` | 仍有效；`0` 通常省略系统提示开头的客户端版本和提示指纹标识，部分直连自动审核请求仍可保留 | 启用写 `1`，禁用写 `0` |
+| `attribution` | `settings.json` 顶层配置，控制 Git 提交、PR 描述及会话链接署名；支持对象或 `false`，`true` 无效 | 默认不设置；禁用写 `false`，需要 Claude Code `2.1.281+`；已有对象显示“文件自定义”，编辑其他项时原样保留 |
 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | 任意非空值均禁用，包括字符串 `0`、`false`；涉及自动更新、遥测、错误报告和功能开关获取等 | 禁用写 `1`，允许时显式移除当前文件中的变量；进程环境中的值仍可能生效 |
 | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | 仍有效，实验功能默认关闭 | 启用写 `1`，禁用写 `0` |
 | `ENABLE_TOOL_SEARCH` | 仍有效；需要模型与网关支持 MCP 工具搜索。支持 `true`、`false`、`auto`、`auto:N` | 控件设置 `true` / `false`；已有自动阈值在未操作该控件时保留 |
@@ -28,6 +31,7 @@
 | 页面配置项 | 初始选择 | 保存字段 |
 | --- | --- | --- |
 | 命令沙箱 | 不设置 | 省略 `sandbox.enabled` |
+| Attribution | 不设置 | 省略顶层 `attribution` |
 | Attribution Header | 禁用 | `env.CLAUDE_CODE_ATTRIBUTION_HEADER: "0"` |
 | 非必要流量 | 禁用 | `env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"` |
 | 实验性 Agent Teams | 启用 | `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"` |
@@ -36,6 +40,26 @@
 | 关闭 WebFetch 预检 | 启用 | 顶层 `skipWebFetchPreflight: true` |
 
 `skipWebFetchPreflight` 位于用户级 `~/.claude/settings.json` 的顶层，Windows 默认对应 `%USERPROFILE%\.claude\settings.json`。本服务运行环境提供 `CLAUDE_CONFIG_DIR` 时，本机目标为该目录下的 `settings.json`；SSH 目标位于远程用户的主目录。官方同样支持在项目级 `.claude/settings.json`、`.claude/settings.local.json` 和管理级设置中使用此字段。本页的读取和保存预览展示实际目标文件，文件在点击保存后创建。
+
+## Git 与 PR 署名
+
+`attribution` 位于 Claude Code `settings.json` 顶层，可用于用户、项目、本地项目和管理级设置。默认未设置，Claude 按默认规则为 Git 提交添加 `Co-Authored-By` 等署名，为 PR 描述添加文本署名。它与 `env.CLAUDE_CODE_ATTRIBUTION_HEADER` 分别管理不同内容。
+
+页面提供“不设置”和“禁用”。“不设置”显式移除当前文件中的 `attribution`，其他作用域或历史 `includeCoAuthoredBy` 仍可能影响实际署名。“禁用”写入 `attribution: false`，关闭全部署名，包括会话链接。`false` 从 Claude Code `2.1.281` 起支持，较旧版本可能将整个设置文件判为无效；旧版本可通过文件编辑器使用以下兼容对象：
+
+```json
+{
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  }
+}
+```
+
+对象中的 `commit` 和 `pr` 分别设置提交与 PR 的自定义署名，空字符串隐藏对应署名，缺省项沿用默认值；`sessionUrl` 控制会话链接。已有对象在页面显示“文件自定义”，内容、注释和额外字段在修改其他配置时保持原样，具体文本可在配置文件编辑器维护。将该项切换为“禁用”或“不设置”会替换或移除整个 `attribution` 字段，其他设置保持不变。
+
+旧字段 `includeCoAuthoredBy` 自 `2.0.62` 起弃用，当前仍支持读取。设置 `attribution.commit` 或 `attribution.pr` 后，`includeCoAuthoredBy` 不再控制署名。CLAUDE.md、记忆和组织管理策略也可能影响实际生成的提交或 PR 文本。
 
 ## 权限模式与命令沙箱
 
@@ -69,4 +93,5 @@ Linux/macOS 的 root 用户在未被识别为隔离环境时，启动 `bypassPer
 - [命令沙箱](https://code.claude.com/docs/en/sandboxing)
 - [WebFetch 预检设置](https://code.claude.com/docs/en/settings-reference#skipwebfetchpreflight)
 - [WebFetch 域名安全检查](https://code.claude.com/docs/en/data-usage#webfetch-domain-safety-check)
+- [Git 与 PR 署名设置](https://code.claude.com/docs/en/settings-reference#attribution)
 - 本机 `claude --version`、`claude --help` 与安装包静态变量检查，未运行模型会话。

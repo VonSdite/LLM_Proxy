@@ -553,6 +553,7 @@ class CodexCompatibilityTests(unittest.TestCase):
             authenticate_api_key=lambda key: {"id": 9} if key == "valid" else None,
             can_api_key_access_model=lambda *args, **kwargs: allowed,
             is_token_limit_exceeded=lambda key: limit_exceeded,
+            acquire_request=lambda key: lambda: None,
         )
         logs = RecordingLogService()
         provider = LLMProvider(

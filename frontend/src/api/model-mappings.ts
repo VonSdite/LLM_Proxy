@@ -55,10 +55,10 @@ export const mappingsApi = {
       body: { model_id, enabled },
       signal,
     }),
-  export: (ids?: string[], signal?: AbortSignal) =>
+  export: (ids: string[], signal?: AbortSignal) =>
     download('/api/model-mappings/export', 'llm-proxy-model-mappings.json', {
       method: 'POST',
-      body: ids?.length ? { mapping_ids: ids } : {},
+      body: { mapping_ids: ids },
       signal,
     }),
   import: (body: unknown, signal?: AbortSignal) =>

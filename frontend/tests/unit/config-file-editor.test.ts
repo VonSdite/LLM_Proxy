@@ -2,6 +2,7 @@ import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ConfigFileEditor from '@/features/shared/ConfigFileEditor.vue'
+import { UiDialog } from '@/components/ui'
 
 const editor = defineComponent({
   props: { modelValue: { type: String, default: '' }, readOnly: Boolean },
@@ -44,22 +45,34 @@ async function edit(text: string) {
   await flushPromises()
 }
 describe('文件编辑器', () => {
-  it('修改后关闭显示三项选择；继续编辑保留内容，放弃不保存', async () => {
+  it('修改后被动关闭显示三项选择；继续编辑保留内容，放弃不保存', async () => {
     const { wrapper, save } = harness()
     await flushPromises()
     await edit('unsaved')
-    button('关闭').click()
+    await wrapper.findComponent(UiDialog).vm.requestClose()
     await flushPromises()
     expect(document.body.textContent).toContain('保存修改？')
     button('继续编辑').click()
     await flushPromises()
     expect(document.querySelector('textarea')?.value).toBe('unsaved')
-    button('关闭').click()
+    await wrapper.findComponent(UiDialog).vm.requestClose()
     await flushPromises()
-    button('放弃修改').click()
+    button('不保存').click()
     await flushPromises()
     expect(save).not.toHaveBeenCalled()
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false])
+    wrapper.unmount()
+  })
+
+  it('页脚关闭直接放弃草稿，不弹确认且不保存', async () => {
+    const { wrapper, save } = harness()
+    await flushPromises()
+    await edit('unsaved')
+    button('关闭').click()
+    await flushPromises()
+    expect(document.body.textContent).not.toContain('保存修改？')
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
+    expect(save).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

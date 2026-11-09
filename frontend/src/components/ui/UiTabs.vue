@@ -38,7 +38,8 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
   gap: var(--space-1);
   max-width: 100%;
   overflow-x: auto;
-  border-bottom: 1px solid var(--border);
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--divider);
 }
 
 .ui-tab {
@@ -49,7 +50,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
   background: transparent;
   border-radius: var(--radius-control) var(--radius-control) 0 0;
   color: var(--muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   white-space: nowrap;
 }
 
@@ -59,6 +60,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
 .ui-tab[data-state='active'] {
   color: var(--link);
+  font-weight: var(--weight-emphasis);
 }
 
 .ui-tab[data-state='active']::after {
@@ -82,16 +84,24 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 .ui-tabs--segmented .ui-tab {
   padding: var(--space-1) var(--space-3);
   min-height: 28px;
-  border-radius: 6px;
+  border-radius: calc(var(--radius-control) - 3px);
 }
 
 .ui-tabs--segmented .ui-tab[data-state='active'] {
   background: var(--overlay);
   color: var(--text);
+  box-shadow: var(--shadow-control);
 }
 
 .ui-tabs--segmented .ui-tab::after {
   display: none;
+}
+
+@media (width <= 600px) {
+  .ui-tab {
+    padding-inline: var(--space-3);
+    font-size: var(--text-sm);
+  }
 }
 
 @media (pointer: coarse) {

@@ -17,7 +17,7 @@ from ..config.provider_config import (
     validate_auth_group_provider_definitions,
 )
 from ..utils.concurrency import synchronized
-from .config_sections import read_auth_group_entries, read_provider_entries
+from .config_sections import merge_auth_group, read_auth_group_entries, read_provider_entries
 
 
 class AuthGroupService:
@@ -115,6 +115,81 @@ class AuthGroupService:
 
         auth_groups.remove(target)
         self._save_auth_groups(config, auth_groups, providers)
+
+    @synchronized("_config_manager.write_lock")
+    def batch_delete_auth_groups(self, names: Any) -> dict[str, Any]:
+        """完整校验所选认证组后，一次写回删除结果。"""
+        if not isinstance(names, list) or not names:
+            raise ValueError("请选择要删除的 Auth Group")
+        if any(not isinstance(name, str) or not name.strip() for name in names):
+            raise ValueError("Auth Group 名称必须是非空字符串")
+        normalized_names = list(dict.fromkeys(name.strip() for name in names))
+        selected = set(normalized_names)
+        config = self._config_manager.get_raw_config()
+        groups = read_auth_group_entries(config)
+        providers = read_provider_entries(config)
+        indexes = self._build_auth_group_indexes_by_name(groups)
+        for name in normalized_names:
+            if name not in indexes:
+                raise ValueError(f"Auth group not found: {name}")
+        referenced = {str(provider.get("auth_group") or "").strip() for provider in providers}
+        blocked = [name for name in normalized_names if name in referenced]
+        if blocked:
+            raise ValueError(f"以下 Auth Group 正被 Provider 引用，无法删除：{', '.join(blocked)}")
+        remaining = [group for group in groups if str(group.get("name", "")).strip() not in selected]
+        self._save_auth_groups(config, remaining, providers)
+        return {"count": len(normalized_names), "names": normalized_names}
+
+    def export_auth_groups(self, names: Any) -> dict[str, Any]:
+        """按指定顺序导出认证组配置及凭据。"""
+        if not isinstance(names, list) or not names:
+            raise ValueError("请选择要导出的 Auth Group")
+        if any(not isinstance(name, str) or not name.strip() for name in names):
+            raise ValueError("Auth Group 名称必须是非空字符串")
+        normalized_names = list(dict.fromkeys(name.strip() for name in names))
+        config = self._config_manager.get_raw_config()
+        groups = read_auth_group_entries(config)
+        indexes = self._build_auth_group_indexes_by_name(groups)
+        exported = []
+        for name in normalized_names:
+            if name not in indexes:
+                raise ValueError(f"Auth group not found: {name}")
+            exported.append(AuthGroupSchema.from_mapping(groups[indexes[name]]).to_mapping())
+        return {"version": 1, "kind": "llm_proxy.auth_groups", "auth_groups": exported}
+
+    @synchronized("_config_manager.write_lock")
+    def import_auth_groups(self, payload: Any) -> dict[str, Any]:
+        """一次性校验并导入认证组配置，同名组补入缺少的凭据。"""
+        if not isinstance(payload, dict):
+            raise ValueError("Auth Group 导入内容必须是 JSON 对象")
+        if payload.get("version", 1) != 1:
+            raise ValueError("不支持此 Auth Group 文件版本")
+        if payload.get("kind", "llm_proxy.auth_groups") not in ("llm_proxy.auth_groups", "llm_proxy.providers"):
+            raise ValueError("文件不包含 Auth Group 配置")
+        raw_groups = payload.get("auth_groups")
+        if not isinstance(raw_groups, list) or not raw_groups:
+            raise ValueError("auth_groups 必须是非空列表")
+
+        config = self._config_manager.get_raw_config()
+        groups = read_auth_group_entries(config)
+        providers = read_provider_entries(config)
+        indexes = self._build_auth_group_indexes_by_name(groups)
+        imported_names: list[str] = []
+        for raw_group in raw_groups:
+            if not isinstance(raw_group, dict):
+                raise ValueError("每个 Auth Group 必须是对象")
+            incoming = AuthGroupSchema.from_mapping(raw_group)
+            index = indexes.get(incoming.name)
+            if index is None:
+                indexes[incoming.name] = len(groups)
+                groups.append(incoming.to_mapping())
+            else:
+                groups[index] = merge_auth_group(AuthGroupSchema.from_mapping(groups[index]), incoming)
+            if incoming.name not in imported_names:
+                imported_names.append(incoming.name)
+
+        self._save_auth_groups(config, groups, providers)
+        return {"count": len(imported_names), "names": imported_names}
 
     def get_auth_group_runtime(self, name: str) -> dict[str, Any]:
         runtime = self._auth_group_manager.get_auth_group_runtime(name)

@@ -12,6 +12,9 @@ export interface ApiKey extends UsageTotals {
   available_models_count: number
   token_limit_k: number | null
   token_limit_remaining: number | null
+  max_concurrency: number | null
+  request_quota_per_minute: number | null
+  request_quota_per_day: number | null
   created_at: string
   last_used_at: string | null
 }
@@ -20,6 +23,9 @@ export interface ApiKeyInput {
   enabled: boolean
   model_permissions: ModelPermissions
   token_limit_k: number | null
+  max_concurrency: number | null
+  request_quota_per_minute: number | null
+  request_quota_per_day: number | null
 }
 export const apiKeysApi = {
   async list(query: ListQuery, signal?: AbortSignal): Promise<PagedResult<ApiKey>> {

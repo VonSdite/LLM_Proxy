@@ -151,6 +151,8 @@ export function createDraft(
       effortLevel: effort === 'unset' ? 'auto' : effort,
       permissionMode: permission === 'manual' ? 'default' : permission,
       sandboxEnabled: triState(m['sandbox.enabled']),
+      attribution:
+        m.attribution === undefined ? 'unset' : m.attribution === false ? 'disabled' : 'custom',
       skipWebFetchPreflight: triState(m.skipWebFetchPreflight),
     }
     for (const setting of CLAUDE_MODES) {

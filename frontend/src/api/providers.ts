@@ -15,7 +15,7 @@ export interface Provider {
   force_upstream_stream: boolean
   safe_desensitization_enabled: boolean
   model_list: string[]
-  hidden_model_list: string[]
+  hidden_model_list?: string[]
   hook: string | null
 }
 export interface AuthEntry {
@@ -26,8 +26,6 @@ export interface AuthEntry {
   cooldown_seconds_on_429?: number | null
   request_quota_per_minute?: number | null
   request_quota_per_day?: number | null
-  token_quota_per_minute?: number | null
-  token_quota_per_day?: number | null
 }
 export interface AuthGroupSummary {
   entry_count: number
@@ -122,6 +120,24 @@ export const providersApi = {
 }
 export const authGroupsApi = {
   list: (signal?: AbortSignal) => api<AuthGroup[]>('/api/auth-groups', { signal }),
+  batchDelete: (names: string[], signal?: AbortSignal) =>
+    api<{ count: number; names: string[] }>('/api/auth-groups/batch', {
+      method: 'POST',
+      body: { action: 'delete', names },
+      signal,
+    }),
+  export: (names: string[], signal?: AbortSignal) =>
+    download('/api/auth-groups/export', 'llm-proxy-auth-groups.json', {
+      method: 'POST',
+      body: { names },
+      signal,
+    }),
+  import: (body: unknown, signal?: AbortSignal) =>
+    api<{ count: number; names: string[] }>('/api/auth-groups/import', {
+      method: 'POST',
+      body,
+      signal,
+    }),
   get: (name: string, signal?: AbortSignal) => api<AuthGroup>(groupPath(name), { signal }),
   save: (body: AuthGroup, name?: string, signal?: AbortSignal) =>
     api<AuthGroup>(name ? groupPath(name) : '/api/auth-groups', {

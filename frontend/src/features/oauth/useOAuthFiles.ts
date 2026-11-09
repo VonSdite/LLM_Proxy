@@ -2,13 +2,16 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { oauthApi, type OAuthFile, type OAuthImportResult, type Quota } from '@/api/oauth'
 import { ApiError, errorMessage, isAbort } from '@/api/client'
 import { notify } from '@/components/ui'
+import { useToggle } from '@/features/shared/useToggle'
 import { MAX_TIMER_DELAY_MS, OAUTH_SYNC_INTERVAL_MS, quotaDue, timestamp } from './quota'
 
 export function useOAuthFiles() {
   const files = ref<OAuthFile[]>([])
   const busy = ref('')
   const externalBusy = ref(false)
-  const blocked = computed(() => !!busy.value || externalBusy.value)
+  const toggles = useToggle()
+  const toggleDisabled = computed(() => !!busy.value || externalBusy.value)
+  const blocked = computed(() => toggleDisabled.value || toggles.busy.value)
   const error = ref('')
   const fileErrors = ref<Record<string, string>>({})
   const loadingFile = ref('')
@@ -166,6 +169,16 @@ export function useOAuthFiles() {
       await readList()
     })
   }
+  function setEnabled(name: string, value: boolean) {
+    if (toggleDisabled.value) return
+    delete fileErrors.value[name]
+    return toggles.run(
+      name,
+      value,
+      (signal) => oauthApi.enabled(name, value, signal),
+      (result) => update(name, result.auth_file ?? { enabled: value, disabled: !value }),
+    )
+  }
   async function exportFiles(names: string[]) {
     const snapshot = [...names]
     await run('export', () => oauthApi.export(snapshot, lifetime.signal))
@@ -265,6 +278,9 @@ export function useOAuthFiles() {
     busy,
     externalBusy,
     blocked,
+    toggles,
+    toggleDisabled,
+    setEnabled,
     error,
     fileErrors,
     loadingFile,

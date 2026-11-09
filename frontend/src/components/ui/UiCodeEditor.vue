@@ -52,7 +52,7 @@ onMounted(async () => {
     if (disposed || !mount.value) return
     editor = ace.edit(mount.value)
     editor.setOptions({
-      fontSize: 13,
+      fontSize: 15,
       showPrintMargin: false,
       useWorker: false,
       tabSize: 2,
@@ -102,5 +102,10 @@ defineExpose({ focus: () => editor?.focus() })
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   overflow: hidden;
+}
+
+.ui-code-editor :deep(.ace_gutter-cell),
+.ui-code-editor :deep(.ace_gutter-cell_svg-icons) {
+  padding-left: 6px;
 }
 </style>

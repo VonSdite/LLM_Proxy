@@ -1,11 +1,11 @@
 import { expect, visualTest as test } from '../browser-test'
 import { mockAdmin, pages } from '../browser-fixtures'
 
-for (const width of [1920, 1440, 1024, 390]) {
+for (const width of [2560, 1920, 1440, 1024, 390]) {
   for (const theme of ['dark', 'light']) {
     for (const item of [
       ...pages,
-      { path: '/login', heading: 'LLM Proxy' },
+      { path: '/login', heading: '登录' },
       { path: '/dev/components', heading: '组件展示' },
     ]) {
       test(`${item.path} ${theme} ${width}px`, async ({ page }) => {

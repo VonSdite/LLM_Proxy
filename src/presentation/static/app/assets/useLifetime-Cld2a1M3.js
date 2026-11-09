@@ -1,0 +1,1 @@
+import{at as e}from"./index-0CFUmfq_.js";function t(){let t=new AbortController;return e(()=>t.abort()),t.signal}export{t};

@@ -64,7 +64,7 @@ test('用户表覆盖加载、错误重试、空数据与千条数据的分页�
   await expect(page.getByRole('cell', { name: 'user-50', exact: true })).toBeVisible()
   await expect(page.locator('tbody tr')).toHaveCount(50)
   await page.getByRole('checkbox', { name: '选择当前列表' }).click()
-  await expect(page.getByText('已选 50', { exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: '批量操作' })).toContainText('已选 50 项')
   await page.getByRole('textbox', { name: '跳转页码' }).fill('20')
   await page.getByRole('textbox', { name: '跳转页码' }).press('Enter')
   await expect(page.getByRole('cell', { name: 'user-1000', exact: true })).toBeVisible()
@@ -129,5 +129,16 @@ test.describe('触屏', () => {
     await page.getByRole('option', { name: /Codex/ }).tap()
     await expect(select).toHaveText('Codex')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.goto('/')
+    await expect(page.getByRole('button', { name: /^(上移|下移) / })).toHaveCount(0)
+    for (const label of ['拖动 main 排序']) {
+      const control = page.getByRole('button', { name: label, exact: true })
+      const box = (await control.boundingBox())!
+      const cell = (await control.locator('xpath=ancestor::td').boundingBox())!
+      expect(box.width).toBeGreaterThanOrEqual(44)
+      expect(box.height).toBeGreaterThanOrEqual(44)
+      expect(box.x).toBeGreaterThanOrEqual(cell.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(cell.x + cell.width)
+    }
   })
 })

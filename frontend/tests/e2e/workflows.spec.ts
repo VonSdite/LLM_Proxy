@@ -33,9 +33,9 @@ test('Provider 拉取模型使用当前表单，嵌套选择后可测试并保�
     .getByRole('textbox', { name: 'API 地址', exact: true })
     .fill('https://draft.example/v1/chat/completions')
   await dialog.getByRole('button', { name: '拉取模型', exact: true }).click()
-  const picker = page.getByRole('dialog', { name: '添加上游模型', exact: true })
+  const picker = page.getByRole('dialog', { name: '选择上游模型', exact: true })
   await picker.getByRole('checkbox', { name: 'org/new-model', exact: true }).click()
-  await picker.getByRole('button', { name: '添加所选', exact: true }).click()
+  await picker.getByRole('button', { name: '确定', exact: true }).click()
   await expect(picker).toHaveCount(0)
   expect(new URL(fetchedUrl).searchParams.get('api')).toBe(
     'https://draft.example/v1/chat/completions',
@@ -63,6 +63,62 @@ test('Provider 拉取模型使用当前表单，嵌套选择后可测试并保�
       'org/new-model',
     ],
   })
+  expect(fixture.unexpected).toEqual([])
+})
+
+test('拉取模型取消勾选可移除已有模型，搜索与全不选保留候选之外的模型', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  fixture.provider.model_list = ['keep-model', 'remove-model', 'manual-model']
+  fixture.provider.hidden_model_list = ['keep-model', 'remove-model']
+  const saves: unknown[] = []
+  await page.route('**/api/providers/fetch-models?*', (route) =>
+    route.fulfill({ json: { fetched_models: ['remove-model', 'new-model', 'keep-model'] } }),
+  )
+  await page.route('**/api/providers/main', async (route) => {
+    const body = route.request().postDataJSON()
+    saves.push(body)
+    Object.assign(fixture.provider, body)
+    await route.fulfill({ json: fixture.provider })
+  })
+  await page.goto('/')
+  const edit = page.getByRole('button', { name: '编辑 Provider main', exact: true })
+  const dialog = page.getByRole('dialog', { name: '编辑 Provider', exact: true })
+  const picker = page.getByRole('dialog', { name: '选择上游模型', exact: true })
+  await edit.click()
+  await dialog.getByRole('button', { name: '拉取模型', exact: true }).click()
+  await expect(picker.getByRole('checkbox', { name: 'remove-model', exact: true })).toBeChecked()
+  await picker.getByRole('textbox', { name: '筛选候选模型' }).fill('remove')
+  await picker.getByRole('checkbox', { name: 'remove-model', exact: true }).uncheck()
+  await picker.getByRole('textbox', { name: '筛选候选模型' }).fill('new')
+  await picker.getByRole('checkbox', { name: 'new-model', exact: true }).check()
+  await picker.getByRole('button', { name: '确定', exact: true }).click()
+  await expect(picker).toHaveCount(0)
+  await expect
+    .poll(() =>
+      dialog
+        .getByRole('textbox', { name: /^模型 \d+$/ })
+        .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value)),
+    )
+    .toEqual(['keep-model', 'manual-model', 'new-model'])
+  await expect(dialog.getByRole('button', { name: '显示 keep-model', exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(saves[0]).toMatchObject({
+    model_list: ['keep-model', 'manual-model', 'new-model'],
+    hidden_model_list: ['keep-model'],
+  })
+  await edit.click()
+  await dialog.getByRole('button', { name: '拉取模型', exact: true }).click()
+  await expect(
+    picker.getByRole('checkbox', { name: 'remove-model', exact: true }),
+  ).not.toBeChecked()
+  const all = picker.getByRole('checkbox', { name: '选择当前筛选', exact: true })
+  await all.check()
+  await all.uncheck()
+  await picker.getByRole('button', { name: '确定', exact: true }).click()
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(saves[1]).toMatchObject({ model_list: ['manual-model'], hidden_model_list: [] })
   expect(fixture.unexpected).toEqual([])
 })
 
@@ -161,7 +217,7 @@ test('OAuth 卡片刷新、重置确认和所选导出遵循现有请求链路',
   expect(reads).toEqual(['quota', 'cards', 'quota'])
   await page.getByRole('checkbox', { name: '选择 account-demo.json', exact: true }).click()
   const download = page.waitForEvent('download')
-  await page.getByRole('button', { name: '导出', exact: true }).click()
+  await page.getByRole('button', { name: '导出所选', exact: true }).click()
   expect((await download).suggestedFilename()).toBe('codex-auth-files.zip')
   expect(exported).toEqual({ names: ['account-demo.json'] })
   expect(fixture.unexpected).toEqual([])

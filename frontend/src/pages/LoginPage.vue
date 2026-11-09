@@ -6,15 +6,7 @@ import { ApiError, errorMessage } from '@/api/client'
 import { useSession } from '@/stores/session'
 import { useTheme } from '@/stores/theme'
 import { useLifetime } from '@/features/shared/useLifetime'
-import {
-  UiAlert,
-  UiButton,
-  UiField,
-  UiIcon,
-  UiIconButton,
-  UiInput,
-  UiSecretInput,
-} from '@/components/ui'
+import { UiAlert, UiButton, UiField, UiIconButton, UiInput, UiSecretInput } from '@/components/ui'
 const username = ref('')
 const password = ref('')
 const busy = ref(false)
@@ -54,20 +46,24 @@ async function login() {
       @click="theme.toggle"
     />
     <form class="login-form surface" @submit.prevent="login">
-      <div class="login-brand">
-        <span class="login-mark"><UiIcon name="network" :size="24" /></span>
-        <h1>LLM Proxy</h1>
-        <p class="muted">登录管理控制台</p>
+      <header class="login-heading">
+        <h1>登录</h1>
+      </header>
+      <div class="login-body">
+        <UiAlert v-if="error">{{ error }}</UiAlert>
+        <UiField label="用户名" :error="submitted && !username.trim() ? '请输入用户名' : undefined">
+          <UiInput
+            v-model="username"
+            autocomplete="username"
+            placeholder="请输入用户名"
+            autofocus
+          />
+        </UiField>
+        <UiField label="密码" :error="submitted && !password ? '请输入密码' : undefined">
+          <UiSecretInput v-model="password" placeholder="请输入密码" password-autofill />
+        </UiField>
+        <UiButton type="submit" variant="primary" :loading="busy">登录</UiButton>
       </div>
-      <UiAlert v-if="error">{{ error }}</UiAlert>
-      <UiField label="账号" :error="submitted && !username.trim() ? '请输入账号' : undefined">
-        <UiInput v-model="username" autocomplete="username" autofocus />
-      </UiField>
-      <UiField label="密码" :error="submitted && !password ? '请输入密码' : undefined">
-        <UiSecretInput v-model="password" password-autofill />
-      </UiField>
-      <UiButton type="submit" variant="primary" :loading="busy">登录</UiButton>
-      <small class="login-version muted">v{{ session.context?.version }}</small>
     </form>
   </div>
 </template>
@@ -86,34 +82,42 @@ async function login() {
 }
 
 .login-form {
+  --control: 40px;
+
+  width: min(420px, 100%);
+  overflow: hidden;
+  box-shadow: var(--shadow-soft);
+}
+
+.login-heading {
+  padding: var(--space-5) 28px;
+  background: var(--surface-tint);
+  border-bottom: 1px solid var(--divider);
+}
+
+.login-body {
   display: grid;
-  gap: var(--space-6);
-  width: min(380px, 100%);
-  padding: var(--space-8);
+  gap: var(--space-5);
+  padding: var(--space-6) 28px 28px;
 }
 
-.login-brand {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-2);
+@media (pointer: coarse) {
+  .login-form {
+    --control: 44px;
+  }
 }
 
-.login-brand p {
-  font-size: var(--text-sm);
-}
+@media (width <= 480px) {
+  .login-page {
+    padding: var(--space-5);
+  }
 
-.login-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-group);
-  background: var(--selected);
-  color: var(--link);
-  margin-bottom: var(--space-2);
-}
+  .login-heading {
+    padding: var(--space-5) var(--space-6);
+  }
 
-.login-version {
-  text-align: center;
+  .login-body {
+    padding: var(--space-6);
+  }
 }
 </style>

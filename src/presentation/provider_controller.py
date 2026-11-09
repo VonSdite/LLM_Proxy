@@ -96,6 +96,9 @@ class ProviderController:
         self._app.route("/api/providers/<path:name>/enable", methods=["POST"])(auth(self.enable_provider))
         self._app.route("/api/auth-groups", methods=["GET"])(auth(self.get_auth_groups))
         self._app.route("/api/auth-groups", methods=["POST"])(auth(self.create_auth_group))
+        self._app.route("/api/auth-groups/export", methods=["POST"])(auth(self.export_auth_groups))
+        self._app.route("/api/auth-groups/import", methods=["POST"])(auth(self.import_auth_groups))
+        self._app.route("/api/auth-groups/batch", methods=["POST"])(auth(self.batch_auth_groups))
         self._app.route("/api/auth-groups/import-entries", methods=["POST"])(auth(self.import_auth_group_entries))
         self._app.route("/api/auth-groups/<string:name>", methods=["GET"])(auth(self.get_auth_group))
         self._app.route("/api/auth-groups/<string:name>", methods=["PUT"])(auth(self.update_auth_group))
@@ -293,6 +296,43 @@ class ProviderController:
             return jsonify(self._auth_group_service.list_auth_groups())
         except Exception as exc:
             self._logger.error("Error getting auth groups: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def export_auth_groups(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            result = self._auth_group_service.export_auth_groups(payload.get("names"))
+            self._logger.info("Auth groups exported: count=%s", len(result["auth_groups"]))
+            return jsonify(result)
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error exporting auth groups: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def import_auth_groups(self) -> ResponseReturnValue:
+        try:
+            result = self._auth_group_service.import_auth_groups(get_json_object())
+            self._logger.info("Auth groups imported: count=%s", result["count"])
+            return jsonify(result), 201
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error importing auth groups: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def batch_auth_groups(self) -> ResponseReturnValue:
+        try:
+            payload = get_json_object()
+            if payload.get("action") != "delete":
+                raise ValueError("Auth Group 批量操作仅支持删除")
+            result = self._auth_group_service.batch_delete_auth_groups(payload.get("names"))
+            self._logger.info("Auth groups deleted: count=%s", result["count"])
+            return jsonify(result)
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error deleting auth groups: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def get_auth_group(self, name: str) -> ResponseReturnValue:

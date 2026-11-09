@@ -1,0 +1,23 @@
+.ui-sort-root {
+  position: relative;
+}
+
+.ui-sort-item[data-drop-position='before'] {
+  box-shadow: inset 0 2px var(--link);
+}
+
+.ui-sort-item[data-drop-position='after'] {
+  box-shadow: inset 0 -2px var(--link);
+}
+
+.ui-sort-item[data-dragging] {
+  opacity: 0.55;
+}
+
+.ui-sort-tail {
+  position: absolute;
+  top: 100%;
+  inset-inline: 0;
+  height: 32px;
+  z-index: var(--z-header);
+}

@@ -4,7 +4,7 @@ import { mockAdmin, pages } from '../browser-fixtures'
 test('登录错误保留表单，正确登录后展示统一外壳', async ({ page }) => {
   const fixture = await mockAdmin(page, false)
   await page.goto('/login')
-  await page.getByLabel('账号', { exact: true }).fill('admin')
+  await page.getByLabel('用户名', { exact: true }).fill('admin')
   await page.getByLabel('密码', { exact: true }).fill('wrong')
   await page.getByRole('button', { name: '登录', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('账号或密码不正确')
@@ -35,18 +35,21 @@ for (const item of pages) {
   })
 }
 
-test('Provider 模型输入保持焦点和 DOM，弹窗 Escape 后焦点回到入口', async ({ page }) => {
+test('Provider 模型输入保持焦点和 DOM，确认放弃后焦点回到入口', async ({ page }) => {
   await mockAdmin(page)
   await page.goto('/')
   const trigger = page.getByRole('button', { name: '新增 Provider' })
   await trigger.click()
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: '新增 Provider', exact: true })
   await dialog.getByRole('button', { name: '添加', exact: true }).click()
   const input = dialog.getByRole('textbox', { name: '模型 1' })
   await input.fill('org/model-with-full-id')
   await expect(input).toBeFocused()
   await expect(input).toHaveValue('org/model-with-full-id')
   await page.keyboard.press('Escape')
+  const prompt = page.getByRole('dialog', { name: '保存修改？', exact: true })
+  await expect(prompt).toBeVisible()
+  await prompt.getByRole('button', { name: '不保存', exact: true }).click()
   await expect(dialog).not.toBeVisible()
   await expect(trigger).toBeFocused()
 })

@@ -38,9 +38,7 @@ class ApiKeyController:
             page = request.args.get("page", 1, type=int)
             page_size = request.args.get("page_size", 50, type=int)
             keyword = (request.args.get("keyword", "", type=str) or "").strip()
-            sort_key = (
-                request.args.get("sort_key", "created_at", type=str) or "created_at"
-            ).strip() or "created_at"
+            sort_key = (request.args.get("sort_key", "created_at", type=str) or "created_at").strip() or "created_at"
             sort_direction = (request.args.get("sort_direction", "desc", type=str) or "desc").strip() or "desc"
             self._logger.debug(
                 "List API keys requested: page=%s, page_size=%s, keyword=%r, sort_key=%r, sort_direction=%r",
@@ -100,6 +98,7 @@ class ApiKeyController:
                 model_permissions=model_permissions,
                 token_limit_k=data.get("token_limit_k"),
                 enabled=enabled,
+                request_limits={field: data[field] for field in ApiKeyService.REQUEST_LIMIT_FIELDS if field in data},
             )
             return jsonify({"api_key": api_key, "message": "API key created successfully"}), 201
         except ValueError as exc:
@@ -131,6 +130,7 @@ class ApiKeyController:
                 model_permissions=data.get("model_permissions"),
                 token_limit_k_provided="token_limit_k" in data,
                 token_limit_k=data.get("token_limit_k"),
+                request_limits={field: data[field] for field in ApiKeyService.REQUEST_LIMIT_FIELDS if field in data},
             )
             if not success:
                 self._logger.warning("Update API key failed: key_id=%s", key_id)

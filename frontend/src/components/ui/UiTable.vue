@@ -11,7 +11,9 @@ import type { TableColumn, TableSort } from './types'
 import UiCheckbox from './UiCheckbox.vue'
 import UiEmptyState from './UiEmptyState.vue'
 import UiIcon from './UiIcon.vue'
-import UiIconButton from './UiIconButton.vue'
+import UiDragHandle from './UiDragHandle.vue'
+import UiHelpPopover from './UiHelpPopover.vue'
+import UiButton from './UiButton.vue'
 import { useRowDrag } from './drag'
 const props = withDefaults(
   defineProps<{
@@ -26,7 +28,11 @@ const props = withDefaults(
     empty?: string
     storageKey?: string
     reorderable?: boolean
+    reorderDisabled?: boolean
+    reorderGroup?: (row: T) => string
     footer?: Record<string, string | number | undefined>
+    addLabel?: string
+    addDisabled?: boolean
   }>(),
   { selected: () => [] },
 )
@@ -34,17 +40,17 @@ const emit = defineEmits<{
   'update:selected': [value: string[]]
   'update:sort': [value: TableSort]
   reorder: [value: { id: string; targetId: string; after: boolean }]
+  add: []
 }>()
-const { dragOver, startDrag, endDrag, drop, over } = useRowDrag(
-  () => !!props.reorderable,
-  (move) => emit('reorder', move),
-)
-function moveRow(index: number, offset: number) {
-  const rows = table.getRowModel().rows
-  const source = rows[index]
-  const target = rows[index + offset]
-  if (source && target) emit('reorder', { id: source.id, targetId: target.id, after: offset > 0 })
-}
+const { setRoot, dragging, startDrag, endDrag, drop, over, leave, startPointer, keydown } =
+  useRowDrag(
+    () => !!props.reorderable && !props.reorderDisabled,
+    () =>
+      table
+        .getRowModel()
+        .rows.map((row) => ({ id: row.id, group: props.reorderGroup?.(row.original) })),
+    (move) => emit('reorder', move),
+  )
 const sizes = ref<ColumnSizingState>({})
 if (props.storageKey) {
   try {
@@ -79,7 +85,8 @@ const columns = computed(() =>
     header: column.label,
     enableSorting: column.sortable === true,
     size: column.width || 180,
-    minSize: 80,
+    minSize: column.minWidth || 80,
+    maxSize: column.maxWidth,
   })),
 )
 // TanStack 按数组引用缓存行与单元格；草稿原位编辑时刷新缓存并保留原始行对象。
@@ -131,21 +138,63 @@ const table = useVueTable({
   },
   enableSortingRemoval: false,
 })
+const flexibleWeight = computed(() =>
+  props.columns.reduce(
+    (total, column) =>
+      total + (column.fixed ? 0 : (column.grow ?? table.getColumn(column.key)?.getSize() ?? 0)),
+    0,
+  ),
+)
+function columnWidth(id: string, size: number) {
+  const column = props.columns.find((column) => column.key === id)
+  if (column?.fixed) return `${size}px`
+  if (!flexibleWeight.value) return `${size}px`
+  const extra = `max(0px, 100cqw - var(--table-utility-width) - ${table.getTotalSize()}px)`
+  const preferred = `calc(${size}px + ${extra} * ${(column?.grow ?? size) / flexibleWeight.value})`
+  if (column?.maxWidth) return `min(${column.maxWidth}px, ${preferred})`
+  // 有上限的列停止扩展后，额外宽度分配给未设上限的弹性列。
+  const capped = props.columns.filter((item) => !item.fixed && item.maxWidth)
+  if (!capped.length) return preferred
+  const remainingWeight = props.columns.reduce(
+    (total, item) =>
+      total +
+      (item.fixed || item.maxWidth ? 0 : (item.grow ?? table.getColumn(item.key)?.getSize() ?? 0)),
+    0,
+  )
+  if (!remainingWeight) return preferred
+  const surplus = capped
+    .map((item) => {
+      const base = table.getColumn(item.key)?.getSize() || 0
+      return `max(0px, ${extra} * ${(item.grow ?? base) / flexibleWeight.value} - ${item.maxWidth! - base}px)`
+    })
+    .join(' + ')
+  return `calc(${preferred} + (${surplus}) * ${(column?.grow ?? size) / remainingWeight})`
+}
 </script>
 <template>
-  <div class="ui-table-wrap surface" :aria-busy="loading || undefined">
+  <div
+    :ref="setRoot"
+    class="ui-table-wrap ui-sort-root surface"
+    :class="{ 'ui-table-wrap--reorderable': reorderable }"
+    :aria-busy="loading || undefined"
+    @dragover="over"
+    @dragleave="leave"
+    @drop="drop"
+  >
     <div class="ui-table-scroll">
       <table
         class="ui-table"
         :style="{
-          minWidth: `${table.getTotalSize() + (selectable ? 44 : 0) + (reorderable ? 100 : 0)}px`,
+          '--table-utility-width': `calc(${selectable ? 'var(--table-check-width)' : '0px'} + ${reorderable ? 'var(--table-order-width)' : '0px'})`,
+          minWidth: `calc(${table.getTotalSize()}px + var(--table-utility-width))`,
         }"
       >
         <thead>
           <tr>
-            <th v-if="reorderable" class="ui-table-order">顺序</th>
+            <th v-if="reorderable" class="ui-table-order" aria-label="顺序" />
             <th v-if="selectable" class="ui-table-check">
               <UiCheckbox
+                class="ui-table-checkbox"
                 :model-value="
                   table.getIsAllRowsSelected() && rows.length > 0
                     ? true
@@ -161,7 +210,11 @@ const table = useVueTable({
             <th
               v-for="header in table.getFlatHeaders()"
               :key="header.id"
-              :style="{ width: `${header.getSize()}px` }"
+              :style="{ width: columnWidth(header.id, header.getSize()) }"
+              :class="{
+                'ui-table-right':
+                  props.columns.find((column) => column.key === header.id)?.align === 'right',
+              }"
               :aria-sort="
                 header.column.getIsSorted() === 'asc'
                   ? 'ascending'
@@ -170,24 +223,33 @@ const table = useVueTable({
                     : undefined
               "
             >
-              <button
-                v-if="header.column.getCanSort()"
-                class="ui-table-heading"
-                @click="header.column.toggleSorting()"
-              >
-                {{ header.column.columnDef.header }}
-                <UiIcon
-                  :name="
-                    header.column.getIsSorted() === 'asc'
-                      ? 'up'
-                      : header.column.getIsSorted() === 'desc'
-                        ? 'arrowDown'
-                        : 'sort'
-                  "
-                  :size="13"
+              <div class="ui-table-header-content">
+                <slot :name="`header-${header.id}`">
+                  <button
+                    v-if="header.column.getCanSort()"
+                    class="ui-table-heading"
+                    @click="header.column.toggleSorting()"
+                  >
+                    {{ header.column.columnDef.header }}
+                    <UiIcon
+                      :name="
+                        header.column.getIsSorted() === 'asc'
+                          ? 'up'
+                          : header.column.getIsSorted() === 'desc'
+                            ? 'arrowDown'
+                            : 'sort'
+                      "
+                      :size="13"
+                    />
+                  </button>
+                  <span v-else>{{ header.column.columnDef.header }}</span>
+                </slot>
+                <UiHelpPopover
+                  v-if="props.columns.find((column) => column.key === header.id)?.help"
+                  :label="`${header.column.columnDef.header}说明`"
+                  :text="props.columns.find((column) => column.key === header.id)?.help"
                 />
-              </button>
-              <span v-else>{{ header.column.columnDef.header }}</span>
+              </div>
               <div
                 class="ui-table-resize"
                 role="separator"
@@ -201,7 +263,10 @@ const table = useVueTable({
                 @keydown.left.prevent="
                   table.setColumnSizing((old) => ({
                     ...old,
-                    [header.id]: Math.max(80, header.getSize() - 16),
+                    [header.id]: Math.max(
+                      header.column.columnDef.minSize || 80,
+                      header.getSize() - 16,
+                    ),
                   }))
                 "
                 @keydown.right.prevent="
@@ -213,41 +278,28 @@ const table = useVueTable({
         </thead>
         <tbody>
           <tr
-            v-for="(row, rowIndex) in table.getRowModel().rows"
+            v-for="row in table.getRowModel().rows"
             :key="row.id"
+            class="ui-sort-item"
+            :data-sort-id="row.id"
             :data-selected="row.getIsSelected() || undefined"
-            :data-drag-over="dragOver === row.id || undefined"
-            @dragover="over($event, row.id)"
-            @drop="drop($event, row.id)"
+            :data-dragging="dragging === row.id || undefined"
           >
             <td v-if="reorderable" class="ui-table-order">
               <div class="ui-table-order-actions">
-                <button
-                  type="button"
-                  class="ui-table-drag"
-                  draggable="true"
-                  :aria-label="`拖动 ${row.id} 排序`"
+                <UiDragHandle
+                  :disabled="reorderDisabled"
+                  :label="`拖动 ${row.id} 排序`"
                   @dragstart="startDrag($event, row.id)"
                   @dragend="endDrag"
-                >
-                  <UiIcon name="grip" :size="14" />
-                </button>
-                <UiIconButton
-                  icon="up"
-                  :label="`上移 ${row.id}`"
-                  :disabled="rowIndex === 0"
-                  @click="moveRow(rowIndex, -1)"
-                />
-                <UiIconButton
-                  icon="arrowDown"
-                  :label="`下移 ${row.id}`"
-                  :disabled="rowIndex === rows.length - 1"
-                  @click="moveRow(rowIndex, 1)"
+                  @pointerdown="startPointer($event, row.id)"
+                  @keydown="keydown($event, row.id)"
                 />
               </div>
             </td>
             <td v-if="selectable" class="ui-table-check">
               <UiCheckbox
+                class="ui-table-checkbox"
                 :model-value="row.getIsSelected()"
                 :label="`选择 ${row.id}`"
                 @update:model-value="row.toggleSelected($event)"
@@ -265,6 +317,19 @@ const table = useVueTable({
               <slot :name="`cell-${cell.column.id}`" :row="row.original" :value="cell.getValue()">
                 {{ cell.getValue() ?? '—' }}
               </slot>
+            </td>
+          </tr>
+          <tr v-if="addLabel" class="ui-table-add-row">
+            <td :colspan="props.columns.length + Number(!!selectable) + Number(!!reorderable)">
+              <UiButton
+                variant="ghost"
+                icon="plus"
+                class="ui-table-add"
+                :disabled="addDisabled"
+                @click="emit('add')"
+              >
+                {{ addLabel }}
+              </UiButton>
             </td>
           </tr>
         </tbody>
@@ -285,81 +350,107 @@ const table = useVueTable({
         </tfoot>
       </table>
     </div>
-    <UiEmptyState v-if="!rows.length" :loading="loading" :title="empty || '暂无数据'" />
+    <UiEmptyState
+      v-if="!rows.length && (!addLabel || loading)"
+      :loading="loading"
+      :title="empty || '暂无数据'"
+    />
+    <div v-if="dragging" class="ui-sort-tail" aria-hidden="true" />
   </div>
 </template>
 <style scoped>
 .ui-table-wrap {
-  overflow: hidden;
+  --table-check-width: 44px;
+  --table-order-width: calc(var(--control-sm) + var(--space-2));
+
   min-width: 0;
+  container-type: inline-size;
+}
+
+.ui-table-wrap--reorderable {
+  --table-check-width: var(--control-sm);
 }
 
 .ui-table-scroll {
   overflow-x: auto;
+  border-radius: inherit;
+}
+
+.ui-table-checkbox {
+  display: flex;
+  justify-content: center;
 }
 
 .ui-table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 
 .ui-table th {
   position: relative;
-  height: 40px;
+  height: 44px;
   padding: var(--space-2) var(--space-3);
-  background: var(--input);
+  background: var(--surface-soft);
   color: var(--muted);
-  font-weight: 500;
+  font-weight: var(--weight-label);
+  font-size: var(--text-sm);
   text-align: left;
 }
 
 .ui-table td {
-  height: 48px;
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--border);
+  height: 56px;
+  padding: 10px var(--space-3);
+  border-top: 1px solid var(--divider);
   overflow-wrap: anywhere;
   vertical-align: middle;
 }
 
 .ui-table tfoot {
-  background: var(--input);
-  font-weight: 600;
+  background: var(--surface-soft);
+  font-weight: var(--weight-emphasis);
+}
+
+.ui-table .ui-table-add-row td {
+  height: auto;
+  padding: 0;
+}
+
+.ui-table-add {
+  position: sticky;
+  left: 0;
+  width: min(100%, 100cqw);
+  min-height: 44px;
+  border-radius: 0;
+  color: var(--link);
 }
 
 .ui-table tr[data-selected] {
+  --tag-background: var(--tag-selected-background);
+
   background: var(--selected);
 }
 
-.ui-table tbody tr:hover {
+.ui-table tbody tr:not([data-selected]):hover {
   background: color-mix(in srgb, var(--hover) 65%, transparent);
 }
 
 .ui-table .ui-table-check {
-  width: 44px;
+  width: var(--table-check-width);
+  padding-inline: 0;
   text-align: center;
 }
 
 .ui-table .ui-table-order {
-  width: 100px;
+  width: var(--table-order-width);
+  padding-inline: var(--space-2) 0;
 }
 
 .ui-table-order-actions {
   display: flex;
   align-items: center;
-}
-
-.ui-table-drag {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: grab;
-}
-
-.ui-table tr[data-drag-over] {
-  box-shadow: inset 0 2px var(--link);
+  justify-content: center;
 }
 
 .ui-table .ui-table-right {
@@ -379,6 +470,16 @@ const table = useVueTable({
   font-weight: inherit;
 }
 
+.ui-table-header-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ui-table-right .ui-table-header-content {
+  justify-content: flex-end;
+}
+
 .ui-table-resize {
   position: absolute;
   top: var(--space-2);
@@ -395,17 +496,8 @@ const table = useVueTable({
 }
 
 @media (pointer: coarse) {
-  .ui-table .ui-table-check {
-    width: calc(var(--control) + 24px);
-  }
-
-  .ui-table .ui-table-order {
-    width: calc(3 * var(--control) + 24px);
-  }
-
-  .ui-table-drag {
-    min-width: var(--control);
-    min-height: var(--control);
+  .ui-table-wrap {
+    --table-check-width: calc(var(--control) + 24px);
   }
 
   .ui-table-heading {

@@ -9,11 +9,11 @@
 body {
   margin: 0;
   min-width: 320px;
-  background: var(--background);
+  background: var(--page-glow), var(--background);
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--text-base);
-  line-height: 1.5;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -64,15 +64,17 @@ p {
 }
 
 h1 {
+  color: var(--heading);
   font-size: var(--text-title);
-  font-weight: 650;
-  letter-spacing: -0.025em;
+  font-weight: var(--weight-heading);
+  letter-spacing: -0.015em;
 }
 
 h2,
 h3 {
+  color: var(--heading);
   font-size: var(--text-section);
-  font-weight: 600;
+  font-weight: var(--weight-heading);
 }
 
 code,
@@ -84,6 +86,10 @@ pre,
 
 small {
   font-size: var(--text-xs);
+}
+
+strong {
+  font-weight: var(--weight-emphasis);
 }
 
 .muted {
@@ -112,7 +118,7 @@ small {
 
 .page {
   display: grid;
-  gap: var(--space-6);
+  gap: var(--space-5);
 }
 
 .page-heading,
@@ -145,6 +151,14 @@ small {
   border: 1px solid var(--border);
   border-radius: var(--radius-group);
   background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: nowrap;
 }
 
 .stack {

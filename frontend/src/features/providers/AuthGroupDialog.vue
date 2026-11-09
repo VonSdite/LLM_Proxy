@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useDraftChanges } from '@/features/shared/useDraftChanges'
+import { nextTick, ref } from 'vue'
 import { authGroupsApi, type AuthGroup } from '@/api/providers'
 import { errorMessage } from '@/api/client'
 import { useLifetime } from '@/features/shared/useLifetime'
-import ConfigFileEditor from '@/features/shared/ConfigFileEditor.vue'
+import TextImportDialog from '@/features/shared/TextImportDialog.vue'
 import { entryDraft, entryErrors, entryLimits, entryPayload, entriesYaml } from './auth-entry'
 import {
   UiAlert,
@@ -12,11 +13,13 @@ import {
   UiConfirmPopover,
   UiDialog,
   UiField,
+  UiHelpPopover,
   UiIconButton,
   UiInput,
   UiNumberInput,
   UiSecretInput,
   UiSelect,
+  UiSelectableRow,
   UiSwitch,
 } from '@/components/ui'
 const props = defineProps<{ group?: AuthGroup }>()
@@ -32,34 +35,31 @@ const errors = ref<Record<string, string>>({})
 const invalid = ref<Record<string, boolean>>({})
 const busy = ref(false)
 const error = ref('')
-const yamlSource = ref<{ path: string; text: string; version: string }>()
+const yamlSource = ref('')
 const yamlOpen = ref(false)
-const fileInput = ref<HTMLInputElement>()
+const sidebar = ref<HTMLElement>()
 const signal = useLifetime()
 let headerKey = -1
-function add() {
+async function add() {
   const entry = entryDraft()
   entries.value.push(entry)
   current.value = entry.key
+  await nextTick()
+  sidebar.value?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest' })
 }
 function remove(key: number) {
+  const index = entries.value.findIndex((entry) => entry.key === key)
   entries.value = entries.value.filter((entry) => entry.key !== key)
-  if (current.value === key) current.value = entries.value[0]?.key
+  if (current.value === key)
+    current.value = entries.value[Math.min(index, entries.value.length - 1)]?.key
 }
-function openYaml(text = entriesYaml(entries.value.map(entryPayload))) {
-  yamlSource.value = { path: 'Auth Entries.yaml', text, version: '' }
+function openYaml() {
+  yamlSource.value = entriesYaml(entries.value.map(entryPayload))
   yamlOpen.value = true
 }
-async function readFile(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (file) {
-    openYaml(await file.text())
-    if (fileInput.value) fileInput.value.value = ''
-  }
-}
-async function applyYaml(text: string) {
-  const result = await authGroupsApi.importEntries(text, signal)
-  if (signal.aborted) return
+async function applyYaml(text: string, importSignal: AbortSignal) {
+  const result = await authGroupsApi.importEntries(text, importSignal)
+  if (importSignal.aborted) return
   entries.value = result.entries.map(entryDraft)
   current.value = entries.value[0]?.key
   errors.value = {}
@@ -107,9 +107,22 @@ async function submit() {
     busy.value = false
   }
 }
+const dirty = useDraftChanges(() => ({
+  name: name.value,
+  strategy: strategy.value,
+  cooldown: cooldown.value,
+  entries: entries.value.map((entry) => ({
+    id: entry.id,
+    enabled: entry.enabled,
+    headers: entry.headers.map((header) => ({ name: header.name, value: header.value })),
+    limits: entryLimits.map(({ key }) => entry[key] ?? null),
+  })),
+}))
 </script>
 <template>
   <UiDialog
+    :save="submit"
+    :dirty="dirty"
     open
     :title="group ? '编辑 Auth Group' : '新增 Auth Group'"
     size="xl"
@@ -124,7 +137,11 @@ async function submit() {
         </UiField>
         <UiField
           label="选择策略"
-          help="最小并发优先选择当前请求数最少的条目；粘滞故障切换持续使用最近成功条目，直到不可用。"
+          :help="[
+            '最小并发：优先选择当前进行中请求最少的可用条目，适合长流式请求与分摊负载。',
+            '粘滞故障切换：持续使用当前条目；冷却、禁用、配额耗尽或并发已满时，再按顺序选择其他可用条目。',
+            '限制范围：并发与配额按条目计算。多个 Provider 绑定同一组时，共享凭据与用量。',
+          ]"
         >
           <UiSelect
             v-model="strategy"
@@ -135,7 +152,16 @@ async function submit() {
             :disabled="busy"
           />
         </UiField>
-        <UiField label="默认 429 冷却" unit="秒" :error="errors.cooldown">
+        <UiField
+          label="默认 429 冷却"
+          unit="秒"
+          :error="errors.cooldown"
+          :help="[
+            '触发条件：条目收到上游 429 限流后暂停使用，只冷却被限流的条目。',
+            '时长优先级：有效的 Retry-After → 条目冷却值 → 本组默认值。',
+            '留空：本组默认冷却 60 秒。',
+          ]"
+        >
           <UiNumberInput
             v-model="cooldown"
             :min="1"
@@ -147,33 +173,30 @@ async function submit() {
         </UiField>
       </div>
       <div class="toolbar">
-        <h2>认证条目</h2>
         <div class="actions">
-          <UiButton size="sm" :disabled="busy" @click="openYaml()">编辑 YAML</UiButton>
-          <UiButton size="sm" icon="upload" :disabled="busy" @click="fileInput?.click()">
-            导入
-          </UiButton>
-          <UiButton size="sm" icon="plus" :disabled="busy" @click="add">添加条目</UiButton>
-          <input
-            ref="fileInput"
-            type="file"
-            accept=".yaml,.yml,.json"
-            class="sr-only"
-            aria-label="导入认证条目"
-            @change="readFile"
+          <h2>认证条目</h2>
+          <UiHelpPopover
+            label="认证条目说明"
+            :text="[
+              '每个条目：一组发往上游的认证请求头，并发、冷却与配额分别按条目计算。',
+              '编辑 / 导入：直接编辑 YAML，或选择 YAML、JSON 文件，确定后整体替换当前表单中的条目列表。',
+              '生效时机：保存认证组后生效。',
+            ]"
           />
         </div>
+        <UiButton size="sm" :disabled="busy" @click="openYaml">编辑 / 导入</UiButton>
       </div>
       <UiAlert v-if="errors.entries">{{ errors.entries }}</UiAlert>
       <div class="entry-workspace surface">
-        <nav class="entry-sidebar" aria-label="认证条目">
-          <UiButton
+        <nav ref="sidebar" class="entry-sidebar" aria-label="认证条目">
+          <UiSelectableRow
             v-for="entry in entries"
             :key="entry.key"
-            :variant="current === entry.key ? 'secondary' : 'ghost'"
+            class="entry-sidebar-row"
+            :selected="current === entry.key"
             :disabled="busy"
-            :aria-pressed="current === entry.key"
-            @click="current = entry.key"
+            :title="entry.id || '未命名'"
+            @select="current = entry.key"
           >
             <span class="truncate">{{ entry.id || '未命名' }}</span>
             <UiBadge
@@ -182,6 +205,24 @@ async function submit() {
             >
               !
             </UiBadge>
+            <template #actions>
+              <UiSwitch
+                v-model="entry.enabled"
+                :disabled="busy"
+                :label="`启用条目 ${entry.id || '未命名'}`"
+              />
+              <UiConfirmPopover message="移除此认证条目？" @confirm="remove(entry.key)">
+                <UiIconButton
+                  icon="delete"
+                  size="sm"
+                  :label="`移除条目 ${entry.id || '未命名'}`"
+                  :disabled="busy"
+                />
+              </UiConfirmPopover>
+            </template>
+          </UiSelectableRow>
+          <UiButton class="entry-add" variant="ghost" icon="plus" :disabled="busy" @click="add">
+            添加条目
           </UiButton>
         </nav>
         <div class="entry-content">
@@ -191,13 +232,15 @@ async function submit() {
             :key="entry.key"
             class="stack"
           >
-            <div class="toolbar">
-              <UiSwitch v-model="entry.enabled" :disabled="busy">启用条目</UiSwitch>
-              <UiConfirmPopover message="移除此认证条目？" @confirm="remove(entry.key)">
-                <UiButton size="sm" variant="danger" :disabled="busy">移除条目</UiButton>
-              </UiConfirmPopover>
-            </div>
-            <UiField label="Entry ID" required :error="errors[`${entry.key}:id`]">
+            <UiField
+              label="Entry ID"
+              required
+              :error="errors[`${entry.key}:id`]"
+              :help="[
+                '作用：组内唯一的凭据标识，用于关联运行状态与配额统计，不是上游 API Key。',
+                '命名：建议使用稳定名称，例如 key-01。',
+              ]"
+            >
               <UiInput v-model="entry.id" mono :disabled="busy" />
             </UiField>
             <div class="form-grid form-grid--four">
@@ -205,6 +248,7 @@ async function submit() {
                 v-for="limit in entryLimits"
                 :key="limit.key"
                 :label="limit.label"
+                :help="limit.help"
                 :error="errors[`${entry.key}:${limit.key}`]"
               >
                 <UiNumberInput
@@ -217,7 +261,18 @@ async function submit() {
                 />
               </UiField>
             </div>
-            <UiField label="Headers" group required :error="errors[`${entry.key}:headers`]">
+            <UiField
+              label="Headers"
+              group
+              required
+              :error="errors[`${entry.key}:headers`]"
+              :help="[
+                '作用：所选条目发给上游的认证请求头。',
+                'OpenAI 兼容接口：通常填写 Authorization，值为 Bearer 密钥。',
+                '其他上游：可能使用 x-api-key，请按上游要求填写完整值。',
+                '名称：同一条目内不可重复。',
+              ]"
+            >
               <div class="stack">
                 <div v-for="header in entry.headers" :key="header.key" class="header-row">
                   <UiInput
@@ -255,20 +310,25 @@ async function submit() {
         </div>
       </div>
     </form>
-    <template #footer>
-      <UiButton :disabled="busy" @click="emit('close')">取消</UiButton>
+    <template #footer="{ close }">
+      <UiButton :disabled="busy" @click="close()">取消</UiButton>
       <UiButton variant="primary" type="submit" form="auth-group-form" :loading="busy">
         保存
       </UiButton>
     </template>
   </UiDialog>
-  <ConfigFileEditor
-    v-if="yamlOpen && yamlSource"
+  <TextImportDialog
+    v-if="yamlOpen"
     v-model:open="yamlOpen"
-    :source="yamlSource"
+    title="编辑认证条目"
+    :initial-value="yamlSource"
     language="yaml"
-    :save="applyYaml"
-    save-unchanged
+    confirm-label="确定"
+    :help="[
+      '直接编辑 YAML，或选择 YAML / JSON 文件填入编辑区。',
+      '确定后整体替换当前表单的认证条目；保存 Auth Group 后生效。',
+    ]"
+    :submit="applyYaml"
   />
 </template>
 <style scoped>
@@ -280,7 +340,7 @@ async function submit() {
 
 .entry-workspace {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: 250px minmax(0, 1fr);
   min-height: 360px;
 }
 
@@ -296,6 +356,10 @@ async function submit() {
 
 .entry-sidebar > * {
   flex: none;
+}
+
+.entry-add {
+  width: 100%;
   justify-content: flex-start;
 }
 
@@ -320,7 +384,7 @@ async function submit() {
   }
 
   .entry-sidebar {
-    flex-direction: row;
+    max-height: 220px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }

@@ -1,101 +1,141 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import { useSession } from '@/stores/session'
 import { useTheme } from '@/stores/theme'
-import { sessionApi } from '@/api/session'
-import { errorMessage } from '@/api/client'
-import { UiButton, UiIcon, UiIconButton, notify } from '@/components/ui'
+import { UiButton, UiDialog, UiIcon, UiIconButton, UiTooltip } from '@/components/ui'
+import AppNavigation from './AppNavigation.vue'
+
 const session = useSession()
 const theme = useTheme()
-const router = useRouter()
 const route = useRoute()
-const navigation = computed(() =>
-  [
-    { path: '/', label: 'Provider', show: true },
-    { path: '/oauth', label: 'OAuth', show: session.context?.features.oauth },
-    { path: '/model-mappings', label: '模型映射', show: session.context?.features.model_mapping },
-    { path: '/api-keys', label: 'API Key', show: session.context?.features.api_keys },
-    { path: '/agents', label: 'Agent 配置', show: true },
-    { path: '/users', label: '用户', show: true },
-    { path: '/statistics', label: '统计', show: true },
-    { path: '/settings', label: '设置', show: true },
-  ].filter((item) => item.show),
-)
-async function logout() {
-  try {
-    await sessionApi.logout()
-    session.clear()
-    await router.replace('/login')
-  } catch (reason) {
-    notify(errorMessage(reason), 'danger')
+const desktopCollapsed = ref(false)
+const compactCollapsed = ref(true)
+const menuOpen = ref(false)
+const mobileQuery = window.matchMedia('(max-width: 900px)')
+const compactQuery = window.matchMedia('(max-width: 1280px)')
+const mobile = ref(mobileQuery.matches)
+const compact = ref(compactQuery.matches)
+const collapsed = computed(() => (compact.value ? compactCollapsed.value : desktopCollapsed.value))
+function updateViewport() {
+  // 窄桌面的手动展开仅在当前宽度区间内保留，宽屏偏好独立保存。
+  if (mobile.value !== mobileQuery.matches || compact.value !== compactQuery.matches) {
+    compactCollapsed.value = true
   }
+  mobile.value = mobileQuery.matches
+  compact.value = compactQuery.matches
+  if (!mobile.value) menuOpen.value = false
 }
+function toggleSidebar() {
+  if (compact.value) compactCollapsed.value = !compactCollapsed.value
+  else desktopCollapsed.value = !desktopCollapsed.value
+}
+mobileQuery.addEventListener('change', updateViewport)
+compactQuery.addEventListener('change', updateViewport)
+onBeforeUnmount(() => {
+  mobileQuery.removeEventListener('change', updateViewport)
+  compactQuery.removeEventListener('change', updateViewport)
+})
+watch(
+  () => route.fullPath,
+  () => {
+    menuOpen.value = false
+  },
+)
 </script>
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'app-shell--collapsed': collapsed }">
     <a href="#main-content" class="skip-link">跳转到内容</a>
-    <header class="app-header">
-      <RouterLink to="/" class="app-brand">
-        <UiIcon name="network" :size="22" />
-        <span>LLM Proxy</span>
-        <small>v{{ session.context?.version }}</small>
-      </RouterLink>
-      <nav class="app-nav" aria-label="主导航">
-        <template v-for="item in navigation" :key="item.path">
-          <RouterLink
-            :to="item.path"
-            class="app-nav-link"
-            :class="{
-              'is-active':
-                route.path === item.path || (item.path === '/' && route.path === '/providers'),
-            }"
-          >
-            {{ item.label }}
-          </RouterLink>
-        </template>
-      </nav>
-      <div class="app-user">
-        <UiIconButton
-          :icon="theme.theme === 'dark' ? 'sun' : 'moon'"
-          label="切换主题"
-          @click="theme.toggle"
-        />
-        <template v-if="session.context?.auth_enabled">
-          <span class="app-username">{{ session.context.username }}</span>
-          <UiButton variant="ghost" icon="logout" size="sm" @click="logout">退出</UiButton>
-        </template>
+    <aside v-if="!mobile" class="app-sidebar" aria-label="侧边栏">
+      <div class="app-sidebar-header">
+        <RouterLink v-if="!collapsed" to="/" class="app-brand" aria-label="LLM Proxy">
+          <UiIcon name="network" :size="22" />
+          <span class="app-brand-text">
+            <strong>LLM Proxy</strong>
+            <small>v{{ session.context?.version }}</small>
+          </span>
+        </RouterLink>
+        <UiTooltip :text="collapsed ? '展开侧栏' : '收起侧栏'">
+          <UiButton
+            variant="ghost"
+            :icon="collapsed ? 'expand' : 'collapse'"
+            class="app-sidebar-toggle"
+            :aria-label="collapsed ? '展开侧栏' : '收起侧栏'"
+            :aria-expanded="!collapsed"
+            @click="toggleSidebar"
+          />
+        </UiTooltip>
       </div>
+      <AppNavigation :collapsed="collapsed" />
+    </aside>
+    <header v-else class="app-mobile-header">
+      <UiIconButton
+        icon="menu"
+        label="打开导航"
+        :aria-expanded="menuOpen"
+        aria-haspopup="dialog"
+        @click="menuOpen = true"
+      />
+      <RouterLink to="/" class="app-mobile-brand">LLM Proxy</RouterLink>
+      <UiIconButton
+        :icon="theme.theme === 'dark' ? 'sun' : 'moon'"
+        label="切换主题"
+        @click="theme.toggle"
+      />
     </header>
     <main id="main-content" class="app-content" tabindex="-1"><slot /></main>
+    <UiDialog v-if="mobile" v-model:open="menuOpen" title="LLM Proxy" placement="left">
+      <AppNavigation />
+    </UiDialog>
   </div>
 </template>
 <style scoped>
 .app-shell {
+  --app-sidebar-width: 216px;
+  --app-sticky-offset: 24px;
+
+  display: grid;
+  grid-template-columns: var(--app-sidebar-width) minmax(0, 1fr);
   min-height: 100dvh;
 }
 
-.app-header {
+.app-shell--collapsed {
+  --app-sidebar-width: 72px;
+}
+
+.app-sidebar {
   position: sticky;
   top: 0;
-  z-index: var(--z-header);
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  gap: var(--space-5);
+  height: 100dvh;
+  min-height: 0;
+  padding: var(--space-5) var(--space-3) var(--space-3);
+  border-right: 1px solid var(--divider);
+  background: var(--surface);
+}
+
+.app-sidebar-header {
   display: flex;
   align-items: center;
-  gap: var(--space-6);
-  min-height: 64px;
-  padding: var(--space-3) var(--space-8);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: 44px;
 }
 
 .app-brand {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  min-height: 44px;
+  padding-left: var(--space-2);
+  border-radius: var(--radius-control);
   color: var(--text);
-  font-weight: 650;
   white-space: nowrap;
-  letter-spacing: -0.02em;
 }
 
 .app-brand:hover {
@@ -106,59 +146,50 @@ async function logout() {
   color: var(--link);
 }
 
+.app-brand-text {
+  display: grid;
+  gap: 2px;
+}
+
+.app-brand strong {
+  font-size: var(--text-section);
+}
+
 .app-brand small {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 400;
 }
 
-.app-nav {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  overflow: auto;
-  flex: 1;
-}
-
-.app-nav-link {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-control);
-  color: var(--muted);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-}
-
-.app-nav-link:hover {
-  color: var(--text);
-  background: var(--hover);
-  text-decoration: none;
-}
-
-.app-nav-link.is-active {
-  color: var(--text);
-  background: var(--hover);
-  font-weight: 550;
-}
-
-.app-user {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.app-username {
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: var(--text-xs);
+.app-sidebar-toggle {
+  flex: none;
+  width: var(--control);
+  padding: 0;
   color: var(--muted);
 }
 
 .app-content {
-  max-width: 1760px;
-  margin: 0 auto;
-  padding: var(--space-6) var(--space-8) var(--space-8);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-6) var(--space-6) var(--space-8);
   outline: none;
+}
+
+.app-mobile-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--divider);
+  background: var(--surface);
+}
+
+.app-mobile-brand {
+  margin-right: auto;
+  color: var(--text);
+  font-size: var(--text-section);
+  font-weight: var(--weight-heading);
 }
 
 .skip-link {
@@ -174,42 +205,15 @@ async function logout() {
   top: var(--space-2);
 }
 
-@media (pointer: coarse) {
-  .app-nav-link {
-    display: inline-flex;
-    align-items: center;
-    min-height: var(--control);
-  }
-}
+@media (width <= 900px) {
+  .app-shell {
+    --app-sticky-offset: calc(40px + var(--control));
 
-@media (width <= 1200px) {
-  .app-header {
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    padding-inline: var(--space-6);
-  }
-
-  .app-nav {
-    order: 3;
-    flex-basis: 100%;
-  }
-
-  .app-user {
-    margin-left: auto;
-  }
-}
-
-@media (width <= 600px) {
-  .app-header {
-    padding-inline: var(--space-4);
+    display: block;
   }
 
   .app-content {
-    padding: var(--space-4);
-  }
-
-  .app-brand small {
-    display: none;
+    padding: var(--space-5) var(--space-4) var(--space-6);
   }
 }
 </style>

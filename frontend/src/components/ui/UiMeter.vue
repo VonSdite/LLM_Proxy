@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-const props = defineProps<{ value: number | null; label: string }>()
+const props = defineProps<{ value: number | null; label: string; muted?: boolean }>()
 const percent = computed(() =>
   props.value == null ? null : Math.max(0, Math.min(100, props.value)),
 )
 </script>
 <template>
-  <div class="ui-meter">
+  <div class="ui-meter" :class="{ 'ui-meter--muted': muted }">
     <div class="ui-meter-label">
       <span>{{ label }}</span>
       <span class="number">{{ percent === null ? '—' : `${Number(percent.toFixed(1))}%` }}</span>
@@ -30,14 +30,20 @@ const percent = computed(() =>
 <style scoped>
 .ui-meter {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 
 .ui-meter-label {
   display: flex;
   justify-content: space-between;
   gap: var(--space-2);
-  font-size: var(--text-xs);
+  align-items: baseline;
+  font-size: var(--text-sm);
+}
+
+.ui-meter-label .number {
+  font-size: var(--text-section);
+  font-weight: var(--weight-emphasis);
 }
 
 .ui-meter-track {
@@ -56,5 +62,13 @@ const percent = computed(() =>
 
 .ui-meter-track .ui-meter-low {
   background: var(--danger);
+}
+
+.ui-meter--muted {
+  color: var(--muted);
+}
+
+.ui-meter--muted .ui-meter-track span {
+  background: var(--muted);
 }
 </style>

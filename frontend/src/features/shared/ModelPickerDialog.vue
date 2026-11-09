@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useDraftChanges } from './useDraftChanges'
 import { UiButton, UiCheckbox, UiDialog, UiEmptyState, UiInput } from '@/components/ui'
 const props = defineProps<{ title: string; models: string[]; initial?: string[] }>()
 const emit = defineEmits<{ close: []; apply: [models: string[]] }>()
 const keyword = ref('')
-const selected = ref(new Set(props.initial || []))
+const selected = ref(new Set(props.models.filter((model) => props.initial?.includes(model))))
 const visible = computed(() =>
   props.models.filter((model) => model.toLowerCase().includes(keyword.value.toLowerCase())),
 )
@@ -19,9 +20,23 @@ function toggle(model: string, enabled: boolean) {
 function toggleVisible(enabled: boolean) {
   visible.value.forEach((model) => toggle(model, enabled))
 }
+const dirty = useDraftChanges(() => [...selected.value].sort())
+function apply() {
+  emit(
+    'apply',
+    props.models.filter((model) => selected.value.has(model)),
+  )
+}
 </script>
 <template>
-  <UiDialog open :title="title" @update:open="emit('close')">
+  <UiDialog
+    open
+    :title="title"
+    :dirty="dirty"
+    :save="apply"
+    save-label="确定并关闭"
+    @update:open="emit('close')"
+  >
     <div class="stack">
       <UiInput v-model="keyword" placeholder="搜索模型" aria-label="筛选候选模型" />
       <div class="toolbar">
@@ -46,19 +61,9 @@ function toggleVisible(enabled: boolean) {
         <UiEmptyState v-if="!visible.length" title="没有匹配的模型" />
       </div>
     </div>
-    <template #footer>
-      <UiButton @click="emit('close')">取消</UiButton>
-      <UiButton
-        variant="primary"
-        @click="
-          emit(
-            'apply',
-            models.filter((model) => selected.has(model)),
-          )
-        "
-      >
-        添加所选
-      </UiButton>
+    <template #footer="{ close }">
+      <UiButton @click="close()">取消</UiButton>
+      <UiButton variant="primary" @click="apply">确定</UiButton>
     </template>
   </UiDialog>
 </template>

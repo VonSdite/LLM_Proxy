@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { inject, onBeforeUnmount, ref, watch } from 'vue'
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import UiInput from './UiInput.vue'
 import UiIcon from './UiIcon.vue'
+import { dialogPendingEdits } from './dialogEdits'
 defineOptions({ inheritAttrs: false })
 const props = defineProps<{
   modelValue: number | null | undefined
@@ -19,6 +20,13 @@ const emit = defineEmits<{
   'validity-change': [valid: boolean]
 }>()
 const draft = ref(props.modelValue == null ? '' : String(props.modelValue))
+const pendingEdits = inject(dialogPendingEdits, undefined)
+const hasPendingEdit = () => {
+  const value = draft.value.trim() === '' ? null : Number(draft.value)
+  return invalid.value || value !== (props.modelValue ?? null)
+}
+pendingEdits?.add(hasPendingEdit)
+onBeforeUnmount(() => pendingEdits?.delete(hasPendingEdit))
 const invalid = ref(false)
 const focused = ref(false)
 const open = ref(false)
@@ -163,8 +171,8 @@ function choose(value: number) {
 }
 
 .ui-number-option strong {
-  font-size: var(--text-sm);
-  font-weight: 550;
+  font-size: var(--text-base);
+  font-weight: var(--weight-option);
 }
 
 .ui-number-empty {

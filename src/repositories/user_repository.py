@@ -347,16 +347,19 @@ class UserRepository:
             return [dict(row) for row in cursor.fetchall()]
 
     @database_operation()
-    def list_all(self) -> list[dict[str, Any]]:
-        """查询全部用户，用于权限同步与批量设置。"""
+    def list_all(self, keyword: str | None = None) -> list[dict[str, Any]]:
+        """查询匹配搜索条件的全部用户，用于导出、权限同步与批量设置。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            where_clause, search_params = self._build_search_clause(keyword, table_alias="u")
             cursor.execute(
-                """
+                f"""
                 SELECT id, username, ip_address, whitelist_access_enabled, model_permissions, created_at, updated_at
-                FROM users
+                FROM users u
+                {where_clause}
                 ORDER BY id ASC
-                """
+                """,
+                search_params,
             )
             return [dict(row) for row in cursor.fetchall()]
 

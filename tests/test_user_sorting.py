@@ -106,6 +106,31 @@ class UserBackendSortApiTests(unittest.TestCase):
             ip_address=ip_address,
         )
 
+    def test_users_export_matches_search_across_pages(self) -> None:
+        for keyword, expected in [
+            ("a", ["alice", "carol"]),
+            ("10.0.0.2", ["bob"]),
+            ("  alice  ", ["alice"]),
+            ("no-match", []),
+            ("", ["alice", "bob", "carol"]),
+        ]:
+            with self.subTest(keyword=keyword):
+                listing = self.client.get("/api/users", query_string={"keyword": keyword, "page_size": 1}).get_json()
+                response = self.client.post("/api/users/export", json={"keyword": keyword})
+                self.assertEqual(200, response.status_code)
+                users = response.get_json()["users"]
+                self.assertEqual(expected, [user["username"] for user in users])
+                self.assertEqual(listing["total"], len(users))
+
+    def test_users_export_selection_is_explicit_and_keyword_is_validated(self) -> None:
+        response = self.client.post("/api/users/export", json={"user_ids": [self.user_ids["bob"]], "keyword": "alice"})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(["bob"], [user["username"] for user in response.get_json()["users"]])
+        for keyword in [False, 123, ["alice"], {"name": "alice"}]:
+            with self.subTest(keyword=keyword):
+                response = self.client.post("/api/users/export", json={"keyword": keyword})
+                self.assertEqual(400, response.status_code)
+
     def test_users_api_sorts_before_pagination(self) -> None:
         response = self.client.get(
             "/api/users",

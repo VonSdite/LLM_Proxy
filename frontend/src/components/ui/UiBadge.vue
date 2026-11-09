@@ -1,10 +1,17 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ variant?: 'neutral' | 'success' | 'danger' | 'warning' | 'info' }>(), {
-  variant: 'neutral',
-})
+withDefaults(
+  defineProps<{
+    variant?: 'neutral' | 'success' | 'danger' | 'warning' | 'info'
+    size?: 'sm' | 'md'
+  }>(),
+  {
+    variant: 'neutral',
+    size: 'sm',
+  },
+)
 </script>
 <template>
-  <span class="ui-badge" :class="`ui-badge--${variant}`"><slot /></span>
+  <span class="ui-badge" :class="[`ui-badge--${variant}`, `ui-badge--${size}`]"><slot /></span>
 </template>
 <style scoped>
 .ui-badge {
@@ -41,5 +48,18 @@ withDefaults(defineProps<{ variant?: 'neutral' | 'success' | 'danger' | 'warning
 .ui-badge--info {
   color: var(--link);
   background: var(--selected);
+}
+
+.ui-badge--md {
+  max-width: 100%;
+  padding: 3px var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-size: var(--text-base);
+}
+
+.ui-badge--md.ui-badge--neutral {
+  background: var(--tag-background);
+  color: var(--tag-text);
 }
 </style>

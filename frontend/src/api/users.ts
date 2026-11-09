@@ -44,10 +44,16 @@ export const usersApi = {
       body: { user_ids: ids, action, model_permissions: permissions },
       signal,
     }),
-  export: (ids?: number[], signal?: AbortSignal) =>
+  export: (ids: number[], signal?: AbortSignal) =>
     download('/api/users/export', 'llm-proxy-users.json', {
       method: 'POST',
-      body: ids?.length ? { user_ids: ids } : {},
+      body: { user_ids: ids },
+      signal,
+    }),
+  exportFiltered: (keyword: string, signal?: AbortSignal) =>
+    download('/api/users/export', 'llm-proxy-users.json', {
+      method: 'POST',
+      body: { keyword },
       signal,
     }),
   import: (body: unknown, signal?: AbortSignal) =>

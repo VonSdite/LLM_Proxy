@@ -22,7 +22,7 @@ chat:
 
 api_keys:
   # 开启后下游模型请求必须携带已启用的 API Key。
-  # API Key 支持在后台页面创建，并可独立设置模型权限。
+  # API Key 支持在后台页面创建，并可独立设置模型权限、累计 Token 配额和并发/分钟/每日请求限制。
   enabled: false
 
 client_ip:
@@ -61,8 +61,6 @@ auth_groups:
         cooldown_seconds_on_429: 120
         request_quota_per_minute: 60
         request_quota_per_day: 3000
-        token_quota_per_minute: 120000
-        token_quota_per_day: 5000000
       - id: openai-key-b
         enabled: true
         headers:

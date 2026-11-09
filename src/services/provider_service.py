@@ -20,7 +20,7 @@ from ..config.provider_config import (
 )
 from ..repositories.auth_group_repository import AuthGroupRepository
 from ..utils.concurrency import synchronized
-from .config_sections import read_auth_group_entries, read_provider_entries
+from .config_sections import merge_auth_group, read_auth_group_entries, read_provider_entries
 
 
 class ProviderService:
@@ -211,14 +211,7 @@ class ProviderService:
                 auth_group_indexes[auth_group.name] = len(auth_groups) - 1
             else:
                 current_auth_group = AuthGroupSchema.from_mapping(auth_groups[existing_index])
-                existing_entry_ids = {entry.id for entry in current_auth_group.entries}
-                missing_entries = [
-                    entry.to_mapping() for entry in original_auth_group.entries if entry.id not in existing_entry_ids
-                ]
-                if missing_entries:
-                    merged_auth_group = current_auth_group.to_mapping()
-                    merged_auth_group["entries"].extend(missing_entries)
-                    auth_groups[existing_index] = AuthGroupSchema.from_mapping(merged_auth_group).to_mapping()
+                auth_groups[existing_index] = merge_auth_group(current_auth_group, original_auth_group)
 
             if original_auth_group.name not in imported_auth_group_name_set:
                 imported_auth_group_names.append(original_auth_group.name)

@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { useDraftChanges } from '@/features/shared/useDraftChanges'
 import { nextTick, reactive, ref } from 'vue'
 import type { AgentMachine, MachineInput } from '@/api/agents'
 import { errorMessage } from '@/api/client'
 import { UiAlert, UiButton, UiDialog, UiField, UiInput, UiSecretInput } from '@/components/ui'
 import ProxySettings from '@/features/shared/ProxySettings.vue'
+import { splitProxyUrl } from '@/features/shared/proxy'
 const props = defineProps<{
   open: boolean
   machine?: AgentMachine
@@ -52,7 +54,15 @@ async function submit(connect: boolean) {
     const id = await props.save(
       {
         ...draft,
-        proxy: { ...draft.proxy, url: draft.proxy.mode === 'custom' ? draft.proxy.url : '' },
+        proxy: {
+          ...draft.proxy,
+          url: draft.proxy.mode === 'custom' ? draft.proxy.url : '',
+          ...(draft.proxy.mode === 'custom' &&
+          splitProxyUrl(props.machine?.proxy.url || '').authenticated &&
+          !splitProxyUrl(draft.proxy.url).authenticated
+            ? { clearCredentials: true }
+            : {}),
+        },
       },
       props.machine?.id,
     )
@@ -66,9 +76,12 @@ async function submit(connect: boolean) {
     busy.value = false
   }
 }
+const dirty = useDraftChanges(() => draft)
 </script>
 <template>
   <UiDialog
+    :save="() => submit(false)"
+    :dirty="dirty"
     :open="open"
     :title="machine ? '编辑 SSH 机器' : '添加 SSH 机器'"
     :busy="busy"
@@ -81,6 +94,10 @@ async function submit(connect: boolean) {
       </UiField>
       <div class="machine-address">
         <UiField label="IP / 主机名" :error="errors.host" required>
+          <template #help>
+            <p>由运行 LLM Proxy 的机器连接此 SSH 地址，不是由浏览器直接连接。</p>
+            <p>填写 IP 或主机名，不带 ssh://、用户名或端口。</p>
+          </template>
           <UiInput
             v-model="draft.host"
             placeholder="192.168.1.20"
@@ -98,7 +115,7 @@ async function submit(connect: boolean) {
         </UiField>
         <UiField
           label="SSH 密码"
-          help="留空时使用当前会话凭据、本机 SSH 密钥或 SSH Agent。密码仅在当前浏览器会话中暂存。"
+          help="留空优先使用当前会话已暂存的密码，否则尝试运行 LLM Proxy 的机器上的 SSH 密钥或 SSH Agent。凭据只在服务端当前会话内存中暂存，不写入机器列表；服务重启或会话过期后需重新提供。"
         >
           <UiSecretInput
             v-model="draft.password"
@@ -109,13 +126,15 @@ async function submit(connect: boolean) {
         <ProxySettings
           v-model:mode="draft.proxy.mode"
           v-model:url="draft.proxy.url"
+          :class="{ 'full-width': draft.proxy.mode === 'custom' }"
+          purpose="ssh"
           :error="draft.proxy.mode === 'custom' ? errors.proxy : undefined"
         />
       </div>
       <button type="submit" class="sr-only" tabindex="-1">保存并连接</button>
     </form>
-    <template #footer>
-      <UiButton :disabled="busy" @click="emit('update:open', false)">取消</UiButton>
+    <template #footer="{ close }">
+      <UiButton :disabled="busy" @click="close()">取消</UiButton>
       <UiButton :loading="busy" @click="submit(false)">保存</UiButton>
       <UiButton variant="primary" icon="connect" :loading="busy" @click="submit(true)">
         保存并连接

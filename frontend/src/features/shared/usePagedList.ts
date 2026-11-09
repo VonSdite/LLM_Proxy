@@ -3,7 +3,7 @@ import type { ListQuery, PagedResult } from '@/api/permissions'
 import type { TableSort } from '@/components/ui'
 import { useRequest } from './useRequest'
 
-export function usePagedList<T>(
+export function usePagedList<T extends { id: string | number }>(
   load: (query: ListQuery, signal: AbortSignal) => Promise<PagedResult<T>>,
   initialSort: TableSort,
 ) {
@@ -46,7 +46,9 @@ export function usePagedList<T>(
     { immediate: true },
   )
   watch(request.data, (value) => {
-    selected.value = []
+    selected.value = selected.value.filter((id) =>
+      value?.items.some((item) => String(item.id) === id),
+    )
     if (value && page.value > Math.max(1, Math.ceil(value.total / pageSize.value)))
       page.value = Math.max(1, Math.ceil(value.total / pageSize.value))
   })
@@ -56,6 +58,9 @@ export function usePagedList<T>(
     page,
     pageSize,
     keyword,
+    filterPending: computed(
+      () => request.loading.value || keyword.value.trim() !== effectiveKeyword.value,
+    ),
     sort,
     selected,
     rows: computed(() => request.data.value?.items || []),

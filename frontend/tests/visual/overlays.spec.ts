@@ -15,6 +15,8 @@ const scenarios = [
   'key-dialog',
   'auth-group-dialog',
   'statistics-filter',
+  'navigation',
+  'account-menu',
 ] as const
 
 for (const width of [1440, 390]) {
@@ -40,7 +42,17 @@ for (const width of [1440, 390]) {
         await page.goto(path)
         await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
         if (theme === 'light') await page.getByRole('button', { name: '切换主题' }).click()
-        if (scenario === 'toast') {
+        if (scenario === 'account-menu') {
+          if (width <= 900) await page.getByRole('button', { name: '打开导航' }).click()
+          await page.getByRole('button', { name: 'admin 的账户菜单', exact: true }).click()
+          await expect(page.getByRole('menu', { name: '账户菜单', exact: true })).toBeVisible()
+        } else if (scenario === 'navigation') {
+          if (width > 900) await page.getByRole('button', { name: '收起侧栏' }).click()
+          else {
+            await page.getByRole('button', { name: '打开导航' }).click()
+            await expect(page.getByRole('dialog', { name: 'LLM Proxy', exact: true })).toBeVisible()
+          }
+        } else if (scenario === 'toast') {
           await page.getByRole('button', { name: '显示通知', exact: true }).click()
           await expect(page.locator('.ui-toast')).toContainText('配置已保存')
         } else if (scenario === 'ssh') {

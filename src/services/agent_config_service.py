@@ -215,7 +215,12 @@ class AgentConfigService:
                         self.credentials.pop(key)
             credentials = self.credentials.get((owner, machine_id), {})
             password = str(payload.get("password") or credentials.get("password") or "")
-            if proxy_url and credentials.get("proxy_url") and proxy_url == public_proxy_url(credentials["proxy_url"]):
+            if (
+                proxy.get("clearCredentials") is not True
+                and proxy_url
+                and credentials.get("proxy_url")
+                and proxy_url == public_proxy_url(credentials["proxy_url"])
+            ):
                 proxy_url = credentials["proxy_url"]
             self.credentials[(owner, machine_id)] = {
                 "password": password,

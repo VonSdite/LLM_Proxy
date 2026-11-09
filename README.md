@@ -12,7 +12,7 @@ LLM_Proxy 把模型服务、鉴权方式、协议转换和后台运维收敛到�
 - 多下游兼容内建：同一个 Provider 不需要额外配置下游格式，默认即可同时服务 `/v1/chat/completions`、`/v1/responses` 和 `/v1/messages`
 - OAuth 账号文件代理：支持 Codex / Claude 认证文件代理、账号状态记录和账号候选切换；后台提供 Codex 登录、认证文件管理、模型目录维护和配额查看
 - Hook 扩展机制：用于补充 Header、请求护栏和成功响应清洗
-- 多 Key 池化调度：`auth_group` 支持并发限制、429 冷却、分钟/日请求配额、分钟/日 Token 配额
+- 多 Key 池化调度：`auth_group` 支持并发限制、429 冷却、分钟/日请求配额
 - 控制平面模型测试：Provider 编辑页可按当前表单快照直接测试模型可用性、首字延迟和 TPS
 - 后台可直接运维：内置 Provider 管理、Auth Group 管理、OAuth 管理、系统设置、白名单管理、日志和统计面板
 - 请求调试可开关：支持将下游请求、上游请求、上游响应和下游响应写入独立 trace 日志
@@ -112,10 +112,12 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 - `/users`：用户与白名单管理
 - `/providers`：Provider / Auth Group 管理
 - `/model-mappings`：模型映射；开启模型映射功能后显示
-- `/api-keys`：下游 API Key、模型权限与配额；开启 API Key 功能后显示
+- `/api-keys`：下游 API Key、模型权限、累计 Token 配额与并发/分钟/每日请求限制；开启 API Key 功能后显示
 - `/agents`：本机与 SSH 机器上的 Claude、Codex、opencode 配置管理
 - `/oauth`：Codex OAuth 认证文件与模型管理；开启 `oauth.enabled` 后会显示在后台导航中
 - `/settings`：系统、登录、日志和 OAuth 网络设置
+
+API Key 的最大并发数、请求/分钟、请求/天均可独立设置，留空表示不限制。周期按服务本地时间的自然分钟、自然日计算，计数保存在 SQLite，重启或调整限制保留当前周期计数。通过鉴权、模型与权限检查后接收的推理请求计一次，上游失败计入，内部重试不重复计数；被拒绝的请求和 `/v1/models` 查询不计入。并发名额在请求完成、异常或流式断开时释放；达到限制返回 `429` 与 `Retry-After`。累计 Token 配额独立生效。
 
 ### 前端开发与部署
 
@@ -259,7 +261,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `max_concurrency`：单条目最大并发
 - `cooldown_seconds_on_429`：条目级 429 冷却时间
 - `request_quota_per_minute` / `request_quota_per_day`：请求数配额
-- `token_quota_per_minute` / `token_quota_per_day`：Token 配额
+- Token 用量用于统计；旧配置的 `token_quota_per_minute` / `token_quota_per_day` 字段兼容读取且忽略，规范化保存与导出只包含受支持的限制字段
 
 运行时行为：
 

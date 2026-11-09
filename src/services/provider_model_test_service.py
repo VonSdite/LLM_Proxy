@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 import json
+import re
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 import requests
@@ -17,7 +18,9 @@ from ..config.provider_runtime_factory import ProviderRuntimeFactory
 from ..executors import OpenedUpstreamResponse, build_default_executor_registry
 from ..hooks import HookContext, HookErrorType
 from ..proxy_core import decode_stream_events
+from ..proxy_core.usage import extract_canonical_usage
 from ..translators import build_default_translator_registry
+from ..translators.reasoning_utils import openai_reasoning_effort_to_claude_thinking
 from ..utils.http_headers import merge_http_headers, normalize_http_headers
 from ..utils.local_time import now_local_datetime
 from ..utils.net import build_requests_proxy_settings, build_requests_request_proxies
@@ -152,9 +155,9 @@ class ProviderModelTestService:
         previous_status_code: int | None = None
         previous_error_type: HookErrorType | None = None
         last_error_message: str | None = None
+        use_completion_token_limit = False
 
         for attempt in range(max_retries):
-            request_started_at = time.perf_counter()
             opened: OpenedUpstreamResponse | None = None
             try:
                 headers, benchmark_request, translated_request, request_ctx = self._build_upstream_request(
@@ -166,20 +169,23 @@ class ProviderModelTestService:
                     attempt=attempt,
                     previous_status_code=previous_status_code,
                     previous_error_type=previous_error_type,
+                    use_completion_token_limit=use_completion_token_limit,
                 )
+                request_proxies = build_requests_request_proxies(
+                    build_requests_proxy_settings(
+                        provider.proxy_mode,
+                        provider.proxy,
+                        proxy_mode_error_message="Provider proxy_mode must be one of: direct, system, custom",
+                        proxy_url_error_message="Provider proxy must be a valid absolute URL",
+                    )
+                )
+                request_started_at = time.perf_counter()
                 opened = self._open_upstream_response(
                     provider,
                     headers,
                     translated_request,
                     requested_stream=request_ctx.stream,
-                    request_proxies=build_requests_request_proxies(
-                        build_requests_proxy_settings(
-                            provider.proxy_mode,
-                            provider.proxy,
-                            proxy_mode_error_message="Provider proxy_mode must be one of: direct, system, custom",
-                            proxy_url_error_message="Provider proxy must be a valid absolute URL",
-                        )
-                    ),
+                    request_proxies=request_proxies,
                     timeout_seconds=provider.timeout_seconds,
                     verify_ssl=provider.verify_ssl,
                 )
@@ -193,6 +199,17 @@ class ProviderModelTestService:
                     previous_status_code = opened.status_code
                     previous_error_type = HookErrorType.TRANSPORT_ERROR
                     last_error_message = error_message
+                    if (
+                        attempt + 1 < max_retries
+                        and not use_completion_token_limit
+                        and provider.source_format == "openai_chat"
+                        and "max_tokens" in translated_request
+                        and "max_completion_tokens" not in translated_request
+                        and self._requires_completion_token_limit(opened.status_code, error_message)
+                    ):
+                        # 仅按上游明确的参数替换建议重试，状态局限于本次模型测试。
+                        use_completion_token_limit = True
+                        continue
                     if attempt + 1 < max_retries and self._should_retry_status_code(opened.status_code):
                         continue
                     return self._build_failure_result(
@@ -260,8 +277,11 @@ class ProviderModelTestService:
         attempt: int,
         previous_status_code: int | None,
         previous_error_type: HookErrorType | None,
+        use_completion_token_limit: bool = False,
     ) -> tuple[dict[str, str], dict[str, Any], dict[str, Any], HookContext]:
         request_data = self._build_benchmark_request(provider, model_name)
+        if use_completion_token_limit:
+            request_data["max_completion_tokens"] = request_data.pop("max_tokens")
         headers = {"content-type": "application/json"}
         if request_headers:
             headers = merge_http_headers(headers, request_headers)
@@ -298,8 +318,6 @@ class ProviderModelTestService:
         request: dict[str, Any] = {
             "model": model_name,
             "stream": True,
-            "temperature": 0,
-            "top_p": 1,
             "max_tokens": 192,
             "messages": [
                 {
@@ -321,7 +339,24 @@ class ProviderModelTestService:
         ):
             # GLM Claude 接口要求始终开启思考；模型测试使用最小的 low 档位。
             request["reasoning_effort"] = "low"
+            thinking = openai_reasoning_effort_to_claude_thinking("low", max_tokens=request["max_tokens"])
+            if thinking is not None:
+                # 总额度同时容纳 low 思考预算和基准正文，预算与协议转换器保持一致。
+                request["max_tokens"] += int(thinking["budget_tokens"])
         return request
+
+    @staticmethod
+    def _requires_completion_token_limit(status_code: int, error_message: str) -> bool:
+        """识别明确要求用 max_completion_tokens 替代 max_tokens 的参数错误。"""
+        if status_code not in {400, 422}:
+            return False
+        message = error_message.lower()
+        if not re.search(r"\bmax_completion_tokens\b", message):
+            return False
+        return bool(
+            re.search(r"unsupported\s+(?:parameter|argument)\s*:\s*['\"`]?max_tokens\b", message)
+            or re.search(r"\bmax_tokens\b['\"`]?\s+(?:is\s+)?(?:not supported|unsupported|not allowed)\b", message)
+        )
 
     def _open_upstream_response(
         self,
@@ -358,13 +393,33 @@ class ProviderModelTestService:
         meta: dict[str, Any],
     ) -> dict[str, Any]:
         first_token_at: float | None = None
-        completed_at = request_started_at
+        last_token_at: float | None = None
+        received_at = request_started_at
+        reasoning_observed = False
+        reasoning_tokens = 0
+        redacted_reasoning = False
         stream_error: str | None = None
         has_model_output = False
         state: dict[str, Any] = {}
 
+        def timed_chunks() -> Iterator[bytes]:
+            nonlocal received_at
+            for data in opened.response.iter_content(chunk_size=None):
+                if data:
+                    # 同一网络数据块中的多个事件共享到达时间，避免本地解析制造虚假生成区间。
+                    received_at = time.perf_counter()
+                    yield data
+
         try:
-            for event in decode_stream_events(opened.response.iter_content(chunk_size=None), opened.stream_format):
+            for event in decode_stream_events(timed_chunks(), opened.stream_format):
+                if event.kind == "json":
+                    if isinstance(event.payload, dict):
+                        block = event.payload.get("content_block")
+                        if isinstance(block, dict) and block.get("type") == "redacted_thinking":
+                            redacted_reasoning = True
+                    usage = extract_canonical_usage(event.payload, provider.source_format)
+                    if usage is not None and "reasoning_tokens" in usage:
+                        reasoning_tokens = int(usage["reasoning_tokens"])
                 translated_chunks = translator.translate_stream_event(
                     model_name,
                     original_request,
@@ -375,13 +430,16 @@ class ProviderModelTestService:
                 for chunk in translated_chunks:
                     if chunk.kind == "json" and isinstance(chunk.payload, dict):
                         self._update_meta_from_payload(meta, chunk.payload)
-                        if first_token_at is None and self._has_openai_chat_output_delta(chunk.payload):
-                            first_token_at = time.perf_counter()
+                        if self._has_openai_chat_output_delta(chunk.payload):
+                            if first_token_at is None:
+                                first_token_at = received_at
+                            last_token_at = received_at
                             has_model_output = True
+                        if self._has_openai_chat_output_delta(chunk.payload, fields=("reasoning_content",)):
+                            reasoning_observed = True
                         error_message = self._extract_error_message(chunk.payload)
                         if error_message:
                             stream_error = error_message
-            completed_at = time.perf_counter()
         finally:
             try:
                 opened.response.close()
@@ -406,9 +464,13 @@ class ProviderModelTestService:
             model_name=model_name,
             response_model=str(meta.get("response_model") or "") or None,
             first_token_at=first_token_at,
-            completed_at=completed_at,
+            last_token_at=last_token_at,
             request_started_at=request_started_at,
             completion_tokens=int(meta.get("completion_tokens") or 0),
+            # Responses 思考摘要不是逐 Token 的完整思考输出，不能用于隐藏思考的生成区间。
+            unobserved_reasoning=redacted_reasoning
+            or (reasoning_tokens > 0 and not reasoning_observed)
+            or (provider.source_format == "openai_responses" and (reasoning_tokens > 0 or reasoning_observed)),
         )
 
     def _collect_nonstream_result(
@@ -453,7 +515,7 @@ class ProviderModelTestService:
             model_name=model_name,
             response_model=str(meta.get("response_model") or "") or None,
             first_token_at=None,
-            completed_at=None,
+            last_token_at=None,
             request_started_at=None,
             completion_tokens=int(meta.get("completion_tokens") or 0),
         )
@@ -465,19 +527,25 @@ class ProviderModelTestService:
         model_name: str,
         response_model: str | None,
         first_token_at: float | None,
-        completed_at: float | None,
+        last_token_at: float | None,
         request_started_at: float | None,
         completion_tokens: int,
+        unobserved_reasoning: bool = False,
     ) -> dict[str, Any]:
         first_token_latency_ms: float | None = None
         tps: float | None = None
 
         if first_token_at is not None and request_started_at is not None:
             first_token_latency_ms = round(max((first_token_at - request_started_at) * 1000, 0), 2)
-        if request_started_at is not None and completed_at is not None and completion_tokens > 0:
-            elapsed_seconds = completed_at - request_started_at
+        if (
+            first_token_at is not None
+            and last_token_at is not None
+            and completion_tokens > 1
+            and not unobserved_reasoning
+        ):
+            elapsed_seconds = last_token_at - first_token_at
             if elapsed_seconds > 0:
-                tps = round(completion_tokens / elapsed_seconds, 2)
+                tps = round((completion_tokens - 1) / elapsed_seconds, 2)
 
         return {
             "requested_model": model_name,
@@ -541,7 +609,9 @@ class ProviderModelTestService:
             meta["usage_status"] = "partial"
 
     @staticmethod
-    def _has_openai_chat_output_delta(payload: dict[str, Any]) -> bool:
+    def _has_openai_chat_output_delta(
+        payload: dict[str, Any], *, fields: tuple[str, ...] = ("content", "reasoning_content")
+    ) -> bool:
         choices = payload.get("choices")
         if not isinstance(choices, list):
             return False
@@ -551,7 +621,7 @@ class ProviderModelTestService:
             delta = choice.get("delta")
             if not isinstance(delta, dict):
                 continue
-            for field_name in ("content", "reasoning_content"):
+            for field_name in fields:
                 content = delta.get(field_name)
                 if isinstance(content, str) and content:
                     return True

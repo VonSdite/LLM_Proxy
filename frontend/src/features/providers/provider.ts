@@ -1,4 +1,5 @@
 import type { Provider } from '@/api/providers'
+import { isProxyUrl } from '@/features/shared/proxy'
 
 export type ProviderDraft = Omit<Provider, 'api_key' | 'auth_group' | 'proxy' | 'hook'> & {
   api_key: string
@@ -40,15 +41,8 @@ export function providerErrors(provider: Provider): Record<string, string> {
     const value = provider[key]
     if (value != null && (!Number.isInteger(value) || value < 1)) errors[key] = '请输入正整数'
   }
-  if (provider.proxy_mode === 'custom') {
-    try {
-      if (
-        !['http:', 'https:', 'socks5:', 'socks5h:'].includes(new URL(provider.proxy || '').protocol)
-      )
-        throw new Error()
-    } catch {
-      errors.proxy = '请输入完整的 HTTP、HTTPS 或 SOCKS5 代理地址'
-    }
+  if (provider.proxy_mode === 'custom' && !isProxyUrl(provider.proxy || '')) {
+    errors.proxy = '请输入完整的 HTTP、HTTPS 或 SOCKS5 代理地址'
   }
   if (!provider.model_list.length) errors.models = '至少添加一个模型'
   return errors
