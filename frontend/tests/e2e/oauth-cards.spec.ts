@@ -1,6 +1,47 @@
 import { expect, test } from '../browser-test'
 import { mockOAuthCards } from '../oauth-fixtures'
 
+test('卡片正文与空白切换选择，内部控件和复制文字保持独立', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-07T02:00:00Z') })
+  const fixture = await mockOAuthCards(page)
+  await page.goto('/oauth')
+  const card = page.getByRole('article', { name: fixture.files[0]!.name, exact: true })
+  const checkbox = card.getByRole('checkbox')
+  await card.locator('.oauth-file-title').click()
+  await expect(checkbox).toBeChecked()
+  await card.click({ position: { x: 8, y: 8 } })
+  await expect(checkbox).not.toBeChecked()
+  await card.getByText('剩余额度', { exact: true }).click()
+  await expect(checkbox).toBeChecked()
+  await checkbox.click()
+  await expect(checkbox).not.toBeChecked()
+  await checkbox.focus()
+  await checkbox.press('Space')
+  await expect(checkbox).toBeChecked()
+  await checkbox.press('Space')
+  await card.getByRole('button', { name: '认证文件详情', exact: true }).click()
+  await expect(checkbox).not.toBeChecked()
+  await page.keyboard.press('Escape')
+  await card.getByRole('combobox').click()
+  await page.getByRole('option').first().click()
+  await expect(checkbox).not.toBeChecked()
+  for (const name of [`删除 ${fixture.files[0]!.name}`, '使用']) {
+    await card.getByRole('button', { name, exact: true }).click()
+    await page.getByRole('button', { name: '取消', exact: true }).click()
+    await expect(checkbox).not.toBeChecked()
+  }
+  await card.locator('.oauth-file-name').evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await expect(checkbox).not.toBeChecked()
+  await page.evaluate(() => window.getSelection()?.removeAllRanges())
+  expect(fixture.calls.filter((call) => call.method !== 'GET')).toEqual([])
+})
+
 test('认证文件默认可用、全部位于末项，搜索与全选遵循当前筛选', async ({ page }) => {
   const fixture = await mockOAuthCards(page)
   await page.goto('/oauth')

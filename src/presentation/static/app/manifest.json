@@ -1,26 +1,26 @@
 {
-  "_DesensitizationHelp-Ce3wTADF.js": {
-    "file": "assets/DesensitizationHelp-Ce3wTADF.js",
+  "_DesensitizationHelp-B0BPvj24.js": {
+    "file": "assets/DesensitizationHelp-B0BPvj24.js",
     "name": "DesensitizationHelp",
     "imports": [
       "index.html"
     ]
   },
-  "_JsonImportDialog-BmSh1H-u.js": {
-    "file": "assets/JsonImportDialog-BmSh1H-u.js",
+  "_JsonImportDialog-D_arVY6M.js": {
+    "file": "assets/JsonImportDialog-D_arVY6M.js",
     "name": "JsonImportDialog",
     "imports": [
       "index.html",
-      "_useDraftChanges-D4A10kIx.js",
-      "_useLifetime-rpSrLtON.js"
+      "_useDraftChanges-CJp2VpmL.js",
+      "_useLifetime-BrrQp3WL.js"
     ]
   },
-  "_ModelPermissionPicker-CSC2sBvh.js": {
-    "file": "assets/ModelPermissionPicker-CSC2sBvh.js",
+  "_ModelPermissionPicker-BPlJ_LYN.js": {
+    "file": "assets/ModelPermissionPicker-BPlJ_LYN.js",
     "name": "ModelPermissionPicker",
     "imports": [
       "index.html",
-      "_useRequest-ChHwzD_2.js"
+      "_useRequest-BXlRdJRD.js"
     ],
     "css": [
       "assets/ModelPermissionPicker-CckryRhh.css"
@@ -30,8 +30,8 @@
     "file": "assets/ModelPermissionPicker-CckryRhh.css",
     "src": "_ModelPermissionPicker-CckryRhh.css"
   },
-  "_ProxySettings-BHT5l6uV.js": {
-    "file": "assets/ProxySettings-BHT5l6uV.js",
+  "_ProxySettings-C9lPVrrz.js": {
+    "file": "assets/ProxySettings-C9lPVrrz.js",
     "name": "ProxySettings",
     "imports": [
       "index.html"
@@ -44,52 +44,52 @@
     "file": "assets/ProxySettings-_WkVGyWp.css",
     "src": "_ProxySettings-_WkVGyWp.css"
   },
-  "_format-Biy3Vks0.js": {
-    "file": "assets/format-Biy3Vks0.js",
+  "_format-2-eYJ5dR.js": {
+    "file": "assets/format-2-eYJ5dR.js",
     "name": "format",
     "imports": [
       "index.html",
-      "_useLifetime-rpSrLtON.js"
+      "_useLifetime-BrrQp3WL.js"
     ]
   },
-  "_modelTestHelp-B-Q3rswZ.js": {
-    "file": "assets/modelTestHelp-B-Q3rswZ.js",
+  "_modelTestHelp-Dqxv_q_R.js": {
+    "file": "assets/modelTestHelp-Dqxv_q_R.js",
     "name": "modelTestHelp",
     "imports": [
       "index.html"
     ]
   },
-  "_useDraftChanges-D4A10kIx.js": {
-    "file": "assets/useDraftChanges-D4A10kIx.js",
+  "_useDraftChanges-CJp2VpmL.js": {
+    "file": "assets/useDraftChanges-CJp2VpmL.js",
     "name": "useDraftChanges",
     "imports": [
       "index.html"
     ]
   },
-  "_useLifetime-rpSrLtON.js": {
-    "file": "assets/useLifetime-rpSrLtON.js",
+  "_useLifetime-BrrQp3WL.js": {
+    "file": "assets/useLifetime-BrrQp3WL.js",
     "name": "useLifetime",
     "imports": [
       "index.html"
     ]
   },
-  "_useRequest-ChHwzD_2.js": {
-    "file": "assets/useRequest-ChHwzD_2.js",
+  "_useRequest-BXlRdJRD.js": {
+    "file": "assets/useRequest-BXlRdJRD.js",
     "name": "useRequest",
     "imports": [
       "index.html"
     ]
   },
-  "_useToggle-BdqnowGR.js": {
-    "file": "assets/useToggle-BdqnowGR.js",
+  "_useToggle-Duz-tQvu.js": {
+    "file": "assets/useToggle-Duz-tQvu.js",
     "name": "useToggle",
     "imports": [
       "index.html",
-      "_useLifetime-rpSrLtON.js"
+      "_useLifetime-BrrQp3WL.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-DwDBvXSZ.js",
+    "file": "assets/index-USRNyW0e.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -109,150 +109,150 @@
     ]
   },
   "src/pages/AgentsPage.vue": {
-    "file": "assets/AgentsPage-D07DxIdp.js",
+    "file": "assets/AgentsPage-BPilD9u7.js",
     "name": "AgentsPage",
     "src": "src/pages/AgentsPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_useDraftChanges-D4A10kIx.js",
-      "_ProxySettings-BHT5l6uV.js"
+      "_useDraftChanges-CJp2VpmL.js",
+      "_ProxySettings-C9lPVrrz.js"
     ],
     "css": [
       "assets/AgentsPage-qEegxRru.css"
     ]
   },
   "src/pages/ApiKeysPage.vue": {
-    "file": "assets/ApiKeysPage-CDejJFd8.js",
+    "file": "assets/ApiKeysPage-Bcj83s_I.js",
     "name": "ApiKeysPage",
     "src": "src/pages/ApiKeysPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_ModelPermissionPicker-CSC2sBvh.js",
-      "_format-Biy3Vks0.js",
-      "_useToggle-BdqnowGR.js",
-      "_useDraftChanges-D4A10kIx.js",
-      "_useLifetime-rpSrLtON.js"
+      "_ModelPermissionPicker-BPlJ_LYN.js",
+      "_format-2-eYJ5dR.js",
+      "_useToggle-Duz-tQvu.js",
+      "_useDraftChanges-CJp2VpmL.js",
+      "_useLifetime-BrrQp3WL.js"
     ],
     "css": [
       "assets/ApiKeysPage-CL6KbxiQ.css"
     ]
   },
   "src/pages/LoginPage.vue": {
-    "file": "assets/LoginPage-eWN-qnGv.js",
+    "file": "assets/LoginPage-Di5_IIpe.js",
     "name": "LoginPage",
     "src": "src/pages/LoginPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_useLifetime-rpSrLtON.js"
+      "_useLifetime-BrrQp3WL.js"
     ],
     "css": [
       "assets/LoginPage-2BrWoyLB.css"
     ]
   },
   "src/pages/ModelMappingsPage.vue": {
-    "file": "assets/ModelMappingsPage-BytT-s6Q.js",
+    "file": "assets/ModelMappingsPage-CjETtwAF.js",
     "name": "ModelMappingsPage",
     "src": "src/pages/ModelMappingsPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_useRequest-ChHwzD_2.js",
-      "_format-Biy3Vks0.js",
-      "_useToggle-BdqnowGR.js",
-      "_modelTestHelp-B-Q3rswZ.js",
-      "_useDraftChanges-D4A10kIx.js",
-      "_useLifetime-rpSrLtON.js",
-      "_DesensitizationHelp-Ce3wTADF.js",
-      "_JsonImportDialog-BmSh1H-u.js"
+      "_useRequest-BXlRdJRD.js",
+      "_format-2-eYJ5dR.js",
+      "_useToggle-Duz-tQvu.js",
+      "_modelTestHelp-Dqxv_q_R.js",
+      "_useDraftChanges-CJp2VpmL.js",
+      "_useLifetime-BrrQp3WL.js",
+      "_DesensitizationHelp-B0BPvj24.js",
+      "_JsonImportDialog-D_arVY6M.js"
     ],
     "css": [
-      "assets/ModelMappingsPage-CX6T4ZiY.css"
+      "assets/ModelMappingsPage-3QSLVufk.css"
     ]
   },
   "src/pages/OAuthPage.vue": {
-    "file": "assets/OAuthPage-DmNA6pib.js",
+    "file": "assets/OAuthPage-Btn5X8T9.js",
     "name": "OAuthPage",
     "src": "src/pages/OAuthPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_useToggle-BdqnowGR.js",
-      "_useRequest-ChHwzD_2.js",
-      "_format-Biy3Vks0.js",
-      "_useDraftChanges-D4A10kIx.js"
+      "_useToggle-Duz-tQvu.js",
+      "_useRequest-BXlRdJRD.js",
+      "_format-2-eYJ5dR.js",
+      "_useDraftChanges-CJp2VpmL.js"
     ],
     "css": [
-      "assets/OAuthPage-udW--g7l.css"
+      "assets/OAuthPage-9XRBJP1b.css"
     ]
   },
   "src/pages/ProvidersPage.vue": {
-    "file": "assets/ProvidersPage-BGA4sJpP.js",
+    "file": "assets/ProvidersPage-_2vEGqSE.js",
     "name": "ProvidersPage",
     "src": "src/pages/ProvidersPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_modelTestHelp-B-Q3rswZ.js",
-      "_useRequest-ChHwzD_2.js",
-      "_format-Biy3Vks0.js",
-      "_useToggle-BdqnowGR.js",
-      "_JsonImportDialog-BmSh1H-u.js",
-      "_useDraftChanges-D4A10kIx.js",
-      "_useLifetime-rpSrLtON.js",
-      "_ProxySettings-BHT5l6uV.js",
-      "_DesensitizationHelp-Ce3wTADF.js"
+      "_modelTestHelp-Dqxv_q_R.js",
+      "_useRequest-BXlRdJRD.js",
+      "_format-2-eYJ5dR.js",
+      "_useToggle-Duz-tQvu.js",
+      "_JsonImportDialog-D_arVY6M.js",
+      "_useDraftChanges-CJp2VpmL.js",
+      "_useLifetime-BrrQp3WL.js",
+      "_ProxySettings-C9lPVrrz.js",
+      "_DesensitizationHelp-B0BPvj24.js"
     ],
     "css": [
       "assets/ProvidersPage-DQhPV_bD.css"
     ]
   },
   "src/pages/SettingsPage.vue": {
-    "file": "assets/SettingsPage-yUx2tx-P.js",
+    "file": "assets/SettingsPage-0YACrQ_b.js",
     "name": "SettingsPage",
     "src": "src/pages/SettingsPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_useRequest-ChHwzD_2.js",
-      "_useLifetime-rpSrLtON.js",
-      "_ProxySettings-BHT5l6uV.js",
-      "_DesensitizationHelp-Ce3wTADF.js"
+      "_useRequest-BXlRdJRD.js",
+      "_useLifetime-BrrQp3WL.js",
+      "_ProxySettings-C9lPVrrz.js",
+      "_DesensitizationHelp-B0BPvj24.js"
     ],
     "css": [
       "assets/SettingsPage-DRSi_coD.css"
     ]
   },
   "src/pages/StatisticsPage.vue": {
-    "file": "assets/StatisticsPage-CBVjP5mS.js",
+    "file": "assets/StatisticsPage-CNEo_nYx.js",
     "name": "StatisticsPage",
     "src": "src/pages/StatisticsPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_useRequest-ChHwzD_2.js",
-      "_format-Biy3Vks0.js",
-      "_JsonImportDialog-BmSh1H-u.js"
+      "_useRequest-BXlRdJRD.js",
+      "_format-2-eYJ5dR.js",
+      "_JsonImportDialog-D_arVY6M.js"
     ],
     "css": [
       "assets/StatisticsPage-CTIBW3q6.css"
     ]
   },
   "src/pages/UsersPage.vue": {
-    "file": "assets/UsersPage-BDCUM0vw.js",
+    "file": "assets/UsersPage-C9KBvmZr.js",
     "name": "UsersPage",
     "src": "src/pages/UsersPage.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_ModelPermissionPicker-CSC2sBvh.js",
-      "_format-Biy3Vks0.js",
-      "_useToggle-BdqnowGR.js",
-      "_JsonImportDialog-BmSh1H-u.js",
-      "_useLifetime-rpSrLtON.js",
-      "_useDraftChanges-D4A10kIx.js"
+      "_ModelPermissionPicker-BPlJ_LYN.js",
+      "_format-2-eYJ5dR.js",
+      "_useToggle-Duz-tQvu.js",
+      "_JsonImportDialog-D_arVY6M.js",
+      "_useLifetime-BrrQp3WL.js",
+      "_useDraftChanges-CJp2VpmL.js"
     ]
   }
 }
