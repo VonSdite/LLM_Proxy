@@ -47,6 +47,12 @@ for (const width of [1920, 1440, 1024, 390, 320]) {
           expect(filter.y + filter.height / 2).toBeCloseTo(importing.y + importing.height / 2, 0)
         }
       }
+      if (item.path === '/oauth') {
+        const actions = page.locator('.ui-list-toolbar-actions')
+        await expect(actions.getByRole('button', { name: '模型目录', exact: true })).toBeVisible()
+        await expect(actions.getByRole('checkbox', { name: '选择当前筛选的账号' })).toBeVisible()
+        await expect(page.locator('.ui-pagination')).toHaveCount(0)
+      }
       await search.fill('lookup')
       await page.getByRole('button', { name: '清空搜索', exact: true }).click()
       await expect(search).toHaveValue('')
@@ -306,7 +312,7 @@ test('用户导出等待搜索结果，包含全部匹配分页且下载不刷�
   expect(exported).toEqual({ keyword: 'alpha' })
   expect(searches).toHaveLength(reads)
   await search.fill('no-match')
-  await expect(page.locator('.ui-pagination')).toContainText('共 0 项')
+  await expect(page.locator('.ui-pagination')).toHaveCount(0)
   await expect(button).toBeDisabled()
   expect(fixture.unexpected).toEqual([])
 })

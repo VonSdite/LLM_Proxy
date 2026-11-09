@@ -1,1 +1,0 @@
-import{J as e}from"./index-0CFUmfq_.js";function t(t){let n=JSON.stringify(t());return e(()=>JSON.stringify(t())!==n)}export{t};

@@ -160,15 +160,7 @@ function exportFiltered() {
             导出
           </UiButton>
         </UiTooltip>
-      </template>
-      <template #search>
-        <UiSearchInput
-          v-model="keyword"
-          placeholder="搜索文件、邮箱或套餐"
-          aria-label="搜索认证文件"
-        />
-      </template>
-      <template #filters>
+        <UiButton @click="catalogOpen = true">模型目录</UiButton>
         <UiCheckbox
           class="oauth-select-all"
           :model-value="allSelected ? true : selectedNames.length ? 'indeterminate' : false"
@@ -179,6 +171,13 @@ function exportFiltered() {
           全选
         </UiCheckbox>
       </template>
+      <template #search>
+        <UiSearchInput
+          v-model="keyword"
+          placeholder="搜索文件、邮箱或套餐"
+          aria-label="搜索认证文件"
+        />
+      </template>
       <UiIconButton
         icon="refresh"
         label="同步认证文件列表"
@@ -186,7 +185,6 @@ function exportFiltered() {
         :disabled="workspace.blocked.value"
         @click="workspace.reload"
       />
-      <UiButton variant="ghost" @click="catalogOpen = true">模型目录</UiButton>
     </UiListToolbar>
     <UiSelectionBar
       v-if="selectedNames.length"
