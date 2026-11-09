@@ -38,7 +38,10 @@ function help(model: string) {
     <div class="agent-model-all">
       <UiField
         label="一键设置模型"
-        help="一次设置全部四项。外部地址输入时立即同步；单独修改模型后，四项不同则此处留空。"
+        :help="[
+          '一次设置下面全部四个模型变量。本服务地址下选择即同步；外部地址下输入即同步，清空也会清空四项。四项不同则此处留空，全部一致则显示共同 ID。点击保存后才写入文件。',
+          '带 [1M] 的候选会在模型 ID 后保存 [1m] 标记，向 Claude Code 声明大上下文；不会自动改变下方参数或扩展上游模型的真实容量，仍需上游支持。',
+        ]"
       >
         <ModelSelect
           :model-value="uniformClaudeModel(draft)"
@@ -57,6 +60,7 @@ function help(model: string) {
           <p>{{ descriptions[key] }}</p>
           <p>{{ help(draft.models?.[key] || '') }}</p>
           <p>写入 env.{{ key }}；不设置时移除该覆盖项。</p>
+          <p>带 [1M] 的候选声明大上下文，仍需上游支持，不会自动扩展模型容量。</p>
         </template>
         <ModelSelect
           :model-value="draft.models?.[key] || ''"
@@ -71,7 +75,16 @@ function help(model: string) {
     </div>
   </div>
   <div v-else class="form-grid">
-    <UiField label="模型" :help="help(draft.model || '')">
+    <UiField
+      label="模型"
+      :help="[
+        agent === 'codex'
+          ? 'Codex 默认模型，写入 config.toml 的 model。'
+          : 'opencode 默认模型，写入 model 并关联对应 Provider 配置。',
+        '本服务使用完整模型 ID；外部地址填写对应服务的模型 ID。参数参考值不会自动覆盖手动配置。',
+        help(draft.model || ''),
+      ]"
+    >
       <ModelSelect
         :model-value="draft.model || ''"
         :models="bootstrap.models"

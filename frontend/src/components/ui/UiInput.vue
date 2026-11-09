@@ -42,7 +42,7 @@ defineExpose({ focus: () => input.value?.focus(), input })
   background: var(--input);
   color: var(--text);
   outline: none;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   transition:
     border-color var(--motion),
     box-shadow var(--motion);
@@ -50,7 +50,7 @@ defineExpose({ focus: () => input.value?.focus(), input })
 
 .ui-input::placeholder {
   color: var(--muted);
-  opacity: 0.8;
+  opacity: var(--placeholder-opacity);
 }
 
 .ui-input:focus {

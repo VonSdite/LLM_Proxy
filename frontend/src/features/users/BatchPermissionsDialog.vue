@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDraftChanges } from '@/features/shared/useDraftChanges'
 import { ref } from 'vue'
 import { usersApi } from '@/api/users'
 import type { ModelPermissions } from '@/api/permissions'
@@ -27,9 +28,14 @@ async function submit() {
     busy.value = false
   }
 }
+const dirty = useDraftChanges(() =>
+  Array.isArray(permissions.value) ? [...permissions.value].sort() : permissions.value,
+)
 </script>
 <template>
   <UiDialog
+    :save="submit"
+    :dirty="dirty"
     open
     :title="`设置 ${ids.length} 个用户的模型权限`"
     :busy="busy"
@@ -37,10 +43,10 @@ async function submit() {
   >
     <div class="stack">
       <UiAlert v-if="error">{{ error }}</UiAlert>
-      <ModelPermissionPicker v-model="permissions" :models="models" :disabled="busy" />
+      <ModelPermissionPicker v-model="permissions" :models="models" :disabled="busy" batch />
     </div>
-    <template #footer>
-      <UiButton :disabled="busy" @click="emit('close')">取消</UiButton>
+    <template #footer="{ close }">
+      <UiButton :disabled="busy" @click="close()">取消</UiButton>
       <UiButton variant="primary" :loading="busy" @click="submit">保存</UiButton>
     </template>
   </UiDialog>

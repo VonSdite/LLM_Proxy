@@ -31,7 +31,7 @@ const id = useId()
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 
 .ui-checkbox {

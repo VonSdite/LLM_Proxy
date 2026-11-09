@@ -14,6 +14,8 @@ import {
   Copy,
   Download,
   Upload,
+  FileInput,
+  FileOutput,
   RefreshCw,
   Search,
   Settings2,
@@ -46,6 +48,9 @@ import {
   RotateCcw,
   CheckCheck,
   Ban,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from '@lucide/vue'
 const icons = {
   help: CircleHelp,
@@ -62,6 +67,8 @@ const icons = {
   copy: Copy,
   download: Download,
   upload: Upload,
+  import: FileInput,
+  export: FileOutput,
   refresh: RefreshCw,
   search: Search,
   settings: Settings2,
@@ -94,6 +101,9 @@ const icons = {
   reset: RotateCcw,
   all: CheckCheck,
   ban: Ban,
+  menu: Menu,
+  collapse: PanelLeftClose,
+  expand: PanelLeftOpen,
 }
 export type IconName = keyof typeof icons
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })

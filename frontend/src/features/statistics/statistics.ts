@@ -55,15 +55,29 @@ const tokens: TableColumn[] = [
   {
     key: 'cache_read_input_tokens',
     label: '缓存读取 Token',
-    width: 158,
+    help: '上游报告的缓存命中输入 Token，是输入 Token 的一部分，不应再加到总 Token。没有缓存明细时，不能把显示的 0 直接理解为没有缓存命中。',
+    width: 180,
     sortable: true,
     align: 'right',
   },
-  { key: 'cache_hit_rate', label: '缓存命中率', width: 132, sortable: true, align: 'right' },
+  {
+    key: 'cache_hit_rate',
+    label: '缓存命中率',
+    width: 154,
+    sortable: true,
+    align: 'right',
+    help: '缓存读取 Token ÷ 已提供缓存明细请求的输入 Token。汇总按 Token 加权，不是各行百分比平均值；未知表示上游未提供可计算的明细，部分明细时只统计已知输入。',
+  },
 ]
 const user: TableColumn = { key: 'username', label: '用户名', width: 144, sortable: true }
 const ip: TableColumn = { key: 'ip_address', label: 'IP', width: 140, sortable: true }
-const flow: TableColumn = { key: 'model_flow', label: '模型流向', width: 280, sortable: true }
+const flow: TableColumn = {
+  key: 'model_flow',
+  label: '模型流向',
+  width: 280,
+  sortable: true,
+  help: '依次展示客户端请求的模型 ID → 映射实际选择的目标（如有）→ 上游响应报告的模型名。三者可以不同，缺失的阶段不显示。',
+}
 const count: TableColumn = {
   key: 'request_count',
   label: '请求数',
@@ -93,7 +107,14 @@ export const columnsByView: Record<StatisticsView, TableColumn[]> = {
     ...tokens,
     { key: 'start_time', label: '开始时间', width: 190, sortable: true },
     { key: 'end_time', label: '结束时间', width: 190, sortable: true },
-    { key: 'duration', label: '耗时（秒）', width: 128, sortable: true, align: 'right' },
+    {
+      key: 'duration',
+      label: '耗时（秒）',
+      width: 150,
+      sortable: true,
+      align: 'right',
+      help: '从收到请求到响应结束的总时长，流式请求包含全部输出时间，不是首 Token 延迟。缺少起止时间时显示 —。',
+    },
   ],
 }
 export function rowKey(row: UsageRow, view: StatisticsView) {

@@ -3,17 +3,23 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
-from flask import Flask, jsonify
+import gevent
+from flask import Flask, Response, jsonify
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
+from src.presentation.api_key_controller import ApiKeyController
 from src.presentation.proxy_controller import ProxyController
 from src.repositories import ApiKeyRepository, LogRepository
 from src.services import ApiKeyService, LogService, ModelCatalogService
+from src.services.api_key_service import ApiKeyRequestError
 from src.services.proxy_service import ProxyErrorInfo
 from src.utils.database import create_connection_factory
 
@@ -107,7 +113,7 @@ class FakeProviderManager:
                 (),
                 {
                     "name": "demo",
-                    "target_formats": ("openai_chat",),
+                    "target_formats": ("openai_chat", "openai_responses", "claude"),
                 },
             )()
         return None
@@ -371,6 +377,264 @@ class ApiKeyManagementTests(unittest.TestCase):
 
         self.assertEqual(429, response.status_code)
         self.assertEqual("api_key_token_limit_exceeded", response.get_json()["error"]["code"])
+
+    def test_request_limits_round_trip_and_partial_update_through_management_api(self) -> None:
+        ApiKeyController(self.ctx, self.api_key_service, cast(Any, SimpleNamespace(is_auth_enabled=lambda: False)))
+        client = self.app.test_client()
+        response = client.post(
+            "/api/api-keys",
+            json={"name": "limited", "max_concurrency": 2, "request_quota_per_minute": "3", "request_quota_per_day": 8},
+        )
+        self.assertEqual(201, response.status_code)
+        created = response.get_json()["api_key"]
+        url = f"/api/api-keys/{created['id']}"
+        self.assertEqual(3, created["request_quota_per_minute"])
+        self.assertEqual(200, client.put(url, json={"enabled": False}).status_code)
+        self.assertEqual(200, client.put(url, json={"max_concurrency": None}).status_code)
+        stored = client.get(url).get_json()
+        self.assertIsNone(stored["max_concurrency"])
+        self.assertEqual(3, stored["request_quota_per_minute"])
+        self.assertEqual(8, stored["request_quota_per_day"])
+        for field in ApiKeyService.REQUEST_LIMIT_FIELDS:
+            for invalid in (0, -1, True, 1.5, "1.5", "abc", 2147483648):
+                with self.subTest(field=field, invalid=invalid):
+                    self.assertEqual(400, client.post("/api/api-keys", json={field: invalid}).status_code)
+                    self.assertEqual(400, client.put(url, json={field: invalid}).status_code)
+        self.assertEqual(1, self.api_key_service.get_total_api_keys_count())
+        self.assertEqual(
+            200, client.put(url, json={field: "" for field in ApiKeyService.REQUEST_LIMIT_FIELDS}).status_code
+        )
+        self.assertTrue(all(client.get(url).get_json()[field] is None for field in ApiKeyService.REQUEST_LIMIT_FIELDS))
+
+    def test_existing_database_migration_preserves_key_and_defaults_to_unlimited(self) -> None:
+        factory = create_connection_factory(self.root_path / "legacy.db")
+        with factory() as conn:
+            conn.execute(
+                "CREATE TABLE api_keys (id INTEGER PRIMARY KEY, name TEXT, key_hash TEXT, "
+                "key_prefix TEXT, key_suffix TEXT, enabled INTEGER, created_at TEXT, updated_at TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO api_keys VALUES (1, 'legacy', ?, 'sk-old', 'key', 1, '2026-01-01', '2026-01-01')",
+                (ApiKeyService.hash_api_key("sk-old-key"),),
+            )
+        repository = ApiKeyRepository(factory)
+        service = ApiKeyService(self.ctx, repository)
+        key = service.authenticate_api_key("sk-old-key")
+        self.assertIsNotNone(key)
+        assert key is not None
+        self.assertTrue(all(key[field] is None for field in ApiKeyService.REQUEST_LIMIT_FIELDS))
+        service.acquire_request(key)()
+        ApiKeyRepository(factory)
+        self.assertEqual(1, len(repository.get()))
+
+    def test_request_limits_are_atomic_and_rejections_do_not_consume_quota(self) -> None:
+        key = self.api_key_service.create_api_key(request_limits={"max_concurrency": 3, "request_quota_per_minute": 4})
+
+        def acquire():
+            try:
+                return self.api_key_service.acquire_request(key)
+            except ApiKeyRequestError as exc:
+                return exc.code
+
+        with patch("src.services.api_key_service.now_local_datetime", return_value=datetime(2026, 11, 7, 12)):
+            tasks = [gevent.spawn(acquire) for _ in range(12)]
+            gevent.joinall(tasks, raise_error=True)
+            admitted = [task.value for task in tasks if callable(task.value)]
+            self.assertEqual(3, len(admitted))
+            self.assertEqual(9, sum(task.value == "api_key_concurrency_limit_exceeded" for task in tasks))
+            for release in admitted:
+                release()
+                release()
+            self.api_key_service.acquire_request(key)()
+            with self.assertRaises(ApiKeyRequestError) as error:
+                self.api_key_service.acquire_request(key)
+            self.assertEqual("api_key_minute_limit_exceeded", error.exception.code)
+            other = self.api_key_service.create_api_key(request_limits={"max_concurrency": 1})
+            self.api_key_service.acquire_request(other)()
+
+    def test_request_periods_survive_restart_and_reset_at_local_boundaries(self) -> None:
+        key = self.api_key_service.create_api_key(
+            request_limits={"request_quota_per_minute": 1, "request_quota_per_day": 2}
+        )
+        with patch("src.services.api_key_service.now_local_datetime") as clock:
+            clock.return_value = datetime(2026, 11, 7, 23, 58, 30)
+            self.api_key_service.acquire_request(key)()
+            restarted = ApiKeyService(self.ctx, ApiKeyRepository(self.connection_factory))
+            with self.assertRaises(ApiKeyRequestError) as error:
+                restarted.acquire_request(key)
+            self.assertEqual("api_key_minute_limit_exceeded", error.exception.code)
+            self.assertEqual(30, error.exception.retry_after)
+            clock.return_value = datetime(2026, 11, 7, 23, 59)
+            restarted.acquire_request(key)()
+            restarted.update_api_key(key["id"], request_limits={"request_quota_per_minute": None})
+            with self.assertRaises(ApiKeyRequestError) as error:
+                restarted.acquire_request(key)
+            self.assertEqual("api_key_day_limit_exceeded", error.exception.code)
+            self.assertEqual(60, error.exception.retry_after)
+            clock.return_value = datetime(2026, 11, 8)
+            restarted.acquire_request(key)()
+
+    def test_current_limits_and_disabled_state_override_authenticated_snapshot(self) -> None:
+        key = self.api_key_service.create_api_key()
+        first = self.api_key_service.acquire_request(key)
+        self.api_key_service.update_api_key(key["id"], request_limits={"max_concurrency": 1})
+        with self.assertRaises(ApiKeyRequestError) as error:
+            self.api_key_service.acquire_request(key)
+        self.assertEqual("api_key_concurrency_limit_exceeded", error.exception.code)
+        first()
+        self.api_key_service.acquire_request(key)()
+        self.api_key_service.update_api_key(key["id"], enabled=False)
+        with self.assertRaises(ApiKeyRequestError) as error:
+            self.api_key_service.acquire_request(key)
+        self.assertEqual(401, error.exception.status_code)
+
+    def test_proxy_rejects_over_quota_across_formats_without_counting_invalid_requests(self) -> None:
+        key = self.api_key_service.create_api_key(
+            model_permissions=["demo/m1"], request_limits={"request_quota_per_day": 1}
+        )
+        proxy = self._register_proxy()
+        client = self.app.test_client()
+        headers = {"Authorization": f"Bearer {key['api_key']}"}
+        with patch.object(proxy, "proxy_request", wraps=proxy.proxy_request) as forward:
+            self.assertEqual(200, client.get("/v1/models", headers=headers).status_code)
+            self.assertEqual(400, client.post("/v1/chat/completions", json={}, headers=headers).status_code)
+            self.assertEqual(
+                403, client.post("/v1/chat/completions", json={"model": "demo/m2"}, headers=headers).status_code
+            )
+            self.assertEqual(
+                200, client.post("/v1/chat/completions", json={"model": "demo/m1"}, headers=headers).status_code
+            )
+            for route in ("/v1/chat/completions", "/v1/responses", "/v1/messages"):
+                with self.subTest(route=route):
+                    response = client.post(route, json={"model": "demo/m1"}, headers=headers)
+                    self.assertEqual(429, response.status_code)
+                    self.assertGreater(int(response.headers["Retry-After"]), 0)
+                    self.assertEqual("rate_limit_error", response.get_json()["error"]["type"])
+                    if route == "/v1/messages":
+                        self.assertEqual("error", response.get_json()["type"])
+                    else:
+                        self.assertEqual("api_key_day_limit_exceeded", response.get_json()["error"]["code"])
+            self.assertEqual(1, forward.call_count)
+
+    def test_proxy_failure_and_exception_release_concurrency_but_consume_request_quota(self) -> None:
+        key = self.api_key_service.create_api_key(request_limits={"max_concurrency": 1, "request_quota_per_day": 2})
+        proxy = self._register_proxy()
+        client = self.app.test_client()
+        headers = {"Authorization": f"Bearer {key['api_key']}"}
+        with patch.object(proxy, "proxy_request", return_value=(None, 502, None)):
+            self.assertEqual(
+                502, client.post("/v1/chat/completions", json={"model": "demo/m1"}, headers=headers).status_code
+            )
+        with patch.object(proxy, "proxy_request", side_effect=RuntimeError("upstream failed")):
+            self.assertEqual(
+                500, client.post("/v1/chat/completions", json={"model": "demo/m1"}, headers=headers).status_code
+            )
+        response = client.post("/v1/chat/completions", json={"model": "demo/m1"}, headers=headers)
+        self.assertEqual("api_key_day_limit_exceeded", response.get_json()["error"]["code"])
+
+    def test_compact_and_image_routes_share_the_same_key_limits(self) -> None:
+        key = self.api_key_service.create_api_key(request_limits={"max_concurrency": 1, "request_quota_per_day": 3})
+        calls = []
+
+        def forward(*args, **kwargs):
+            calls.append(kwargs["route_name"])
+            return jsonify({"id": "ok"}), 200, None
+
+        codex = SimpleNamespace(
+            list_model_names=lambda: ("codex-model",),
+            list_image_model_names=lambda: ("image-model",),
+            has_model=lambda model: model == "codex-model",
+            has_image_model=lambda model: model == "image-model",
+            proxy_request=forward,
+            proxy_image_request=forward,
+        )
+        ProxyController(
+            self.ctx,
+            CompletingProxyService(),
+            cast(Any, FakeUserService()),
+            self.log_service,
+            cast(Any, FakeProviderManager()),
+            api_key_service=self.api_key_service,
+            codex_proxy_service=cast(Any, codex),
+        )
+        client = self.app.test_client()
+        headers = {"Authorization": f"Bearer {key['api_key']}"}
+        routes = (
+            ("/v1/responses/compact", "codex-model"),
+            ("/v1/images/generations", "image-model"),
+            ("/v1/images/edits", "image-model"),
+        )
+        for route, model in routes:
+            with self.subTest(route=route):
+                self.assertEqual(200, client.post(route, json={"model": model}, headers=headers).status_code)
+        for route, model in routes:
+            with self.subTest(route=route):
+                response = client.post(route, json={"model": model}, headers=headers)
+                self.assertEqual(429, response.status_code)
+                self.assertEqual("api_key_day_limit_exceeded", response.get_json()["error"]["code"])
+        self.assertEqual(3, len(calls))
+
+    def test_stream_slot_is_held_until_exhaustion_failure_or_disconnect(self) -> None:
+        key = self.api_key_service.create_api_key(request_limits={"max_concurrency": 1})
+        proxy = self._register_proxy()
+        client = self.app.test_client()
+        headers = {"Authorization": f"Bearer {key['api_key']}"}
+        for ending in ("complete", "error", "disconnect"):
+            with self.subTest(ending=ending):
+                closed = []
+
+                def events():
+                    try:
+                        yield "data: first\n\n"
+                        if ending == "error":
+                            raise RuntimeError("stream failed")
+                        yield "data: last\n\n"
+                    finally:
+                        closed.append(True)
+
+                with patch.object(
+                    proxy, "proxy_request", return_value=(Response(events(), mimetype="text/event-stream"), 200, None)
+                ):
+                    response = client.post(
+                        "/v1/chat/completions",
+                        json={"model": "demo/m1", "stream": True},
+                        headers=headers,
+                        buffered=False,
+                    )
+                blocked = client.post("/v1/chat/completions", json={"model": "demo/m1"}, headers=headers)
+                self.assertEqual("api_key_concurrency_limit_exceeded", blocked.get_json()["error"]["code"])
+                if ending == "error":
+                    with self.assertRaisesRegex(RuntimeError, "stream failed"):
+                        list(response.response)
+                elif ending == "complete":
+                    list(response.response)
+                else:
+                    response.close()
+                self.assertEqual([True], closed)
+                self.api_key_service.acquire_request(key)()
+                response.close()
+                response.close()
+
+    def test_unstarted_stream_close_releases_slot_and_original_iterator(self) -> None:
+        key = self.api_key_service.create_api_key(request_limits={"max_concurrency": 1})
+        closed = []
+
+        class UnstartedStream:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise AssertionError("The unstarted body must not be consumed")
+
+            def close(self):
+                closed.append(True)
+
+        response = Response(UnstartedStream())
+        release = self.api_key_service.acquire_request(key)
+        self.assertTrue(ProxyController._hold_api_key_stream_slot(response, release))
+        response.close()
+        self.assertEqual([True], closed)
+        self.api_key_service.acquire_request(key)()
 
 
 if __name__ == "__main__":

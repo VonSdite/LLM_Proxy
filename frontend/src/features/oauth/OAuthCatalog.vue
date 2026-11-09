@@ -37,13 +37,26 @@ async function add() {
       <div class="actions">
         <h2>{{ image ? '图片模型' : '文本模型' }}</h2>
         <UiHelpPopover :label="image ? '图片模型说明' : '文本模型说明'">
-          <p v-if="image">
-            图片接口未传模型时使用默认模型；Codex Responses
-            的图片工具也使用此默认值。仍可手动指定目录中的其他图片模型。
-          </p>
-          <p v-else>
-            下游直接使用这里的模型 ID，无需 Provider 前缀。支持 Chat Completions、Responses 和
-            Messages 接口。
+          <template v-if="image">
+            <p>
+              /v1/images/generations 与 /v1/images/edits 可指定这里的模型；未传 model
+              时使用默认模型。
+            </p>
+            <p>
+              Codex Responses 的 image_generation
+              工具未指定图片模型时也使用默认值。默认模型只影响自动补齐，不限制手动指定其他模型。
+            </p>
+          </template>
+          <template v-else>
+            <p>维护下游可见的 Codex 文本模型 ID，客户端直接使用该 ID，无需 Provider 前缀。</p>
+            <p>
+              Chat Completions、Responses 和 Messages 请求会转换为 Codex OAuth
+              上游请求，并使用认证文件访问上游。
+            </p>
+          </template>
+          <p>
+            这是本地目录，添加 ID
+            不代表上游账号一定支持。内置模型也可删除；补回内置只恢复缺失的内置项，保留自行添加的模型。
           </p>
         </UiHelpPopover>
       </div>

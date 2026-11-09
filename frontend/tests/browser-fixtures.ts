@@ -55,7 +55,6 @@ export async function mockAdmin(page: Page, authenticated = true) {
     force_upstream_stream: false,
     safe_desensitization_enabled: false,
     model_list: ['claude-sonnet-4-6', 'org/very-long-model-name-with-full-routing-path-20261106'],
-    hidden_model_list: [],
     hook: '',
   }
   const models = provider.model_list.map((model) => `main/${model}`)
@@ -238,6 +237,9 @@ export async function mockAdmin(page: Page, authenticated = true) {
               available_models_count: 2,
               token_limit_k: 10000,
               token_limit_remaining: 9655000,
+              max_concurrency: 3,
+              request_quota_per_minute: 60,
+              request_quota_per_day: 1000,
               created_at: '2026-11-06 10:00:00',
               last_used_at: '2026-11-06 10:00:00',
               ...usage,
@@ -390,5 +392,5 @@ export async function mockAdmin(page: Page, authenticated = true) {
       return send({ error: `Unexpected fixture request: ${method} ${path}` }, 501)
     },
   )
-  return { calls, unexpected, bootstrap, snapshot, agent }
+  return { calls, unexpected, bootstrap, snapshot, agent, provider, settings }
 }

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from ..utils.database import ConnectionFactory, database_operation
@@ -14,6 +15,7 @@ class ApiKeyRepository:
     """负责 api_keys 表的数据访问。"""
 
     MODEL_PERMISSIONS_ALL = "*"
+    REQUEST_LIMIT_FIELDS = ("max_concurrency", "request_quota_per_minute", "request_quota_per_day")
     _SORT_COLUMNS = {
         "id": "k.id",
         "name": "k.name",
@@ -76,6 +78,17 @@ class ApiKeyRepository:
                 cursor.execute("ALTER TABLE api_keys ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0")
             if "last_used_at" not in columns:
                 cursor.execute("ALTER TABLE api_keys ADD COLUMN last_used_at TEXT")
+            for field in self.REQUEST_LIMIT_FIELDS:
+                if field not in columns:
+                    cursor.execute(f"ALTER TABLE api_keys ADD COLUMN {field} INTEGER")
+            for field, definition in {
+                "request_minute": "TEXT",
+                "minute_request_count": "INTEGER NOT NULL DEFAULT 0",
+                "request_day": "TEXT",
+                "day_request_count": "INTEGER NOT NULL DEFAULT 0",
+            }.items():
+                if field not in columns:
+                    cursor.execute(f"ALTER TABLE api_keys ADD COLUMN {field} {definition}")
             cursor.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_plaintext ON api_keys(api_key) WHERE api_key IS NOT NULL"
             )
@@ -94,6 +107,9 @@ class ApiKeyRepository:
             k.enabled,
             k.model_permissions,
             k.token_limit_k,
+            k.max_concurrency,
+            k.request_quota_per_minute,
+            k.request_quota_per_day,
             k.total_request_count,
             k.total_tokens,
             k.prompt_tokens,
@@ -116,18 +132,21 @@ class ApiKeyRepository:
         model_permissions: str = MODEL_PERMISSIONS_ALL,
         token_limit_k: int | None = None,
         enabled: bool = True,
+        request_limits: dict[str, int | None] | None = None,
     ) -> int | None:
         """创建 API Key 记录。"""
         now_text = now_local_datetime_text()
+        request_limits = request_limits or {}
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
                 INSERT INTO api_keys (
                     name, api_key, key_hash, key_prefix, key_suffix, enabled, model_permissions,
-                    token_limit_k, created_at, updated_at
+                    token_limit_k, created_at, updated_at,
+                    max_concurrency, request_quota_per_minute, request_quota_per_day
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     name,
@@ -140,6 +159,7 @@ class ApiKeyRepository:
                     token_limit_k,
                     now_text,
                     now_text,
+                    *(request_limits.get(field) for field in self.REQUEST_LIMIT_FIELDS),
                 ),
             )
             return cursor.lastrowid
@@ -330,6 +350,7 @@ class ApiKeyRepository:
         model_permissions: str | None = None,
         token_limit_k: int | None = None,
         token_limit_k_provided: bool = False,
+        request_limits: dict[str, int | None] | None = None,
     ) -> bool:
         """更新 API Key 记录。"""
         updates: list[str] = []
@@ -347,6 +368,10 @@ class ApiKeyRepository:
         if token_limit_k_provided:
             updates.append("token_limit_k = ?")
             params.append(token_limit_k)
+        for field in self.REQUEST_LIMIT_FIELDS:
+            if request_limits is not None and field in request_limits:
+                updates.append(f"{field} = ?")
+                params.append(request_limits[field])
 
         if not updates:
             return False
@@ -359,6 +384,33 @@ class ApiKeyRepository:
             cursor = conn.cursor()
             cursor.execute(f"UPDATE api_keys SET {', '.join(updates)} WHERE id = ?", params)
             return cursor.rowcount > 0
+
+    @database_operation(write=True)
+    def reserve_request(self, key_id: int, now: datetime) -> str | None:
+        """原子检查自然分钟、自然日配额并记录一次已准入请求；只保留当前周期。"""
+        minute = now.strftime("%Y-%m-%d %H:%M")
+        day = now.strftime("%Y-%m-%d")
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT enabled, request_quota_per_minute, request_quota_per_day, "
+                "request_minute, minute_request_count, request_day, day_request_count FROM api_keys WHERE id = ?",
+                (key_id,),
+            ).fetchone()
+            if row is None or not row["enabled"]:
+                return "api_key_invalid"
+            minute_count = row["minute_request_count"] if row["request_minute"] == minute else 0
+            day_count = row["day_request_count"] if row["request_day"] == day else 0
+            if row["request_quota_per_minute"] is not None and minute_count >= row["request_quota_per_minute"]:
+                return "api_key_minute_limit_exceeded"
+            if row["request_quota_per_day"] is not None and day_count >= row["request_quota_per_day"]:
+                return "api_key_day_limit_exceeded"
+            conn.execute(
+                "UPDATE api_keys SET request_minute = ?, minute_request_count = ?, "
+                "request_day = ?, day_request_count = ? WHERE id = ?",
+                (minute, minute_count + 1, day, day_count + 1, key_id),
+            )
+            return None
 
     @database_operation(write=True)
     def delete(self, key_id: int) -> bool:

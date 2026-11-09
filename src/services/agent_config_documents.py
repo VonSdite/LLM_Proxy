@@ -272,6 +272,7 @@ def _explicit_clears(agent: str, draft: dict, result: dict) -> dict:
             allowed[name] = (agent, ("env", env))
         allowed["runtime.permissionMode"] = (agent, ("permissions", "defaultMode"))
         allowed["runtime.sandboxEnabled"] = (agent, ("sandbox", "enabled"))
+        allowed["runtime.attribution"] = (agent, ("attribution",))
         allowed["runtime.skipWebFetchPreflight"] = (agent, ("skipWebFetchPreflight",))
     elif agent == "codex":
         allowed = {"apiKey": ("codexAuth", ("OPENAI_API_KEY",))}
@@ -376,6 +377,12 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
         sandbox = _choice(runtime.get("sandboxEnabled", "unset"), ("unset", "enabled", "disabled"), "Claude sandbox")
         if sandbox in ("enabled", "disabled"):
             fields[("sandbox", "enabled")] = sandbox == "enabled"
+        attribution = _choice(
+            runtime.get("attribution", "unset"), ("unset", "disabled", "custom"), "Claude attribution"
+        )
+        # 自定义对象由文件编辑器维护，表单只管理 false，保留对象内的注释和扩展字段。
+        if attribution == "disabled":
+            fields[("attribution",)] = False
         preflight = _choice(
             runtime.get("skipWebFetchPreflight", "unset"), ("unset", "enabled", "disabled"), "WebFetch preflight"
         )
@@ -478,6 +485,7 @@ def visible_fields(target: str, data: dict) -> dict[str, Any]:
     if target == "claude":
         include(("permissions", "defaultMode"))
         include(("sandbox", "enabled"))
+        include(("attribution",))
         include(("skipWebFetchPreflight",))
         for name in (
             *CLAUDE_MODELS,

@@ -55,7 +55,7 @@ describe('共享模型权限', () => {
     await wrapper.findAll('[role="checkbox"]')[0]!.trigger('click')
     await wrapper
       .findAll('button')
-      .find((button) => button.text() === '添加所选')!
+      .find((button) => button.text() === '确定')!
       .trigger('click')
     await flushPromises()
     expect(wrapper.emitted('apply')?.[0]?.[0]).toEqual(['vendor/a', 'vendor/b'])

@@ -16,6 +16,7 @@ import {
   UiDialog,
   UiEmptyState,
   UiField,
+  UiHelpPopover,
   UiIcon,
   UiIconButton,
   UiInput,
@@ -190,7 +191,7 @@ function trustHost() {
 }
 </script>
 <template>
-  <div class="page">
+  <div class="page agent-page">
     <header class="page-heading"><h1>Agent 配置</h1></header>
     <UiAlert v-if="error">{{ error }}</UiAlert>
     <UiEmptyState v-if="!bootstrap" :loading="loading">
@@ -199,7 +200,22 @@ function trustHost() {
     <div v-else class="agent-workspace">
       <aside class="agent-sidebar">
         <header class="section-heading">
-          <h2>机器</h2>
+          <div class="actions">
+            <h2>机器</h2>
+            <UiHelpPopover label="配置机器说明">
+              <p>
+                本机指运行 LLM Proxy 的机器。服务部署在 Linux 上时，这里编辑的是该服务器的文件。
+              </p>
+              <p>
+                SSH 机器由服务端连接，使用对应 SSH
+                用户的目录与文件权限。先连接再编辑；删除机器仅移除连接记录，不删除远程配置文件。
+              </p>
+              <p>
+                每台机器分别记住各 Agent 的配置路径。表单更改在点击保存后写入所选机器，已经运行的
+                Agent 是否重新读取配置取决于对应客户端。
+              </p>
+            </UiHelpPopover>
+          </div>
           <UiIconButton
             icon="plus"
             label="添加 SSH 机器"
@@ -327,7 +343,15 @@ function trustHost() {
             <div class="form-grid">
               <UiField
                 label="API 地址"
-                help="本服务地址可选择模型目录；外部地址手动输入对应模型 ID。Claude 通常不带 /v1，Codex 和 opencode 使用 /v1。"
+                :help="[
+                  '填写目标 Agent 实际能访问的模型服务地址。Claude 通常使用根地址，Codex / opencode 使用带 /v1 的基础地址，不填写 /chat/completions 等请求端点。',
+                  '本服务地址使用模型下拉；外部地址手动填写该服务的模型 ID。远程 Agent 的 127.0.0.1 指远程机器自身，应选择它能访问的网卡或域名地址。',
+                  ...(unreachable
+                    ? [
+                        '当前 LLM Proxy 仅监听回环地址，远程机器可能无法直连。可在系统设置调整监听地址并重启，或填写远程可达的反向代理地址。',
+                      ]
+                    : []),
+                ]"
               >
                 <template #label>
                   <UiIcon
@@ -350,8 +374,8 @@ function trustHost() {
                 label="API Key"
                 :help="
                   ownService && bootstrap.apiKeyEnabled
-                    ? '选择已有 Key 或手动输入。保存预览中的凭据始终打码。'
-                    : '填写目标服务的访问凭据；不校验 Key 的服务可留空。'
+                    ? '当前地址为本服务且已启用 API Key 校验。聚焦后可选择已创建的 Key，也可手动输入；该 Key 还需有目标模型的权限与剩余配额。点击保存后写入 Agent 文件，预览始终打码。'
+                    : '填写所选 API 服务的访问凭据；不校验 Key 的服务可留空。显式清空已有值后的操作见保存预览，确认保存后才修改目标文件。'
                 "
               >
                 <ApiKeyField
@@ -412,10 +436,14 @@ function trustHost() {
       size="sm"
       @update:open="!$event && (fingerprint = undefined)"
     >
-      <div class="stack">
+      <UiField
+        label="SSH 主机指纹"
+        group
+        help="指纹用于确认连接的是预期服务器。首次连接时可与服务器上可信来源提供的 SHA256 指纹核对；信任后登记此机器的主机密钥，下次变化会阻止连接。"
+      >
         <code class="fingerprint">{{ fingerprint?.fingerprint }}</code>
         <small class="muted">{{ fingerprint?.keyType }}</small>
-      </div>
+      </UiField>
       <template #footer>
         <UiButton @click="fingerprint = undefined">取消</UiButton>
         <UiButton variant="primary" @click="trustHost">信任并连接</UiButton>
@@ -435,6 +463,10 @@ function trustHost() {
   </div>
 </template>
 <style scoped>
+.agent-page {
+  container: agent-page / inline-size;
+}
+
 .agent-workspace {
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
@@ -444,7 +476,7 @@ function trustHost() {
 
 .agent-sidebar {
   position: sticky;
-  top: 88px;
+  top: var(--app-sticky-offset);
   display: grid;
   gap: var(--space-3);
 }
@@ -502,8 +534,7 @@ function trustHost() {
 }
 
 .machine-choice strong {
-  font-size: var(--text-sm);
-  font-weight: 550;
+  font-size: var(--text-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -544,7 +575,7 @@ function trustHost() {
 }
 
 .agent-paths > * + * {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--divider);
 }
 
 .fingerprint {
@@ -562,7 +593,7 @@ function trustHost() {
   }
 }
 
-@media (width <= 760px) {
+@container agent-page (width <= 980px) {
   .agent-workspace {
     grid-template-columns: minmax(0, 1fr);
   }

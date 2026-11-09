@@ -8,8 +8,9 @@ withDefaults(
     disabled?: boolean
     loading?: boolean
     variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
+    size?: 'xs' | 'sm' | 'md'
   }>(),
-  { variant: 'ghost' },
+  { variant: 'ghost', size: 'md' },
 )
 </script>
 <template>
@@ -20,6 +21,7 @@ withDefaults(
     :disabled="disabled"
     :loading="loading"
     :variant="variant"
+    :size="size"
     class="ui-icon-button"
   />
 </template>
@@ -28,5 +30,13 @@ withDefaults(
   width: var(--control);
   padding: 0;
   flex: none;
+}
+
+.ui-icon-button.ui-button--sm {
+  width: var(--control-sm);
+}
+
+.ui-icon-button.ui-button--xs {
+  width: var(--control-xs);
 }
 </style>

@@ -5,12 +5,14 @@ import UiHelpPopover from './UiHelpPopover.vue'
 import UiIcon from './UiIcon.vue'
 const props = defineProps<{
   label: string
-  help?: string
+  labelHidden?: boolean
+  help?: string | readonly string[]
   error?: string
   hint?: string
   required?: boolean
   unit?: string
   group?: boolean
+  inline?: boolean
 }>()
 const id = useId()
 provide(fieldKey, {
@@ -25,19 +27,19 @@ provide(fieldKey, {
 <template>
   <div
     class="ui-field"
-    :class="{ 'ui-field--error': error }"
+    :class="{ 'ui-field--error': error, 'ui-field--inline': inline }"
     :role="group ? 'group' : undefined"
     :aria-labelledby="group ? `${id}-label` : undefined"
   >
-    <div class="ui-field-label">
+    <div class="ui-field-label" :class="{ 'sr-only': labelHidden }">
       <component :is="group ? 'span' : 'label'" :id="`${id}-label`" :for="group ? undefined : id">
         {{ label }}
         <span v-if="unit" class="muted">（{{ unit }}）</span>
         <span v-if="required" class="danger" aria-hidden="true">*</span>
       </component>
       <slot name="label" />
-      <UiHelpPopover v-if="help || $slots.help" :label="`${label}说明`">
-        <slot name="help">{{ help }}</slot>
+      <UiHelpPopover v-if="help || $slots.help" :label="`${label}说明`" :text="help">
+        <template v-if="$slots.help" #default><slot name="help" /></template>
       </UiHelpPopover>
     </div>
     <slot :id="id" />
@@ -63,8 +65,25 @@ provide(fieldKey, {
   flex-wrap: wrap;
   gap: var(--space-1);
   min-height: 20px;
-  font-size: var(--text-sm);
-  font-weight: 500;
+  color: var(--label);
+  font-size: var(--text-base);
+  font-weight: var(--weight-label);
+}
+
+.ui-field--inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-control);
+  background: var(--surface-soft);
+}
+
+.ui-field--inline > .ui-field-error,
+.ui-field--inline > .ui-field-hint {
+  grid-column: 1 / -1;
 }
 
 .ui-field-error,

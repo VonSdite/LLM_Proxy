@@ -4,6 +4,7 @@ import { usersApi, type User } from '@/api/users'
 import { useSession } from '@/stores/session'
 import { usePagedList } from '@/features/shared/usePagedList'
 import { useAction } from '@/features/shared/useAction'
+import { useToggle } from '@/features/shared/useToggle'
 import { dateTime, number, tokenK } from '@/features/shared/format'
 import JsonImportDialog from '@/features/shared/JsonImportDialog.vue'
 import UserDialog from '@/features/users/UserDialog.vue'
@@ -14,10 +15,14 @@ import {
   UiConfirmPopover,
   UiHelpPopover,
   UiIconButton,
-  UiInput,
+  UiListToolbar,
+  UiPageHeader,
   UiPagination,
+  UiSearchInput,
+  UiSelectionBar,
   UiSwitch,
   UiTable,
+  UiTooltip,
   notify,
   type TableColumn,
 } from '@/components/ui'
@@ -25,6 +30,8 @@ const session = useSession()
 const whitelist = computed(() => session.context?.features.whitelist || false)
 const list = usePagedList(usersApi.list, { key: 'total_tokens', direction: 'desc' })
 const action = useAction(list.refresh)
+const exporting = useAction()
+const toggles = useToggle()
 const editing = ref<User>()
 const formOpen = ref(false)
 const importing = ref(false)
@@ -33,16 +40,24 @@ const selectedIds = computed(() => list.selected.value.map(Number))
 const columns: TableColumn[] = [
   { key: 'username', label: '用户', sortable: true, width: 160 },
   { key: 'ip_address', label: 'IP 地址', sortable: true, width: 175 },
-  { key: 'whitelist_access_enabled', label: '白名单', width: 95 },
+  { fixed: true, key: 'whitelist_access_enabled', label: '白名单', width: 95 },
   { key: 'allowed_models_count', label: '模型权限', sortable: true, width: 110 },
   { key: 'prompt_tokens', label: '输入 (k)', sortable: true, width: 110, align: 'right' },
   { key: 'completion_tokens', label: '输出 (k)', sortable: true, width: 110, align: 'right' },
-  { key: 'total_tokens', label: '总用量 (k)', sortable: true, width: 120, align: 'right' },
+  {
+    key: 'total_tokens',
+    label: '总用量 (k)',
+    sortable: true,
+    width: 148,
+    align: 'right',
+    help: '该用户累计记录的输入与输出 Token，1k = 1000 Tokens。输入、输出列使用相同单位；查看特定日期范围请到统计与日志。',
+  },
   { key: 'total_request_count', label: '请求', sortable: true, width: 95, align: 'right' },
   { key: 'created_at', label: '创建时间', sortable: true, width: 170 },
-  { key: 'actions', label: '操作', width: 90 },
+  { fixed: true, key: 'actions', label: '操作', width: 120, minWidth: 120 },
 ]
 function edit(user?: User) {
+  if (toggles.busy.value || action.busy.value) return
   editing.value = user
   formOpen.value = true
 }
@@ -50,17 +65,32 @@ async function saved() {
   notify('已保存')
   await list.refresh()
 }
-async function toggleWhitelist(value: boolean) {
-  await action.run(
-    async (signal) => {
-      await usersApi.whitelist(value, signal)
-      if (signal.aborted) return
-      await session.refresh()
+function toggleWhitelist(value: boolean) {
+  return toggles.run(
+    'whitelist',
+    value,
+    (signal) => usersApi.whitelist(value, signal),
+    (result) => {
+      if (session.context) session.context.features.whitelist = result.enabled
     },
-    value ? '白名单已启用' : '白名单已关闭',
+  )
+}
+function setEnabled(user: User, value: boolean) {
+  return toggles.run(
+    String(user.id),
+    value,
+    (signal) => usersApi.update(user.id, { whitelist_access_enabled: value }, signal),
+    () =>
+      list.patch((data) => ({
+        ...data,
+        items: data.items.map((row) =>
+          row.id === user.id ? { ...row, whitelist_access_enabled: value } : row,
+        ),
+      })),
   )
 }
 async function removeSelected() {
+  if (toggles.busy.value) return
   const ids = [...selectedIds.value]
   if (
     await action.run(
@@ -78,63 +108,135 @@ function imported(message: string) {
   notify(message)
   void list.refresh()
 }
+function exportFiltered() {
+  if (
+    !list.total.value ||
+    list.filterPending.value ||
+    list.error.value ||
+    action.busy.value ||
+    toggles.busy.value
+  )
+    return
+  const keyword = list.keyword.value.trim()
+  void exporting.run((signal) => usersApi.exportFiltered(keyword, signal))
+}
+function exportSelected() {
+  if (
+    !selectedIds.value.length ||
+    list.filterPending.value ||
+    action.busy.value ||
+    toggles.busy.value
+  )
+    return
+  const ids = [...selectedIds.value]
+  void exporting.run((signal) => usersApi.export(ids, signal))
+}
 </script>
 <template>
   <div class="page">
-    <header class="page-heading">
-      <h1>用户</h1>
-      <div class="actions">
+    <UiPageHeader title="用户" />
+    <UiListToolbar>
+      <template #actions>
+        <UiButton
+          variant="primary"
+          icon="plus"
+          :disabled="action.busy.value || toggles.busy.value"
+          @click="edit()"
+        >
+          添加用户
+        </UiButton>
+        <UiButton
+          icon="import"
+          :disabled="action.busy.value || toggles.busy.value"
+          @click="importing = true"
+        >
+          导入
+        </UiButton>
+        <UiTooltip :text="`导出当前搜索条件下的 ${list.total.value} 个用户，包含所有分页`">
+          <UiButton
+            icon="export"
+            :loading="exporting.busy.value"
+            :disabled="
+              !list.total.value ||
+              list.filterPending.value ||
+              !!list.error.value ||
+              action.busy.value ||
+              toggles.busy.value
+            "
+            @click="exportFiltered"
+          >
+            导出
+          </UiButton>
+        </UiTooltip>
+      </template>
+      <template #search>
+        <UiSearchInput
+          v-model="list.keyword.value"
+          placeholder="搜索用户名或 IP"
+          aria-label="搜索用户"
+        />
+      </template>
+      <template #filters>
         <UiSwitch
-          :model-value="whitelist"
+          :model-value="toggles.value('whitelist', whitelist)"
+          :loading="toggles.pending('whitelist')"
           :disabled="action.busy.value"
           @update:model-value="toggleWhitelist"
         >
           白名单
         </UiSwitch>
         <UiHelpPopover label="白名单说明">
-          启用后，仅允许白名单中的 IP 调用模型，并按用户模型权限限制访问。
+          <p>
+            启用后，调用模型的 IP
+            必须已登记且开启“允许白名单访问”，并受用户的模型权限限制；模型目录也按权限过滤。
+          </p>
+          <p>
+            新建用户默认允许白名单访问并授权全部模型，可在列表中禁用或编辑权限。关闭总开关后不再按用户
+            IP 与模型权限拦截；API Key 校验仍由其独立开关控制。
+          </p>
         </UiHelpPopover>
-      </div>
-      <UiButton variant="primary" icon="plus" @click="edit()">添加用户</UiButton>
-    </header>
-    <div class="toolbar">
-      <div class="list-search">
-        <UiInput v-model="list.keyword.value" placeholder="搜索用户名或 IP" aria-label="搜索用户" />
-      </div>
-      <div class="actions">
-        <template v-if="selectedIds.length">
-          <span class="muted">已选 {{ selectedIds.length }}</span>
-          <UiButton
-            :disabled="!whitelist || action.busy.value"
-            @click="permissionIds = [...selectedIds]"
-          >
-            模型权限
-          </UiButton>
-          <UiConfirmPopover
-            :message="`删除所选 ${selectedIds.length} 个用户？`"
-            @confirm="removeSelected"
-          >
-            <UiButton variant="danger" :disabled="action.busy.value">删除</UiButton>
-          </UiConfirmPopover>
-        </template>
-        <UiButton icon="upload" @click="importing = true">导入</UiButton>
-        <UiButton
-          icon="download"
-          :disabled="action.busy.value"
-          @click="action.run((signal) => usersApi.export(selectedIds, signal))"
-        >
-          {{ selectedIds.length ? '导出所选' : '导出' }}
+      </template>
+      <UiIconButton
+        icon="refresh"
+        label="刷新用户"
+        :loading="list.loading.value"
+        @click="list.refresh"
+      />
+    </UiListToolbar>
+    <UiSelectionBar
+      v-if="selectedIds.length"
+      :count="selectedIds.length"
+      :disabled="action.busy.value || toggles.busy.value"
+      @clear="list.selected.value = []"
+    >
+      <UiButton
+        :disabled="!whitelist || action.busy.value || toggles.busy.value"
+        @click="permissionIds = [...selectedIds]"
+      >
+        模型权限
+      </UiButton>
+      <UiButton
+        :disabled="
+          action.busy.value ||
+          toggles.busy.value ||
+          exporting.busy.value ||
+          list.filterPending.value
+        "
+        @click="exportSelected"
+      >
+        导出所选
+      </UiButton>
+      <UiConfirmPopover
+        :message="`删除所选 ${selectedIds.length} 个用户？`"
+        @confirm="removeSelected"
+      >
+        <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
+          删除
         </UiButton>
-        <UiIconButton
-          icon="refresh"
-          label="刷新用户"
-          :loading="list.loading.value"
-          @click="list.refresh"
-        />
-      </div>
-    </div>
-    <UiAlert v-if="list.error.value || action.error.value">
-      {{ action.error.value || list.error.value }}
+      </UiConfirmPopover>
+    </UiSelectionBar>
+    <UiAlert v-if="list.error.value || action.error.value || exporting.error.value">
+      {{ exporting.error.value || action.error.value || list.error.value }}
     </UiAlert>
     <UiTable
       v-model:selected="list.selected.value"
@@ -153,14 +255,20 @@ function imported(message: string) {
       </template>
       <template #cell-whitelist_access_enabled="{ row }">
         <UiSwitch
-          :model-value="Boolean(row.whitelist_access_enabled)"
-          :disabled="!whitelist || action.busy.value"
+          :model-value="toggles.value(String(row.id), Boolean(row.whitelist_access_enabled))"
+          :loading="toggles.pending(String(row.id))"
+          :disabled="!whitelist || action.busy.value || toggles.pending('whitelist')"
           :label="`${row.username} 白名单访问`"
-          @update:model-value="action.run((signal) => usersApi.toggle(row.id, signal))"
+          @update:model-value="setEnabled(row, $event)"
         />
       </template>
       <template #cell-allowed_models_count="{ row }">
-        <UiButton variant="ghost" size="sm" :disabled="!whitelist" @click="edit(row)">
+        <UiButton
+          variant="ghost"
+          size="sm"
+          :disabled="!whitelist || action.busy.value || toggles.busy.value"
+          @click="edit(row)"
+        >
           {{ row.model_permissions === '*' ? '全部模型' : `${row.allowed_models_count} 个模型` }}
         </UiButton>
       </template>
@@ -172,8 +280,13 @@ function imported(message: string) {
         <small class="muted">{{ dateTime(row.created_at) }}</small>
       </template>
       <template #cell-actions="{ row }">
-        <div class="actions">
-          <UiIconButton icon="edit" :label="`编辑 ${row.username}`" @click="edit(row)" />
+        <div class="table-actions">
+          <UiIconButton
+            icon="edit"
+            :label="`编辑 ${row.username}`"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="edit(row)"
+          />
           <UiConfirmPopover
             :message="`删除用户 ${row.username}？`"
             @confirm="action.run((signal) => usersApi.remove(row.id, signal), '已删除用户')"
@@ -181,7 +294,7 @@ function imported(message: string) {
             <UiIconButton
               icon="delete"
               :label="`删除 ${row.username}`"
-              :disabled="action.busy.value"
+              :disabled="action.busy.value || toggles.busy.value"
             />
           </UiConfirmPopover>
         </div>
@@ -212,6 +325,10 @@ function imported(message: string) {
       v-if="importing"
       v-model:open="importing"
       title="导入用户"
+      :help="[
+        '选择本系统导出的 JSON 文件，或粘贴相同结构的内容。以 IP 地址识别用户：新 IP 创建记录，相同 IP 更新原记录的名称、白名单状态和模型权限。',
+        '导入后立即生效，不会删除文件中未包含的用户，也不包含历史用量。',
+      ]"
       :submit="importUsers"
       @imported="imported"
     />

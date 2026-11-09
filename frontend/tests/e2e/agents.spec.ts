@@ -117,11 +117,16 @@ for (const protocol of ['http', 'https']) {
     await dialog
       .getByRole('textbox', { name: '代理地址', exact: true })
       .fill(`${protocol}://127.0.0.1:8088`)
+    await dialog.getByRole('button', { name: '认证', exact: true }).click()
+    const auth = page.getByRole('dialog', { name: '代理认证', exact: true })
+    await auth.getByRole('textbox', { name: '代理用户名', exact: true }).fill('u:name')
+    await auth.getByRole('textbox', { name: '代理密码', exact: true }).fill('p@/#?%40')
+    await auth.getByRole('button', { name: '完成', exact: true }).click()
     await dialog.getByRole('button', { name: '保存', exact: true }).click()
     await expect(dialog).not.toBeVisible()
     expect(saved).toMatchObject({
       password: '',
-      proxy: { mode: 'custom', url: `${protocol}://127.0.0.1:8088` },
+      proxy: { mode: 'custom', url: `${protocol}://u%3Aname:p%40%2F%23%3F%2540@127.0.0.1:8088` },
     })
     await expect(page.getByText('连接后编辑配置')).toBeVisible()
   })
@@ -143,7 +148,7 @@ test('API Key 候选在移入和停留时稳定，可选已有凭据也可手填
   await page.clock.install()
   await page.clock.runFor(600)
   await expect(candidate).toBeVisible()
-  await expect(page.getByRole('listbox')).toHaveCSS('background-color', 'rgb(44, 44, 48)')
+  await expect(page.getByRole('listbox')).toHaveCSS('background-color', 'rgb(30, 39, 51)')
   await candidate.click()
   await expect(key).toHaveValue('fixture-key')
   await key.fill('manual-api-key')
@@ -226,6 +231,9 @@ test('已有 Claude 缺失项显示不设置，新建文件使用约定默认值
   await page.goto('/agents')
   const sandbox = page.getByRole('combobox', { name: '命令沙箱', exact: true })
   await expect(sandbox).toHaveText('不设置')
+  await expect(page.getByRole('combobox', { name: 'Attribution', exact: true })).toHaveText(
+    '不设置',
+  )
   await expect(page.getByRole('combobox', { name: 'Attribution Header', exact: true })).toHaveText(
     '不设置',
   )
@@ -233,6 +241,7 @@ test('已有 Claude 缺失项显示不设置，新建文件使用约定默认值
   await page.reload()
   for (const [name, value] of [
     ['命令沙箱', '不设置'],
+    ['Attribution', '不设置'],
     ['Attribution Header', '禁用'],
     ['非必要流量', '禁用'],
     ['实验性 Agent Teams', '启用'],
@@ -257,6 +266,39 @@ test('已有 Claude 缺失项显示不设置，新建文件使用约定默认值
       )
       .toBe(state)
   }
+})
+
+test('Attribution 保留文件自定义，支持禁用和清空，并解释署名与 Header 的区别', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  fixture.snapshot.files.claude.managed.attribution = { commit: 'Custom', pr: '' }
+  await page.goto('/agents')
+  const attribution = page.getByRole('combobox', { name: 'Attribution', exact: true })
+  await expect(attribution).toHaveText('文件自定义')
+  const preview = () =>
+    (fixture.calls.filter((c) => c.path.endsWith('/preview')).at(-1)?.body as PreviewInput)?.draft
+  await expect.poll(() => preview()?.runtime.attribution).toBe('custom')
+  await page.getByRole('button', { name: 'Attribution说明', exact: true }).hover()
+  const help = page.locator('.ui-help-content')
+  await expect(help).toContainText('Git 提交和 PR 描述')
+  await expect(help).toContainText('2.1.281')
+  await expect(help).toContainText('不代表关闭署名')
+  await expect(help).toContainText('Attribution Header')
+  await help.hover()
+  await expect(help).toBeVisible()
+  await page.keyboard.press('Escape')
+  await attribution.click()
+  await expect(page.getByRole('option', { name: '文件自定义', exact: true })).toBeDisabled()
+  await page.getByRole('option', { name: '禁用', exact: true }).click()
+  await expect(attribution).toHaveText('禁用')
+  await expect.poll(() => preview()?.runtime.attribution).toBe('disabled')
+  expect(preview()?.clearFields || []).not.toContain('runtime.attribution')
+  await attribution.click()
+  await page.getByRole('option', { name: '不设置', exact: true }).click()
+  await expect(attribution).toHaveText('不设置')
+  await expect.poll(() => preview()?.clearFields).toContain('runtime.attribution')
+  fixture.snapshot.files.claude.managed.attribution = false
+  await page.reload()
+  await expect(attribution).toHaveText('禁用')
 })
 
 test('参数候选包含多个参考模型和来源，问号悬停并可移入', async ({ page }) => {
@@ -286,7 +328,7 @@ test('参数候选包含多个参考模型和来源，问号悬停并可移入',
   const help = page.locator('.ui-help-content')
   await expect(help).toContainText('CLAUDE_CODE_AUTO_COMPACT_WINDOW')
   await help.hover()
-  await expect(help).toHaveCSS('background-color', 'rgb(44, 44, 48)')
+  await expect(help).toHaveCSS('background-color', 'rgb(30, 39, 51)')
   await page.keyboard.press('Escape')
   await expect(help).not.toBeVisible()
 })
@@ -382,7 +424,7 @@ test('文件高亮、备份、空白关闭保存及冲突后保留内容', async
   await page.mouse.click(12, 120)
   const prompt = page.getByRole('dialog', { name: '保存修改？' })
   await expect(prompt).toBeVisible()
-  await prompt.getByRole('button', { name: '保存', exact: true }).click()
+  await prompt.getByRole('button', { name: '保存并关闭', exact: true }).click()
   await expect(editor.getByRole('alert')).toContainText('文件已被其他程序修改')
   await expect(editor.locator('.ace_content')).toContainText('backup-model')
   expect(raw?.versions).toEqual({ claude: 'original-version' })

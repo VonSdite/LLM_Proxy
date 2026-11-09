@@ -337,14 +337,13 @@ class AuthGroupManager:
         is_cooling_down = cooldown_until is not None and cooldown_until > now
         is_disabled = (not entry.enabled) or bool(runtime_state.get("disabled"))
         is_request_quota_exceeded = self._is_request_quota_exceeded(entry, usage)
-        is_token_quota_exceeded = self._is_token_quota_exceeded(entry, usage)
         is_saturated = entry.max_concurrency is not None and inflight >= entry.max_concurrency
 
         if is_disabled:
             status = "disabled"
         elif is_cooling_down:
             status = "cooldown"
-        elif is_request_quota_exceeded or is_token_quota_exceeded:
+        elif is_request_quota_exceeded:
             status = "quota_exceeded"
         elif is_saturated:
             status = "saturated"
@@ -359,8 +358,6 @@ class AuthGroupManager:
             "cooldown_seconds_on_429": entry.cooldown_seconds_on_429,
             "request_quota_per_minute": entry.request_quota_per_minute,
             "request_quota_per_day": entry.request_quota_per_day,
-            "token_quota_per_minute": entry.token_quota_per_minute,
-            "token_quota_per_day": entry.token_quota_per_day,
             "inflight": inflight,
             "cooldown_until": cooldown_until_text,
             "disabled": is_disabled,
@@ -418,8 +415,6 @@ class AuthGroupManager:
             return False
         if self._is_request_quota_exceeded(entry, usage):
             return False
-        if self._is_token_quota_exceeded(entry, usage):
-            return False
         return True
 
     @staticmethod
@@ -429,16 +424,6 @@ class AuthGroupManager:
         if entry.request_quota_per_minute is not None and minute_requests >= entry.request_quota_per_minute:
             return True
         if entry.request_quota_per_day is not None and day_requests >= entry.request_quota_per_day:
-            return True
-        return False
-
-    @staticmethod
-    def _is_token_quota_exceeded(entry: AuthEntrySchema, usage: Mapping[str, Any]) -> bool:
-        minute_tokens = int(usage.get("minute_total_tokens") or 0)
-        day_tokens = int(usage.get("day_total_tokens") or 0)
-        if entry.token_quota_per_minute is not None and minute_tokens >= entry.token_quota_per_minute:
-            return True
-        if entry.token_quota_per_day is not None and day_tokens >= entry.token_quota_per_day:
             return True
         return False
 

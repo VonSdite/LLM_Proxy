@@ -120,11 +120,13 @@ describe('Agent 配置语义', () => {
   })
   it('已有文件的缺项保持不设置，新建 Claude 文件单独使用默认值', () => {
     const source = snapshot()
+    expect(draft('claude', source).runtime.attribution).toBe('unset')
     expect(draft('claude', source).runtime.attributionHeader).toBe('unset')
     expect(draft('claude', source).runtime.sandboxEnabled).toBe('unset')
     source.files.claude.exists = false
     expect(draft('claude', source).runtime).toMatchObject({
       sandboxEnabled: 'unset',
+      attribution: 'unset',
       attributionHeader: 'disabled',
       disableNonessentialTraffic: 'enabled',
       experimentalAgentTeams: 'enabled',
@@ -132,6 +134,33 @@ describe('Agent 配置语义', () => {
       sandbox: 'enabled',
       skipWebFetchPreflight: 'enabled',
     })
+  })
+
+  it('Attribution 区分禁用与文件自定义，清空只移除署名设置', () => {
+    const source = snapshot()
+    source.files.claude.managed = {
+      attribution: false,
+      'env.CLAUDE_CODE_ATTRIBUTION_HEADER': '1',
+    }
+    const value = draft('claude', source)
+    expect(value.runtime.attribution).toBe('disabled')
+    setRuntime(value, 'attribution', 'unset')
+    expect(value.clearFields).toEqual(['runtime.attribution'])
+    expect(value.runtime.attributionHeader).toBe('enabled')
+    setRuntime(value, 'attribution', 'disabled')
+    expect(value.clearFields).toBeUndefined()
+    for (const attribution of [
+      {},
+      { commit: 'Co-Authored-By: Example <example@example.com>' },
+      { commit: '', pr: '', sessionUrl: false },
+    ]) {
+      source.files.claude.managed.attribution = attribution
+      const custom = draft('claude', source)
+      expect(custom.runtime.attribution).toBe('custom')
+      setRuntime(custom, 'sandboxEnabled', 'enabled')
+      expect(custom.runtime.attribution).toBe('custom')
+      expect(custom.clearFields).toBeUndefined()
+    }
   })
 
   it('命令沙箱、记忆布尔值和流量字符串按实际文件解释', () => {

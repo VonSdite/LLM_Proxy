@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import yaml
 from flask import Flask
@@ -19,6 +19,7 @@ from src.config.provider_config import (
     AuthGroupSchema,
     ProviderConfigSchema,
 )
+from src.presentation.provider_controller import ProviderController
 from src.repositories import AuthGroupRepository
 from src.services.auth_group_service import AuthGroupService
 from src.utils.database import create_connection_factory
@@ -257,6 +258,34 @@ class AuthGroupManagerTests(unittest.TestCase):
         self.assertEqual(1, entry["minute_request_count"])
         self.assertEqual(20, entry["minute_total_tokens"])
 
+    def test_legacy_token_quotas_are_ignored_and_usage_remains_available(self) -> None:
+        raw = {
+            "name": "legacy",
+            "entries": [
+                {
+                    "id": "key",
+                    "headers": {"Authorization": "Bearer test"},
+                    "token_quota_per_minute": 1,
+                    "token_quota_per_day": 1,
+                }
+            ],
+        }
+        group = AuthGroupSchema.from_mapping(raw)
+        self.assertNotIn("token_quota_per_minute", group.to_mapping()["entries"][0])
+        self.assertNotIn("token_quota_per_day", group.to_mapping()["entries"][0])
+        self.manager.load_auth_groups((group,))
+        selection = self.manager.acquire("legacy")
+        self.manager.mark_request_dispatched(selection)
+        self.manager.finish(
+            selection, status_code=200, usage={"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20}
+        )
+        entry = self.manager.get_auth_group_runtime("legacy")["entries"][0]
+        self.assertEqual("available", entry["status"])
+        self.assertEqual(20, entry["minute_total_tokens"])
+        self.assertNotIn("token_quota_per_minute", entry)
+        self.assertNotIn("token_quota_per_day", entry)
+        self.assertIsNotNone(self.manager.acquire("legacy"))
+
     def test_repository_list_current_usage_batches_without_single_entry_fallback(self) -> None:
         self.repository.increment_request_usage("pool-a", "key-a", datetime(2026, 4, 18, 12, 0, 0))
         self.repository.increment_token_usage(
@@ -480,6 +509,142 @@ class AuthGroupServiceTests(unittest.TestCase):
     def _write_config(self, payload) -> None:
         with open(self.config_path, "w", encoding="utf-8") as handle:
             yaml.safe_dump(payload, handle, allow_unicode=True, sort_keys=False)
+
+    @staticmethod
+    def _transfer_group(name="pool-a", entry_id="key-a"):
+        return {
+            "name": name,
+            "strategy": "sticky_failover",
+            "cooldown_seconds_on_429": 30,
+            "entries": [{"id": entry_id, "headers": {"Authorization": "Bearer fixture"}, "max_concurrency": 3}],
+        }
+
+    def test_group_transfer_round_trip_and_filtered_order(self) -> None:
+        for name in ("pool-a", "pool-b", "pool-c"):
+            self.service.create_auth_group(self._transfer_group(name))
+        exported = self.service.export_auth_groups(["pool-c", "pool-a", "pool-c"])
+        self.assertEqual("llm_proxy.auth_groups", exported["kind"])
+        self.assertEqual(["pool-c", "pool-a"], [group["name"] for group in exported["auth_groups"]])
+        self.assertEqual({"version", "kind", "auth_groups"}, set(exported))
+        self.assertNotIn("summary", exported["auth_groups"][0])
+        self.service.delete_auth_group("pool-a")
+        self.service.delete_auth_group("pool-c")
+        self.reload_count = 0
+        result = self.service.import_auth_groups(exported)
+        self.assertEqual(2, result["count"])
+        self.assertEqual(1, self.reload_count)
+        self.assertEqual(exported, self.service.export_auth_groups(result["names"]))
+
+    def test_group_import_preserves_existing_settings_credentials_and_provider_bindings(self) -> None:
+        original = self.service.create_auth_group(self._transfer_group())
+        provider = {"name": "main", "api": "https://example.test/v1", "auth_group": "pool-a", "model_list": ["test"]}
+        config = self.config_manager.get_raw_config()
+        config["providers"] = [provider]
+        self.config_manager.write_raw_config(config)
+        self.reload_callback()
+        existing_providers = self.config_manager.get_raw_config()["providers"]
+        incoming = self._transfer_group()
+        incoming["strategy"] = "least_inflight"
+        incoming["entries"][0]["headers"]["Authorization"] = "Bearer replaced"
+        incoming["entries"].append(self._transfer_group(entry_id="key-b")["entries"][0])
+        self.service.import_auth_groups({"auth_groups": [incoming, incoming]})
+        actual = self.service.get_auth_group("pool-a")
+        self.assertEqual(original["strategy"], actual["strategy"])
+        self.assertEqual(original["entries"][0], actual["entries"][0])
+        self.assertEqual(["key-a", "key-b"], [entry["id"] for entry in actual["entries"]])
+        self.assertEqual(existing_providers, self.config_manager.get_raw_config()["providers"])
+
+    def test_invalid_group_import_leaves_config_and_runtime_unchanged(self) -> None:
+        self.service.create_auth_group(self._transfer_group())
+        before = self.config_path.read_bytes()
+        self.reload_count = 0
+        invalid_payloads = [
+            [],
+            {},
+            {"auth_groups": []},
+            {"auth_groups": "wrong"},
+            {"version": 2, "auth_groups": [self._transfer_group()]},
+            {"kind": "other", "auth_groups": [self._transfer_group()]},
+            {"auth_groups": [self._transfer_group("pool-b"), None]},
+            {"auth_groups": [self._transfer_group("pool-b"), {"name": "invalid", "entries": []}]},
+        ]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                self.service.import_auth_groups(payload)
+            self.assertEqual(before, self.config_path.read_bytes())
+            self.assertEqual(0, self.reload_count)
+        for names in (None, [], "pool-a", [""], [42], ["missing"]):
+            with self.subTest(names=names), self.assertRaises(ValueError):
+                self.service.export_auth_groups(names)
+
+    def test_group_transfer_routes_validate_and_require_authentication(self) -> None:
+        auth = Mock()
+        auth.is_auth_enabled.return_value = False
+        ProviderController(self.ctx, Mock(), Mock(), self.service, Mock(), Mock(), auth)
+        client = self.ctx.flask_app.test_client()
+        response = client.post("/api/auth-groups/import", json={"auth_groups": [self._transfer_group()]})
+        self.assertEqual(201, response.status_code)
+        self.assertEqual(1, response.get_json()["count"])
+        response = client.post("/api/auth-groups/export", json={"names": ["pool-a"]})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("pool-a", response.get_json()["auth_groups"][0]["name"])
+        for path in ("import", "export"):
+            self.assertEqual(400, client.post(f"/api/auth-groups/{path}", json={}).status_code)
+        auth.is_auth_enabled.return_value = True
+        auth.validate_session.return_value = False
+        for path in ("import", "export"):
+            self.assertEqual(401, client.post(f"/api/auth-groups/{path}", json={}).status_code)
+
+    def test_batch_delete_groups_writes_once_and_preserves_unselected(self) -> None:
+        for name in ("pool-a", "pool-b", "pool-c"):
+            self.service.create_auth_group(self._transfer_group(name))
+        self.reload_count = 0
+        result = self.service.batch_delete_auth_groups(["pool-c", " pool-a ", "pool-c"])
+        self.assertEqual({"count": 2, "names": ["pool-c", "pool-a"]}, result)
+        self.assertEqual(1, self.reload_count)
+        self.assertEqual(["pool-b"], [group["name"] for group in self.service.list_auth_groups()])
+
+    def test_batch_delete_groups_validates_entire_selection_before_writing(self) -> None:
+        for name in ("pool-a", "pool-b"):
+            self.service.create_auth_group(self._transfer_group(name))
+        config = self.config_manager.get_raw_config()
+        config["providers"] = [
+            {
+                "name": "main",
+                "api": "https://example.test/v1",
+                "auth_group": "pool-b",
+                "enabled": False,
+                "model_list": ["test"],
+            }
+        ]
+        self.config_manager.write_raw_config(config)
+        self.reload_callback()
+        before = self.config_path.read_bytes()
+        self.reload_count = 0
+        for names in (None, [], "pool-a", [""], [42], ["pool-a", "missing"], ["pool-a", "pool-b"]):
+            with self.subTest(names=names), self.assertRaises(ValueError):
+                self.service.batch_delete_auth_groups(names)
+            self.assertEqual(before, self.config_path.read_bytes())
+            self.assertEqual(0, self.reload_count)
+        self.assertEqual(["pool-a", "pool-b"], [group["name"] for group in self.service.list_auth_groups()])
+
+    def test_batch_delete_groups_route_validates_and_requires_authentication(self) -> None:
+        auth = Mock()
+        auth.is_auth_enabled.return_value = False
+        ProviderController(self.ctx, Mock(), Mock(), self.service, Mock(), Mock(), auth)
+        client = self.ctx.flask_app.test_client()
+        self.service.create_auth_group(self._transfer_group())
+        for payload in ({}, {"action": "enable", "names": ["pool-a"]}, {"action": "delete", "names": []}):
+            self.assertEqual(400, client.post("/api/auth-groups/batch", json=payload).status_code)
+        auth.is_auth_enabled.return_value = True
+        auth.validate_session.return_value = False
+        payload = {"action": "delete", "names": ["pool-a"]}
+        self.assertEqual(401, client.post("/api/auth-groups/batch", json=payload).status_code)
+        self.assertIsNotNone(self.service.get_auth_group("pool-a"))
+        auth.is_auth_enabled.return_value = False
+        response = client.post("/api/auth-groups/batch", json=payload)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual({"count": 1, "names": ["pool-a"]}, response.get_json())
 
     def test_create_auth_group_persists_and_lists_summary(self) -> None:
         created = self.service.create_auth_group(

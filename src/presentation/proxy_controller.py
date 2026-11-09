@@ -5,15 +5,17 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Protocol
 from uuid import uuid4
 
 from flask import Response, jsonify, request
 from flask.typing import ResponseReturnValue
+from werkzeug.wsgi import ClosingIterator
 
 from ..application.app_context import AppContext
 from ..hooks import HookAbortError
+from ..services.api_key_service import ApiKeyRequestError
 from ..services.claude_proxy_service import CLAUDE_PROVIDER_NAME
 from ..services.codex_proxy_service import CODEX_PROVIDER_NAME
 from ..services.proxy_service import ProxyErrorInfo
@@ -117,6 +119,8 @@ class ApiKeyServiceLike(Protocol):
     ) -> list[str]: ...
 
     def is_token_limit_exceeded(self, api_key: dict[str, Any] | None) -> bool: ...
+
+    def acquire_request(self, api_key: dict[str, Any]) -> Callable[[], None]: ...
 
 
 class LogServiceLike(Protocol):
@@ -480,6 +484,50 @@ class ProxyController:
                 fallback_kwargs.pop(field, None)
             return self._log_service.log_request(**fallback_kwargs)
 
+    def _acquire_api_key_request(
+        self, api_key: dict[str, Any] | None, *, error_format: str
+    ) -> tuple[Callable[[], None] | None, ResponseReturnValue | None]:
+        """在模型与权限校验后执行一次客户端请求的准入。"""
+        if api_key is None or not self._is_api_key_required():
+            return None, None
+        try:
+            return self._api_key_service.acquire_request(api_key), None
+        except ApiKeyRequestError as exc:
+            response, status = self._error_response(
+                str(exc),
+                exc.status_code,
+                error_type="authentication_error" if exc.status_code == 401 else "rate_limit_error",
+                code=exc.code,
+                error_format=error_format,
+            )
+            if status == 429:
+                response.headers["Retry-After"] = str(exc.retry_after)
+            return None, (response, status)
+
+    @staticmethod
+    def _hold_api_key_stream_slot(response: Response, release: Callable[[], None]) -> bool:
+        """流结束、异常或提前关闭均释放槽位，包括首块尚未消费时的关闭。"""
+        if not response.is_streamed:
+            return False
+        body = response.response
+
+        def stream():
+            try:
+                yield from body
+            finally:
+                release()
+
+        def close_body():
+            try:
+                close = getattr(body, "close", None)
+                if callable(close):
+                    close()
+            finally:
+                release()
+
+        response.response = ClosingIterator(stream(), close_body)
+        return True
+
     def _list_available_model_names(self, *, visible_provider_models_only: bool = False) -> tuple[str, ...]:
         provider_list_method = self._provider_manager.list_model_names
         if visible_provider_models_only:
@@ -558,6 +606,8 @@ class ProxyController:
         model_name: str | None = None
         provider_name = CODEX_PROVIDER_NAME
         target_format = "openai_images"
+        release_request = None
+        response_holds_slot = False
         try:
             self._logger.info("Proxy image request received: route=%s ip=%s", route_name, client_ip)
             user, denial_response = self._get_authorized_user_for_request(
@@ -656,6 +706,9 @@ class ProxyController:
                     target_format=target_format,
                 )
 
+            release_request, denial_response = self._acquire_api_key_request(api_key, error_format="openai_chat")
+            if denial_response is not None:
+                return denial_response
             trace_id = uuid4().hex
             if is_model_mapping:
                 provider_name = "model_mapping"
@@ -739,6 +792,8 @@ class ProxyController:
                     request_model=model_name,
                     target_format=target_format,
                 )
+            if release_request is not None:
+                response_holds_slot = self._hold_api_key_stream_slot(result, release_request)
             return result
         except ValueError as exc:
             return self._error_response(
@@ -770,6 +825,10 @@ class ProxyController:
                 target_format=target_format,
             )
 
+        finally:
+            if release_request is not None and not response_holds_slot:
+                release_request()
+
     def _proxy_completion_request(
         self,
         *,
@@ -786,6 +845,8 @@ class ProxyController:
         trace_id: str | None = None
         model_name: str | None = None
         provider_name: str | None = None
+        release_request = None
+        response_holds_slot = False
         try:
             self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
             user, denial_response = self._get_authorized_user_for_request(
@@ -927,6 +988,11 @@ class ProxyController:
                     stream_options.get("include_usage") is True
                 )
 
+            release_request, denial_response = self._acquire_api_key_request(
+                api_key, error_format=resolved_error_format
+            )
+            if denial_response is not None:
+                return denial_response
             trace_id = uuid4().hex
             self._log_downstream_request_trace_safe(
                 trace_id=trace_id,
@@ -1055,6 +1121,8 @@ class ProxyController:
                     target_format=resolved_target_format,
                 )
 
+            if release_request is not None:
+                response_holds_slot = self._hold_api_key_stream_slot(result, release_request)
             return result
         except HookAbortError as exc:
             self._logger.warning(
@@ -1093,6 +1161,10 @@ class ProxyController:
                 request_model=model_name,
                 target_format=resolved_target_format,
             )
+
+        finally:
+            if release_request is not None and not response_holds_slot:
+                release_request()
 
     def _resolve_model_route(self, model_name: str) -> tuple[Any | None, bool, bool, bool]:
         """按模型映射、Provider、OAuth 的优先级解析请求路由。"""

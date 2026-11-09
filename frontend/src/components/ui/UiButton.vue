@@ -2,8 +2,9 @@
 import UiIcon, { type IconName } from './UiIcon.vue'
 withDefaults(
   defineProps<{
-    variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
-    size?: 'sm' | 'md'
+    variant?:
+      'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-outline' | 'danger-solid' | 'link'
+    size?: 'xs' | 'sm' | 'md'
     icon?: IconName
     loading?: boolean
     disabled?: boolean
@@ -36,8 +37,8 @@ withDefaults(
   border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 550;
+  font-size: var(--text-base);
+  font-weight: 500;
   white-space: nowrap;
   transition:
     background var(--motion),
@@ -50,6 +51,12 @@ withDefaults(
 
 .ui-button--sm {
   min-height: var(--control-sm);
+  font-size: var(--text-sm);
+}
+
+.ui-button--xs {
+  min-height: var(--control-xs);
+  font-size: var(--text-sm);
 }
 
 .ui-button--primary {
@@ -67,6 +74,25 @@ withDefaults(
   background: transparent;
 }
 
+.ui-button--link {
+  justify-content: flex-start;
+  min-height: var(--control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--space-1);
+  background: transparent;
+  color: var(--link);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-underline-offset: 4px;
+}
+
+.ui-button--link:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
 .ui-button--danger {
   background: var(--danger-surface);
   border-color: transparent;
@@ -75,6 +101,25 @@ withDefaults(
 
 .ui-button--danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger-surface) 85%, var(--danger));
+}
+
+.ui-button--danger-outline {
+  color: var(--danger);
+}
+
+.ui-button--danger-outline:hover:not(:disabled) {
+  background: var(--danger-surface);
+  border-color: var(--danger);
+}
+
+.ui-button--danger-solid {
+  background: var(--danger-action);
+  border-color: transparent;
+  color: var(--on-danger);
+}
+
+.ui-button--danger-solid:hover:not(:disabled) {
+  background: var(--danger-action-hover);
 }
 
 .ui-button:disabled {

@@ -16,6 +16,7 @@ test('Provider 创建校验字段并提交当前模型列表', async ({ page }) 
     .getByRole('textbox', { name: 'API 地址', exact: true })
     .fill('https://new.example/v1/chat/completions')
   await dialog.getByRole('button', { name: '添加', exact: true }).click()
+  await expect(dialog.getByRole('textbox', { name: '模型 1' })).toBeFocused()
   await dialog.getByRole('textbox', { name: '模型 1' }).fill('org/new-model')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).not.toBeVisible()
@@ -26,6 +27,40 @@ test('Provider 创建校验字段并提交当前模型列表', async ({ page }) 
     api: 'https://new.example/v1/chat/completions',
     model_list: ['org/new-model'],
   })
+  expect(fixture.unexpected).toEqual([])
+})
+
+test('模型表格末行添加，眼睛图标逐项及整列切换并保存', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: '编辑 Provider main', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑 Provider', exact: true })
+  const table = dialog.getByRole('table')
+  await page.setViewportSize({ width: 390, height: 844 })
+  const add = table
+    .locator('tbody > tr:last-child')
+    .getByRole('button', { name: '添加', exact: true })
+  await add.scrollIntoViewIfNeeded()
+  const bounds = await add.boundingBox()
+  expect(bounds!.x).toBeGreaterThanOrEqual(0)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390)
+  await add.click()
+  const model = dialog.getByRole('textbox', { name: /^模型 / }).last()
+  await expect(model).toBeFocused()
+  await model.fill('new-model')
+  await table.getByRole('button', { name: '隐藏 new-model', exact: true }).click()
+  await expect(table.getByRole('button', { name: '显示 new-model', exact: true })).toBeVisible()
+  await table.locator('thead').getByRole('button', { name: '全部显示', exact: true }).click()
+  await expect(table.getByRole('button', { name: '隐藏 new-model', exact: true })).toBeVisible()
+  await table.locator('thead').getByRole('button', { name: '全部隐藏', exact: true }).click()
+  await expect(table.locator('tbody button[aria-pressed="true"]')).toHaveCount(0)
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).not.toBeVisible()
+  const saved = fixture.calls.find(
+    (call) => call.path === '/api/providers/main' && call.method === 'PUT',
+  )?.body as { model_list: string[]; hidden_model_list: string[] }
+  expect(saved.model_list).toContain('new-model')
+  expect(saved.hidden_model_list).toEqual(saved.model_list)
   expect(fixture.unexpected).toEqual([])
 })
 
@@ -41,6 +76,9 @@ test('Auth Group 嵌套条目保存原始凭据', async ({ page }) => {
   await page.getByRole('tab', { name: /Auth Groups/ }).click()
   await page.getByRole('button', { name: '新增 Auth Group' }).click()
   const dialog = page.getByRole('dialog', { name: '新增 Auth Group' })
+  await expect(dialog.getByRole('textbox', { name: /Token.*分钟|Token.*天/ })).toHaveCount(0)
+  await expect(dialog.getByRole('textbox', { name: '请求 / 分钟', exact: true })).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: '请求 / 天', exact: true })).toBeVisible()
   await dialog.getByRole('textbox', { name: '名称', exact: true }).fill('test-pool')
   await dialog.getByRole('textbox', { name: 'Entry ID', exact: true }).fill('entry-main')
   await dialog.getByRole('textbox', { name: 'Header 名称', exact: true }).fill('Authorization')
@@ -96,6 +134,9 @@ test('API Key 指定模型与数值配额按原值保存', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: '创建 API Key' })
   await dialog.getByRole('textbox', { name: '名称', exact: true }).fill('limited-key')
   await dialog.getByRole('textbox', { name: /Token 配额/ }).fill('100')
+  await dialog.getByRole('textbox', { name: '最大并发数', exact: true }).fill('2')
+  await dialog.getByRole('textbox', { name: '请求 / 分钟', exact: true }).fill('30')
+  await dialog.getByRole('textbox', { name: '请求 / 天', exact: true }).fill('500')
   await dialog.getByRole('tab', { name: '指定模型' }).click()
   await dialog.getByRole('checkbox', { name: 'main/claude-sonnet-4-6', exact: true }).click()
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
@@ -103,6 +144,9 @@ test('API Key 指定模型与数值配额按原值保存', async ({ page }) => {
   expect(saved).toMatchObject({
     name: 'limited-key',
     token_limit_k: 100,
+    max_concurrency: 2,
+    request_quota_per_minute: 30,
+    request_quota_per_day: 500,
     model_permissions: ['main/claude-sonnet-4-6'],
   })
 })
@@ -138,9 +182,12 @@ test('设置开关保存后立即更新导航，数值端口不提交非法草�
   await page.goto('/settings')
   const basic = page.locator('#basic')
   await basic.getByLabel('端口', { exact: true }).fill('70000')
-  await basic.getByRole('button', { name: '保存', exact: true }).click()
+  await basic.getByLabel('端口', { exact: true }).press('Tab')
+  await expect(basic.getByLabel('端口', { exact: true })).toHaveAttribute('aria-invalid', 'true')
+  await expect(basic.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
   expect(fixture.calls.some((call) => call.path.endsWith('/basic'))).toBe(false)
   await basic.getByLabel('端口', { exact: true }).fill('8081')
+  await basic.getByLabel('端口', { exact: true }).press('Tab')
   await basic.getByRole('button', { name: '保存', exact: true }).click()
   await expect
     .poll(() => fixture.calls.find((call) => call.path.endsWith('/basic'))?.body)
@@ -175,7 +222,7 @@ test('OAuth 生成授权链接且认证失败保持当前登录弹窗', async ({
   await page.getByRole('button', { name: '添加账号', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '添加 Codex 账号' })
   await dialog.getByRole('button', { name: '生成授权链接' }).click()
-  await expect(dialog.getByRole('link', { name: '打开登录页' })).toHaveAttribute(
+  await expect(dialog.getByRole('link', { name: '打开链接' })).toHaveAttribute(
     'href',
     'https://auth.example/authorize?state=fixture',
   )

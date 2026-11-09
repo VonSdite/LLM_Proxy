@@ -5,6 +5,10 @@ import {
   UiButton,
   UiIconButton,
   UiInput,
+  UiPageHeader,
+  UiListToolbar,
+  UiSearchInput,
+  UiSelectionBar,
   UiNumberInput,
   UiSecretInput,
   UiField,
@@ -17,15 +21,18 @@ import {
   UiTabs,
   UiSegmented,
   UiHelpPopover,
+  UiPopover,
   UiTooltip,
   UiDialog,
   UiConfirmPopover,
+  UiDropdownMenu,
   UiAlert,
   UiEmptyState,
   UiBadge,
   UiStatus,
   UiTable,
   UiSortableList,
+  UiSelectableRow,
   UiPagination,
   UiCodeEditor,
   notify,
@@ -36,12 +43,14 @@ const checked = ref(true)
 const tri = ref<boolean | null>(null)
 const tab = ref('claude')
 const open = ref(false)
+const popoverOpen = ref(false)
 function saveExample() {
   open.value = false
   notify('已保存')
 }
 const page = ref(1)
 const selected = ref<string[]>([])
+const selectedRow = ref('primary')
 const ordered = ref([
   { id: 'primary', name: '主目标' },
   { id: 'fallback', name: '备用目标' },
@@ -67,17 +76,30 @@ const rows = [
 </script>
 <template>
   <div class="page">
-    <header class="page-heading">
-      <h1>组件展示</h1>
-      <UiButton @click="notify('配置已保存')">显示通知</UiButton>
-    </header>
+    <UiPageHeader title="组件展示" />
+    <UiListToolbar>
+      <template #actions>
+        <UiButton variant="primary" @click="notify('配置已保存')">显示通知</UiButton>
+        <UiSegmented v-model="tab" :items="options" label="组件示例筛选" />
+        <UiButton icon="import" @click="notify('示例导入')">导入</UiButton>
+        <UiTooltip text="导出当前状态和搜索条件匹配的记录">
+          <UiButton icon="export" @click="notify('示例导出')">导出</UiButton>
+        </UiTooltip>
+      </template>
+      <template #search>
+        <UiSearchInput v-model="text" aria-label="搜索组件示例" placeholder="搜索组件" />
+      </template>
+      <UiIconButton icon="refresh" label="刷新组件示例" @click="notify('已刷新')" />
+    </UiListToolbar>
     <section class="specimen surface stack">
       <h2>操作</h2>
       <div class="actions">
         <UiButton variant="primary" icon="plus">新增</UiButton>
         <UiButton icon="refresh">刷新</UiButton>
         <UiButton variant="ghost">取消</UiButton>
+        <UiButton variant="link">查看详情</UiButton>
         <UiButton variant="danger">删除</UiButton>
+        <UiButton variant="danger-solid">确认删除</UiButton>
         <UiButton loading>保存中</UiButton>
         <UiButton disabled>禁用</UiButton>
         <UiTooltip text="编辑配置"><UiIconButton icon="edit" label="编辑" /></UiTooltip>
@@ -115,6 +137,9 @@ const rows = [
         </UiField>
         <UiField label="三态设置"><UiTriState v-model="tri" /></UiField>
         <UiField label="禁用"><UiInput model-value="不可编辑" disabled /></UiField>
+        <UiField inline label="行内开关" help="标签与开关在同一行，点击标签或开关切换。">
+          <UiSwitch v-model="checked" label="行内开关" />
+        </UiField>
       </div>
       <div class="actions">
         <UiCheckbox v-model="checked">选择项目</UiCheckbox>
@@ -123,19 +148,42 @@ const rows = [
           悬停或聚焦查看说明。
           <a href="#states">状态示例</a>
         </UiHelpPopover>
+        <UiHelpPopover
+          label="多项说明示例"
+          :text="[
+            '多条规则使用无序列表，每项说明一个重点。',
+            '段落、路径与代码等复杂内容使用内容插槽。',
+          ]"
+        />
       </div>
     </section>
     <section id="states" class="specimen surface stack">
       <h2>状态与浮层</h2>
       <div class="actions">
         <UiBadge>默认</UiBadge>
+        <UiBadge size="md">claude-sonnet-4-6</UiBadge>
         <UiStatus :value="true" />
         <UiBadge variant="warning">待确认</UiBadge>
         <UiBadge variant="danger">连接失败</UiBadge>
         <UiButton @click="open = true">打开弹窗</UiButton>
+        <UiPopover v-model:open="popoverOpen" title="编辑内容">
+          <template #trigger><UiButton>编辑浮窗</UiButton></template>
+          <UiField label="内容"><UiInput v-model="text" /></UiField>
+          <template #footer="{ close }"><UiButton @click="close()">完成</UiButton></template>
+        </UiPopover>
         <UiConfirmPopover message="删除这条配置？">
           <UiButton variant="danger">删除配置</UiButton>
         </UiConfirmPopover>
+        <UiDropdownMenu
+          label="操作菜单"
+          :items="[
+            { value: 'copy', label: '复制', icon: 'copy' },
+            { value: 'delete', label: '删除', icon: 'delete', danger: true },
+          ]"
+          @select="notify($event === 'copy' ? '已复制' : '已删除')"
+        >
+          <UiButton icon="more">更多操作</UiButton>
+        </UiDropdownMenu>
       </div>
       <UiAlert variant="info">配置草稿已更新</UiAlert>
       <UiAlert>连接失败，请检查地址和凭据</UiAlert>
@@ -143,6 +191,10 @@ const rows = [
       <UiSegmented v-model="tab" :items="options" />
       <UiEmptyState title="尚未添加机器" description="添加一台 SSH 机器即可编辑远程配置。" />
     </section>
+    <UiSelectionBar v-if="selected.length" :count="selected.length" @clear="selected = []">
+      <UiButton @click="notify('示例导出')">导出所选</UiButton>
+      <UiButton variant="danger-outline" @click="notify('示例删除')">删除</UiButton>
+    </UiSelectionBar>
     <UiTable
       v-model:selected="selected"
       :rows="rows"
@@ -157,6 +209,16 @@ const rows = [
       <template #cell-status="{ row }"><UiStatus :value="row.status" /></template>
     </UiTable>
     <UiPagination v-model:page="page" :page-size="20" :total="76" />
+    <section class="specimen surface stack">
+      <h2>条目选择</h2>
+      <UiSelectableRow :selected="selectedRow === 'primary'" @select="selectedRow = 'primary'">
+        主凭据
+        <template #actions><UiSwitch v-model="checked" label="启用主凭据" /></template>
+      </UiSelectableRow>
+      <UiSelectableRow :selected="selectedRow === 'fallback'" @select="selectedRow = 'fallback'">
+        备用凭据
+      </UiSelectableRow>
+    </section>
     <section class="specimen surface stack">
       <h2>排序列表</h2>
       <UiSortableList

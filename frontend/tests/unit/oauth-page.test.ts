@@ -40,7 +40,9 @@ describe('OAuth 页面状态', () => {
     const tabs = wrapper.findAll('[role="tab"]')
     const available = tabs.find((tab) => tab.text().startsWith('可用'))!
     const node = available.element
-    await available.trigger('keydown', { key: 'Enter' })
+    expect(tabs[0]!.text()).toBe('可用 1')
+    expect(tabs.at(-1)!.text()).toBe('全部 2')
+    expect(available.attributes('aria-selected')).toBe('true')
     expect(wrapper.findAllComponents(OAuthFileCard)).toHaveLength(1)
     await wrapper.find('[role="checkbox"]').trigger('click')
     expect(wrapper.findComponent(OAuthFileCard).props('selected')).toBe(true)

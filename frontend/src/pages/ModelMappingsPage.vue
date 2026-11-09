@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { mappingsApi, type ModelMapping } from '@/api/model-mappings'
 import { useRequest } from '@/features/shared/useRequest'
 import { useAction } from '@/features/shared/useAction'
+import { useToggle } from '@/features/shared/useToggle'
 import { moveItem, type RowMove } from '@/features/shared/order'
 import { copyText, dateTime } from '@/features/shared/format'
 import MappingDialog from '@/features/model-mappings/MappingDialog.vue'
@@ -14,15 +15,21 @@ import {
   UiConfirmPopover,
   UiHelpPopover,
   UiIconButton,
-  UiInput,
+  UiListToolbar,
+  UiPageHeader,
+  UiSearchInput,
   UiSegmented,
+  UiSelectionBar,
   UiSwitch,
   UiTable,
+  UiTooltip,
   notify,
   type TableColumn,
 } from '@/components/ui'
 const request = useRequest(mappingsApi.list)
 const action = useAction(request.refresh)
+const exporting = useAction()
+const toggles = useToggle()
 const clipboard = useAction()
 onMounted(request.refresh)
 const keyword = ref('')
@@ -44,15 +51,20 @@ const visible = computed(() =>
 watch([keyword, filter], () => {
   selected.value = []
 })
-watch(mappings, (rows) => {
+watch(visible, (rows) => {
   selected.value = selected.value.filter((id) => rows.some((row) => row.id === id))
 })
 const columns: TableColumn[] = [
   { key: 'id', label: '对外模型', width: 240 },
   { key: 'strategy', label: '策略', width: 155 },
-  { key: 'targets', label: '目标模型', width: 440 },
-  { key: 'enabled', label: '启用', width: 90 },
-  { key: 'actions', label: '操作', width: 120 },
+  {
+    key: 'targets',
+    label: '目标模型',
+    width: 440,
+    help: '当前标记是最近选中的目标，数字是优先级，越大越优先。单个目标被禁用或冷却时通常跳过；无正常候选时仍会尝试存在于运行时目录中的目标兜底。停止整个映射请关闭映射的启用开关。',
+  },
+  { fixed: true, key: 'enabled', label: '启用', width: 90 },
+  { fixed: true, key: 'actions', label: '操作', width: 168, minWidth: 168 },
 ]
 const states = {
   available: '可用',
@@ -62,6 +74,7 @@ const states = {
   unavailable: '不可用',
 }
 function edit(mapping?: ModelMapping) {
+  if (toggles.busy.value || action.busy.value) return
   editing.value = mapping
   formOpen.value = true
 }
@@ -70,6 +83,7 @@ async function saved() {
   await request.refresh()
 }
 async function reorder(move: RowMove) {
+  if (toggles.busy.value || action.busy.value || request.loading.value || keyword.value) return
   const source = mappings.value.find((item) => item.id === move.id)
   const target = mappings.value.find((item) => item.id === move.targetId)
   if (!source || !target || source.enabled !== target.enabled) return
@@ -81,6 +95,7 @@ async function reorder(move: RowMove) {
   )
 }
 async function removeSelected() {
+  if (toggles.busy.value) return
   const ids = [...selected.value]
   if (
     await action.run(
@@ -98,58 +113,111 @@ function imported(message: string) {
   notify(message)
   void request.refresh()
 }
+function exportMappings(ids: string[]) {
+  if (!ids.length || request.loading.value || action.busy.value || toggles.busy.value) return
+  const snapshot = [...ids]
+  void exporting.run((signal) => mappingsApi.export(snapshot, signal))
+}
+const targetKey = (id: string, model: string) => JSON.stringify([id, model])
+function updateMapping(updated: ModelMapping) {
+  request.patch((data) => ({
+    ...data,
+    model_mappings: data.model_mappings.map((row) => (row.id === updated.id ? updated : row)),
+  }))
+}
+function setEnabled(id: string, value: boolean) {
+  return toggles.run(id, value, (signal) => mappingsApi.enabled(id, value, signal), updateMapping)
+}
+function setTarget(id: string, model: string, value: boolean) {
+  return toggles.run(
+    targetKey(id, model),
+    value,
+    (signal) => mappingsApi.toggleTarget(id, model, value, signal),
+    updateMapping,
+    id,
+  )
+}
 </script>
 <template>
   <div class="page">
-    <header class="page-heading">
-      <h1>模型映射</h1>
-      <UiButton variant="primary" icon="plus" @click="edit()">创建映射</UiButton>
-    </header>
-    <div class="toolbar">
-      <UiSegmented
-        v-model="filter"
-        label="映射状态"
-        :items="[
-          { value: 'enabled', label: '已启用' },
-          { value: 'disabled', label: '已禁用' },
-          { value: 'all', label: '全部' },
-        ]"
-      />
-      <div class="list-search">
-        <UiInput v-model="keyword" placeholder="搜索模型 ID" aria-label="搜索模型映射" />
-      </div>
-    </div>
-    <div class="toolbar">
-      <span class="muted">
-        {{ visible.length }} 个映射
-        <span v-if="selected.length">· 已选 {{ selected.length }}</span>
-      </span>
-      <div class="actions">
-        <UiConfirmPopover
-          v-if="selected.length"
-          :message="`删除所选 ${selected.length} 个映射？`"
-          @confirm="removeSelected"
-        >
-          <UiButton variant="danger" :disabled="action.busy.value">删除所选</UiButton>
-        </UiConfirmPopover>
-        <UiButton icon="upload" @click="importing = true">导入</UiButton>
+    <UiPageHeader title="模型映射" :count="visible.length" />
+    <UiListToolbar>
+      <template #actions>
         <UiButton
-          icon="download"
-          :disabled="action.busy.value"
-          @click="action.run((signal) => mappingsApi.export(selected, signal))"
+          variant="primary"
+          icon="plus"
+          :disabled="action.busy.value || toggles.busy.value"
+          @click="edit()"
         >
-          {{ selected.length ? '导出所选' : '导出' }}
+          创建映射
         </UiButton>
-        <UiIconButton
-          icon="refresh"
-          label="刷新模型映射"
-          :loading="request.loading.value"
-          @click="request.refresh"
+        <UiSegmented
+          v-model="filter"
+          label="映射状态"
+          :items="[
+            { value: 'enabled', label: '已启用' },
+            { value: 'disabled', label: '已禁用' },
+            { value: 'all', label: '全部' },
+          ]"
         />
-      </div>
-    </div>
-    <UiAlert v-if="request.error.value || action.error.value || clipboard.error.value">
-      {{ action.error.value || clipboard.error.value || request.error.value }}
+        <UiButton
+          icon="import"
+          :disabled="action.busy.value || toggles.busy.value"
+          @click="importing = true"
+        >
+          导入
+        </UiButton>
+        <UiTooltip :text="`导出当前状态和搜索条件下的 ${visible.length} 个模型映射`">
+          <UiButton
+            icon="export"
+            :loading="exporting.busy.value"
+            :disabled="
+              !visible.length || request.loading.value || action.busy.value || toggles.busy.value
+            "
+            @click="exportMappings(visible.map((item) => item.id))"
+          >
+            导出
+          </UiButton>
+        </UiTooltip>
+      </template>
+      <template #search>
+        <UiSearchInput v-model="keyword" placeholder="搜索模型 ID" aria-label="搜索模型映射" />
+      </template>
+      <UiIconButton
+        icon="refresh"
+        label="刷新模型映射"
+        :loading="request.loading.value"
+        @click="request.refresh"
+      />
+    </UiListToolbar>
+    <UiSelectionBar
+      v-if="selected.length"
+      :count="selected.length"
+      :disabled="action.busy.value || toggles.busy.value"
+      @clear="selected = []"
+    >
+      <UiButton
+        :disabled="
+          action.busy.value || toggles.busy.value || exporting.busy.value || request.loading.value
+        "
+        @click="exportMappings(selected)"
+      >
+        导出所选
+      </UiButton>
+      <UiConfirmPopover :message="`删除所选 ${selected.length} 个映射？`" @confirm="removeSelected">
+        <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
+          删除
+        </UiButton>
+      </UiConfirmPopover>
+    </UiSelectionBar>
+    <UiAlert
+      v-if="
+        request.error.value || action.error.value || clipboard.error.value || exporting.error.value
+      "
+    >
+      {{
+        exporting.error.value || action.error.value || clipboard.error.value || request.error.value
+      }}
     </UiAlert>
     <UiAlert v-if="request.data.value && !request.data.value.enabled" variant="warning">
       模型映射功能已关闭，可在系统设置中启用。
@@ -160,7 +228,11 @@ function imported(message: string) {
       :columns="columns"
       :row-key="(row) => row.id"
       selectable
-      :reorderable="!keyword && !action.busy.value"
+      reorderable
+      :reorder-group="(row) => String(row.enabled)"
+      :reorder-disabled="
+        !!keyword || action.busy.value || toggles.busy.value || request.loading.value
+      "
       :loading="request.loading.value"
       storage-key="model-mappings"
       empty="没有匹配的模型映射"
@@ -168,7 +240,15 @@ function imported(message: string) {
     >
       <template #cell-id="{ row }">
         <div class="actions">
-          <code>{{ row.id }}</code>
+          <UiButton
+            variant="link"
+            :aria-label="`编辑模型映射 ${row.id}`"
+            aria-haspopup="dialog"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="edit(row)"
+          >
+            <code>{{ row.id }}</code>
+          </UiButton>
           <UiIconButton
             icon="copy"
             label="复制模型 ID"
@@ -190,14 +270,20 @@ function imported(message: string) {
         <div class="mapping-target-list">
           <div v-for="target in row.targets" :key="target.model_id" class="mapping-target-summary">
             <UiSwitch
-              :model-value="target.enabled && target.status === 'available'"
-              :label="`${target.model_id} 启用状态`"
-              :disabled="target.available_model === false || action.busy.value"
-              @update:model-value="
-                action.run((signal) =>
-                  mappingsApi.toggleTarget(row.id, target.model_id, $event, signal),
+              :model-value="
+                toggles.value(
+                  targetKey(row.id, target.model_id),
+                  target.enabled && target.status === 'available',
                 )
               "
+              :loading="toggles.pending(targetKey(row.id, target.model_id))"
+              :label="`${target.model_id} 启用状态`"
+              :disabled="
+                target.available_model === false ||
+                action.busy.value ||
+                (toggles.blocked(row.id) && !toggles.pending(targetKey(row.id, target.model_id)))
+              "
+              @update:model-value="setTarget(row.id, target.model_id, $event)"
             />
             <code>{{ target.model_id }}</code>
             <UiBadge v-if="target.current" variant="success">当前</UiBadge>
@@ -216,26 +302,36 @@ function imported(message: string) {
       </template>
       <template #cell-enabled="{ row }">
         <UiSwitch
-          :model-value="row.enabled"
+          :model-value="toggles.value(row.id, row.enabled)"
+          :loading="toggles.pending(row.id)"
           :label="`启用映射 ${row.id}`"
-          :disabled="action.busy.value"
-          @update:model-value="action.run((signal) => mappingsApi.enabled(row.id, $event, signal))"
+          :disabled="action.busy.value || (toggles.blocked(row.id) && !toggles.pending(row.id))"
+          @update:model-value="setEnabled(row.id, $event)"
         />
       </template>
       <template #cell-actions="{ row }">
-        <div class="actions">
-          <UiIconButton icon="edit" :label="`编辑 ${row.id}`" @click="edit(row)" />
+        <div class="table-actions">
+          <UiIconButton
+            icon="edit"
+            :label="`编辑 ${row.id}`"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="edit(row)"
+          />
           <UiIconButton
             icon="copy"
             label="复制映射"
-            :disabled="action.busy.value"
+            :disabled="action.busy.value || toggles.busy.value"
             @click="action.run((signal) => mappingsApi.copy(row.id, signal), '已复制映射')"
           />
           <UiConfirmPopover
             :message="`删除映射 ${row.id}？`"
             @confirm="action.run((signal) => mappingsApi.remove(row.id, signal), '已删除映射')"
           >
-            <UiIconButton icon="delete" :label="`删除 ${row.id}`" :disabled="action.busy.value" />
+            <UiIconButton
+              icon="delete"
+              :label="`删除 ${row.id}`"
+              :disabled="action.busy.value || toggles.busy.value"
+            />
           </UiConfirmPopover>
         </div>
       </template>
@@ -251,6 +347,7 @@ function imported(message: string) {
       v-if="importing"
       v-model:open="importing"
       title="导入模型映射"
+      help="选择本系统导出的 JSON 文件，或粘贴相同结构的内容。映射 ID 与现有映射冲突时自动添加后缀，保留原映射；导入不会自动创建缺失的 Provider 或目标模型，请在列表中检查目标是否可用。"
       :submit="importMappings"
       @imported="imported"
     />

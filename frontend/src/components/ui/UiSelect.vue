@@ -22,6 +22,7 @@ const props = withDefaults(
     options: SelectOption[]
     placeholder?: string
     disabled?: boolean
+    compact?: boolean
     invalid?: boolean
   }>(),
   { placeholder: '请选择' },
@@ -47,6 +48,7 @@ function update(next: unknown) {
     <SelectTrigger
       :id="field?.id"
       class="ui-select"
+      :class="{ 'ui-select--compact': compact }"
       :aria-invalid="invalid || !!field?.error.value || undefined"
       :aria-required="field?.required?.value || undefined"
       :aria-describedby="field?.describedBy.value"
@@ -102,7 +104,12 @@ function update(next: unknown) {
   background: var(--input);
   padding: 0 var(--space-3);
   text-align: left;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
+}
+
+.ui-select--compact {
+  gap: var(--space-1);
+  padding-inline: var(--space-2);
 }
 
 .ui-select:focus-visible {
@@ -142,7 +149,7 @@ function update(next: unknown) {
   padding: var(--space-2);
   border-radius: var(--space-1);
   outline: none;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   cursor: pointer;
 }
 

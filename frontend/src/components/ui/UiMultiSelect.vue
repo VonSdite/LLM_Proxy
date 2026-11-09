@@ -147,7 +147,7 @@ function toggleVisible(checked: boolean) {
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--input);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   text-align: left;
 }
 

@@ -78,6 +78,31 @@ afterEach(() => {
   vi.useRealTimers()
 })
 describe('OAuth 额度刷新规则与生命周期', () => {
+  it('单个开关独立等待，期间暂停自动同步并保留其他账号操作能力', async () => {
+    await setup([file('a'), file('b')])
+    let release!: (value: { auth_file?: OAuthFile }) => void
+    vi.mocked(oauthApi.enabled).mockImplementation((name) =>
+      name === 'a'
+        ? new Promise((resolve) => {
+            release = resolve
+          })
+        : Promise.resolve({ auth_file: file('b', { enabled: false, disabled: true }) }),
+    )
+    const pending = state.setEnabled('a', false)
+    expect(state.toggles.pending('a')).toBe(true)
+    expect(state.toggles.value('a', true)).toBe(false)
+    expect(state.toggleDisabled.value).toBe(false)
+    await state.setEnabled('b', false)
+    expect(state.files.value[1]?.enabled).toBe(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(oauthApi.files).toHaveBeenCalledTimes(1)
+    release({ auth_file: file('a', { enabled: false, disabled: true }) })
+    await pending
+    expect(state.files.value[0]?.enabled).toBe(false)
+    expect(state.blocked.value).toBe(false)
+    expect(oauthApi.files).toHaveBeenCalledTimes(1)
+  })
+
   it('首次只读本地快照；每分钟仅刷新到期且尚未在重置后刷新的账号', async () => {
     const due = file('due.json', {
       quota: {

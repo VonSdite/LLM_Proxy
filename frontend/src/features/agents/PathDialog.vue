@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { AgentId, FileSnapshot } from '@/api/agents'
 import { errorMessage } from '@/api/client'
+import { useDraftChanges } from '@/features/shared/useDraftChanges'
 import { UiButton, UiDialog, UiField, UiInput } from '@/components/ui'
 const props = defineProps<{
   open: boolean
@@ -36,9 +37,17 @@ async function submit(value = path.value) {
     busy.value = false
   }
 }
+const dirty = useDraftChanges(() => path.value)
 </script>
 <template>
-  <UiDialog :open="open" :title="label" :busy="busy" @update:open="emit('update:open', $event)">
+  <UiDialog
+    :save="() => submit()"
+    :open="open"
+    :title="label"
+    :busy="busy"
+    :dirty="dirty"
+    @update:open="emit('update:open', $event)"
+  >
     <form @submit.prevent="submit()">
       <UiField
         :label="agent === 'codex' ? '目录路径' : '文件路径'"
@@ -46,8 +55,8 @@ async function submit(value = path.value) {
         :hint="`默认：${defaultPath}`"
         :help="
           agent === 'codex'
-            ? '该目录同时关联 config.toml 和 auth.json。按机器保存，下次打开继续使用。'
-            : '支持绝对路径和用户目录路径。按机器保存，下次打开继续使用。'
+            ? '填写目标机器上的目录，同时关联 config.toml 和 auth.json。按机器保存，下次打开继续使用；留空恢复默认。这里只决定网页编辑的位置，Codex 仍需通过其配置目录设置使用该位置。'
+            : '填写目标机器上的配置文件路径，支持绝对路径和 ~ 用户目录。按机器保存，下次打开继续使用；留空恢复默认。这里只决定网页编辑的位置，不会自动让 Agent 加载一个任意的新路径。'
         "
       >
         <UiInput
@@ -59,9 +68,9 @@ async function submit(value = path.value) {
         />
       </UiField>
     </form>
-    <template #footer>
+    <template #footer="{ close }">
       <UiButton :disabled="busy" icon="reset" @click="submit('')">恢复默认</UiButton>
-      <UiButton :disabled="busy" @click="emit('update:open', false)">取消</UiButton>
+      <UiButton :disabled="busy" @click="close()">取消</UiButton>
       <UiButton variant="primary" :loading="busy" @click="submit()">保存</UiButton>
     </template>
   </UiDialog>

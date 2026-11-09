@@ -164,7 +164,7 @@ function display(value: unknown) {
   border-radius: inherit;
   outline: none;
   background: transparent;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   text-overflow: ellipsis;
 }
 
@@ -211,7 +211,7 @@ function display(value: unknown) {
   padding: var(--space-2);
   min-height: var(--control-sm);
   border-radius: var(--space-1);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   cursor: pointer;
   outline: none;
 }

@@ -17,3 +17,4 @@ frontend/playwright-report/
 frontend/.vite/
 frontend/.review-artifacts/
 *.tsbuildinfo
+/tmp/

@@ -3,10 +3,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { authGroupsApi, providersApi, type AuthGroup, type Provider } from '@/api/providers'
 import { useRequest } from '@/features/shared/useRequest'
 import { useAction } from '@/features/shared/useAction'
+import { useToggle } from '@/features/shared/useToggle'
 import { moveItem, type RowMove } from '@/features/shared/order'
 import { copyText } from '@/features/shared/format'
 import JsonImportDialog from '@/features/shared/JsonImportDialog.vue'
 import ProviderDialog from '@/features/providers/ProviderDialog.vue'
+import ProviderTable from '@/features/providers/ProviderTable.vue'
 import AuthGroupDialog from '@/features/providers/AuthGroupDialog.vue'
 import AuthRuntimeDialog from '@/features/providers/AuthRuntimeDialog.vue'
 import {
@@ -17,10 +19,15 @@ import {
   UiDialog,
   UiIconButton,
   UiInput,
+  UiListToolbar,
+  UiPageHeader,
+  UiSearchInput,
   UiSegmented,
+  UiSelectionBar,
   UiSwitch,
   UiTable,
   UiTabs,
+  UiTooltip,
   notify,
   type TableColumn,
 } from '@/components/ui'
@@ -32,21 +39,35 @@ const request = useRequest(async (signal) => {
   return { providers, groups }
 })
 const action = useAction(request.refresh)
+const exporting = useAction()
+const toggles = useToggle()
 const clipboard = useAction()
 onMounted(request.refresh)
 const tab = ref('providers')
 const filter = ref('enabled')
 const keyword = ref('')
 const selected = ref<string[]>([])
+const selectedGroups = ref<string[]>([])
 const providerOpen = ref(false)
 const editing = ref<Provider>()
 const groupOpen = ref(false)
 const groupEditing = ref<AuthGroup>()
 const importing = ref(false)
+const importingGroups = ref(false)
 const runtime = ref('')
 const modelDetail = ref<Provider>()
 const modelSearch = ref('')
 const providers = computed(() => request.data.value?.providers || [])
+const selectedProviders = computed(() => {
+  const names = new Set(selected.value)
+  return providers.value.filter((provider) => names.has(provider.name))
+})
+const canEnableSelected = computed(() =>
+  selectedProviders.value.some((provider) => !provider.enabled),
+)
+const canDisableSelected = computed(() =>
+  selectedProviders.value.some((provider) => provider.enabled),
+)
 const groups = computed(() => request.data.value?.groups || [])
 const visibleProviders = computed(() =>
   providers.value.filter(
@@ -72,32 +93,49 @@ const detailModels = computed(
 )
 watch([keyword, filter, tab], () => {
   selected.value = []
+  selectedGroups.value = []
 })
-watch(providers, (rows) => {
+watch(visibleProviders, (rows) => {
   selected.value = selected.value.filter((name) => rows.some((row) => row.name === name))
 })
-const providerColumns: TableColumn[] = [
-  { key: 'name', label: 'Provider', width: 170 },
-  { key: 'api', label: 'API 地址', width: 300 },
-  { key: 'source_format', label: '协议', width: 150 },
-  { key: 'models', label: '模型', width: 270 },
-  { key: 'auth_group', label: '认证', width: 160 },
-  { key: 'enabled', label: '启用', width: 80 },
-  { key: 'actions', label: '操作', width: 120 },
-]
+watch(visibleGroups, (rows) => {
+  selectedGroups.value = selectedGroups.value.filter((name) =>
+    rows.some((row) => row.name === name),
+  )
+})
 const groupColumns: TableColumn[] = [
-  { key: 'name', label: 'Auth Group', width: 200 },
+  {
+    key: 'name',
+    label: 'Auth Group',
+    width: 200,
+    help: [
+      '作用：一组可供多个 Provider 共用的认证凭据。',
+      '条目：分别配置 Headers、并发上限与请求配额。',
+      '调度：正式请求按组策略选择可用条目。',
+    ],
+  },
   { key: 'strategy', label: '策略', width: 180 },
   { key: 'provider_count', label: '关联 Provider', width: 130 },
   { key: 'entries', label: '认证条目', width: 170 },
-  { key: 'summary', label: '运行状态', width: 260 },
-  { key: 'actions', label: '操作', width: 180 },
+  {
+    key: 'summary',
+    label: '运行状态',
+    width: 260,
+    help: [
+      '汇总：展示可用、冷却与禁用条目数量。',
+      '暂时不可用：并发已满或配额耗尽的条目也会停止分配新请求。',
+      '详情：运行状态按当前时刻计算。',
+    ],
+  },
+  { fixed: true, key: 'actions', label: '操作', width: 224, minWidth: 224 },
 ]
 function editProvider(provider?: Provider) {
+  if (toggles.busy.value || action.busy.value) return
   editing.value = provider
   providerOpen.value = true
 }
 function editGroup(group?: AuthGroup) {
+  if (toggles.busy.value || action.busy.value) return
   groupEditing.value = group
   groupOpen.value = true
 }
@@ -110,6 +148,7 @@ async function saved() {
   await request.refresh()
 }
 async function reorder(move: RowMove) {
+  if (toggles.busy.value || action.busy.value || request.loading.value || keyword.value) return
   const source = providers.value.find((item) => item.name === move.id)
   const target = providers.value.find((item) => item.name === move.targetId)
   if (!source || !target || source.enabled !== target.enabled) return
@@ -121,7 +160,11 @@ async function reorder(move: RowMove) {
   )
 }
 async function batch(actionName: 'enable' | 'disable' | 'delete') {
-  const names = [...selected.value]
+  if (toggles.busy.value) return
+  const names = selectedProviders.value
+    .filter((provider) => actionName === 'delete' || provider.enabled !== (actionName === 'enable'))
+    .map((provider) => provider.name)
+  if (!names.length) return
   if (
     await action.run(
       (signal) => providersApi.batch(names, actionName, signal),
@@ -134,161 +177,283 @@ async function importProviders(value: unknown, signal: AbortSignal) {
   const result = await providersApi.import(value, signal)
   return `已导入 ${result.count} 个 Provider、${result.auth_groups_count} 个 Auth Group`
 }
+async function importGroups(value: unknown, signal: AbortSignal) {
+  const result = await authGroupsApi.import(value, signal)
+  return `已导入 ${result.count} 个 Auth Group`
+}
 function imported(message: string) {
   notify(message)
   void request.refresh()
 }
+function exportProviders(names: string[]) {
+  if (!names.length || request.loading.value || action.busy.value || toggles.busy.value) return
+  const snapshot = [...names]
+  void exporting.run((signal) => providersApi.export(snapshot, signal))
+}
+function exportGroups(names: string[]) {
+  if (!names.length || request.loading.value || action.busy.value || toggles.busy.value) return
+  const snapshot = [...names]
+  void exporting.run((signal) => authGroupsApi.export(snapshot, signal))
+}
+async function deleteGroups() {
+  if (request.loading.value || toggles.busy.value) return
+  const names = [...selectedGroups.value]
+  if (!names.length) return
+  if (
+    await action.run(
+      (signal) => authGroupsApi.batchDelete(names, signal),
+      `已删除 ${names.length} 个 Auth Group`,
+    )
+  ) {
+    selectedGroups.value = selectedGroups.value.filter((name) => !names.includes(name))
+  }
+}
+function setEnabled(provider: Provider, value: boolean) {
+  return toggles.run(
+    provider.name,
+    value,
+    (signal) => providersApi.enabled(provider.name, value, signal),
+    (updated) =>
+      request.patch((data) => ({
+        ...data,
+        providers: data.providers.map((row) => (row.name === provider.name ? updated : row)),
+      })),
+  )
+}
 </script>
 <template>
   <div class="page">
-    <header class="page-heading">
-      <h1>Provider</h1>
-      <UiButton v-if="tab === 'providers'" variant="primary" icon="plus" @click="editProvider()">
-        新增 Provider
-      </UiButton>
-      <UiButton v-else variant="primary" icon="plus" @click="editGroup()">新增 Auth Group</UiButton>
-    </header>
-    <UiTabs
-      v-model="tab"
-      :items="[
-        { value: 'providers', label: `Providers · ${providers.length}` },
-        { value: 'groups', label: `Auth Groups · ${groups.length}` },
-      ]"
-    />
-    <div class="toolbar">
-      <UiSegmented
-        v-if="tab === 'providers'"
-        v-model="filter"
-        label="Provider 状态"
-        :items="[
-          { value: 'enabled', label: '已启用' },
-          { value: 'disabled', label: '已禁用' },
-          { value: 'all', label: '全部' },
-        ]"
-      />
-      <div class="list-search">
-        <UiInput
+    <UiPageHeader title="Provider">
+      <template #navigation>
+        <UiTabs
+          v-model="tab"
+          :items="[
+            { value: 'providers', label: `Providers · ${providers.length}` },
+            { value: 'groups', label: `Auth Groups · ${groups.length}` },
+          ]"
+        />
+      </template>
+    </UiPageHeader>
+    <UiListToolbar>
+      <template #actions>
+        <UiButton
+          v-if="tab === 'providers'"
+          variant="primary"
+          icon="plus"
+          :disabled="action.busy.value || toggles.busy.value"
+          @click="editProvider()"
+        >
+          新增 Provider
+        </UiButton>
+        <UiButton
+          v-else
+          variant="primary"
+          icon="plus"
+          :disabled="action.busy.value || toggles.busy.value"
+          @click="editGroup()"
+        >
+          新增 Auth Group
+        </UiButton>
+        <template v-if="tab === 'providers'">
+          <UiSegmented
+            v-model="filter"
+            label="Provider 状态"
+            :items="[
+              { value: 'enabled', label: '已启用' },
+              { value: 'disabled', label: '已禁用' },
+              { value: 'all', label: '全部' },
+            ]"
+          />
+          <UiButton
+            icon="import"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="importing = true"
+          >
+            导入
+          </UiButton>
+          <UiTooltip :text="`导出当前状态和搜索条件下的 ${visibleProviders.length} 个 Provider`">
+            <UiButton
+              icon="export"
+              :loading="exporting.busy.value"
+              :disabled="
+                !visibleProviders.length ||
+                request.loading.value ||
+                action.busy.value ||
+                toggles.busy.value
+              "
+              @click="exportProviders(visibleProviders.map((item) => item.name))"
+            >
+              导出
+            </UiButton>
+          </UiTooltip>
+        </template>
+        <template v-else>
+          <UiButton
+            icon="import"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="importingGroups = true"
+          >
+            导入
+          </UiButton>
+          <UiTooltip :text="`导出当前搜索条件下的 ${visibleGroups.length} 个 Auth Group`">
+            <UiButton
+              icon="export"
+              :loading="exporting.busy.value"
+              :disabled="
+                !visibleGroups.length ||
+                request.loading.value ||
+                action.busy.value ||
+                toggles.busy.value
+              "
+              @click="exportGroups(visibleGroups.map((item) => item.name))"
+            >
+              导出
+            </UiButton>
+          </UiTooltip>
+        </template>
+      </template>
+      <template #search>
+        <UiSearchInput
           v-model="keyword"
           :placeholder="tab === 'providers' ? '搜索名称、地址或模型' : '搜索认证组或条目'"
           aria-label="搜索配置"
         />
-      </div>
-      <div class="actions">
-        <template v-if="tab === 'providers'">
-          <UiButton icon="upload" @click="importing = true">导入</UiButton>
-          <UiButton
-            icon="download"
-            :disabled="action.busy.value || !providers.length"
-            @click="
-              action.run((signal) =>
-                providersApi.export(
-                  selected.length ? selected : providers.map((item) => item.name),
-                  signal,
-                ),
-              )
-            "
-          >
-            {{ selected.length ? '导出所选' : '导出' }}
-          </UiButton>
-        </template>
-        <UiIconButton
-          icon="refresh"
-          label="刷新 Provider 与认证组"
-          :loading="request.loading.value"
-          @click="request.refresh"
-        />
-      </div>
-    </div>
-    <div v-if="selected.length && tab === 'providers'" class="actions">
-      <span class="muted">已选 {{ selected.length }}</span>
-      <UiButton size="sm" :disabled="action.busy.value" @click="batch('enable')">启用</UiButton>
-      <UiButton size="sm" :disabled="action.busy.value" @click="batch('disable')">禁用</UiButton>
+      </template>
+      <UiIconButton
+        icon="refresh"
+        label="刷新 Provider 与认证组"
+        :loading="request.loading.value"
+        @click="request.refresh"
+      />
+    </UiListToolbar>
+    <UiSelectionBar
+      v-if="selected.length && tab === 'providers'"
+      :count="selected.length"
+      :disabled="action.busy.value || toggles.busy.value"
+      @clear="selected = []"
+    >
+      <UiButton
+        v-if="canEnableSelected"
+        :disabled="action.busy.value || toggles.busy.value"
+        @click="batch('enable')"
+      >
+        启用
+      </UiButton>
+      <UiButton
+        v-if="canDisableSelected"
+        :disabled="action.busy.value || toggles.busy.value"
+        @click="batch('disable')"
+      >
+        禁用
+      </UiButton>
+      <UiButton
+        :disabled="
+          action.busy.value || toggles.busy.value || exporting.busy.value || request.loading.value
+        "
+        @click="exportProviders(selected)"
+      >
+        导出所选
+      </UiButton>
       <UiConfirmPopover
         :message="`删除所选 ${selected.length} 个 Provider？`"
         @confirm="batch('delete')"
       >
-        <UiButton size="sm" variant="danger" :disabled="action.busy.value">删除</UiButton>
+        <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
+          删除
+        </UiButton>
       </UiConfirmPopover>
-    </div>
-    <UiAlert v-if="request.error.value || action.error.value || clipboard.error.value">
-      {{ action.error.value || clipboard.error.value || request.error.value }}
+    </UiSelectionBar>
+    <UiSelectionBar
+      v-if="selectedGroups.length && tab === 'groups'"
+      :count="selectedGroups.length"
+      :disabled="action.busy.value || toggles.busy.value"
+      @clear="selectedGroups = []"
+    >
+      <UiButton
+        :disabled="
+          action.busy.value || toggles.busy.value || exporting.busy.value || request.loading.value
+        "
+        @click="exportGroups(selectedGroups)"
+      >
+        导出所选
+      </UiButton>
+      <UiConfirmPopover
+        :message="`删除所选 ${selectedGroups.length} 个 Auth Group？`"
+        @confirm="deleteGroups"
+      >
+        <UiButton
+          variant="danger-outline"
+          :disabled="action.busy.value || toggles.busy.value || request.loading.value"
+        >
+          删除
+        </UiButton>
+      </UiConfirmPopover>
+    </UiSelectionBar>
+    <UiAlert
+      v-if="
+        request.error.value || action.error.value || clipboard.error.value || exporting.error.value
+      "
+    >
+      {{
+        exporting.error.value || action.error.value || clipboard.error.value || request.error.value
+      }}
     </UiAlert>
-    <UiTable
+    <ProviderTable
       v-if="tab === 'providers'"
       v-model:selected="selected"
       :rows="visibleProviders"
-      :columns="providerColumns"
-      :row-key="(row) => row.name"
-      selectable
-      :reorderable="!keyword && !action.busy.value"
+      :edit-disabled="action.busy.value || toggles.busy.value"
+      :reorder-disabled="
+        !!keyword || action.busy.value || toggles.busy.value || request.loading.value
+      "
       :loading="request.loading.value"
-      storage-key="providers"
-      empty="没有匹配的 Provider"
       @reorder="reorder"
+      @edit="editProvider"
+      @models="showModels"
+      @auth="runtime = $event"
     >
-      <template #cell-name="{ row }">
-        <strong>{{ row.name }}</strong>
-        <div v-if="row.safe_desensitization_enabled"><UiBadge>安全脱敏</UiBadge></div>
-      </template>
-      <template #cell-api="{ row }">
-        <span class="mono">{{ row.api }}</span>
-      </template>
-      <template #cell-source_format="{ row }">
-        <small>{{ row.source_format }}</small>
-      </template>
-      <template #cell-models="{ row }">
-        <div class="model-preview">
-          <code
-            v-for="model in row.model_list.slice(0, 2)"
-            :key="model"
-            class="truncate"
-            :title="model"
-          >
-            {{ model }}
-          </code>
-          <UiButton variant="ghost" size="sm" @click="showModels(row)">
-            {{ row.model_list.length }} 个模型
-          </UiButton>
-        </div>
-      </template>
-      <template #cell-auth_group="{ row }">
-        <UiButton v-if="row.auth_group" variant="ghost" size="sm" @click="runtime = row.auth_group">
-          {{ row.auth_group }}
-        </UiButton>
-        <small v-else class="muted">{{ row.api_key ? 'API Key' : '无认证' }}</small>
-      </template>
-      <template #cell-enabled="{ row }">
+      <template #enabled="{ row }">
         <UiSwitch
-          :model-value="row.enabled"
+          :model-value="toggles.value(row.name, row.enabled)"
+          :loading="toggles.pending(row.name)"
           :label="`启用 ${row.name}`"
           :disabled="action.busy.value"
-          @update:model-value="
-            action.run((signal) => providersApi.enabled(row.name, $event, signal))
-          "
+          @update:model-value="setEnabled(row, $event)"
         />
       </template>
-      <template #cell-actions="{ row }">
-        <div class="actions">
-          <UiIconButton icon="edit" :label="`编辑 ${row.name}`" @click="editProvider(row)" />
+      <template #actions="{ row }">
+        <div class="table-actions">
+          <UiIconButton
+            icon="edit"
+            :label="`编辑 ${row.name}`"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="editProvider(row)"
+          />
           <UiIconButton
             icon="copy"
             label="复制 Provider"
-            :disabled="action.busy.value"
+            :disabled="action.busy.value || toggles.busy.value"
             @click="action.run((signal) => providersApi.copy(row.name, signal), '已复制 Provider')"
           />
           <UiConfirmPopover
-            :message="`删除 Provider ${row.name}？`"
+            message="是否删除？"
             @confirm="
               action.run((signal) => providersApi.remove(row.name, signal), '已删除 Provider')
             "
           >
-            <UiIconButton icon="delete" :label="`删除 ${row.name}`" :disabled="action.busy.value" />
+            <UiIconButton
+              icon="delete"
+              :label="`删除 ${row.name}`"
+              :disabled="action.busy.value || toggles.busy.value"
+            />
           </UiConfirmPopover>
         </div>
       </template>
-    </UiTable>
+    </ProviderTable>
     <UiTable
       v-else
+      v-model:selected="selectedGroups"
+      selectable
       :rows="visibleGroups"
       :columns="groupColumns"
       :row-key="(row) => row.name"
@@ -297,7 +462,15 @@ function imported(message: string) {
       empty="还没有 Auth Group"
     >
       <template #cell-name="{ row }">
-        <strong>{{ row.name }}</strong>
+        <UiButton
+          variant="link"
+          :aria-label="`编辑 Auth Group ${row.name}`"
+          aria-haspopup="dialog"
+          :disabled="action.busy.value || toggles.busy.value"
+          @click="editGroup(row)"
+        >
+          <strong>{{ row.name }}</strong>
+        </UiButton>
       </template>
       <template #cell-strategy="{ row }">
         {{ row.strategy === 'sticky_failover' ? '粘滞故障切换' : '最小并发' }}
@@ -314,16 +487,25 @@ function imported(message: string) {
         </div>
       </template>
       <template #cell-actions="{ row }">
-        <div class="actions">
+        <div class="table-actions">
           <UiButton size="sm" @click="runtime = row.name">运行状态</UiButton>
-          <UiIconButton icon="edit" :label="`编辑 ${row.name}`" @click="editGroup(row)" />
+          <UiIconButton
+            icon="edit"
+            :label="`编辑 ${row.name}`"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="editGroup(row)"
+          />
           <UiConfirmPopover
             :message="`删除认证组 ${row.name}？`"
             @confirm="
               action.run((signal) => authGroupsApi.remove(row.name, signal), '已删除 Auth Group')
             "
           >
-            <UiIconButton icon="delete" :label="`删除 ${row.name}`" :disabled="action.busy.value" />
+            <UiIconButton
+              icon="delete"
+              :label="`删除 ${row.name}`"
+              :disabled="action.busy.value || toggles.busy.value"
+            />
           </UiConfirmPopover>
         </div>
       </template>
@@ -351,7 +533,27 @@ function imported(message: string) {
       v-if="importing"
       v-model:open="importing"
       title="导入 Provider"
+      :help="[
+        '内容：选择本系统导出的 JSON 文件，或粘贴相同结构的内容。',
+        'Provider 重名：自动生成新名称。',
+        'Auth Group 同名：保留现有设置，只补入缺少的凭据条目。',
+        '生效：提交后写入配置并重载 Provider。',
+        '文件内容：可能包含上游密钥与认证请求头。',
+      ]"
       :submit="importProviders"
+      @imported="imported"
+    />
+    <JsonImportDialog
+      v-if="importingGroups"
+      v-model:open="importingGroups"
+      title="导入 Auth Groups"
+      :help="[
+        '内容：选择本系统导出的 Auth Groups 或 Provider JSON 文件，也可粘贴包含 auth_groups 列表的 JSON 对象。',
+        '同名组：保留现有设置与同 ID 凭据，只补入缺少的条目。',
+        '范围：导入认证组配置与完整凭据，不导入 Provider、用量记录或临时运行状态。',
+        '生效：提交后统一写入配置并重载。',
+      ]"
+      :submit="importGroups"
       @imported="imported"
     />
     <UiDialog
@@ -364,7 +566,7 @@ function imported(message: string) {
         <UiInput v-model="modelSearch" placeholder="搜索模型" aria-label="搜索模型详情" />
         <div v-for="model in detailModels" :key="model" class="model-detail">
           <code>{{ modelDetail.name }}/{{ model }}</code>
-          <UiBadge v-if="modelDetail.hidden_model_list.includes(model)">已隐藏</UiBadge>
+          <UiBadge v-if="modelDetail.hidden_model_list?.includes(model)">已隐藏</UiBadge>
           <UiIconButton
             icon="copy"
             label="复制模型 ID"
@@ -376,16 +578,6 @@ function imported(message: string) {
   </div>
 </template>
 <style scoped>
-.model-preview {
-  display: grid;
-  justify-items: start;
-  gap: var(--space-1);
-}
-
-.model-preview code {
-  max-width: 100%;
-}
-
 .model-detail {
   display: flex;
   align-items: center;

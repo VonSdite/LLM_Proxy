@@ -9,20 +9,32 @@ export function useRequest<T>(load: (signal: AbortSignal) => Promise<T>) {
   let controller: AbortController | undefined
   let serial = 0
   let disposed = false
+  let patches: ((value: T) => T)[] = []
+  function patch(update: (value: T) => T) {
+    if (disposed) return
+    if (data.value !== undefined) data.value = update(data.value)
+    if (loading.value) patches.push(update)
+  }
   async function refresh() {
     if (disposed) return
     controller?.abort()
     controller = new AbortController()
     const current = ++serial
+    patches = []
     loading.value = true
     error.value = ''
     try {
       const result = await load(controller.signal)
-      if (current === serial) data.value = result
+      // 已确认的局部写入优先于仍在途中的旧快照。
+      if (current === serial)
+        data.value = patches.reduce<T>((value, update) => update(value), result)
     } catch (reason) {
       if (current === serial && !isAbort(reason)) error.value = errorMessage(reason)
     } finally {
-      if (current === serial) loading.value = false
+      if (current === serial) {
+        loading.value = false
+        patches = []
+      }
     }
   }
   onBeforeUnmount(() => {
@@ -30,5 +42,5 @@ export function useRequest<T>(load: (signal: AbortSignal) => Promise<T>) {
     serial++
     controller?.abort()
   })
-  return { data, loading, error, refresh }
+  return { data, loading, error, refresh, patch }
 }

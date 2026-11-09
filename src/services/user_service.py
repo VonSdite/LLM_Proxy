@@ -363,10 +363,12 @@ class UserService:
             "user_ids": deleted_user_ids,
         }
 
-    def export_users(self, user_ids: Any = None) -> dict[str, Any]:
-        """导出用户数据。"""
+    def export_users(self, user_ids: Any = None, keyword: str | None = None) -> dict[str, Any]:
+        """导出所选用户，或当前搜索条件下所有分页的用户。"""
+        if keyword is not None and not isinstance(keyword, str):
+            raise ValueError("User export keyword must be a string")
         if user_ids is None:
-            users = self._repository.list_all()
+            users = self._repository.list_all(keyword=keyword)
         else:
             normalized_user_ids = self._normalize_user_ids(user_ids)
             users = self._repository.get_by_ids(normalized_user_ids)

@@ -2,7 +2,8 @@
 import { SwitchRoot, SwitchThumb } from 'reka-ui'
 import { useId } from 'vue'
 import { useField } from './field'
-defineProps<{ modelValue: boolean; disabled?: boolean; label?: string }>()
+import UiIcon from './UiIcon.vue'
+defineProps<{ modelValue: boolean; disabled?: boolean; loading?: boolean; label?: string }>()
 defineOptions({ inheritAttrs: false })
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const field = useField()
@@ -14,12 +15,18 @@ const id = field?.id || useId()
       :id="id"
       :model-value="modelValue"
       :disabled="disabled"
+      :aria-disabled="disabled || loading || undefined"
+      :aria-busy="loading || undefined"
       :aria-label="label"
       class="ui-switch"
       v-bind="$attrs"
-      @update:model-value="emit('update:modelValue', $event)"
+      @update:model-value="!loading && emit('update:modelValue', $event)"
     >
-      <span class="ui-switch-track"><SwitchThumb class="ui-switch-thumb" /></span>
+      <span class="ui-switch-track">
+        <SwitchThumb class="ui-switch-thumb">
+          <UiIcon v-if="loading" name="loading" :size="12" />
+        </SwitchThumb>
+      </span>
     </SwitchRoot>
     <label v-if="$slots.default" :for="id"><slot /></label>
   </span>
@@ -32,7 +39,7 @@ const id = field?.id || useId()
 }
 
 .ui-switch-control label {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   cursor: pointer;
 }
 
@@ -64,11 +71,13 @@ const id = field?.id || useId()
 }
 
 .ui-switch-thumb {
-  display: block;
+  display: grid;
+  place-items: center;
   width: 16px;
   height: 16px;
   border-radius: var(--radius-pill);
   background: var(--on-primary);
+  color: var(--primary);
   transition: transform var(--motion);
 }
 
@@ -78,6 +87,10 @@ const id = field?.id || useId()
 
 .ui-switch:disabled {
   opacity: 0.5;
+}
+
+.ui-switch[aria-busy='true'] {
+  cursor: progress;
 }
 
 @media (pointer: coarse) {

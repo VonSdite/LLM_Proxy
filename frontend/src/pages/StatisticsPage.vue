@@ -5,6 +5,7 @@ import {
   UiAlert,
   UiButton,
   UiField,
+  UiHelpPopover,
   UiInput,
   UiMultiSelect,
   UiPagination,
@@ -128,13 +129,26 @@ function imported(message: string) {
         >
           导出 Excel
         </UiButton>
+        <UiHelpPopover label="统计导入导出说明">
+          <p>
+            导出数据生成可再次导入的 JSON，请求明细与日聚合按已查询的筛选条件导出。导出 Excel
+            对应当前统计页签，导出范围不局限于当前分页。
+          </p>
+          <p>
+            更改日期或筛选后先点查询，再导出。导入会跳过相同请求明细；相同维度的日聚合按数值累加，重复导入会再次累加，请查看完成消息中的新增、重复与合并数量。
+          </p>
+        </UiHelpPopover>
       </div>
     </header>
     <form class="statistics-filters surface" @submit.prevent="apply">
       <UiField label="开始日期" :error="errors.start">
         <UiInput v-model="draft.start_date" type="date" required />
       </UiField>
-      <UiField label="结束日期" :error="errors.end">
+      <UiField
+        label="结束日期"
+        :error="errors.end"
+        help="范围包含开始日期和结束日期当天，最多一年。默认查询今天；调整日期与多选项后点击查询，列表和导出才使用新的条件。"
+      >
         <UiInput v-model="draft.end_date" type="date" :min="draft.start_date" required />
       </UiField>
       <UiField label="用户">
@@ -144,7 +158,10 @@ function imported(message: string) {
           placeholder="全部用户"
         />
       </UiField>
-      <UiField label="请求模型">
+      <UiField
+        label="请求模型"
+        help="按客户端发来的原始模型 ID 筛选，不是映射目标或上游返回的模型名。可多选，留空表示全部模型。"
+      >
         <UiMultiSelect
           v-model="draft.request_model"
           :options="(candidates.data.value?.models || []).map((value) => ({ value, label: value }))"
@@ -200,6 +217,10 @@ function imported(message: string) {
       v-if="importing"
       v-model:open="importing"
       title="导入统计数据"
+      :help="[
+        '使用导出数据生成的 JSON，可包含请求明细与日聚合。相同请求明细会跳过，相同维度的日聚合按数值累加。',
+        '重复导入同一份日聚合会再次累加。导入范围由文件内容决定，不受当前页面筛选条件限制。Excel 用于查看，不能在此导入。',
+      ]"
       :submit="importData"
       @imported="imported"
     />

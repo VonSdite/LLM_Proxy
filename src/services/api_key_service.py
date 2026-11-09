@@ -6,14 +6,35 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import secrets
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from datetime import timedelta
 from typing import Any
+
+from gevent.lock import RLock
 
 from ..application.app_context import AppContext
 from ..repositories import ApiKeyRepository
-from ..utils.local_time import normalize_local_datetime_text
+from ..utils.concurrency import synchronized
+from ..utils.local_time import normalize_local_datetime_text, now_local_datetime
 from .model_catalog_service import ModelCatalogService
+
+
+class ApiKeyRequestError(Exception):
+    """请求准入失败，携带下游错误码及可重试时间。"""
+
+    def __init__(self, code: str, retry_after: int = 1):
+        messages = {
+            "api_key_invalid": "API key is disabled or no longer exists",
+            "api_key_concurrency_limit_exceeded": "API key concurrent request limit exceeded",
+            "api_key_minute_limit_exceeded": "API key requests per minute limit exceeded",
+            "api_key_day_limit_exceeded": "API key requests per day limit exceeded",
+        }
+        super().__init__(messages[code])
+        self.code = code
+        self.status_code = 401 if code == "api_key_invalid" else 429
+        self.retry_after = max(1, retry_after)
 
 
 class ApiKeyService:
@@ -21,6 +42,7 @@ class ApiKeyService:
 
     MODEL_PERMISSIONS_ALL = ApiKeyRepository.MODEL_PERMISSIONS_ALL
     KEY_PREFIX = "sk-"
+    REQUEST_LIMIT_FIELDS = ApiKeyRepository.REQUEST_LIMIT_FIELDS
 
     def __init__(
         self,
@@ -31,6 +53,59 @@ class ApiKeyService:
         self._logger = ctx.logger
         self._model_catalog_service = model_catalog_service or ModelCatalogService(ctx)
         self._repository = repository
+        self._request_lock = RLock()
+        self._inflight_counts: dict[int, int] = {}
+
+    @classmethod
+    def _normalize_request_limits(cls, limits: dict[str, Any] | None) -> dict[str, int | None]:
+        """请求限制允许留空或正整数，更新时保留未提交的字段。"""
+        result: dict[str, int | None] = {}
+        for field in cls.REQUEST_LIMIT_FIELDS:
+            if limits is None or field not in limits:
+                continue
+            value = limits[field]
+            if value is None or isinstance(value, str) and not value.strip():
+                result[field] = None
+                continue
+            text = str(value).strip()
+            if isinstance(value, bool) or not text.isascii() or not text.isdigit() or not 1 <= int(text) <= 2147483647:
+                raise ValueError(f"{field} must be a positive integer no greater than 2147483647")
+            result[field] = int(text)
+        return result
+
+    @synchronized("_request_lock")
+    def acquire_request(self, api_key: dict[str, Any]) -> Callable[[], None]:
+        """一次客户端请求占用一个并发槽；失败和重试均不回退已准入计数。"""
+        key_id = int(api_key["id"])
+        current = self._repository.get_by_id(key_id)
+        if current is None or not current["enabled"]:
+            raise ApiKeyRequestError("api_key_invalid")
+        inflight = self._inflight_counts.get(key_id, 0)
+        if current["max_concurrency"] is not None and inflight >= current["max_concurrency"]:
+            raise ApiKeyRequestError("api_key_concurrency_limit_exceeded")
+        now = now_local_datetime()
+        error = self._repository.reserve_request(key_id, now)
+        if error:
+            reset = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+            if error == "api_key_day_limit_exceeded":
+                reset = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            raise ApiKeyRequestError(error, math.ceil((reset - now).total_seconds()))
+        self._inflight_counts[key_id] = inflight + 1
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            with self._request_lock:
+                if released:
+                    return
+                released = True
+                remaining = self._inflight_counts.get(key_id, 0) - 1
+                if remaining > 0:
+                    self._inflight_counts[key_id] = remaining
+                else:
+                    self._inflight_counts.pop(key_id, None)
+
+        return release
 
     @staticmethod
     def _normalize_key_timestamps(api_key: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -203,11 +278,13 @@ class ApiKeyService:
         model_permissions: Any = MODEL_PERMISSIONS_ALL,
         token_limit_k: Any = None,
         enabled: bool = True,
+        request_limits: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """创建 API Key，并持久化明文用于管理端复制和显示。"""
         normalized_name = self._normalize_name(name)
         serialized_model_permissions = self._serialize_model_permissions(model_permissions)
         normalized_token_limit_k = self._normalize_token_limit_k(token_limit_k, required=True)
+        normalized_request_limits = self._normalize_request_limits(request_limits)
         for _ in range(5):
             plaintext_key = self.generate_api_key()
             key_hash = self.hash_api_key(plaintext_key)
@@ -221,6 +298,7 @@ class ApiKeyService:
                 model_permissions=serialized_model_permissions,
                 token_limit_k=normalized_token_limit_k,
                 enabled=enabled,
+                request_limits=normalized_request_limits,
             )
             if key_id:
                 created = self._repository.get_by_id(int(key_id))
@@ -340,6 +418,7 @@ class ApiKeyService:
         model_permissions: Any = None,
         token_limit_k_provided: bool = False,
         token_limit_k: Any = None,
+        request_limits: dict[str, Any] | None = None,
     ) -> bool:
         """更新 API Key 信息。"""
         try:
@@ -362,6 +441,7 @@ class ApiKeyService:
                 model_permissions=serialized_model_permissions,
                 token_limit_k=normalized_token_limit_k,
                 token_limit_k_provided=token_limit_k_provided,
+                request_limits=self._normalize_request_limits(request_limits),
             )
             if updated:
                 self._logger.info("API key updated: key_id=%s", key_id)

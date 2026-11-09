@@ -22,7 +22,7 @@ export interface MachineInput {
   port: string
   user: string
   password: string
-  proxy: { mode: string; url: string }
+  proxy: { mode: string; url: string; clearCredentials?: boolean }
 }
 export interface FileSnapshot {
   path: string

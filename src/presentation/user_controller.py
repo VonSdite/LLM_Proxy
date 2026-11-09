@@ -205,7 +205,10 @@ class UserController:
     def export_users(self) -> ResponseReturnValue:
         try:
             payload = get_json_object()
-            result = self._user_service.export_users(payload.get("user_ids") if "user_ids" in payload else None)
+            result = self._user_service.export_users(
+                payload.get("user_ids") if "user_ids" in payload else None,
+                keyword=payload.get("keyword"),
+            )
             self._logger.info("Users exported: count=%s", len(result.get("users", [])))
             return jsonify(result)
         except ValueError as exc:

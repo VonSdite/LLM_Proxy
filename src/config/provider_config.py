@@ -74,8 +74,6 @@ SUPPORTED_AUTH_ENTRY_FIELDS = {
     "cooldown_seconds_on_429",
     "request_quota_per_minute",
     "request_quota_per_day",
-    "token_quota_per_minute",
-    "token_quota_per_day",
 }
 
 
@@ -282,9 +280,10 @@ def validate_auth_group_fields(config: Mapping[str, Any]) -> None:
 
 
 def validate_auth_entry_fields(config: Mapping[str, Any]) -> None:
+    # 旧配置中的 Token 限速字段允许读取，标准化时省略，调度不再使用。
     _validate_supported_fields(
         config,
-        supported_fields=SUPPORTED_AUTH_ENTRY_FIELDS,
+        supported_fields=SUPPORTED_AUTH_ENTRY_FIELDS | {"token_quota_per_minute", "token_quota_per_day"},
         field_group_name="auth_entry",
     )
 
@@ -300,8 +299,6 @@ class AuthEntrySchema:
     cooldown_seconds_on_429: int | None = None
     request_quota_per_minute: int | None = None
     request_quota_per_day: int | None = None
-    token_quota_per_minute: int | None = None
-    token_quota_per_day: int | None = None
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> "AuthEntrySchema":
@@ -342,14 +339,6 @@ class AuthEntrySchema:
                 config.get("request_quota_per_day"),
                 error_message="Auth entry request_quota_per_day must be a positive integer",
             ),
-            token_quota_per_minute=parse_optional_positive_int(
-                config.get("token_quota_per_minute"),
-                error_message="Auth entry token_quota_per_minute must be a positive integer",
-            ),
-            token_quota_per_day=parse_optional_positive_int(
-                config.get("token_quota_per_day"),
-                error_message="Auth entry token_quota_per_day must be a positive integer",
-            ),
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -366,10 +355,6 @@ class AuthEntrySchema:
             config["request_quota_per_minute"] = self.request_quota_per_minute
         if self.request_quota_per_day is not None:
             config["request_quota_per_day"] = self.request_quota_per_day
-        if self.token_quota_per_minute is not None:
-            config["token_quota_per_minute"] = self.token_quota_per_minute
-        if self.token_quota_per_day is not None:
-            config["token_quota_per_day"] = self.token_quota_per_day
         return config
 
     def headers_mapping(self) -> dict[str, str]:

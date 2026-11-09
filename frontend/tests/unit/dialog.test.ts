@@ -29,7 +29,7 @@ describe('弹窗关闭', () => {
       attachTo: document.body,
     })
     await flushPromises()
-    document.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!.click()
+    await wrapper.vm.requestClose()
     await flushPromises()
     expect(beforeClose).toHaveBeenCalledOnce()
     expect(wrapper.emitted('update:open')).toBeUndefined()
@@ -50,6 +50,24 @@ describe('弹窗关闭', () => {
     close.click()
     await flushPromises()
     expect(wrapper.emitted('update:open')).toEqual([[false]])
+    expect(beforeClose).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('点击顶部关闭直接放弃修改，不调用关闭确认或保存', async () => {
+    const beforeClose = vi.fn().mockResolvedValue(false)
+    const save = vi.fn()
+    const wrapper = mount(UiDialog, {
+      props: { open: true, title: '编辑配置', dirty: true, beforeClose, save },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    document.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!.click()
+    await flushPromises()
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
+    expect(beforeClose).not.toHaveBeenCalled()
+    expect(save).not.toHaveBeenCalled()
+    expect(document.body.textContent).not.toContain('保存修改？')
     wrapper.unmount()
   })
 })

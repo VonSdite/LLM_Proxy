@@ -2,7 +2,10 @@
 import { onBeforeUnmount, ref, useId } from 'vue'
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
 import UiIcon from './UiIcon.vue'
-withDefaults(defineProps<{ label?: string }>(), { label: '查看说明' })
+import UiPopoverArrow from './UiPopoverArrow.vue'
+withDefaults(defineProps<{ label?: string; text?: string | readonly string[] }>(), {
+  label: '查看说明',
+})
 const open = ref(false)
 const id = useId()
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -21,6 +24,10 @@ function hide() {
 function hold() {
   clearTimeout(timer)
 }
+function toggle() {
+  clearTimeout(timer)
+  open.value = !open.value
+}
 onBeforeUnmount(() => clearTimeout(timer))
 </script>
 <template>
@@ -36,7 +43,7 @@ onBeforeUnmount(() => clearTimeout(timer))
         @pointerleave="hide"
         @focus="show"
         @blur="hide"
-        @click="open = !open"
+        @click="toggle"
       >
         <UiIcon name="help" :size="14" />
       </button>
@@ -45,7 +52,8 @@ onBeforeUnmount(() => clearTimeout(timer))
       <PopoverContent
         as-child
         class="ui-help-content"
-        :side-offset="8"
+        :side-offset="6"
+        :arrow-padding="12"
         :collision-padding="12"
         @open-auto-focus.prevent
         @close-auto-focus.prevent
@@ -54,7 +62,17 @@ onBeforeUnmount(() => clearTimeout(timer))
         @focusin="hold"
         @focusout="hide"
       >
-        <div :id="id"><slot /></div>
+        <div :id="id">
+          <UiPopoverArrow />
+          <div class="ui-help-body">
+            <slot>
+              <ul v-if="Array.isArray(text)">
+                <li v-for="item in text" :key="item">{{ item }}</li>
+              </ul>
+              <p v-else-if="text">{{ text }}</p>
+            </slot>
+          </div>
+        </div>
       </PopoverContent>
     </PopoverPortal>
   </PopoverRoot>
@@ -86,13 +104,36 @@ onBeforeUnmount(() => clearTimeout(timer))
   z-index: var(--z-popup);
   width: max-content;
   max-width: min(360px, calc(100vw - 24px));
-  padding: var(--space-3);
   border-radius: var(--radius-control);
   background: var(--overlay);
   color: var(--text);
   box-shadow: var(--shadow-overlay);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   line-height: 1.65;
   overflow-wrap: anywhere;
+}
+
+:global(.ui-help-body) {
+  max-height: min(480px, calc(100dvh - 24px), var(--reka-popover-content-available-height, 480px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-3);
+  border-radius: inherit;
+}
+
+:global(.ui-help-content p + p),
+:global(.ui-help-content p + ul),
+:global(.ui-help-content ul + p) {
+  margin-top: var(--space-2);
+}
+
+:global(.ui-help-content ul) {
+  list-style-type: disc;
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+:global(.ui-help-content li + li) {
+  margin-top: var(--space-1);
 }
 </style>

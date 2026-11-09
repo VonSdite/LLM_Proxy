@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { errorMessage } from '@/api/client'
-import { UiAlert, UiButton, UiCodeEditor, UiDialog, UiSelect } from '@/components/ui'
+import { UiAlert, UiButton, UiCodeEditor, UiDialog, UiHelpPopover, UiSelect } from '@/components/ui'
 const props = defineProps<{
   open: boolean
   source: { path: string; text: string; version: string }
@@ -84,6 +84,10 @@ function discard() {
       <div class="editor-toolbar">
         <code class="muted truncate" :title="source.path">{{ source.path }}</code>
         <div v-if="props.loadBackup" class="editor-backups">
+          <UiHelpPopover label="配置备份说明">
+            备份 1 最近，数字越大越早，最多保留 5
+            份。读取备份只替换编辑区内容，点击保存后才覆盖当前文件；也可继续编辑后保存。读取其他版本会替换尚未保存的编辑内容。
+          </UiHelpPopover>
           <UiSelect
             :model-value="selectedBackup"
             :options="backups"
@@ -102,13 +106,11 @@ function discard() {
         @save="persist"
       />
     </div>
-    <template #footer>
+    <template #footer="{ close }">
       <span class="editor-status muted">
         {{ content.split('\n').length }} 行 · {{ dirty ? '有未保存的修改' : '未修改' }}
       </span>
-      <UiButton :disabled="busy" @click="requestClose() && emit('update:open', false)">
-        关闭
-      </UiButton>
+      <UiButton :disabled="busy" @click="close()">关闭</UiButton>
       <UiButton
         variant="primary"
         icon="save"
@@ -128,8 +130,8 @@ function discard() {
   >
     <template #footer>
       <UiButton @click="closePrompt = false">继续编辑</UiButton>
-      <UiButton variant="danger" @click="discard">放弃修改</UiButton>
-      <UiButton variant="primary" @click="persist">保存</UiButton>
+      <UiButton variant="danger" @click="discard">不保存</UiButton>
+      <UiButton variant="primary" @click="persist">保存并关闭</UiButton>
     </template>
   </UiDialog>
 </template>
@@ -146,7 +148,10 @@ function discard() {
 }
 
 .editor-backups {
-  width: 140px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 166px;
   flex: none;
 }
 

@@ -146,6 +146,10 @@ class ConfigDocumentTests(unittest.TestCase):
             {"runtime": {"sandboxEnabled": True}},
             {"runtime": {"skipWebFetchPreflight": True}},
             {"runtime": {"skipWebFetchPreflight": "true"}},
+            {"runtime": {"attribution": True}},
+            {"runtime": {"attribution": "true"}},
+            {"runtime": {"attribution": "enabled"}},
+            {"runtime": {"attribution": {"commit": ""}}},
             {"runtime": {"permissionMode": "bypasspermission"}},
             {"runtime": {"permissionMode": True}},
             {"limits": {"context": True}},
@@ -279,6 +283,7 @@ class AgentConfigServiceTests(AgentConfigFixture):
         data = draft()
         data["runtime"] = {
             "sandboxEnabled": "unset",
+            "attribution": "unset",
             "attributionHeader": "disabled",
             "disableNonessentialTraffic": "enabled",
             "experimentalAgentTeams": "enabled",
@@ -295,6 +300,7 @@ class AgentConfigServiceTests(AgentConfigFixture):
         saved = json.loads(Path(result["files"]["claude"]["path"]).read_text(encoding="utf-8"))
         self.assertNotIn("sandbox", saved)
         self.assertNotIn("permissions", saved)
+        self.assertNotIn("attribution", saved)
         self.assertIs(True, saved["skipWebFetchPreflight"])
         for name, value in {
             "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
@@ -306,6 +312,57 @@ class AgentConfigServiceTests(AgentConfigFixture):
             self.assertEqual(value, saved["env"][name])
         self.assertNotIn("skipWebFetchPreflight", saved["env"])
         self.assertFalse(self.preview(data=data)["hasChanges"])
+
+    def test_claude_attribution_disable_and_clear_are_independent_of_header(self):
+        path = Path(self.snapshot()["files"]["claude"]["path"])
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            '// 用户署名\n{"attribution":{"commit":"Custom","pr":""},'
+            '"includeCoAuthoredBy":false,"env":{"CLAUDE_CODE_ATTRIBUTION_HEADER":"1"}}\n',
+            encoding="utf-8",
+        )
+        data = draft()
+        data["runtime"]["attribution"] = "disabled"
+        preview = self.preview(data=data)
+        row = next(row for row in preview["rows"] if row["path"] == "attribution")
+        self.assertEqual("change", row["kind"])
+        self.assertIs(False, row["next"])
+        result = self.service.apply(self.owner, "local", preview["token"])
+        self.assertIs(False, result["files"]["claude"]["managed"]["attribution"])
+        self.assertFalse(self.preview(data=data)["hasChanges"])
+        data["runtime"]["attribution"] = "unset"
+        data["clearFields"] = ["runtime.attribution"]
+        preview = self.preview(data=data)
+        self.assertEqual({"attribution"}, {row["path"] for row in preview["rows"] if row["kind"] == "remove"})
+        result = self.service.apply(self.owner, "local", preview["token"])
+        self.assertNotIn("attribution", result["files"]["claude"]["managed"])
+        text = path.read_text(encoding="utf-8")
+        saved = parse_document("claude", text)
+        self.assertEqual("1", saved["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"])
+        self.assertIs(False, saved["includeCoAuthoredBy"])
+        self.assertIn("// 用户署名", text)
+        self.assertFalse(self.preview(data=data)["hasChanges"])
+
+    def test_claude_custom_attribution_survives_unrelated_saves_and_explicitly_clears(self):
+        path = Path(self.snapshot()["files"]["claude"]["path"])
+        for attribution in ({}, {"commit": "Custom"}, {"commit": "", "pr": "", "sessionUrl": False}):
+            with self.subTest(attribution=attribution):
+                data = draft()
+                data["runtime"]["attribution"] = "disabled"
+                self.save(data=data)
+                original = json.dumps(attribution).replace("{", "{ /* 自定义署名 */ ", 1)
+                path.write_text('{"attribution":' + original + ',"custom":true}\n', encoding="utf-8")
+                self.assertEqual(attribution, self.snapshot()["files"]["claude"]["managed"]["attribution"])
+                data["runtime"].update(attribution="custom", sandboxEnabled="enabled")
+                for _ in range(2):
+                    result = self.save(data=data)
+                    self.assertEqual(attribution, result["files"]["claude"]["managed"]["attribution"])
+                    self.assertIn(original, path.read_text(encoding="utf-8"))
+                data["runtime"]["attribution"] = "unset"
+                data["clearFields"] = ["runtime.attribution"]
+                result = self.save(data=data)
+                self.assertNotIn("attribution", result["files"]["claude"]["managed"])
+                self.assertIs(True, parse_document("claude", path.read_text(encoding="utf-8"))["custom"])
 
     def test_webfetch_preflight_round_trips_boolean_and_explicitly_clears_only_top_level_key(self):
         path = Path(self.snapshot()["files"]["claude"]["path"])
@@ -831,6 +888,26 @@ class AgentConfigServiceTests(AgentConfigFixture):
         self.addCleanup(restarted.close)
         self.assertEqual("test", restarted.list_machines(self.owner)[1]["name"])
         self.assertEqual("", restarted.list_machines(self.owner)[1]["password"])
+
+    def test_machine_proxy_credentials_can_be_explicitly_cleared(self):
+        payload = {
+            "host": "server.test",
+            "user": "user",
+            "password": "ssh-secret",
+            "proxy": {"mode": "custom", "url": "http://u:p%2540ss@proxy.test:8080"},
+        }
+        machine = self.service.save_machine(self.owner, payload)
+        payload["password"] = ""
+        payload["proxy"] = {"mode": "custom", "url": "http://proxy.test:8080"}
+        retained = self.service.save_machine(self.owner, payload, machine["id"])
+        self.assertEqual("http://u:p%2540ss@proxy.test:8080", retained["proxy"]["url"])
+        payload["proxy"]["clearCredentials"] = True
+        cleared = self.service.save_machine(self.owner, payload, machine["id"])
+        self.assertEqual("http://proxy.test:8080", cleared["proxy"]["url"])
+        credentials = self.service.credentials[(self.owner, machine["id"])]
+        self.assertEqual("http://proxy.test:8080", credentials["proxy_url"])
+        self.assertEqual("ssh-secret", credentials["password"])
+        self.assertNotIn("clearCredentials", self.service.repository.path.read_text())
 
     def test_bootstrap_uses_public_models_and_downstream_keys(self):
         result = self.service.bootstrap(self.owner, "https://proxy.test")

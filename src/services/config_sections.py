@@ -7,6 +7,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ..config.provider_config import AuthGroupSchema
+
+
+def merge_auth_group(current: AuthGroupSchema, incoming: AuthGroupSchema) -> dict[str, Any]:
+    """保留同名认证组的现有设置，只补入缺少的凭据条目。"""
+    merged = current.to_mapping()
+    existing_ids = {entry.id for entry in current.entries}
+    merged["entries"].extend(entry.to_mapping() for entry in incoming.entries if entry.id not in existing_ids)
+    return AuthGroupSchema.from_mapping(merged).to_mapping()
+
 
 def read_provider_entries(config: Mapping[str, Any]) -> list[dict[str, Any]]:
     """读取原始配置中的 provider 列表。"""

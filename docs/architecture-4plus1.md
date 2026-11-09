@@ -43,7 +43,11 @@
 
 表单草稿与服务器快照分开保存，列表使用稳定业务 ID。`useRequest` 管理替换读取与迟到响应，`useAction` 管理串行操作、错误和操作后刷新，页面与弹窗卸载时取消未完成请求。Agent 预览按当前机器、Agent 和草稿版本关联，原始文件编辑期间暂停表单预览。OAuth 首次读取本地账号快照，每分钟按已到期窗口同步，页面隐藏或操作忙碌时跳过，卸载时移除定时器和监听器。客户端取消不回滚已经完成的服务端事务。
 
+单项开关由 `useToggle` 保存临时目标值和记录锁，已确认数据通过 `useRequest.patch` 写入页面快照；在途读取完成时合并期间已确认的更新，后续新读取接收服务器最新状态。同一模型映射及其目标共享记录锁，不同记录可独立提交。用户与 API Key 的开关调用既有 PUT 接口，携带显式布尔值。OAuth 单项启停期间暂停自动同步，认证组条目操作后读取当前运行快照。系统设置的各分组在同一页展示，按保存分组维护已确认值与草稿，保存响应仅更新对应分组。这些状态均属于当前页面，卸载时取消未完成请求；控制平面 API、数据平面和部署拓扑保持既有职责。
+
 浏览器非敏感偏好使用 `localStorage.theme` 和 `table-widths:*`。API Key、SSH 密码和文件内容仅处于当前页面或既有服务器隔离会话中。样式、菜单、帮助和对话框来自共享控件，文件编辑器实例随所属弹窗销毁。
+
+`AppShell` 在组件内独立保存宽屏侧栏选择与窄桌面临时选择。901–1280px 默认收起，可在该区间内手动展开；1280px 以上恢复宽屏选择；900px 及以下使用抽屉。`matchMedia` 只在跨越断点时更新响应式状态，监听随外壳卸载清理；侧栏选择不写入本地存储，宽度变化保留业务页面实例及草稿。
 
 ```mermaid
 flowchart LR
@@ -153,11 +157,11 @@ decoder
   - 状态文件位于数据库同级目录的 `agent-config/state.json`，保存机器、已确认主机指纹、自定义路径及受管字段摘要
   - JSONC 与 TOML 局部编辑、本机原子替换、SSH 主机验证及 SFTP 文件访问分别承担格式与传输职责
   - SSH 支持直连、进程系统代理及 HTTP / HTTPS CONNECT、SOCKS5、SOCKS5h 自定义代理；HTTPS 代理校验证书
-  - SSH 密码与代理凭据按浏览器在内存中暂存，登记文件中的代理地址移除认证信息
+  - SSH 密码与代理凭据按浏览器在内存中暂存，登记文件中的代理地址移除认证信息；机器保存请求的 `proxy.clearCredentials=true` 表示显式移除当前会话的代理认证，SSH 密码仍按原规则保留
 - `ProxyController`
   - 根据当前 route family 选择下游接口协议
   - 根据 `client_ip.real_ip_enabled` 和 `client_ip.real_ip_header` 解析白名单、模型权限、统计和 trace 使用的客户端 IP
-  - 在 `api_keys.enabled=true` 时校验下游 API Key，并按 key 模型权限与总 token 上限收窄可访问模型和请求
+  - 在 `api_keys.enabled=true` 时校验下游 API Key，并按 key 模型权限、总 token 上限、并发及分钟/每日请求限制执行准入
   - 同时启用 Chat 白名单和 API Key 管理时，最终模型权限为用户权限与 key 权限的交集
   - 处理 `/v1/images/generations` 与 `/v1/images/edits`，图片模型使用 Codex OAuth 图片模型目录和默认图片模型
   - 对模型映射 ID 执行配置的目标选择策略，并在目标自身候选耗尽后切换 Provider、Codex OAuth 或 Claude OAuth 文本目标
@@ -192,12 +196,13 @@ decoder
   - 支持按筛选条件导出统计迁移 JSON，迁移包包含请求明细和日聚合统计
   - 导入请求明细时按明细业务字段识别重复行；导入日聚合统计时按日期、IP、请求模型、映射目标模型和响应模型累加数值
 - `ApiKeyController`
-  - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限和 token 上限更新接口
+  - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限、Token 上限与三项请求限制更新接口
 - `ApiKeyService`
   - 生成 `sk-` 前缀的下游 API Key
   - 持久化明文 key 供管理端复制和显示，同时保留 hash 用于数据面鉴权
   - 复用 `*` / 显式模型列表语义维护 key 模型权限
   - 校验数据面请求携带的 `Authorization: Bearer sk-...` 或 `X-API-Key`
+  - 管理 key 级内存并发名额，协调 SQLite 周期请求计数与请求准入
 - `ModelCatalogService`
   - 汇总模型权限控制平面的可选模型目录
   - Provider 模型从配置中的 `providers[].model_list` 读取，继续包含已禁用 Provider 的模型
@@ -512,7 +517,7 @@ OAuth 模型是数据平面的例外路由：
     - 转换后的下游响应
   - 每条记录包含起始行、header 与 payload
 - `oauth.enabled`
-  - 保存后立即影响管理后台顶部 OAuth 页签是否显示
+  - 保存后立即影响管理后台侧栏 OAuth 导航项是否显示
   - 默认值为 `false`
   - 只有开启后，系统设置页才展示 OAuth 出站代理和 SSL 校验设置
 - `oauth.proxy_mode`
@@ -531,13 +536,13 @@ OAuth 模型是数据平面的例外路由：
 - `api_keys.enabled`
   - 归类为“API Key 管理”
   - 页面修改后自动生效
-  - 保存后立即影响后台顶部 API Key 管理页签是否显示
+  - 保存后立即影响后台侧栏 API Key 管理导航项是否显示
   - 保存后立即影响数据平面 `/v1/chat/completions`、`/v1/responses`、`/v1/responses/compact`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 是否要求下游携带 API Key
   - 默认值为 `false`
 - `model_mapping.enabled`
   - 归类为“模型映射”
   - 页面修改后自动生效
-  - 保存后立即影响后台顶部模型映射页签、数据平面模型目录和路由
+  - 保存后立即影响后台侧栏模型映射导航项、数据平面模型目录和路由
   - 映射定义与权限数据继续保存在 SQLite，关闭开关不会删除定义、运行状态或已有用户/API Key 权限
   - 默认值为 `false`
 
@@ -796,10 +801,14 @@ provider editor form snapshot
   - 测试模型也必须显式选择 `auth_entry`
   - 两者都不经过 `AuthGroupManager.acquire()`
   - 两者都不写运行态冷却、并发、配额
-- 首字延迟仅在真实流式首个正文或推理增量到达时记录
-- TPS 仅在拿到 completion usage 后计算，计算口径为 `completion_tokens / 本次流式请求端到端耗时`
+- 首字延迟从 executor 发起上游请求开始，到首个非空正文或推理增量完整到达时记录；请求构建与代理参数准备不计入
+- TPS 采用单请求生成阶段口径：`(completion_tokens - 1) / (末个输出片段时间 - 首个输出片段时间)`，时间单位为秒；不包含首字等待、末尾 usage 和终止事件等待
+- 接收时间在读取网络数据块时记录，同一数据块的事件共享时间；缺少用量、输出不超过一个 Token、单个输出数据块或无有效时间区间时，TPS 为空
+- 上游用量包含未观测到的思考输出、Responses 隐藏思考或摘要、Claude redacted thinking 时，TPS 为空；思考检测只在当前测试调用内保留状态
 - 每个成功模型测试写入一条请求历史；失败结果不写请求明细和日聚合统计
 - 上游重试属于同一次模型测试；最终成功时记录一次，最终失败时不记录
+- 测试基准请求省略 `temperature` 和 `top_p`；GLM Claude 兼容请求使用低档思考预算，并额外保留 192 Token 正文额度
+- OpenAI Chat 明确返回输出上限字段不兼容的 400/422 时，可在 `max_retries` 总尝试次数内将 `max_tokens` 切换为 `max_completion_tokens` 一次；兼容状态仅存在于当前模型测试的调用内，不跨模型缓存
 - 请求历史中的请求模型使用 `{provider_name}/{upstream_model_id}`；未填写 Provider 名称时使用上游模型 ID
 - 请求历史使用当前管理请求按 `client_ip` 设置解析出的客户端 IP，并记录上游返回的 usage
 - 如果上游成功但未返回 usage：
@@ -999,8 +1008,8 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 创建与存储约束：
 
 - 新建 key 使用 `sk-` 前缀随机字符串
-- 明文 key 会保存在 SQLite 中，管理端列表可点击复制图标复制，复制后短暂在 key 旁显示明文气泡
-- 创建和编辑都可以设置名称、模型权限、总 token 使用上限和启用状态
+- 明文 key 保存在 SQLite 中；管理端列表提供显示、隐藏与复制按钮，明文单行显示，列宽不足时表格内部横向滚动
+- 创建和编辑都可以设置名称、模型权限、累计 Token 配额、启用状态、最大并发数、请求/分钟和请求/天
 - SQLite `api_keys` 表保存：
   - `api_key`
   - `key_hash`
@@ -1009,11 +1018,14 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - `enabled`
   - `model_permissions`
   - `token_limit_k`
+  - `max_concurrency`、`request_quota_per_minute`、`request_quota_per_day`
+  - `request_minute`、`minute_request_count`、`request_day`、`day_request_count`：最近自然分钟与自然日的准入计数
   - 累计请求数与 token 用量
   - 创建、更新和最近使用时间
 - `model_permissions='*'` 表示允许全部模型
 - 显式模型权限以 JSON 数组保存，Provider 模型使用 `{provider}/{model}` 路由 key，OAuth 模型使用原始模型名
 - `token_limit_k=NULL` 表示不限额；非空时单位为 k，最小有效值为 `1`，按 `api_keys.total_tokens` 计量
+- 三个请求限制字段为 `NULL` 时不限制；非空值为 `1–2147483647` 的整数，更新时省略字段保留原值，显式 `null` 清空限制
 - Provider 模型变化后，`Application.reload_providers()` 会按当前模型权限目录同步清理 API Key 显式授权中已经不存在的模型
 
 数据面 API Key 鉴权链路如下：
@@ -1028,7 +1040,9 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   -> user model permission check
   -> API Key model permission check
   -> API Key token limit check
+  -> API Key concurrency check + atomic minute/day request reservation
   -> upstream proxy
+  -> release concurrency slot on completion / exception / stream close
   -> statistics completion callback
   -> request log insert
   -> API Key usage counter update
@@ -1051,6 +1065,15 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - 白名单仍按客户端 IP 解析用户
   - 用户模型权限和 API Key 模型权限都必须允许目标模型
   - `/v1/models` 只返回两者交集
+- 请求限速：
+  - `ApiKeyService` 使用实例级 gevent `RLock` 保护 key ID 到在途数量的内存映射，更新后的限制在下一次准入时读取
+  - `ApiKeyRepository.reserve_request()` 在 SQLite `BEGIN IMMEDIATE` 事务内检查分钟与每日配额并同步递增；每个 key 只保留最近两个周期的计数
+  - 周期使用服务器本地自然分钟与自然日，重启和修改限制保留当前周期计数；并发状态随进程重启释放，适用单进程部署
+  - 通过鉴权、模型与权限检查后，每个客户端推理请求准入一次；跨模型共享限制，上游失败计入，Provider、OAuth 和模型映射内部重试不重复计数
+  - 鉴权或准入失败不消耗次数，`/v1/models` 查询不进入限速；累计 Token 用量继续由完成回调记录
+  - `ProxyController` 在普通请求结束或异常时释放并发；流式响应的迭代结束、异常与 `close()` 共用幂等释放，首块尚未消费时关闭也释放
+  - 达到上限返回 `429` 与 `Retry-After`，错误码分别为 `api_key_concurrency_limit_exceeded`、`api_key_minute_limit_exceeded`、`api_key_day_limit_exceeded`；Claude 使用既有协议错误格式
+- Auth Group 继续按上游条目控制并发、429 冷却和分钟/每日请求次数。Token 用量用于统计；历史 `token_quota_per_minute`、`token_quota_per_day` 兼容读取且忽略，规范化保存与导出省略这两个字段
 - 统计完成回调执行后：
   - `request_logs.api_key_id` 记录本次使用的 key
   - `request_logs.target_model_id` 记录模型映射实际命中的目标模型，未经过模型映射的请求为空
@@ -1298,6 +1321,7 @@ Client / Agent / IDE
 sequenceDiagram
     participant Client
     participant Controller
+    participant KeyLimits as ApiKeyService
     participant Service
     participant Translator
     participant Executor
@@ -1308,6 +1332,12 @@ sequenceDiagram
     Controller->>Controller: 按 client_ip.* 解析客户端 IP
     opt api_keys.enabled=true
         Controller->>Controller: 校验 API Key hash、key 模型权限和 token 上限
+        Controller->>KeyLimits: acquire_request(key)
+        KeyLimits->>KeyLimits: 检查内存并发占用
+        KeyLimits->>NativeIO: 原子检查与预占自然分钟、每日请求次数
+        NativeIO->>SQLite: BEGIN IMMEDIATE / UPDATE / COMMIT
+        SQLite-->>KeyLimits: 准入结果
+        KeyLimits-->>Controller: 幂等释放回调，或 429 + Retry-After
     end
     Controller->>Service: proxy_request()
     Service->>Translator: openai_chat -> openai_responses
@@ -1352,6 +1382,9 @@ sequenceDiagram
             Service->>Executor: close upstream response
             Service->>Service: 记录 known、partial 或 unknown usage 统计
         end
+    end
+    opt API Key 已准入
+        Controller->>KeyLimits: 完成、异常或响应 close 时释放并发
     end
 ```
 
