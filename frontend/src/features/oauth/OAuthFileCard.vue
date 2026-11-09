@@ -42,6 +42,21 @@ const emit = defineEmits<{
   refresh: []
   consume: [id: string]
 }>()
+function selectCard(event: MouseEvent) {
+  const target = event.target
+  const card = event.currentTarget
+  if (props.disabled || !(target instanceof Element) || !(card instanceof HTMLElement)) return
+  if (!card.contains(target)) return
+  if (
+    target.closest(
+      'button, a, input, select, textarea, label, [role="button"], [role="checkbox"], [role="switch"], [role="combobox"], [contenteditable="true"]',
+    )
+  )
+    return
+  const selection = window.getSelection()
+  if (selection && !selection.isCollapsed && card.contains(selection.anchorNode)) return
+  emit('select', !props.selected)
+}
 const category = computed(() => fileCategory(props.file, props.now))
 const windows = computed(() => quotaWindows(props.file.quota))
 const cards = computed(() => availableCards(props.file.reset_cards || [], props.now))
@@ -105,10 +120,12 @@ function resetLabel(window: QuotaWindow) {
     class="oauth-file surface"
     :class="{ 'oauth-file-disabled': file.enabled === false, 'oauth-file-selected': selected }"
     :aria-label="file.name"
+    @click="selectCard"
   >
     <header class="oauth-file-header">
       <UiCheckbox
         :model-value="selected"
+        :disabled="disabled"
         :label="`选择 ${file.name}`"
         @update:model-value="emit('select', $event)"
       />
@@ -293,6 +310,7 @@ function resetLabel(window: QuotaWindow) {
   padding: var(--space-5);
   align-content: start;
   min-width: 0;
+  cursor: pointer;
 }
 
 .oauth-file-disabled {

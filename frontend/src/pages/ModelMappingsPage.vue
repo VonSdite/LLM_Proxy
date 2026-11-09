@@ -255,9 +255,6 @@ function setTarget(id: string, model: string, value: boolean) {
             @click="clipboard.run(() => copyText(row.id), '已复制模型 ID')"
           />
         </div>
-        <small v-if="row.conflict_source" class="danger">
-          与 {{ row.conflict_source }} 模型重名
-        </small>
       </template>
       <template #cell-strategy="{ row }">
         <div class="stack-small">

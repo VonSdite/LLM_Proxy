@@ -146,6 +146,16 @@ function exportFiltered() {
         >
           添加账号
         </UiButton>
+        <UiCheckbox
+          class="oauth-select-all"
+          :model-value="allSelected ? true : selectedNames.length ? 'indeterminate' : false"
+          :disabled="!filtered.length || workspace.blocked.value"
+          label="选择当前筛选的账号"
+          @update:model-value="selectAll"
+        >
+          全选
+        </UiCheckbox>
+        <UiButton @click="catalogOpen = true">模型目录</UiButton>
         <UiSegmented v-model="filter" :items="filters" label="认证文件状态" />
         <UiButton icon="import" :disabled="workspace.blocked.value" @click="fileInput?.click()">
           导入
@@ -160,16 +170,6 @@ function exportFiltered() {
             导出
           </UiButton>
         </UiTooltip>
-        <UiButton @click="catalogOpen = true">模型目录</UiButton>
-        <UiCheckbox
-          class="oauth-select-all"
-          :model-value="allSelected ? true : selectedNames.length ? 'indeterminate' : false"
-          :disabled="!filtered.length || workspace.blocked.value"
-          label="选择当前筛选的账号"
-          @update:model-value="selectAll"
-        >
-          全选
-        </UiCheckbox>
       </template>
       <template #search>
         <UiSearchInput
