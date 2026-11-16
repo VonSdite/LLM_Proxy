@@ -2,13 +2,18 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { authGroupsApi, providersApi, type AuthEntry, type ModelTestResult } from '@/api/providers'
 import { errorMessage, isAbort } from '@/api/client'
-import ModelTestStatus from '@/features/providers/ModelTestResult.vue'
 import { UiButton, UiSelect, UiAlert } from '@/components/ui'
 const props = defineProps<{ model: string; disabled?: boolean }>()
+const emit = defineEmits<{
+  loading: [value: boolean]
+  result: [value: ModelTestResult | undefined]
+}>()
 const entries = ref<AuthEntry[]>([])
 const authEntry = ref('')
 const busy = ref(false)
+watch(busy, (value) => emit('loading', value), { flush: 'sync' })
 const result = ref<ModelTestResult>()
+watch(result, (value) => emit('result', value), { flush: 'sync' })
 const unsupported = ref('')
 let controller: AbortController | undefined
 let groupName = ''
@@ -84,6 +89,7 @@ async function test() {
     if (controller === current) busy.value = false
   }
 }
+defineExpose({ test, cancel })
 </script>
 <template>
   <div class="target-test">
@@ -96,7 +102,9 @@ async function test() {
       />
     </div>
     <UiButton size="sm" :loading="busy" :disabled="disabled || !model" @click="test">测试</UiButton>
-    <ModelTestStatus :result="result" />
+    <span v-if="!busy && result && !result.available" class="danger target-test-error">
+      {{ result.error || '上游未返回详细错误，请检查地址、认证与代理后重试。' }}
+    </span>
     <UiAlert v-if="unsupported" variant="info">{{ unsupported }}</UiAlert>
   </div>
 </template>
@@ -106,6 +114,14 @@ async function test() {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+  justify-content: center;
+}
+
+.target-test-error {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .target-test-entry {

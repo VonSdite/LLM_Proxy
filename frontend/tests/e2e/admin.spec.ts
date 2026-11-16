@@ -60,13 +60,13 @@ test('Agent 外部地址一键模型同步，预览刷新保持焦点，文件�
   await page.getByLabel('API 地址', { exact: true }).fill('https://external.example/v1')
   const all = page.getByLabel('一键设置模型', { exact: true })
   await all.fill('external-model')
-  await expect(page.getByLabel('ANTHROPIC_MODEL', { exact: true })).toHaveValue('external-model')
-  await expect(page.getByLabel('ANTHROPIC_DEFAULT_OPUS_MODEL', { exact: true })).toHaveValue(
+  await expect(page.getByLabel('默认主模型', { exact: true })).toHaveValue('external-model')
+  await expect(page.getByLabel('Opus 模型（复杂任务）', { exact: true })).toHaveValue(
     'external-model',
   )
   await expect(page.getByText('有待保存的修改')).toBeVisible()
   await expect(all).toBeFocused()
-  await page.getByRole('button', { name: fixture.snapshot.files.claude.path, exact: true }).click()
+  await page.getByRole('button', { name: fixture.snapshot.files.claude!.path, exact: true }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.locator('.ace_editor')).toBeVisible()
   await dialog.locator('.ace_text-input').focus()
@@ -79,10 +79,10 @@ test('Agent 外部地址一键模型同步，预览刷新保持焦点，文件�
   expect(fixture.calls.filter((call) => call.path.endsWith('/apply'))).toEqual([])
 })
 
-test('统计默认今天、按需请求日志、页码跳转与导出范围', async ({ page }) => {
+test('统计默认概览、按需请求日志、页码跳转与导出范围', async ({ page }) => {
   const fixture = await mockAdmin(page)
   await page.goto('/statistics')
-  await expect(page.getByText('开发用户').first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: '使用趋势', exact: true })).toBeVisible()
   expect(fixture.calls.some((call) => call.path === '/api/request-logs')).toBe(false)
   await page.getByRole('tab', { name: '请求明细' }).click()
   const jump = page.getByRole('textbox', { name: '跳转页码' })
@@ -101,12 +101,12 @@ test('统计默认今天、按需请求日志、页码跳转与导出范围', as
   expect(url.searchParams.has('page')).toBe(false)
 })
 
-test('关闭功能后隐藏导航并阻止直接进入', async ({ page }) => {
+test('关闭功能后保留导航和所属页面入口', async ({ page }) => {
   const fixture = await mockAdmin(page)
   fixture.bootstrap.features.api_keys = false
   await page.goto('/api-keys')
-  await expect(page).toHaveURL(/\/settings$/)
+  await expect(page).toHaveURL(/\/api-keys$/)
   await expect(
     page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: 'API Key' }),
-  ).toHaveCount(0)
+  ).toHaveCount(1)
 })

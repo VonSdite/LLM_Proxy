@@ -55,15 +55,35 @@ watch(visible, (rows) => {
   selected.value = selected.value.filter((id) => rows.some((row) => row.id === id))
 })
 const columns: TableColumn[] = [
-  { key: 'id', label: '对外模型', width: 240 },
-  { key: 'strategy', label: '策略', width: 155 },
+  {
+    key: 'id',
+    label: '映射模型 ID',
+    width: 240,
+    maxWidth: 320,
+    help: '客户端请求时填写的模型 ID，代理按本行路由策略从候选模型中选择实际调用目标。点击名称可编辑映射。',
+  },
+  {
+    key: 'strategy',
+    label: '路由策略',
+    width: 180,
+    fixed: true,
+    help: [
+      '最高优先级：每次请求选择正常候选中优先级最高的模型。',
+      '粘滞故障切换：继续使用当前可用模型，发生故障后再切换。',
+      '故障冷却：网络异常及部分上游错误发生后暂停常规选择的时长；有效 Retry-After 优先。',
+    ],
+  },
   {
     key: 'targets',
-    label: '目标模型',
+    label: '候选模型',
     width: 440,
-    help: '当前标记是最近选中的目标，数字是优先级，越大越优先。单个目标被禁用或冷却时通常跳过；无正常候选时仍会尝试存在于运行时目录中的目标兜底。停止整个映射请关闭映射的启用开关。',
+    help: [
+      '模型标签右侧的数字为优先级，数字越大越优先；相同优先级按从左到右、从上到下的候选顺序选择。粘滞策略优先继续使用当前可用模型。',
+      '最近选用：最近一次路由选中的模型，不代表下一次请求一定使用它。',
+      '候选被禁用或冷却时通常跳过；无正常候选时仍会尝试运行时目录中存在的模型兜底。停止整个映射请关闭“映射启用”。',
+    ],
   },
-  { fixed: true, key: 'enabled', label: '启用', width: 90 },
+  { fixed: true, key: 'enabled', label: '映射启用', width: 100 },
   { fixed: true, key: 'actions', label: '操作', width: 168, minWidth: 168 },
 ]
 const states = {
@@ -140,8 +160,8 @@ function setTarget(id: string, model: string, value: boolean) {
 </script>
 <template>
   <div class="page">
-    <UiPageHeader title="模型映射" :count="visible.length" />
-    <UiListToolbar>
+    <UiPageHeader title="模型映射" />
+    <UiListToolbar :selecting="selected.length > 0">
       <template #actions>
         <UiButton
           variant="primary"
@@ -189,36 +209,37 @@ function setTarget(id: string, model: string, value: boolean) {
         :loading="request.loading.value"
         @click="request.refresh"
       />
+      <template #selection>
+        <UiSelectionBar
+          v-if="selected.length"
+          embedded
+          :count="selected.length"
+          :disabled="action.busy.value || toggles.busy.value"
+          @clear="selected = []"
+        >
+          <UiButton
+            :disabled="
+              action.busy.value ||
+              toggles.busy.value ||
+              exporting.busy.value ||
+              request.loading.value
+            "
+            @click="exportMappings(selected)"
+          >
+            导出所选
+          </UiButton>
+          <UiConfirmPopover
+            :message="`删除所选 ${selected.length} 个映射？`"
+            @confirm="removeSelected"
+          >
+            <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
+              删除
+            </UiButton>
+          </UiConfirmPopover>
+        </UiSelectionBar>
+      </template>
     </UiListToolbar>
-    <UiSelectionBar
-      v-if="selected.length"
-      :count="selected.length"
-      :disabled="action.busy.value || toggles.busy.value"
-      @clear="selected = []"
-    >
-      <UiButton
-        :disabled="
-          action.busy.value || toggles.busy.value || exporting.busy.value || request.loading.value
-        "
-        @click="exportMappings(selected)"
-      >
-        导出所选
-      </UiButton>
-      <UiConfirmPopover :message="`删除所选 ${selected.length} 个映射？`" @confirm="removeSelected">
-        <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
-          删除
-        </UiButton>
-      </UiConfirmPopover>
-    </UiSelectionBar>
-    <UiAlert
-      v-if="
-        request.error.value || action.error.value || clipboard.error.value || exporting.error.value
-      "
-    >
-      {{
-        exporting.error.value || action.error.value || clipboard.error.value || request.error.value
-      }}
-    </UiAlert>
+    <UiAlert v-if="request.error.value">{{ request.error.value }}</UiAlert>
     <UiAlert v-if="request.data.value && !request.data.value.enabled" variant="warning">
       模型映射功能已关闭，可在系统设置中启用。
     </UiAlert>
@@ -238,16 +259,19 @@ function setTarget(id: string, model: string, value: boolean) {
       empty="没有匹配的模型映射"
       @reorder="reorder"
     >
+      <template #header-actions><span class="mapping-centered-heading">操作</span></template>
+      <template #header-enabled><span class="mapping-centered-heading">映射启用</span></template>
       <template #cell-id="{ row }">
         <div class="actions">
           <UiButton
             variant="link"
             :aria-label="`编辑模型映射 ${row.id}`"
+            size="title"
             aria-haspopup="dialog"
             :disabled="action.busy.value || toggles.busy.value"
             @click="edit(row)"
           >
-            <code>{{ row.id }}</code>
+            <span>{{ row.id }}</span>
           </UiButton>
           <UiIconButton
             icon="copy"
@@ -259,55 +283,89 @@ function setTarget(id: string, model: string, value: boolean) {
       <template #cell-strategy="{ row }">
         <div class="stack-small">
           <span>{{ row.strategy === 'sticky_failover' ? '粘滞故障切换' : '最高优先级' }}</span>
-          <small class="muted">冷却 {{ row.cooldown_seconds_on_429 }} 秒</small>
+          <span class="muted text-caption">冷却 {{ row.cooldown_seconds_on_429 }} 秒</span>
           <UiBadge v-if="row.safe_desensitization_enabled">安全脱敏</UiBadge>
         </div>
       </template>
       <template #cell-targets="{ row }">
         <div class="mapping-target-list">
-          <div v-for="target in row.targets" :key="target.model_id" class="mapping-target-summary">
-            <UiSwitch
-              :model-value="
-                toggles.value(
-                  targetKey(row.id, target.model_id),
-                  target.enabled && target.status === 'available',
-                )
-              "
-              :loading="toggles.pending(targetKey(row.id, target.model_id))"
-              :label="`${target.model_id} 启用状态`"
-              :disabled="
-                target.available_model === false ||
-                action.busy.value ||
-                (toggles.blocked(row.id) && !toggles.pending(targetKey(row.id, target.model_id)))
-              "
-              @update:model-value="setTarget(row.id, target.model_id, $event)"
-            />
-            <code>{{ target.model_id }}</code>
-            <UiBadge v-if="target.current" variant="success">当前</UiBadge>
-            <UiHelpPopover
-              v-if="target.status && target.status !== 'available'"
-              :label="states[target.status]"
-            >
-              <p>{{ states[target.status] }}</p>
-              <p v-if="target.cooldown_until">恢复时间：{{ dateTime(target.cooldown_until) }}</p>
-              <p v-if="target.last_status_code">HTTP {{ target.last_status_code }}</p>
-              <p>{{ target.last_error_message || target.last_error_type }}</p>
-            </UiHelpPopover>
-            <small class="muted number">{{ target.priority }}</small>
+          <div
+            v-for="target in row.targets"
+            :key="target.model_id"
+            class="mapping-target-summary"
+            :class="{ 'mapping-target-summary--disabled': target.status === 'disabled' }"
+          >
+            <div class="mapping-target-details">
+              <UiBadge size="md" class="mapping-target-id">
+                <span class="mapping-target-name">{{ target.model_id }}</span>
+                <UiTooltip :text="`优先级 ${target.priority}：数字越大越优先`">
+                  <span
+                    class="mapping-target-priority number"
+                    tabindex="0"
+                    :aria-label="`优先级 ${target.priority}`"
+                  >
+                    {{ target.priority }}
+                  </span>
+                </UiTooltip>
+                <span v-if="target.current" class="mapping-target-current">最近选用</span>
+                <UiSwitch
+                  :model-value="
+                    toggles.value(
+                      targetKey(row.id, target.model_id),
+                      target.enabled && target.status === 'available',
+                    )
+                  "
+                  :loading="toggles.pending(targetKey(row.id, target.model_id))"
+                  :label="`${target.model_id} 启用状态`"
+                  :disabled="
+                    target.available_model === false ||
+                    action.busy.value ||
+                    (toggles.blocked(row.id) &&
+                      !toggles.pending(targetKey(row.id, target.model_id)))
+                  "
+                  @update:model-value="setTarget(row.id, target.model_id, $event)"
+                />
+              </UiBadge>
+              <div class="mapping-target-meta">
+                <UiBadge
+                  v-if="
+                    target.status && target.status !== 'available' && target.status !== 'disabled'
+                  "
+                  :variant="target.status === 'cooldown' ? 'warning' : 'danger'"
+                >
+                  {{ states[target.status] }}
+                </UiBadge>
+                <UiHelpPopover
+                  v-if="
+                    target.status && target.status !== 'available' && target.status !== 'disabled'
+                  "
+                  :label="states[target.status]"
+                >
+                  <p>{{ states[target.status] }}</p>
+                  <p v-if="target.cooldown_until">
+                    恢复时间：{{ dateTime(target.cooldown_until) }}
+                  </p>
+                  <p v-if="target.last_status_code">HTTP {{ target.last_status_code }}</p>
+                  <p>{{ target.last_error_message || target.last_error_type }}</p>
+                </UiHelpPopover>
+              </div>
+            </div>
           </div>
         </div>
       </template>
       <template #cell-enabled="{ row }">
-        <UiSwitch
-          :model-value="toggles.value(row.id, row.enabled)"
-          :loading="toggles.pending(row.id)"
-          :label="`启用映射 ${row.id}`"
-          :disabled="action.busy.value || (toggles.blocked(row.id) && !toggles.pending(row.id))"
-          @update:model-value="setEnabled(row.id, $event)"
-        />
+        <div class="mapping-centered-cell">
+          <UiSwitch
+            :model-value="toggles.value(row.id, row.enabled)"
+            :loading="toggles.pending(row.id)"
+            :label="`启用映射 ${row.id}`"
+            :disabled="action.busy.value || (toggles.blocked(row.id) && !toggles.pending(row.id))"
+            @update:model-value="setEnabled(row.id, $event)"
+          />
+        </div>
       </template>
       <template #cell-actions="{ row }">
-        <div class="table-actions">
+        <div class="table-actions mapping-centered-cell">
           <UiIconButton
             icon="edit"
             :label="`编辑 ${row.id}`"
@@ -321,7 +379,7 @@ function setTarget(id: string, model: string, value: boolean) {
             @click="action.run((signal) => mappingsApi.copy(row.id, signal), '已复制映射')"
           />
           <UiConfirmPopover
-            :message="`删除映射 ${row.id}？`"
+            message="是否删除？"
             @confirm="action.run((signal) => mappingsApi.remove(row.id, signal), '已删除映射')"
           >
             <UiIconButton
@@ -352,23 +410,93 @@ function setTarget(id: string, model: string, value: boolean) {
 </template>
 <style scoped>
 .mapping-target-list {
-  display: grid;
-  gap: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2) var(--space-3);
 }
 
 .mapping-target-summary {
   display: flex;
+  flex: 0 1 auto;
+  max-width: 100%;
   gap: var(--space-2);
   align-items: center;
 }
 
-.mapping-target-summary code {
+.mapping-target-id {
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mapping-target-current {
+  color: var(--success);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.mapping-target-name {
   overflow-wrap: anywhere;
+  white-space: normal;
   min-width: 0;
 }
 
-.mapping-target-summary small {
-  margin-left: auto;
+.mapping-target-priority {
+  display: inline-block;
+  min-width: 16px;
+  margin-left: calc(-1 * var(--space-1));
+  padding-left: var(--space-1);
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  text-align: center;
+  font-size: var(--text-sm);
+  cursor: help;
+}
+
+.mapping-target-priority:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.mapping-target-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.mapping-target-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+
+.mapping-target-meta:empty {
+  display: none;
+}
+
+.mapping-target-summary--disabled .mapping-target-id {
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+}
+
+.mapping-centered-heading {
+  width: 100%;
+  text-align: center;
+}
+
+.mapping-centered-cell {
+  display: flex;
+  justify-content: center;
 }
 
 .stack-small {

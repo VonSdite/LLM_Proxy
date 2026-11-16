@@ -4,7 +4,7 @@ withDefaults(
   defineProps<{
     variant?:
       'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-outline' | 'danger-solid' | 'link'
-    size?: 'xs' | 'sm' | 'md'
+    size?: 'xs' | 'sm' | 'md' | 'title'
     icon?: IconName
     loading?: boolean
     disabled?: boolean
@@ -57,6 +57,11 @@ withDefaults(
 .ui-button--xs {
   min-height: var(--control-xs);
   font-size: var(--text-sm);
+}
+
+.ui-button--title {
+  font-size: var(--text-section);
+  font-weight: var(--weight-emphasis);
 }
 
 .ui-button--primary {

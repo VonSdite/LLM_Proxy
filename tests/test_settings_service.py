@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 import yaml
 from flask import Flask
@@ -12,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
 from src.config.config_manager import ConfigManager
+from src.services.claude_proxy_service import ClaudeProxyService
+from src.services.codex_proxy_service import CodexProxyService
 from src.services.settings_service import SettingsService
 
 
@@ -31,7 +34,7 @@ class FakeLogger:
 
 class SettingsServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        runtime_root = Path(__file__).resolve().parents[1] / "data" / "_test_runtime"
+        runtime_root = Path(__file__).resolve().parents[1] / "tmp" / "settings-tests"
         runtime_root.mkdir(parents=True, exist_ok=True)
         self.temp_dir = tempfile.TemporaryDirectory(dir=runtime_root)
         self.root_path = Path(self.temp_dir.name)
@@ -83,6 +86,46 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertFalse(settings["api_keys"]["enabled"])
         self.assertFalse(self.config_manager.is_api_key_management_enabled())
 
+    def test_oauth_switch_controls_data_plane_without_removing_management_catalog(self) -> None:
+        catalog = Mock()
+        catalog.list_model_names.return_value = ("text-model",)
+        catalog.list_image_model_names.return_value = ("image-model",)
+        catalog.has_model.return_value = True
+        catalog.has_image_model.return_value = True
+        codex = CodexProxyService(self.ctx, catalog)
+        claude = ClaudeProxyService(self.ctx, catalog)
+        for enabled in (False, True, False):
+            with self.subTest(enabled=enabled):
+                self.service.update_oauth_settings(
+                    {"oauth": {"enabled": enabled, "proxy_mode": "direct", "proxy": "", "verify_ssl": False}}
+                )
+                for proxy in (codex, claude):
+                    self.assertEqual(proxy.has_model("text-model"), enabled)
+                    self.assertEqual(proxy.list_model_names(), ("text-model",) if enabled else ())
+                    if not enabled:
+                        _, status, failure = proxy.proxy_request({"model": "text-model"}, {})
+                        self.assertEqual(status, 503)
+                        self.assertEqual(failure.error_code, "oauth_disabled")
+                self.assertEqual(codex.has_image_model("image-model"), enabled)
+                self.assertEqual(codex.list_image_model_names(), ("image-model",) if enabled else ())
+                if not enabled:
+                    _, status, failure = codex.proxy_image_request({"model": "image-model"}, {}, action="generations")
+                    self.assertEqual(status, 503)
+                    self.assertEqual(failure.error_code, "oauth_disabled")
+                self.assertEqual(catalog.list_model_names(), ("text-model",))
+        catalog.list_auth_files.assert_not_called()
+
+    def test_model_mapping_is_always_enabled_with_legacy_config(self) -> None:
+        self.assertTrue(self.config_manager.is_model_mapping_enabled())
+        config = self.config_manager.get_raw_config()
+        config["model_mapping"] = {"enabled": False}
+        self.config_manager.write_raw_config(config)
+        self.assertTrue(self.config_manager.is_model_mapping_enabled())
+        self.assertTrue(self.service.get_system_settings()["model_mapping"]["enabled"])
+        result = self.service.update_model_mapping_settings({"model_mapping": {"enabled": False}})
+        self.assertTrue(result["settings"]["model_mapping"]["enabled"])
+        self.assertTrue(self.config_manager.get_raw_config()["model_mapping"]["enabled"])
+
     def test_update_api_key_settings_persists_enabled_flag(self) -> None:
         result = self.service.update_api_key_settings(
             {
@@ -129,6 +172,19 @@ class SettingsServiceTests(unittest.TestCase):
                     },
                 }
             )
+
+    def test_basic_settings_updates_admin_and_listener_independently(self) -> None:
+        result = self.service.update_basic_settings({"admin": {"username": "test", "password": "secret"}})
+        self.assertEqual({"host": "127.0.0.1", "port": 8080}, result["settings"]["server"])
+        self.assertTrue(result["auth_config_changed"])
+        self.assertFalse(result["server_restart_required"])
+        result = self.service.update_basic_settings({"server": {"host": "0.0.0.0", "port": 9000}})
+        self.assertEqual({"username": "test", "password": "secret"}, result["settings"]["admin"])
+        self.assertFalse(result["auth_config_changed"])
+        self.assertTrue(result["server_restart_required"])
+        for payload in ({}, {"server": None}, {"admin": None}):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                self.service.update_basic_settings(payload)
 
     def test_update_basic_settings_does_not_change_client_ip_settings(self) -> None:
         self.service.update_client_ip_settings(

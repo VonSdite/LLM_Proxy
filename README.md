@@ -113,8 +113,8 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 - `/providers`：Provider / Auth Group 管理
 - `/model-mappings`：模型映射；开启模型映射功能后显示
 - `/api-keys`：下游 API Key、模型权限、累计 Token 配额与并发/分钟/每日请求限制；开启 API Key 功能后显示
-- `/agents`：本机与 SSH 机器上的 Claude、Codex、opencode 配置管理
-- `/oauth`：Codex OAuth 认证文件与模型管理；开启 `oauth.enabled` 后会显示在后台导航中
+- `/agents`：本机与 SSH 机器上的 Claude、Codex、Opencode v1 / v2、DSH、Hermes 配置管理
+- `/oauth`：Codex OAuth 认证文件与模型管理，页面提供总开关与网络设置弹窗
 - `/settings`：系统、登录、日志和 OAuth 网络设置
 
 API Key 的最大并发数、请求/分钟、请求/天均可独立设置，留空表示不限制。周期按服务本地时间的自然分钟、自然日计算，计数保存在 SQLite，重启或调整限制保留当前周期计数。通过鉴权、模型与权限检查后接收的推理请求计一次，上游失败计入，内部重试不重复计数；被拒绝的请求和 `/v1/models` 查询不计入。并发名额在请求完成、异常或流式断开时释放；达到限制返回 `429` 与 `Retry-After`。累计 Token 配额独立生效。
@@ -134,11 +134,13 @@ npm --prefix frontend run dev
 
 ### Agent 配置
 
+Agent 定义集中在根目录 `agents/`。新增 `agents/<id>/agent.yaml` 并重启 Python 服务即可加载自定义表单，复杂格式可增加同目录 `adapter.py`；声明式扩展无需重新构建前端。格式、示例和官方配置依据见 [Agent 配置扩展](docs/agent-extension-design.md)。
+
 Claude 支持权限模式（含 `bypassPermissions`）、命令沙箱和运行参数。字段含义、平台限制及版本依据见 [Claude 配置兼容性](docs/claude-config-compatibility.md)。
 
-`/agents` 左侧管理机器，右侧按 Claude、Codex、opencode 编辑模型、API 地址、下游 API Key 和运行设置。API 地址可自由填写，指向本服务时，模型下拉来自当前启用的 Provider、OAuth 与模型映射；指向外部服务时，模型 ID 使用手动输入，切换地址时保留当前模型值。保存预览展示逐字段变化，已有文件保留最近五份 `.bak.1` 至 `.bak.5` 备份。点击已存在文件的路径可在网页内编辑和载入备份，编辑器提供 JSON / JSONC / TOML 语法高亮；点击保存自动校验并写入当前打开的文件。关闭有未保存修改的编辑器时，可选择保存并关闭、不保存或继续编辑。
+`/agents` 左侧管理机器，右侧按 Claude、Codex、Opencode v1 / v2、DSH、Hermes 编辑模型、API 地址、下游 API Key 和运行设置。API 地址可自由填写，指向本服务时，模型下拉来自当前启用的 Provider、OAuth 与模型映射；指向外部服务时，模型 ID 使用手动输入，切换地址时保留当前模型值。保存预览展示逐字段变化，已有文件保留最近五份 `.bak.1` 至 `.bak.5` 备份。点击已存在文件的路径可在网页内编辑和载入备份，编辑器提供 JSON / JSONC / TOML / YAML 语法高亮；点击保存自动校验并写入当前打开的文件。关闭有未保存修改的编辑器时，可选择保存并关闭、不保存或继续编辑。
 
-“本机”指运行 LLM_Proxy 的机器与用户。Windows 与 Linux 均可编辑本机文件，SSH 机器使用远程用户的真实主目录。文件路径旁的设置按钮支持 Claude `.json` 文件、Codex 配置目录和 opencode `.json` / `.jsonc` 文件；Codex 目录同时定位 `config.toml` 与 `auth.json`。路径按机器和 Agent 持久保存，重新访问和服务重启后继续使用，清空或恢复默认后使用默认位置。本机默认路径支持 `CODEX_HOME` 与 `CLAUDE_CONFIG_DIR`。原有其他配置及 JSONC、TOML 注释保留，单文件上限为 2 MiB，保存遇到文件版本变化时提示刷新。
+“本机”指运行 LLM_Proxy 的机器与用户。Windows 与 Linux 均可编辑本机文件，SSH 机器使用远程用户的真实主目录。文件路径旁的设置按钮支持各 Agent 配置文件的独立路径；Codex 的 `config.toml` 与 `auth.json`、DSH 的 profile 补丁与凭据文件分别设置。路径按机器和 Agent 持久保存，重新访问和服务重启后继续使用，清空或恢复默认后使用默认位置。本机默认路径支持 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`DSH_HOME` 与 `HERMES_HOME`。原有其他配置及 JSONC、TOML、YAML 注释保留，单文件上限为 2 MiB，保存遇到文件版本变化时提示刷新。
 
 模型参数输入显示当前文件值，推荐菜单保留模型对应的全部候选值、模型名称及来源说明；切换模型和手填外部模型 ID 更新候选，选择候选后填入参数。Claude 优先参考主模型或唯一已配置模型；主模型为空且其他模型不一致时，菜单直接列出各模型的候选值。各模型旁的问号提供上下文和最大输出参考值，未识别模型显示通用候选。Codex 的压缩上限与 opencode 的压缩预留显示在压缩阈值标题旁，数值输入失焦且内容变化时更新，选择候选值时即时更新。
 
@@ -207,10 +209,12 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `logging.path`：日志目录，默认 `logs`
 - `logging.level`：日志级别，例如 `INFO`、`DEBUG`
 - `logging.llm_request_debug_enabled`：是否把下游/上游请求与响应写入 `logs/llm_request_trace.log`
-- `oauth.enabled`：是否在后台导航显示 OAuth 管理入口
+- `oauth.enabled`：是否允许 OAuth 模型参与新请求；管理页面与网络设置始终可用
 - `oauth.proxy`：OAuth 登录、Codex 配额查询和 OAuth 上游请求使用的代理地址，留空表示不使用代理
 - `oauth.verify_ssl`：OAuth 网络请求是否校验证书，默认 `false`
 - `oauth.safe_desensitization_enabled`：是否对 OAuth 上游（Codex / Claude）请求启用安全脱敏，默认 `false`；效果与 Provider 的 `safe_desensitization_enabled` 一致
+
+内置服务支持在系统设置中热切换监听地址和端口，离开这组输入区域或按 Enter 自动保存。格式错误显示在对应字段下，无变化不提交。保存成功后弹窗展示新入口，确认后跳转；已有请求继续完成，登录会话保留。绑定失败时继续使用原监听。同端口地址冲突时可使用空闲端口切换。反向代理、容器端口映射和外部 WSGI 宿主的监听由部署方维护。
 
 ### `providers[]` 字段说明
 
@@ -540,6 +544,8 @@ Provider 编辑页的模型测试基于当前表单快照执行，不要求先�
 - 系统设置：`/settings`
 - 白名单按 IP 控制
 - 当 `chat.whitelist_enabled=true` 时，只有已登记且启用白名单权限的用户 IP 才能访问代理接口
+- 已登记 IP 始终按用户模型权限限制请求与模型目录；当 `chat.whitelist_enabled=false` 时，未登记 IP 不受用户模型权限限制，已登记用户的白名单访问状态不参与准入
+- API Key 校验启用时，请求还需满足该 Key 的模型权限；已登记用户的有效模型范围为用户权限与 Key 权限的交集
 - 用户管理支持用户迁移 JSON 导出、JSON 导入和批量删除；导出包包含用户表配置
 - 用户迁移 JSON 导入按 IP 写入用户；IP 已存在时更新用户配置，IP 不存在时创建用户
 

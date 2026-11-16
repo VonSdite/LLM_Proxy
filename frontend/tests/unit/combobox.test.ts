@@ -10,6 +10,23 @@ const options = [
   { value: 'another', label: '另一个 Key' },
 ]
 describe('可输入候选', () => {
+  it('候选名称只用于显示，自定义标识可继续输入且不被名称覆盖', async () => {
+    const wrapper = mount(UiCombobox, {
+      props: { modelValue: 'key-value', options, allowCustom: true, displayLabel: true },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('已有 Key')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.get('input').setValue('custom:proxy')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['custom:proxy'])
+    await wrapper.setProps({ modelValue: 'custom:proxy' })
+    await wrapper.get('input').trigger('blur')
+    await flushPromises()
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('custom:proxy')
+    wrapper.unmount()
+  })
+
   it('初始化不会打开菜单或将候选名称写回实际值', async () => {
     const wrapper = mount(UiCombobox, {
       props: { modelValue: 'key-value', options, allowCustom: true, secret: true },

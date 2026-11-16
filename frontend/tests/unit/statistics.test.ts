@@ -18,6 +18,8 @@ describe('统计数据与筛选契约', () => {
       end_date: '2025-02-28',
       username: [],
       request_model: [],
+      response_model: [],
+      ip_address: [],
     }
     expect(dateErrors(filters)).toEqual({})
     expect(dateErrors({ ...filters, end_date: '2025-03-01' }).end).toBe('查询范围最多一年')
@@ -76,6 +78,8 @@ describe('统计数据与筛选契约', () => {
           end_date: '2026-11-06',
           username: ['one', 'two'],
           request_model: ['provider/full/model'],
+          response_model: ['response/a', 'response/b'],
+          ip_address: ['127.0.0.1', '::1'],
           sort_key: 'duration',
           sort_direction: 'desc',
           page: 2,
@@ -87,6 +91,8 @@ describe('统计数据与筛选契约', () => {
     const url = new URL(String(fetch.mock.calls[0]![0]), 'http://localhost')
     expect(url.searchParams.getAll('username')).toEqual(['one', 'two'])
     expect(url.searchParams.getAll('request_model')).toEqual(['provider/full/model'])
+    expect(url.searchParams.getAll('response_model')).toEqual(['response/a', 'response/b'])
+    expect(url.searchParams.getAll('ip_address')).toEqual(['127.0.0.1', '::1'])
     expect(url.searchParams.get('page')).toBe('2')
     expect(url.searchParams.get('sort_key')).toBe('duration')
   })

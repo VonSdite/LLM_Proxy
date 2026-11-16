@@ -37,10 +37,12 @@ const formOpen = ref(false)
 const importing = ref(false)
 const permissionIds = ref<number[]>()
 const selectedIds = computed(() => list.selected.value.map(Number))
-const columns: TableColumn[] = [
+const columns = computed<TableColumn[]>(() => [
   { key: 'username', label: '用户', sortable: true, width: 160 },
   { key: 'ip_address', label: 'IP 地址', sortable: true, width: 175 },
-  { fixed: true, key: 'whitelist_access_enabled', label: '白名单', width: 95 },
+  ...(whitelist.value
+    ? [{ fixed: true, key: 'whitelist_access_enabled', label: '白名单', width: 95 }]
+    : []),
   { key: 'allowed_models_count', label: '模型权限', sortable: true, width: 110 },
   { key: 'prompt_tokens', label: '输入 (k)', sortable: true, width: 110, align: 'right' },
   { key: 'completion_tokens', label: '输出 (k)', sortable: true, width: 110, align: 'right' },
@@ -55,7 +57,7 @@ const columns: TableColumn[] = [
   { key: 'total_request_count', label: '请求', sortable: true, width: 95, align: 'right' },
   { key: 'created_at', label: '创建时间', sortable: true, width: 170 },
   { fixed: true, key: 'actions', label: '操作', width: 120, minWidth: 120 },
-]
+])
 function edit(user?: User) {
   if (toggles.busy.value || action.busy.value) return
   editing.value = user
@@ -134,8 +136,35 @@ function exportSelected() {
 </script>
 <template>
   <div class="page">
-    <UiPageHeader title="用户" />
-    <UiListToolbar>
+    <UiPageHeader title="用户">
+      <template #controls>
+        <div class="actions">
+          <UiSwitch
+            :model-value="toggles.value('whitelist', whitelist)"
+            :loading="toggles.pending('whitelist')"
+            :disabled="action.busy.value"
+            @update:model-value="toggleWhitelist"
+          >
+            启用白名单
+          </UiSwitch>
+          <UiHelpPopover label="白名单说明">
+            <p>
+              启用后，调用模型的 IP
+              必须已登记且开启“允许白名单访问”，并受用户的模型权限限制；模型目录也按权限过滤。
+            </p>
+            <p>
+              关闭后，已登记 IP 仍按用户模型权限限制请求和模型目录，不检查“允许白名单访问”；未登记
+              IP 不受用户模型权限限制。
+            </p>
+            <p>
+              新建用户默认允许白名单访问并授权全部模型。API Key
+              校验由其独立开关控制，启用时还需满足该 Key 的模型权限。
+            </p>
+          </UiHelpPopover>
+        </div>
+      </template>
+    </UiPageHeader>
+    <UiListToolbar :selecting="selectedIds.length > 0">
       <template #actions>
         <UiButton
           variant="primary"
@@ -145,6 +174,7 @@ function exportSelected() {
         >
           添加用户
         </UiButton>
+
         <UiButton
           icon="import"
           :disabled="action.busy.value || toggles.busy.value"
@@ -176,68 +206,50 @@ function exportSelected() {
           aria-label="搜索用户"
         />
       </template>
-      <template #filters>
-        <UiSwitch
-          :model-value="toggles.value('whitelist', whitelist)"
-          :loading="toggles.pending('whitelist')"
-          :disabled="action.busy.value"
-          @update:model-value="toggleWhitelist"
-        >
-          白名单
-        </UiSwitch>
-        <UiHelpPopover label="白名单说明">
-          <p>
-            启用后，调用模型的 IP
-            必须已登记且开启“允许白名单访问”，并受用户的模型权限限制；模型目录也按权限过滤。
-          </p>
-          <p>
-            新建用户默认允许白名单访问并授权全部模型，可在列表中禁用或编辑权限。关闭总开关后不再按用户
-            IP 与模型权限拦截；API Key 校验仍由其独立开关控制。
-          </p>
-        </UiHelpPopover>
-      </template>
+
       <UiIconButton
         icon="refresh"
         label="刷新用户"
         :loading="list.loading.value"
         @click="list.refresh"
       />
+      <template #selection>
+        <UiSelectionBar
+          v-if="selectedIds.length"
+          embedded
+          :count="selectedIds.length"
+          :disabled="action.busy.value || toggles.busy.value"
+          @clear="list.selected.value = []"
+        >
+          <UiButton
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="permissionIds = [...selectedIds]"
+          >
+            模型权限
+          </UiButton>
+          <UiButton
+            :disabled="
+              action.busy.value ||
+              toggles.busy.value ||
+              exporting.busy.value ||
+              list.filterPending.value
+            "
+            @click="exportSelected"
+          >
+            导出所选
+          </UiButton>
+          <UiConfirmPopover
+            :message="`删除所选 ${selectedIds.length} 个用户？`"
+            @confirm="removeSelected"
+          >
+            <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
+              删除
+            </UiButton>
+          </UiConfirmPopover>
+        </UiSelectionBar>
+      </template>
     </UiListToolbar>
-    <UiSelectionBar
-      v-if="selectedIds.length"
-      :count="selectedIds.length"
-      :disabled="action.busy.value || toggles.busy.value"
-      @clear="list.selected.value = []"
-    >
-      <UiButton
-        :disabled="!whitelist || action.busy.value || toggles.busy.value"
-        @click="permissionIds = [...selectedIds]"
-      >
-        模型权限
-      </UiButton>
-      <UiButton
-        :disabled="
-          action.busy.value ||
-          toggles.busy.value ||
-          exporting.busy.value ||
-          list.filterPending.value
-        "
-        @click="exportSelected"
-      >
-        导出所选
-      </UiButton>
-      <UiConfirmPopover
-        :message="`删除所选 ${selectedIds.length} 个用户？`"
-        @confirm="removeSelected"
-      >
-        <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
-          删除
-        </UiButton>
-      </UiConfirmPopover>
-    </UiSelectionBar>
-    <UiAlert v-if="list.error.value || action.error.value || exporting.error.value">
-      {{ exporting.error.value || action.error.value || list.error.value }}
-    </UiAlert>
+    <UiAlert v-if="list.error.value">{{ list.error.value }}</UiAlert>
     <UiTable
       v-model:selected="list.selected.value"
       v-model:sort="list.sort.value"
@@ -250,6 +262,18 @@ function exportSelected() {
       storage-key="users"
       empty="还没有用户"
     >
+      <template #cell-username="{ row }">
+        <UiButton
+          class="record-title"
+          variant="link"
+          size="title"
+          aria-haspopup="dialog"
+          :disabled="action.busy.value || toggles.busy.value"
+          @click="edit(row)"
+        >
+          {{ row.username }}
+        </UiButton>
+      </template>
       <template #cell-ip_address="{ row }">
         <span class="mono">{{ row.ip_address }}</span>
       </template>
@@ -264,9 +288,8 @@ function exportSelected() {
       </template>
       <template #cell-allowed_models_count="{ row }">
         <UiButton
-          variant="ghost"
-          size="sm"
-          :disabled="!whitelist || action.busy.value || toggles.busy.value"
+          variant="link"
+          :disabled="action.busy.value || toggles.busy.value"
           @click="edit(row)"
         >
           {{ row.model_permissions === '*' ? '全部模型' : `${row.allowed_models_count} 个模型` }}
@@ -277,7 +300,7 @@ function exportSelected() {
       <template #cell-total_tokens="{ row }">{{ tokenK(row.total_tokens) }}</template>
       <template #cell-total_request_count="{ row }">{{ number(row.total_request_count) }}</template>
       <template #cell-created_at="{ row }">
-        <small class="muted">{{ dateTime(row.created_at) }}</small>
+        <span class="muted text-caption">{{ dateTime(row.created_at) }}</span>
       </template>
       <template #cell-actions="{ row }">
         <div class="table-actions">
@@ -288,7 +311,7 @@ function exportSelected() {
             @click="edit(row)"
           />
           <UiConfirmPopover
-            :message="`删除用户 ${row.username}？`"
+            message="是否删除？"
             @confirm="action.run((signal) => usersApi.remove(row.id, signal), '已删除用户')"
           >
             <UiIconButton
@@ -310,7 +333,6 @@ function exportSelected() {
       v-if="formOpen"
       :user="editing"
       :models="list.models.value"
-      :whitelist="whitelist"
       @close="formOpen = false"
       @saved="saved"
     />

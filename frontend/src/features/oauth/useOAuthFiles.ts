@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { oauthApi, type OAuthFile, type OAuthImportResult, type Quota } from '@/api/oauth'
 import { ApiError, errorMessage, isAbort } from '@/api/client'
-import { notify } from '@/components/ui'
+import { notify, notifyProgress } from '@/components/ui'
 import { useToggle } from '@/features/shared/useToggle'
 import { MAX_TIMER_DELAY_MS, OAUTH_SYNC_INTERVAL_MS, quotaDue, timestamp } from './quota'
 
@@ -88,13 +88,23 @@ export function useOAuthFiles() {
   async function refreshMany(names: readonly string[], cards = true) {
     const snapshot = [...new Set(names)]
     progress.value = { done: 0, total: snapshot.length }
+    const notice = snapshot.length ? notifyProgress(`读取额度 0 / ${snapshot.length}`) : undefined
+    if (notice) lifetime.signal.addEventListener('abort', notice.close, { once: true })
     let failed = 0
-    for (const name of snapshot) {
-      if (!alive()) break
-      if (!(await refreshOne(name, cards))) failed++
-      if (alive()) progress.value.done++
+    try {
+      for (const name of snapshot) {
+        if (!alive()) break
+        if (!(await refreshOne(name, cards))) failed++
+        if (alive()) {
+          progress.value.done++
+          notice?.update(`读取额度 ${progress.value.done} / ${snapshot.length}`)
+        }
+      }
+      return failed
+    } finally {
+      notice?.close()
+      if (notice) lifetime.signal.removeEventListener('abort', notice.close)
     }
-    return failed
   }
   async function run(kind: string, task: () => Promise<void>) {
     if (blocked.value || !alive()) return
@@ -103,7 +113,10 @@ export function useOAuthFiles() {
     try {
       await task()
     } catch (reason) {
-      if (alive() && !isAbort(reason)) error.value = errorMessage(reason)
+      if (alive() && !isAbort(reason)) {
+        if (kind === 'loading' || kind === 'sync') error.value = errorMessage(reason)
+        else notify(errorMessage(reason), 'danger')
+      }
     } finally {
       if (alive()) {
         busy.value = ''
@@ -161,7 +174,7 @@ export function useOAuthFiles() {
         }
       }
       if (!alive()) return
-      if (failures.length) error.value = failures.join('\n')
+      if (failures.length) notify(failures.join('\n'), 'danger')
       else
         notify(
           `已${operation === 'delete' ? '删除' : operation === 'enable' ? '启用' : '禁用'} ${snapshot.length} 个认证文件`,

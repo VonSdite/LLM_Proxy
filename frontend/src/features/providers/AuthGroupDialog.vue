@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useDraftChanges } from '@/features/shared/useDraftChanges'
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { authGroupsApi, type AuthGroup } from '@/api/providers'
 import { errorMessage } from '@/api/client'
 import { useLifetime } from '@/features/shared/useLifetime'
@@ -10,16 +10,19 @@ import {
   UiAlert,
   UiBadge,
   UiButton,
+  UiCheckbox,
   UiConfirmPopover,
   UiDialog,
   UiField,
   UiHelpPopover,
   UiIconButton,
   UiInput,
+  UiListToolbar,
   UiNumberInput,
   UiSecretInput,
   UiSelect,
   UiSelectableRow,
+  UiSelectionBar,
   UiSwitch,
 } from '@/components/ui'
 const props = defineProps<{ group?: AuthGroup }>()
@@ -31,6 +34,21 @@ const entries = ref(
   props.group?.entries.length ? props.group.entries.map(entryDraft) : [entryDraft()],
 )
 const current = ref(entries.value[0]?.key)
+const selected = ref<number[]>([])
+const selectedEntries = computed(() =>
+  entries.value.filter((entry) => selected.value.includes(entry.key)),
+)
+function selectEntry(key: number, checked: boolean) {
+  selected.value = checked
+    ? [...new Set([...selected.value, key])]
+    : selected.value.filter((item) => item !== key)
+}
+function setSelectedEnabled(enabled: boolean) {
+  for (const entry of selectedEntries.value) entry.enabled = enabled
+}
+function removeSelected() {
+  for (const key of [...selected.value]) remove(key)
+}
 const errors = ref<Record<string, string>>({})
 const invalid = ref<Record<string, boolean>>({})
 const busy = ref(false)
@@ -48,6 +66,7 @@ async function add() {
   sidebar.value?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest' })
 }
 function remove(key: number) {
+  selected.value = selected.value.filter((item) => item !== key)
   const index = entries.value.findIndex((entry) => entry.key === key)
   entries.value = entries.value.filter((entry) => entry.key !== key)
   if (current.value === key)
@@ -61,6 +80,7 @@ async function applyYaml(text: string, importSignal: AbortSignal) {
   const result = await authGroupsApi.importEntries(text, importSignal)
   if (importSignal.aborted) return
   entries.value = result.entries.map(entryDraft)
+  selected.value = []
   current.value = entries.value[0]?.key
   errors.value = {}
   invalid.value = {}
@@ -172,20 +192,68 @@ const dirty = useDraftChanges(() => ({
           />
         </UiField>
       </div>
-      <div class="toolbar">
-        <div class="actions">
+      <UiListToolbar :selecting="selected.length > 0">
+        <template #persistent>
+          <UiCheckbox
+            variant="button"
+            :model-value="
+              selected.length === entries.length && entries.length > 0
+                ? true
+                : selected.length
+                  ? 'indeterminate'
+                  : false
+            "
+            :disabled="busy || !entries.length"
+            label="选择全部认证条目"
+            @update:model-value="selected = $event ? entries.map((entry) => entry.key) : []"
+          >
+            全选
+          </UiCheckbox>
+        </template>
+        <template #actions>
           <h2>认证条目</h2>
           <UiHelpPopover
             label="认证条目说明"
             :text="[
               '每个条目：一组发往上游的认证请求头，并发、冷却与配额分别按条目计算。',
-              '编辑 / 导入：直接编辑 YAML，或选择 YAML、JSON 文件，确定后整体替换当前表单中的条目列表。',
+              '编辑：直接修改 YAML，确定后整体替换当前表单中的条目列表。',
+              '多选：勾选左侧复选框后可批量启用、禁用和删除；点击名称编辑单个条目。',
               '生效时机：保存认证组后生效。',
             ]"
           />
-        </div>
-        <UiButton size="sm" :disabled="busy" @click="openYaml">编辑 / 导入</UiButton>
-      </div>
+          <UiButton size="sm" :disabled="busy" @click="openYaml">编辑</UiButton>
+        </template>
+        <template #selection>
+          <UiSelectionBar
+            v-if="selected.length"
+            embedded
+            :count="selected.length"
+            :disabled="busy"
+            @clear="selected = []"
+          >
+            <UiButton
+              v-if="selectedEntries.some((entry) => !entry.enabled)"
+              :disabled="busy"
+              @click="setSelectedEnabled(true)"
+            >
+              启用
+            </UiButton>
+            <UiButton
+              v-if="selectedEntries.some((entry) => entry.enabled)"
+              :disabled="busy"
+              @click="setSelectedEnabled(false)"
+            >
+              禁用
+            </UiButton>
+            <UiConfirmPopover
+              :message="`删除所选 ${selected.length} 个认证条目？`"
+              @confirm="removeSelected"
+            >
+              <UiButton variant="danger-outline" :disabled="busy">删除</UiButton>
+            </UiConfirmPopover>
+          </UiSelectionBar>
+        </template>
+      </UiListToolbar>
       <UiAlert v-if="errors.entries">{{ errors.entries }}</UiAlert>
       <div class="entry-workspace surface">
         <nav ref="sidebar" class="entry-sidebar" aria-label="认证条目">
@@ -198,6 +266,14 @@ const dirty = useDraftChanges(() => ({
             :title="entry.id || '未命名'"
             @select="current = entry.key"
           >
+            <template #prefix>
+              <UiCheckbox
+                :model-value="selected.includes(entry.key)"
+                :disabled="busy"
+                :label="`选择条目 ${entry.id || '未命名'}`"
+                @update:model-value="selectEntry(entry.key, $event)"
+              />
+            </template>
             <span class="truncate">{{ entry.id || '未命名' }}</span>
             <UiBadge
               v-if="Object.keys(errors).some((key) => key.startsWith(`${entry.key}:`))"
@@ -321,11 +397,12 @@ const dirty = useDraftChanges(() => ({
     v-if="yamlOpen"
     v-model:open="yamlOpen"
     title="编辑认证条目"
+    :allow-file="false"
     :initial-value="yamlSource"
     language="yaml"
     confirm-label="确定"
     :help="[
-      '直接编辑 YAML，或选择 YAML / JSON 文件填入编辑区。',
+      '直接编辑认证条目的 YAML 内容。',
       '确定后整体替换当前表单的认证条目；保存 Auth Group 后生效。',
     ]"
     :submit="applyYaml"

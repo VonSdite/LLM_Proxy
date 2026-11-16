@@ -22,6 +22,7 @@ const props = withDefaults(
     placeholder?: string
     disabled?: boolean
     allowCustom?: boolean
+    displayLabel?: boolean
     secret?: boolean
   }>(),
   { modelValue: '', placeholder: '搜索或选择' },
@@ -51,7 +52,7 @@ function input(value: string | number) {
   open.value = true
 }
 function display(value: unknown) {
-  if (props.allowCustom || props.secret) return String(value ?? '')
+  if ((props.allowCustom && !props.displayLabel) || props.secret) return String(value ?? '')
   return props.options.find((o) => o.value === value)?.label || String(value ?? '')
 }
 </script>
@@ -65,6 +66,7 @@ function display(value: unknown) {
     @update:model-value="select"
   >
     <ComboboxAnchor class="ui-combobox" :class="{ 'ui-combobox--error': field?.error.value }">
+      <slot name="leading" />
       <ComboboxInput
         :id="field?.id"
         class="ui-combobox-input"

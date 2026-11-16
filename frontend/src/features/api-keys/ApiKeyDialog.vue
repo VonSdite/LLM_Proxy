@@ -5,15 +5,7 @@ import { apiKeysApi, type ApiKey, type ApiKeyInput } from '@/api/api-keys'
 import { errorMessage } from '@/api/client'
 import { useLifetime } from '@/features/shared/useLifetime'
 import ModelPermissionPicker from '@/features/shared/ModelPermissionPicker.vue'
-import {
-  UiAlert,
-  UiButton,
-  UiDialog,
-  UiField,
-  UiInput,
-  UiNumberInput,
-  UiSwitch,
-} from '@/components/ui'
+import { UiAlert, UiButton, UiDialog, UiField, UiInput, UiNumberInput } from '@/components/ui'
 const props = defineProps<{ apiKey?: ApiKey; models: string[] }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 const draft = reactive<ApiKeyInput>({
@@ -139,7 +131,6 @@ const dirty = useDraftChanges(() => ({
           />
         </UiField>
       </div>
-      <UiSwitch v-model="draft.enabled" :disabled="busy">启用</UiSwitch>
       <UiField label="模型权限" group>
         <ModelPermissionPicker
           v-model="draft.model_permissions"

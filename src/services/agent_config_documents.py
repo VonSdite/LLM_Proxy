@@ -272,6 +272,7 @@ def _explicit_clears(agent: str, draft: dict, result: dict) -> dict:
             allowed[name] = (agent, ("env", env))
         allowed["runtime.permissionMode"] = (agent, ("permissions", "defaultMode"))
         allowed["runtime.sandboxEnabled"] = (agent, ("sandbox", "enabled"))
+        allowed["runtime.autoMemoryEnabled"] = (agent, ("autoMemoryEnabled",))
         allowed["runtime.attribution"] = (agent, ("attribution",))
         allowed["runtime.skipWebFetchPreflight"] = (agent, ("skipWebFetchPreflight",))
     elif agent == "codex":
@@ -300,6 +301,10 @@ def _explicit_clears(agent: str, draft: dict, result: dict) -> dict:
             "limits.output": (agent, selected + ("limit", "output")),
             "limits.compact": (agent, ("compaction", "reserved")),
             "runtime.reasoningEffort": (agent, selected + ("options", "reasoningEffort")),
+            "runtime.permissionPolicy": (agent, ("permission",)),
+            "runtime.disabledProviders": (agent, ("disabled_providers",)),
+            "runtime.share": (agent, ("share",)),
+            "runtime.autoupdate": (agent, ("autoupdate",)),
         }
     for name in requested:
         if name not in allowed:
@@ -388,6 +393,11 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
         )
         if preflight in ("enabled", "disabled"):
             fields[("skipWebFetchPreflight",)] = preflight == "enabled"
+        memory = _choice(
+            runtime.get("autoMemoryEnabled", "unset"), ("unset", "enabled", "disabled"), "Claude auto memory"
+        )
+        if memory in ("enabled", "disabled"):
+            fields[("autoMemoryEnabled",)] = memory == "enabled"
         for name, (env, enabled, disabled) in CLAUDE_MODES.items():
             mode = _choice(runtime.get(name, "unset"), ("unset", "enabled", "disabled"), name)
             if mode in ("enabled", "disabled"):
@@ -448,6 +458,22 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
     if api_key:
         fields[prefix + ("options", "apiKey")] = api_key
     effort = _choice(runtime.get("reasoningEffort"), ("none",) + EFFORTS, "opencode effort")
+    if "permissionPolicy" in runtime and not isinstance(runtime["permissionPolicy"], str):
+        raise ValueError("OpenCode permission policy must be a string")
+    permission_policy = _choice(
+        runtime.get("permissionPolicy"), ("allow", "ask", "deny", "custom"), "OpenCode permission policy"
+    )
+    if permission_policy and permission_policy != "custom":
+        fields[("permission",)] = permission_policy
+    disabled = provider_ids(runtime.get("disabledProviders", ""))
+    if disabled:
+        fields[("disabled_providers",)] = disabled
+    share = _choice(runtime.get("share"), ("manual", "auto", "disabled", "custom"), "OpenCode share")
+    if share and share != "custom":
+        fields[("share",)] = share
+    update = _choice(runtime.get("autoupdate"), ("true", "false", "notify", "custom"), "OpenCode autoupdate")
+    if update and update != "custom":
+        fields[("autoupdate",)] = {"true": True, "false": False, "notify": "notify"}[update]
     for configured in dict.fromkeys([*(entry for entry in catalog if provider_key(entry) == provider), model]):
         model_prefix = prefix + ("models", configured)
         fields[model_prefix + ("name",)] = configured
@@ -473,6 +499,17 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
     return _explicit_clears(agent, draft, {agent: fields})
 
 
+def provider_ids(value: str) -> list[str]:
+    """将逗号或空白分隔的服务 ID 转成有序去重列表。"""
+    if not isinstance(value, str) or len(value) > 16384:
+        raise ValueError("禁用服务需填写 Provider ID，多个 ID 用逗号分隔")
+    ids = list(dict.fromkeys(re.split(r"[\s,，;；]+", value.strip()))) if value.strip() else []
+    ids = [item for item in ids if item]
+    if any(any(ord(char) < 32 for char in item) for item in ids):
+        raise ValueError("Provider ID 包含无效字符")
+    return ids
+
+
 def visible_fields(target: str, data: dict) -> dict[str, Any]:
     """返回表单所需字段；路径字符串仅用于展示，不参与字段定位。"""
     result = {}
@@ -485,6 +522,7 @@ def visible_fields(target: str, data: dict) -> dict[str, Any]:
     if target == "claude":
         include(("permissions", "defaultMode"))
         include(("sandbox", "enabled"))
+        include(("autoMemoryEnabled",))
         include(("attribution",))
         include(("skipWebFetchPreflight",))
         for name in (
@@ -518,6 +556,9 @@ def visible_fields(target: str, data: dict) -> dict[str, Any]:
                 include(("model_providers", provider, name))
     else:
         include(("model",))
+        include(("permission",))
+        for key in ("disabled_providers", "share", "autoupdate"):
+            include((key,))
         include(("compaction", "reserved"))
         for provider, body in data.get("provider", {}).items() if isinstance(data.get("provider", {}), dict) else ():
             if not isinstance(body, dict):

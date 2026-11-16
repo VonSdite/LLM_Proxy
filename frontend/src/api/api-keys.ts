@@ -43,4 +43,6 @@ export const apiKeysApi = {
     api<void>(`/api/api-keys/${id}`, { method: 'DELETE', signal }),
   toggle: (id: number, signal?: AbortSignal) =>
     api<void>(`/api/api-keys/${id}/toggle`, { method: 'POST', signal }),
+  order: (body: { id: number; target_id: number; after: boolean }, signal?: AbortSignal) =>
+    api<void>('/api/api-keys/order', { method: 'PUT', body, signal }),
 }

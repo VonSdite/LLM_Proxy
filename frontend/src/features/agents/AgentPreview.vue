@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import type { AgentPreview } from '@/api/agents'
+import { computed } from 'vue'
+import type { AgentId, AgentPreview } from '@/api/agents'
 import { UiBadge, UiButton, UiIcon } from '@/components/ui'
-defineProps<{
+const props = defineProps<{
+  agent: AgentId
   preview?: Partial<AgentPreview> & { pending: boolean; error: string }
   saving?: boolean
   disabled?: boolean
 }>()
+const rows = computed(() => props.preview?.rows || [])
 const emit = defineEmits<{ save: [] }>()
 function display(value: unknown) {
   return value == null || value === ''
@@ -24,7 +27,7 @@ function display(value: unknown) {
           <UiIcon v-if="preview?.pending" name="loading" :size="13" />
           {{
             preview?.error ||
-            (preview?.pending ? '正在检查…' : preview?.hasChanges ? '有待保存的修改' : '与文件一致')
+            (preview?.pending ? '正在检查…' : preview?.hasChanges ? '有待保存的修改' : '无修改')
           }}
         </span>
       </div>
@@ -40,9 +43,10 @@ function display(value: unknown) {
     </header>
     <div class="agent-preview-list" :aria-busy="preview?.pending || undefined">
       <div
-        v-for="row in preview?.rows || []"
+        v-for="row in rows"
         :key="`${row.file}:${row.path}`"
         class="agent-preview-row"
+        :class="{ 'agent-preview-row--write': row.kind === 'add' || row.kind === 'change' }"
       >
         <code class="agent-preview-key">{{ row.path }}</code>
         <span class="agent-preview-values">
@@ -92,15 +96,20 @@ function display(value: unknown) {
   align-items: center;
   min-height: 38px;
   padding: var(--space-2) var(--space-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
 }
 
 .agent-preview-row + .agent-preview-row {
   border-top: 1px solid var(--border);
 }
 
+.agent-preview-row--write {
+  background: var(--selected);
+  box-shadow: inset 2px 0 var(--link);
+}
+
 .agent-preview-key {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
@@ -119,7 +128,7 @@ function display(value: unknown) {
 
 .agent-preview-empty {
   padding: var(--space-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 
 @media (width <= 600px) {

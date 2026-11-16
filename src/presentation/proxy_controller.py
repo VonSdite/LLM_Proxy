@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import time
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Protocol
 from uuid import uuid4
@@ -19,6 +20,7 @@ from ..services.api_key_service import ApiKeyRequestError
 from ..services.claude_proxy_service import CLAUDE_PROVIDER_NAME
 from ..services.codex_proxy_service import CODEX_PROVIDER_NAME
 from ..services.proxy_service import ProxyErrorInfo
+from ..services.request_observation import RequestObservation
 from ..utils import resolve_client_ip
 from ..utils.local_time import now_local_datetime
 
@@ -285,9 +287,6 @@ class ProxyController:
         self._app.route("/v1/images/edits", methods=["POST"])(self.images_edits)
         self._app.route("/v1/models", methods=["GET"])(self.list_models)
 
-    def _get_user_by_ip(self, ip_address: str) -> dict[str, Any] | None:
-        return self._user_service.get_user_by_ip(ip_address, require_whitelist_access=True)
-
     def _is_whitelist_required(self) -> bool:
         return self._config_manager.is_chat_whitelist_enabled()
 
@@ -312,12 +311,10 @@ class ProxyController:
         *,
         error_format: str,
     ) -> tuple[dict[str, Any] | None, tuple[Response, int] | None]:
-        """在启用白名单时解析当前请求对应的用户。"""
-        if not self._is_whitelist_required():
-            return None, None
-
-        user = self._get_user_by_ip(client_ip)
-        if user:
+        """解析已登记用户；白名单开启时要求用户获准访问。"""
+        whitelist_required = self._is_whitelist_required()
+        user = self._user_service.get_user_by_ip(client_ip, require_whitelist_access=whitelist_required)
+        if user is not None or not whitelist_required:
             return user, None
 
         self._logger.warning("Proxy denied: ip=%s is not in whitelist", client_ip)
@@ -476,6 +473,15 @@ class ProxyController:
                 "auth_file_name",
                 "auth_account_id",
                 "estimated_cost_usd",
+                "outcome",
+                "http_status",
+                "error_type",
+                "is_stream",
+                "duration_ms",
+                "first_token_latency_ms",
+                "tps",
+                "tps_unavailable_reason",
+                "upstream_attempts",
             }
             if not any(field in error_text for field in compatibility_fields):
                 raise
@@ -608,6 +614,9 @@ class ProxyController:
         target_format = "openai_images"
         release_request = None
         response_holds_slot = False
+        request_started_at = time.perf_counter()
+        request_start_time = now_local_datetime()
+        observation = None
         try:
             self._logger.info("Proxy image request received: route=%s ip=%s", route_name, client_ip)
             user, denial_response = self._get_authorized_user_for_request(
@@ -664,7 +673,7 @@ class ProxyController:
                 )
 
             available_model_names = tuple(sorted(dict.fromkeys([*self._list_available_model_names(), model_name])))
-            if self._is_whitelist_required() and not self._user_service.can_user_access_model(
+            if user is not None and not self._user_service.can_user_access_model(
                 user,
                 model_name,
                 available_models=available_model_names,
@@ -724,31 +733,19 @@ class ProxyController:
                 target_format=target_format,
             )
             headers = self._filter_request_headers(request.headers)
-            start_time = now_local_datetime()
             api_key_id = self._get_api_key_id(api_key)
 
-            def on_proxy_complete(response_meta: dict[str, Any]) -> None:
-                log_kwargs = {
-                    "request_model": model_name,
-                    "target_model_id": response_meta.get("target_model_id"),
-                    "response_model": response_meta.get("response_model"),
-                    "total_tokens": response_meta.get("total_tokens", 0),
-                    "prompt_tokens": response_meta.get("prompt_tokens", 0),
-                    "completion_tokens": response_meta.get("completion_tokens", 0),
-                    "usage_status": response_meta.get("usage_status", "unknown"),
-                    "cache_read_input_tokens": response_meta.get("cache_read_input_tokens", 0),
-                    "cache_creation_input_tokens": response_meta.get("cache_creation_input_tokens", 0),
-                    "cache_usage_status": response_meta.get("cache_usage_status", "unknown"),
-                    "auth_file_name": response_meta.get("auth_file_name"),
-                    "auth_account_id": response_meta.get("auth_account_id"),
-                    "estimated_cost_usd": response_meta.get("estimated_cost_usd"),
-                    "start_time": start_time,
-                    "end_time": now_local_datetime(),
-                    "ip_address": client_ip,
-                }
-                if api_key_id is not None:
-                    log_kwargs["api_key_id"] = api_key_id
-                self._log_request(**log_kwargs)
+            observation = RequestObservation(
+                self._log_request,
+                started_at=request_started_at,
+                start_time=request_start_time,
+                is_model_mapping=is_model_mapping,
+                request_model=model_name,
+                ip_address=client_ip,
+                api_key_id=api_key_id,
+            )
+            observation.activate()
+            on_proxy_complete = observation.complete
 
             if is_model_mapping:
                 result, status_code, failure_info = self._proxy_model_mapping_image_request(
@@ -778,6 +775,7 @@ class ProxyController:
                     error_type="upstream_error",
                     error_code="upstream_request_failed",
                 )
+                observation.finish("error", status_code=status_code, error_type=failure_info.error_type)
                 return self._error_response(
                     failure_info.message,
                     status_code,
@@ -792,10 +790,13 @@ class ProxyController:
                     request_model=model_name,
                     target_format=target_format,
                 )
+            result = observation.wrap(result, target_format)
             if release_request is not None:
                 response_holds_slot = self._hold_api_key_stream_slot(result, release_request)
             return result
         except ValueError as exc:
+            if observation is not None:
+                observation.finish("error", status_code=400, error_type="invalid_request_error")
             return self._error_response(
                 str(exc),
                 400,
@@ -810,6 +811,8 @@ class ProxyController:
                 target_format=target_format,
             )
         except Exception as exc:
+            if observation is not None:
+                observation.finish("error", status_code=500, error_type="server_error")
             self._logger.error("Error in %s: %s", route_name, exc)
             return self._error_response(
                 str(exc),
@@ -826,6 +829,8 @@ class ProxyController:
             )
 
         finally:
+            if observation is not None:
+                observation.deactivate()
             if release_request is not None and not response_holds_slot:
                 release_request()
 
@@ -847,6 +852,9 @@ class ProxyController:
         provider_name: str | None = None
         release_request = None
         response_holds_slot = False
+        request_started_at = time.perf_counter()
+        request_start_time = now_local_datetime()
+        observation = None
         try:
             self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
             user, denial_response = self._get_authorized_user_for_request(
@@ -912,7 +920,7 @@ class ProxyController:
                 )
 
             available_model_names = self._list_available_model_names()
-            if self._is_whitelist_required() and not self._user_service.can_user_access_model(
+            if user is not None and not self._user_service.can_user_access_model(
                 user,
                 model_name,
                 available_models=available_model_names,
@@ -1006,42 +1014,21 @@ class ProxyController:
                 target_format=resolved_target_format,
             )
             headers = self._filter_request_headers(request.headers)
-            start_time = now_local_datetime()
             api_key_id = self._get_api_key_id(api_key)
 
             replay_identity = f"api_key:{api_key_id}" if api_key_id is not None else f"ip:{client_ip}"
 
-            def on_proxy_complete(response_meta: dict[str, Any]) -> None:
-                self._logger.info(
-                    "Proxy completed: route=%s model=%s target_model_id=%s response_model=%s total_tokens=%s ip=%s",
-                    route_name,
-                    model_name,
-                    response_meta.get("target_model_id"),
-                    response_meta.get("response_model"),
-                    response_meta.get("total_tokens", 0),
-                    client_ip,
-                )
-                log_kwargs = {
-                    "request_model": model_name,
-                    "target_model_id": response_meta.get("target_model_id"),
-                    "response_model": response_meta.get("response_model"),
-                    "total_tokens": response_meta.get("total_tokens", 0),
-                    "prompt_tokens": response_meta.get("prompt_tokens", 0),
-                    "completion_tokens": response_meta.get("completion_tokens", 0),
-                    "usage_status": response_meta.get("usage_status", "unknown"),
-                    "cache_read_input_tokens": response_meta.get("cache_read_input_tokens", 0),
-                    "cache_creation_input_tokens": response_meta.get("cache_creation_input_tokens", 0),
-                    "cache_usage_status": response_meta.get("cache_usage_status", "unknown"),
-                    "auth_file_name": response_meta.get("auth_file_name"),
-                    "auth_account_id": response_meta.get("auth_account_id"),
-                    "estimated_cost_usd": response_meta.get("estimated_cost_usd"),
-                    "start_time": start_time,
-                    "end_time": now_local_datetime(),
-                    "ip_address": client_ip,
-                }
-                if api_key_id is not None:
-                    log_kwargs["api_key_id"] = api_key_id
-                self._log_request(**log_kwargs)
+            observation = RequestObservation(
+                self._log_request,
+                started_at=request_started_at,
+                start_time=request_start_time,
+                is_model_mapping=is_model_mapping,
+                request_model=model_name,
+                ip_address=client_ip,
+                api_key_id=api_key_id,
+            )
+            observation.activate()
+            on_proxy_complete = observation.complete
 
             if is_model_mapping:
                 result, status_code, failure_info = self._proxy_model_mapping_request(
@@ -1106,6 +1093,7 @@ class ProxyController:
                     status_code,
                     failure_info.message,
                 )
+                observation.finish("error", status_code=status_code, error_type=failure_info.error_type)
                 return self._error_response(
                     failure_info.message,
                     status_code,
@@ -1121,10 +1109,13 @@ class ProxyController:
                     target_format=resolved_target_format,
                 )
 
+            result = observation.wrap(result, resolved_target_format)
             if release_request is not None:
                 response_holds_slot = self._hold_api_key_stream_slot(result, release_request)
             return result
         except HookAbortError as exc:
+            if observation is not None:
+                observation.finish("error", status_code=exc.status_code, error_type=exc.error_type)
             self._logger.warning(
                 "Proxy blocked by hook: route=%s ip=%s status=%s type=%s message=%s",
                 route_name,
@@ -1147,6 +1138,8 @@ class ProxyController:
                 target_format=resolved_target_format,
             )
         except Exception as exc:
+            if observation is not None:
+                observation.finish("error", status_code=500, error_type="server_error")
             self._logger.error("Error in %s: %s", route_name, exc)
             return self._error_response(
                 str(exc),
@@ -1163,6 +1156,8 @@ class ProxyController:
             )
 
         finally:
+            if observation is not None:
+                observation.deactivate()
             if release_request is not None and not response_holds_slot:
                 release_request()
 
@@ -1197,7 +1192,7 @@ class ProxyController:
                 return denial_response
 
             model_names = list(self._list_available_model_names(visible_provider_models_only=True))
-            if self._is_whitelist_required():
+            if user is not None:
                 allowed_models = set(
                     self._user_service.get_accessible_models_for_user(
                         user,

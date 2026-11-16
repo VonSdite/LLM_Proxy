@@ -21,6 +21,8 @@ export interface SettingsResult {
   settings: SystemSettings
   auth_config_changed?: boolean
   server_restart_required?: boolean
+  server_listener_changed?: boolean
+  server_access_url?: string | null
 }
 export const settingsApi = {
   get: (signal?: AbortSignal) => api<SystemSettings>('/api/settings/system', { signal }),

@@ -298,6 +298,7 @@ class ProxyResponseBuilder:
             if hook_abort is not None and meta.get("response_model") is None:
                 meta["response_model"] = request_ctx.upstream_model or request_ctx.request_model
             completion_meta = public_usage_meta(meta)
+            completion_meta["upstream_source_format"] = provider.source_format
             has_usage = completion_meta.get("usage_status") != USAGE_STATUS_UNKNOWN
             if finalize_attempt is not None:
                 try:

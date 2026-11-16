@@ -46,6 +46,7 @@ from .openai_model_pricing import estimate_openai_request_cost_usd
 from .outbound_privacy import OutboundPrivacyContext, OutboundPrivacyService
 from .proxy_response_builder import ProxyResponseBuilder, StreamPrivacyRestorer
 from .proxy_service import ProxyErrorInfo
+from .upstream_observation import observe_response
 
 CODEX_BACKEND_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 CODEX_CLIENT_VERSION = ""
@@ -106,21 +107,26 @@ class CodexProxyService:
             return privacy_result.body, context
         return upstream_body, None
 
+    def _is_oauth_enabled(self) -> bool:
+        """逐次读取总开关，已在途的请求继续完成。"""
+        read_enabled = getattr(self._config_manager, "is_oauth_enabled", None)
+        return bool(read_enabled()) if callable(read_enabled) else True
+
     def has_model(self, model_name: str) -> bool:
         """判断 Codex OAuth 是否支持指定模型。"""
-        return self._codex_oauth_service.has_model(model_name)
+        return self._is_oauth_enabled() and self._codex_oauth_service.has_model(model_name)
 
     def list_model_names(self) -> tuple[str, ...]:
         """返回 Codex OAuth 当前模型名。"""
-        return self._codex_oauth_service.list_model_names()
+        return self._codex_oauth_service.list_model_names() if self._is_oauth_enabled() else ()
 
     def has_image_model(self, model_name: str) -> bool:
         """判断 Codex OAuth 是否支持指定图片模型。"""
-        return self._codex_oauth_service.has_image_model(model_name)
+        return self._is_oauth_enabled() and self._codex_oauth_service.has_image_model(model_name)
 
     def list_image_model_names(self) -> tuple[str, ...]:
         """返回 Codex OAuth 当前图片模型名。"""
-        return self._codex_oauth_service.list_image_model_names()
+        return self._codex_oauth_service.list_image_model_names() if self._is_oauth_enabled() else ()
 
     def get_default_image_model(self) -> str:
         """返回 Codex OAuth 图片生成默认模型。"""
@@ -141,6 +147,17 @@ class CodexProxyService:
         replay_identity: str | None = None,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """按账号配额顺序代理 Codex 请求。"""
+        if not self._is_oauth_enabled():
+            return (
+                None,
+                503,
+                ProxyErrorInfo(
+                    message="OAuth is disabled",
+                    status_code=503,
+                    error_type="service_unavailable_error",
+                    error_code="oauth_disabled",
+                ),
+            )
         del trace_id
         request_headers = self._prepare_codex_session_headers(request_data, request_headers)
         model_name = str(request_data.get("model") or "").strip()
@@ -265,6 +282,17 @@ class CodexProxyService:
         force_safe_desensitization: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """把 OpenAI Images 请求包装成 Codex image_generation 工具调用。"""
+        if not self._is_oauth_enabled():
+            return (
+                None,
+                503,
+                ProxyErrorInfo(
+                    message="OAuth is disabled",
+                    status_code=503,
+                    error_type="service_unavailable_error",
+                    error_code="oauth_disabled",
+                ),
+            )
         del trace_id
         request_headers = self._prepare_codex_session_headers(request_data, request_headers)
         desensitize = self._is_safe_desensitization_enabled(force=force_safe_desensitization)
@@ -511,19 +539,22 @@ class CodexProxyService:
         request_options = self._build_request_options()
 
         try:
-            upstream_response = request_with_proxy_warning_retry(
-                lambda: requests.post(
-                    CODEX_BACKEND_RESPONSES_URL + ("/compact" if compact else ""),
-                    headers=upstream_headers,
-                    json=upstream_body,
-                    stream=not compact,
-                    timeout=1200,
-                    allow_redirects=False,
-                    **request_options,
+            upstream_response = observe_response(
+                lambda: request_with_proxy_warning_retry(
+                    lambda: requests.post(
+                        CODEX_BACKEND_RESPONSES_URL + ("/compact" if compact else ""),
+                        headers=upstream_headers,
+                        json=upstream_body,
+                        stream=not compact,
+                        timeout=1200,
+                        allow_redirects=False,
+                        **request_options,
+                    ),
+                    request_options=request_options,
+                    logger=self._logger,
+                    log_context=f"provider=codex model={model_name} auth_file={candidate.name}",
                 ),
-                request_options=request_options,
-                logger=self._logger,
-                log_context=f"provider=codex model={model_name} auth_file={candidate.name}",
+                request_data["model"],
             )
         except ProxyWarningRequired as exc:
             self._logger.warning(
@@ -908,19 +939,22 @@ class CodexProxyService:
         request_options = self._build_request_options()
 
         try:
-            upstream_response = request_with_proxy_warning_retry(
-                lambda: requests.post(
-                    CODEX_BACKEND_RESPONSES_URL,
-                    headers=upstream_headers,
-                    json=upstream_body,
-                    stream=True,
-                    timeout=1200,
-                    allow_redirects=False,
-                    **request_options,
+            upstream_response = observe_response(
+                lambda: request_with_proxy_warning_retry(
+                    lambda: requests.post(
+                        CODEX_BACKEND_RESPONSES_URL,
+                        headers=upstream_headers,
+                        json=upstream_body,
+                        stream=True,
+                        timeout=1200,
+                        allow_redirects=False,
+                        **request_options,
+                    ),
+                    request_options=request_options,
+                    logger=self._logger,
+                    log_context=f"provider=codex image_model={image_model} auth_file={candidate.name}",
                 ),
-                request_options=request_options,
-                logger=self._logger,
-                log_context=f"provider=codex image_model={image_model} auth_file={candidate.name}",
+                request_data["model"],
             )
         except ProxyWarningRequired as exc:
             self._logger.warning(
@@ -2337,6 +2371,7 @@ class CodexProxyService:
     ) -> dict[str, Any]:
         """附加最终认证文件身份和请求发生时的模型费用估算。"""
         result = dict(usage_meta)
+        result["upstream_source_format"] = "openai_responses"
         pricing_model = str(result.get("response_model") or model_name).strip()
         result["auth_file_name"] = auth_file_name
         result["auth_account_id"] = auth_account_id

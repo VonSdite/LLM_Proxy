@@ -18,8 +18,15 @@ const props = defineProps<{
   modes?: { value: string; label: string }[]
   purpose?: 'provider' | 'oauth' | 'ssh'
 }>()
-const emit = defineEmits<{ 'update:mode': [value: string]; 'update:url': [value: string] }>()
+const emit = defineEmits<{
+  'update:mode': [value: string]
+  'update:url': [value: string]
+  commit: []
+}>()
 const authenticationOpen = ref(false)
+watch(authenticationOpen, (open, previous) => {
+  if (previous && !open) emit('commit')
+})
 const fields = ref(splitProxyUrl(props.url))
 let originalUrl = props.url
 let originalFields = splitProxyUrl(originalUrl)
@@ -49,6 +56,10 @@ function updateAddress(value: string) {
   if (parsed.authenticated) Object.assign(fields.value, parsed)
   else fields.value.address = value
   publish()
+}
+function updateMode(value: string) {
+  emit('update:mode', value)
+  emit('commit')
 }
 function updateCredentials() {
   fields.value.authenticated = !!(fields.value.username || fields.value.password)
@@ -95,7 +106,7 @@ const defaults = [
         :compact="mode === 'custom'"
         :options="modes || defaults"
         :disabled="disabled"
-        @update:model-value="emit('update:mode', $event)"
+        @update:model-value="updateMode"
       />
       <UiField v-if="mode === 'custom'" label="代理地址" label-hidden :error="error">
         <div class="proxy-address-row">
@@ -107,6 +118,7 @@ const defaults = [
             data-lpignore="true"
             data-1p-ignore="true"
             @update:model-value="updateAddress"
+            @change="emit('commit')"
           />
           <UiPopover v-model:open="authenticationOpen" title="代理认证">
             <template #trigger>
@@ -155,7 +167,9 @@ const defaults = [
               <li>地址：填写协议、主机和端口，例如 socks5://127.0.0.1:1080。</li>
               <li>协议：支持 HTTP、HTTPS、SOCKS5、SOCKS5H。</li>
               <li>
-                认证：点击按钮，在小窗中填写账号密码，随表单保存；「清除」表示不使用账号密码。
+                认证：点击按钮，在小窗中填写账号密码，{{
+                  purpose === 'oauth' ? '关闭小窗后保存' : '随表单保存'
+                }}；「清除」表示不使用账号密码。
               </li>
               <li>特殊字符：直接填写原文，例如 @ 不用写成 %40，系统会自动编码。</li>
               <li>粘贴完整地址：自动拆分账号密码，已编码的字符会还原后显示。</li>

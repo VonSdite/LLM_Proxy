@@ -173,35 +173,28 @@ for (const item of [
   })
 }
 
-test('设置分组保留草稿，局部保存与重新读取具有明确边界', async ({ page }) => {
+test('设置分组保留无效草稿，局部保存与重新读取具有明确边界', async ({ page }) => {
   const fixture = await mockAdmin(page)
   await page.goto('/settings')
   await expect(page.getByRole('tab')).toHaveCount(0)
-  for (const title of [
-    '基础设置',
-    '客户端 IP',
-    'API Key',
-    '模型映射',
-    'OAuth 网络',
-    '日志与调试',
-  ]) {
+  for (const title of ['服务监听', '管理登录', '客户端 IP', '日志与调试']) {
     await expect(page.getByRole('form', { name: title, exact: true })).toBeVisible()
   }
-  const basic = page.getByRole('form', { name: '基础设置', exact: true })
-  await expect(basic.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
-  await basic.getByRole('textbox', { name: '监听地址', exact: true }).fill('0.0.0.0')
+  const basic = page.getByRole('form', { name: '服务监听', exact: true })
+  await expect(basic.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+  await basic.getByRole('textbox', { name: '监听地址', exact: true }).fill('0.')
   const debug = page.getByRole('form', { name: '日志与调试', exact: true })
   await debug.getByRole('textbox', { name: '日志目录', exact: true }).fill('logs/custom')
-  await debug.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(debug.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
-  await expect(basic.getByRole('textbox', { name: '监听地址', exact: true })).toHaveValue('0.0.0.0')
-  await expect(basic.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
-  await page.getByRole('button', { name: '重新读取', exact: true }).click()
+  await debug.getByRole('textbox', { name: '日志目录', exact: true }).press('Tab')
+  await expect.poll(() => fixture.settings.logging.path).toBe('logs/custom')
+  await expect(basic.getByRole('textbox', { name: '监听地址', exact: true })).toHaveValue('0.')
+  await expect(basic.getByText('请输入有效的 IPv4 或 IPv6 地址')).toBeVisible()
+  await page.getByRole('button', { name: '刷新设置', exact: true }).click()
   const confirm = page.getByRole('dialog', { name: '重新读取配置？', exact: true })
   await expect(confirm).toBeVisible()
   await confirm.getByRole('button', { name: '继续编辑', exact: true }).click()
-  await expect(basic.getByRole('textbox', { name: '监听地址', exact: true })).toHaveValue('0.0.0.0')
-  await page.getByRole('button', { name: '重新读取', exact: true }).click()
+  await expect(basic.getByRole('textbox', { name: '监听地址', exact: true })).toHaveValue('0.')
+  await page.getByRole('button', { name: '刷新设置', exact: true }).click()
   await confirm.getByRole('button', { name: '丢弃并重新读取', exact: true }).click()
   await expect(confirm).not.toBeVisible()
   await expect(basic.getByRole('textbox', { name: '监听地址', exact: true })).toHaveValue(
@@ -214,7 +207,7 @@ test('设置分组保留草稿，局部保存与重新读取具有明确边界',
   expect(fixture.unexpected).toEqual([])
 })
 
-test('设置保存时锁定当前分组，失败反馈留在分组内且保留其他草稿', async ({ page }) => {
+test('监听提交期间暂停组内编辑，失败通知保留当前与其他分组草稿', async ({ page }) => {
   const fixture = await mockAdmin(page)
   const pending = gate()
   await page.route('**/api/settings/system/basic', async (route) => {
@@ -222,16 +215,18 @@ test('设置保存时锁定当前分组，失败反馈留在分组内且保留�
     await route.fulfill({ status: 503, json: { error: '配置暂时不可写' } })
   })
   await page.goto('/settings')
-  const basic = page.getByRole('form', { name: '基础设置', exact: true })
+  const basic = page.getByRole('form', { name: '服务监听', exact: true })
   await basic.getByRole('textbox', { name: '监听地址', exact: true }).fill('0.0.0.0')
-  await basic.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(basic.getByRole('textbox', { name: '监听地址', exact: true })).toBeDisabled()
-  await expect(page.getByRole('button', { name: '重新读取', exact: true })).toBeDisabled()
+  await page.getByRole('heading', { name: '系统设置' }).click()
+  await expect(basic.locator('.form-grid')).toHaveAttribute('inert', '')
+  await expect(page.getByRole('button', { name: '刷新设置', exact: true })).toBeDisabled()
   await page.getByRole('textbox', { name: '日志目录', exact: true }).fill('logs/other')
   pending.release()
-  await expect(basic.getByRole('alert')).toContainText('配置暂时不可写')
+  await expect(
+    page.locator('.ui-toast').filter({ hasText: '监听未保存：配置暂时不可写' }),
+  ).toBeVisible()
   await expect(basic.getByRole('textbox', { name: '监听地址', exact: true })).toHaveValue('0.0.0.0')
-  await expect(basic.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
+  await expect(basic.locator('.form-grid')).not.toHaveAttribute('inert')
   await expect(page.getByRole('textbox', { name: '日志目录', exact: true })).toHaveValue(
     'logs/other',
   )

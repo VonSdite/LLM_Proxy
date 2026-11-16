@@ -1,0 +1,159 @@
+id: hermes
+name: Hermes
+order: 50
+help:
+  - 编辑 Hermes 的用户配置，模型连接使用自定义 OpenAI 兼容服务。
+  - 默认位置为 ~/.hermes/config.yaml；本机设置 HERMES_HOME 时使用该目录。其他 profile 可指定对应配置路径。
+files:
+  hermes:
+    path: ~/.hermes/config.yaml
+    format: yaml
+    homeEnv: HERMES_HOME
+    homeRelative: [config.yaml]
+groups: {connection: 2, models: 3, parameters: 4, runtime: 4}
+fields:
+  - id: base-url
+    group: connection
+    label: API 地址
+    component: url
+    file: hermes
+    path: [model, base_url]
+    role: baseUrl
+    required: true
+    help: [填写 OpenAI 兼容服务的基础地址，通常以 /v1 结尾；本服务地址可使用模型下拉。]
+  - id: api-key
+    group: connection
+    label: API Key
+    component: secret
+    file: hermes
+    path: [model, api_key]
+    help: [自定义服务的访问凭据，写入 model.api_key；留空不写入，清空已有值会移除该字段。]
+  - id: model
+    group: models
+    label: 默认主模型
+    component: model
+    file: hermes
+    path: [model, default]
+    required: true
+    help: [新会话使用的模型 ID；完整保留 Provider 前缀，外部 API 地址支持手动输入。]
+  - id: protocol
+    group: models
+    label: API 协议
+    component: select
+    file: hermes
+    path: [model, api_mode]
+    default: chat_completions
+    options:
+      - {value: chat_completions, label: Chat Completions}
+      - {value: codex_responses, label: Responses}
+      - {value: anthropic_messages, label: Anthropic Messages}
+    help: [选择目标端点支持的请求协议；不设置时由 Hermes 判断。]
+  - id: provider
+    group: models
+    label: 服务类型
+    component: text
+    file: hermes
+    path: [model, provider]
+    default: custom
+    required: true
+    options:
+      - {value: custom, label: 自定义 API（本服务）}
+      - {value: auto, label: 自动选择}
+      - {value: openrouter, label: OpenRouter}
+      - {value: openai-api, label: OpenAI API}
+      - {value: anthropic, label: Anthropic}
+      - {value: gemini, label: Google Gemini}
+      - {value: deepseek, label: DeepSeek}
+      - {value: zai, label: 智谱 GLM}
+      - {value: kimi-coding, label: Kimi Coding}
+      - {value: minimax, label: MiniMax（国际）}
+      - {value: minimax-cn, label: MiniMax（中国）}
+      - {value: xiaomi, label: 小米 MiMo}
+      - {value: nvidia, label: NVIDIA NIM}
+      - {value: lmstudio, label: LM Studio}
+      - {value: ollama, label: Ollama（本地）}
+      - {value: nous, label: Nous Portal（OAuth）}
+      - {value: nous-api, label: Nous Portal（API Key）}
+      - {value: openai-codex, label: OpenAI Codex（OAuth）}
+    help:
+      - 连接本服务或其他兼容端点，选择“自定义 API（本服务）”，使用上方填写的 API 地址和密钥。
+      - 自动选择由 Hermes 根据已有凭据判断；内置服务使用各自的认证配置，需先在 Hermes 中完成设置，并确认 API 地址与协议匹配。
+      - 支持搜索选择，也可直接输入其他服务标识；例如 custom:proxy 表示已有的 proxy 命名服务，需在 Hermes 配置中定义。已有值原样保留。
+  - id: effort
+    group: parameters
+    label: 思考强度
+    component: select
+    file: hermes
+    path: [agent, reasoning_effort]
+    options:
+      - {value: none, label: 关闭}
+      - {value: minimal, label: 极低}
+      - {value: low, label: 低}
+      - {value: medium, label: 中}
+      - {value: high, label: 高}
+      - {value: xhigh, label: 极高}
+    help: [控制模型的推理预算；实际支持的档位取决于模型和服务。已有自定义对象在未修改时保留。]
+  - id: context
+    limit: context
+    group: parameters
+    label: 模型上下文
+    component: number
+    file: hermes
+    path: [model, context_length]
+    min: 1
+    help: [模型输入与输出合计的上下文窗口，单位 Token；不设置时由 Hermes 自动检测。]
+  - id: compression
+    group: parameters
+    label: 压缩阈值
+    component: number
+    file: hermes
+    path: [compression, threshold]
+    min: 0.01
+    max: 1
+    integer: false
+    step: 0.01
+    help: [以小数表示上下文使用比例，例如 0.5 表示 50%；达到此比例时触发历史压缩，需启用自动压缩。]
+  - id: turns
+    group: parameters
+    label: 最大迭代次数
+    component: number
+    file: hermes
+    path: [agent, max_turns]
+    min: 1
+    help: [单次任务允许的模型与工具迭代上限；不等同于聊天消息数量。]
+  - id: approvals
+    group: runtime
+    label: 命令确认
+    component: select
+    file: hermes
+    path: [approvals, mode]
+    options:
+      - {value: smart, label: 智能判断}
+      - {value: manual, label: 手动确认}
+      - {value: 'off', label: 跳过确认}
+    help:
+      - 智能判断由辅助模型评估被标记的命令，不确定时请求确认。
+      - 手动确认对被标记的命令询问用户；跳过确认关闭终端命令审批，等同于 HERMES_YOLO_MODE=true。
+  - id: memory
+    default: true
+    group: runtime
+    label: 长期记忆
+    component: boolean
+    file: hermes
+    path: [memory, memory_enabled]
+    help: [控制 Agent 的长期笔记记忆；不会删除已有记忆文件。]
+  - id: user-profile
+    default: true
+    group: runtime
+    label: 用户画像
+    component: boolean
+    file: hermes
+    path: [memory, user_profile_enabled]
+    help: [控制用户偏好与沟通习惯的记忆，独立于 Agent 长期笔记。]
+  - id: auto-compress
+    group: runtime
+    label: 自动压缩
+    component: boolean
+    file: hermes
+    path: [compression, enabled]
+    help: [上下文达到压缩阈值时自动总结历史；不设置时沿用 Hermes 默认行为。]

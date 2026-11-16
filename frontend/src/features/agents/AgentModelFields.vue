@@ -2,14 +2,14 @@
 import type { AgentBootstrap, AgentDraft, AgentId } from '@/api/agents'
 import { UiField } from '@/components/ui'
 import ModelSelect from '@/features/shared/ModelSelect.vue'
+import { agentVersionHelp } from './versionHelp'
 import {
   CLAUDE_MODEL_KEYS,
-  modelCandidates,
   setAllClaudeModels,
   setModel,
   uniformClaudeModel,
 } from './configuration'
-const props = defineProps<{
+defineProps<{
   agent: AgentId
   draft: AgentDraft
   ownService: boolean
@@ -22,10 +22,11 @@ const descriptions: Record<string, string> = {
   ANTHROPIC_DEFAULT_SONNET_MODEL: 'Sonnet 别名对应的模型，通常用于日常编程。',
   ANTHROPIC_MODEL: 'Claude Code 的默认主模型，启动参数和会话模型选择可覆盖此值。',
 }
-function help(model: string) {
-  if (!model) return '选择模型后显示上下文与最大输出参考值。'
-  const candidates = modelCandidates(model, props.bootstrap)
-  return `${model} · 上下文 ${candidates.context.map((item) => item.value.toLocaleString()).join(' / ')} · 最大输出 ${candidates.output.map((item) => item.value.toLocaleString()).join(' / ')}${candidates.matched ? '' : '（未识别模型，通用参考值）'}`
+const labels: Record<(typeof CLAUDE_MODEL_KEYS)[number], string> = {
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: 'Haiku 模型（轻量任务）',
+  ANTHROPIC_DEFAULT_OPUS_MODEL: 'Opus 模型（复杂任务）',
+  ANTHROPIC_DEFAULT_SONNET_MODEL: 'Sonnet 模型（日常编程）',
+  ANTHROPIC_MODEL: '默认主模型',
 }
 </script>
 <template>
@@ -55,12 +56,12 @@ function help(model: string) {
       </UiField>
     </div>
     <div class="form-grid">
-      <UiField v-for="key in CLAUDE_MODEL_KEYS" :key="key" :label="key">
+      <UiField v-for="key in CLAUDE_MODEL_KEYS" :key="key" :label="labels[key]">
         <template #help>
           <p>{{ descriptions[key] }}</p>
-          <p>{{ help(draft.models?.[key] || '') }}</p>
           <p>写入 env.{{ key }}；不设置时移除该覆盖项。</p>
           <p>带 [1M] 的候选声明大上下文，仍需上游支持，不会自动扩展模型容量。</p>
+          <p v-for="version in agentVersionHelp(agent, key)" :key="version">{{ version }}</p>
         </template>
         <ModelSelect
           :model-value="draft.models?.[key] || ''"
@@ -82,7 +83,7 @@ function help(model: string) {
           ? 'Codex 默认模型，写入 config.toml 的 model。'
           : 'opencode 默认模型，写入 model 并关联对应 Provider 配置。',
         '本服务使用完整模型 ID；外部地址填写对应服务的模型 ID。参数参考值不会自动覆盖手动配置。',
-        help(draft.model || ''),
+        ...agentVersionHelp(agent, 'model'),
       ]"
     >
       <ModelSelect

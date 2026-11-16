@@ -20,7 +20,7 @@ from src.external.agent_config_transport import AgentConfigError
 from src.presentation.agent_config_controller import AgentConfigController
 from src.presentation.app_factory import create_flask_app
 from src.services.agent_config_documents import MISSING, JsoncDocument, desired_fields, edit_document, parse_document
-from src.services.agent_config_service import AgentConfigService
+from src.services.agent_config_service import AgentConfigService, value_hash
 
 
 def make_service(directory):
@@ -68,6 +68,23 @@ def draft(agent="claude"):
 
 
 class ConfigDocumentTests(unittest.TestCase):
+    def test_opencode_sharing_updates_and_disabled_providers(self):
+        data = draft("opencode")
+        data["runtime"].update(disabledProviders="openai, anthropic，openai", share="disabled", autoupdate="false")
+        fields = desired_fields("opencode", data, [])["opencode"]
+        self.assertEqual(["openai", "anthropic"], fields[("disabled_providers",)])
+        self.assertEqual("disabled", fields[("share",)])
+        self.assertIs(False, fields[("autoupdate",)])
+        for setting, expected in (("true", True), ("notify", "notify")):
+            data["runtime"]["autoupdate"] = setting
+            self.assertEqual(expected, desired_fields("opencode", data, [])["opencode"][("autoupdate",)])
+        for field in ("disabledProviders", "share", "autoupdate"):
+            data["runtime"][field] = ""
+        data["clearFields"] = ["runtime.disabledProviders", "runtime.share", "runtime.autoupdate"]
+        fields = desired_fields("opencode", data, [])["opencode"]
+        for field in ("disabled_providers", "share", "autoupdate"):
+            self.assertIs(MISSING, fields[(field,)])
+
     def test_jsonc_preserves_comments_unknown_values_and_model_id(self):
         source = '{\n  // 用户插件\n  "plugin": ["x", {"enabled": true}],\n  "provider": {"main": {"models": {"main/org/model.v1": {"temperature": 0.2}}}},\n}\n'
         updated = edit_document(
@@ -146,6 +163,8 @@ class ConfigDocumentTests(unittest.TestCase):
             {"runtime": {"sandboxEnabled": True}},
             {"runtime": {"skipWebFetchPreflight": True}},
             {"runtime": {"skipWebFetchPreflight": "true"}},
+            {"runtime": {"autoMemoryEnabled": "true"}},
+            {"runtime": {"autoMemoryEnabled": True}},
             {"runtime": {"attribution": True}},
             {"runtime": {"attribution": "true"}},
             {"runtime": {"attribution": "enabled"}},
@@ -233,6 +252,53 @@ class AgentConfigFixture(unittest.TestCase):
 
 
 class AgentConfigServiceTests(AgentConfigFixture):
+    def test_opencode_permissions_round_trip_clear_and_preserve_custom_rules(self):
+        path = Path(self.snapshot()["files"]["opencode"]["path"])
+        path.parent.mkdir(parents=True)
+        custom = {"bash": {"git push *": "ask"}, "edit": "deny"}
+        v2_permissions = [{"action": "*", "resource": "*", "effect": "deny"}]
+        agents = {"reviewer": {"permissions": [{"action": "edit", "resource": "*", "effect": "deny"}]}}
+        path.write_text(
+            "// 用户规则\n" + json.dumps({"permission": custom, "agents": agents, "permissions": v2_permissions}),
+            encoding="utf-8",
+        )
+        # 模拟旧版页面写入并登记过 V2 字段，V1 保存不能将其当作废弃字段删除。
+        ownership_key = self.service._ownership_key("local", str(path))
+        self.service.state["managed"][ownership_key] = [{"path": ["permissions"], "hash": value_hash(v2_permissions)}]
+        data = draft("opencode")
+        data["runtime"]["permissionPolicy"] = "custom"
+        result = self.save("opencode", data)
+        self.assertEqual(custom, result["files"]["opencode"]["managed"]["permission"])
+        for policy in ("allow", "ask", "deny"):
+            data["runtime"]["permissionPolicy"] = policy
+            result = self.save("opencode", data)
+            self.assertEqual(
+                policy,
+                result["files"]["opencode"]["managed"]["permission"],
+            )
+            self.assertFalse(self.preview("opencode", data)["hasChanges"])
+            saved = parse_document("opencode", path.read_text(encoding="utf-8"))
+            self.assertEqual(v2_permissions, saved["permissions"])
+            self.assertEqual(agents, saved["agents"])
+            self.assertTrue(all(row["path"] != "permissions" for row in self.preview("opencode", data)["rows"]))
+        data["runtime"]["permissionPolicy"] = ""
+        data["clearFields"] = ["runtime.permissionPolicy"]
+        result = self.save("opencode", data)
+        self.assertNotIn("permission", result["files"]["opencode"]["managed"])
+        source = path.read_text(encoding="utf-8")
+        saved = parse_document("opencode", source)
+        self.assertEqual(agents, saved["agents"])
+        self.assertEqual(v2_permissions, saved["permissions"])
+        self.assertNotIn("permission", saved)
+        self.assertIn("// 用户规则", source)
+
+    def test_opencode_permissions_missing_and_invalid_values(self):
+        data = draft("opencode")
+        self.assertNotIn(("permission",), desired_fields("opencode", data, [])["opencode"])
+        for value in (True, "bypassPermissions", "invalid", []):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                desired_fields("opencode", {**data, "runtime": {"permissionPolicy": value}}, [])
+
     def test_codex_memories_round_trip_and_clear_preserve_other_settings(self):
         path = Path(self.snapshot()["files"]["codex"]["path"])
         path.parent.mkdir(parents=True)
@@ -342,6 +408,27 @@ class AgentConfigServiceTests(AgentConfigFixture):
         self.assertIs(False, saved["includeCoAuthoredBy"])
         self.assertIn("// 用户署名", text)
         self.assertFalse(self.preview(data=data)["hasChanges"])
+
+    def test_claude_auto_memory_round_trip_and_clear(self):
+        path = Path(self.snapshot()["files"]["claude"]["path"])
+        path.parent.mkdir(parents=True)
+        path.write_text('// 保留内容\n{"custom":true}\n', encoding="utf-8")
+        data = draft()
+        self.assertNotIn("autoMemoryEnabled", self.snapshot()["files"]["claude"]["managed"])
+        for state, expected in (("enabled", True), ("disabled", False)):
+            data["runtime"]["autoMemoryEnabled"] = state
+            preview = self.preview(data=data)
+            result = self.service.apply(self.owner, "local", preview["token"])
+            self.assertIs(expected, result["files"]["claude"]["managed"]["autoMemoryEnabled"])
+            self.assertFalse(self.preview(data=data)["hasChanges"])
+        data["runtime"]["autoMemoryEnabled"] = "unset"
+        data["clearFields"] = ["runtime.autoMemoryEnabled"]
+        preview = self.preview(data=data)
+        self.service.apply(self.owner, "local", preview["token"])
+        saved = parse_document("claude", path.read_text(encoding="utf-8"))
+        self.assertNotIn("autoMemoryEnabled", saved)
+        self.assertTrue(saved["custom"])
+        self.assertIn("// 保留内容", path.read_text(encoding="utf-8"))
 
     def test_claude_custom_attribution_survives_unrelated_saves_and_explicitly_clears(self):
         path = Path(self.snapshot()["files"]["claude"]["path"])
@@ -712,22 +799,26 @@ class AgentConfigServiceTests(AgentConfigFixture):
         defaults = self.snapshot()["files"]
         paths = {
             "claude": "~/profiles/claude/settings.json",
-            "codex": "~/profiles/codex",
+            "codex": "~/profiles/codex/config.toml",
+            "codexAuth": "~/credentials/auth.json",
             "opencode": "~/profiles/opencode.jsonc",
         }
         for agent, path in paths.items():
             with self.subTest(agent=agent):
-                old = self.preview(agent)
+                old = self.preview("codex" if agent == "codexAuth" else agent)
                 result = self.service.set_path(self.owner, "local", {"target": agent, "path": path})
                 self.assertEqual(path, result["files"][agent]["customPath"])
                 self.assertFalse(result["files"][agent]["usesDefaultPath"])
                 with self.assertRaises(AgentConfigError):
                     self.service.apply(self.owner, "local", old["token"])
-                saved = self.save(agent)
+                saved = self.save("codex" if agent == "codexAuth" else agent)
                 self.assertTrue(Path(saved["files"][agent]["path"]).is_file())
-                self.assertFalse(Path(defaults[agent]["path"]).exists())
+                if agent == "codexAuth":
+                    self.assertTrue(Path(defaults[agent]["path"]).exists())
+                else:
+                    self.assertFalse(Path(defaults[agent]["path"]).exists())
         codex_files = self.snapshot()["files"]
-        self.assertEqual(Path(codex_files["codex"]["path"]).parent, Path(codex_files["codexAuth"]["path"]).parent)
+        self.assertNotEqual(Path(codex_files["codex"]["path"]).parent, Path(codex_files["codexAuth"]["path"]).parent)
         self.assertTrue(Path(codex_files["codexAuth"]["path"]).is_file())
         restarted = make_service(self.directory)
         self.addCleanup(restarted.close)
@@ -735,7 +826,9 @@ class AgentConfigServiceTests(AgentConfigFixture):
         for agent, path in paths.items():
             self.assertEqual(path, restored[agent]["customPath"])
         reset = restarted.set_path(self.owner, "local", {"target": "codex", "path": ""})["files"]
-        for target in ("codex", "codexAuth"):
+        self.assertEqual(restored["codexAuth"]["path"], reset["codexAuth"]["path"])
+        self.assertFalse(reset["codexAuth"]["usesDefaultPath"])
+        for target in ("codex",):
             self.assertTrue(reset[target]["usesDefaultPath"])
             self.assertEqual(defaults[target]["path"], reset[target]["path"])
             self.assertTrue(Path(restored[target]["path"]).exists())
@@ -754,9 +847,29 @@ class AgentConfigServiceTests(AgentConfigFixture):
         )
         restarted.set_path(self.owner, "local", {"target": "claude", "path": "~/custom/settings.json"})
         stored = json.loads(restarted.repository.path.read_text(encoding="utf-8"))
-        self.assertEqual(2, stored["version"])
+        self.assertEqual(3, stored["version"])
         self.assertEqual("~/legacy/opencode.jsonc", stored["paths"]["local"]["opencode"])
         self.assertEqual(state["managed"], stored["managed"])
+
+    def test_legacy_codex_directory_migrates_to_independent_files(self):
+        state = deepcopy(self.service.state)
+        state.update(version=2, paths={"local": {"codex": "~/legacy"}, "remote": {"codex": "/opt/codex"}})
+        self.service.repository.save(state)
+        restarted = make_service(self.directory)
+        self.addCleanup(restarted.close)
+        files = restarted.snapshot(self.owner, "local")["files"]
+        self.assertEqual(str((self.directory / "home/legacy/config.toml").resolve()), files["codex"]["path"])
+        self.assertEqual(str((self.directory / "home/legacy/auth.json").resolve()), files["codexAuth"]["path"])
+        self.assertEqual(
+            {"codex": "/opt/codex/config.toml", "codexAuth": "/opt/codex/auth.json"},
+            restarted.state["paths"]["remote"],
+        )
+        reset = restarted.set_path(self.owner, "local", {"target": "codexAuth", "path": ""})["files"]
+        self.assertTrue(reset["codexAuth"]["usesDefaultPath"])
+        self.assertEqual(files["codex"]["path"], reset["codex"]["path"])
+        reloaded = restarted.repository.load()
+        self.assertEqual(3, reloaded["version"])
+        self.assertEqual(restarted.state["paths"], reloaded["paths"])
 
     def test_invalid_or_unreadable_path_and_registry_failure_preserve_last_selection(self):
         self.service.set_path(self.owner, "local", {"target": "claude", "path": "~/good/settings.json"})
@@ -764,7 +877,8 @@ class AgentConfigServiceTests(AgentConfigFixture):
         disk_before = self.service.repository.path.read_bytes()
         for payload in (
             {"target": "claude", "path": "wrong.toml"},
-            {"target": "codex", "path": "~/config.toml"},
+            {"target": "codex", "path": "~/codex-directory"},
+            {"target": "codexAuth", "path": "~/auth.toml"},
             {"target": "opencode", "path": "wrong.txt"},
             {"target": "unknown", "path": "config.json"},
             {"target": "claude", "path": "bad\npath.json"},
@@ -797,13 +911,14 @@ class AgentConfigServiceTests(AgentConfigFixture):
         }
         for agent, path in {
             "claude": "~/custom/settings.json",
-            "codex": "~/custom/codex",
+            "codex": "~/custom/codex/config.toml",
+            "codexAuth": "~/custom/credentials/auth.json",
             "opencode": "~/custom/opencode.jsonc",
         }.items():
             result = self.service.set_path(self.owner, machine["id"], {"target": agent, "path": path})
             self.assertTrue(result["files"][agent]["path"].startswith("/home/fixture/custom/"))
             self.assertTrue(self.snapshot()["files"][agent]["usesDefaultPath"])
-        self.assertEqual("/home/fixture/custom/codex/auth.json", result["files"]["codexAuth"]["path"])
+        self.assertEqual("/home/fixture/custom/credentials/auth.json", result["files"]["codexAuth"]["path"])
         restarted = make_service(self.directory)
         self.addCleanup(restarted.close)
         self.assertEqual(self.service.state["paths"], restarted.state["paths"])

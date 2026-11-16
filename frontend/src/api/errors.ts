@@ -29,6 +29,8 @@ const messages: Record<string, string> = {
   'server host must be a valid ip address': '监听 IP 格式无效，请填写合法 IP 地址',
   'server port must be an integer': '监听端口必须是整数',
   'server port must be between 1 and 65535': '监听端口必须在 1 到 65535 之间',
+  'cannot bind new listener; current listener is unchanged':
+    '新监听不可用，请检查 IP、端口占用和监听权限。原监听保持不变。',
   'log path is required': '请填写日志路径',
   'failed to fetch': '网络请求失败，请检查服务是否运行',
 }

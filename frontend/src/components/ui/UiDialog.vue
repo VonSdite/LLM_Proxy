@@ -17,14 +17,15 @@ const props = withDefaults(
     title: string
     description?: string
     size?: 'sm' | 'md' | 'lg' | 'xl'
-    placement?: 'center' | 'left' | 'top'
+    placement?: 'center' | 'left'
     busy?: boolean
+    dismissible?: boolean
     dirty?: boolean
     save?: () => void | Promise<void>
     saveLabel?: string
     beforeClose?: () => boolean | Promise<boolean>
   }>(),
-  { size: 'md', placement: 'center' },
+  { size: 'md', placement: 'center', dismissible: true },
 )
 const emit = defineEmits<{ 'update:open': [value: boolean]; closed: [] }>()
 const closing = ref(false)
@@ -58,7 +59,7 @@ function focusOnOpen(event: Event) {
   target.focus({ preventScroll: true })
 }
 async function requestClose(value = false) {
-  if (value || props.busy || closing.value || discardPrompt.value) return
+  if (value || !props.dismissible || props.busy || closing.value || discardPrompt.value) return
   closing.value = true
   try {
     // 先提交仍在输入中的字段，再比较当前草稿与初始值。
@@ -88,7 +89,7 @@ function close() {
   emit('closed')
 }
 function dismiss() {
-  if (props.busy || closing.value || discardPrompt.value) return
+  if (!props.dismissible || props.busy || closing.value || discardPrompt.value) return
   close()
 }
 defineExpose({ requestClose })
@@ -99,12 +100,9 @@ defineExpose({ requestClose })
       <DialogOverlay class="ui-dialog-overlay" />
       <DialogContent
         class="ui-dialog"
-        :class="[
-          `ui-dialog--${size}`,
-          { 'ui-dialog--drawer': placement === 'left', 'ui-dialog--top': placement === 'top' },
-        ]"
-        @escape-key-down="busy && $event.preventDefault()"
-        @interact-outside="busy && $event.preventDefault()"
+        :class="[`ui-dialog--${size}`, { 'ui-dialog--drawer': placement === 'left' }]"
+        @escape-key-down="(busy || !dismissible) && $event.preventDefault()"
+        @interact-outside="(busy || !dismissible) && $event.preventDefault()"
         @open-auto-focus="focusOnOpen"
         @close-auto-focus="restoreFocus"
       >
@@ -116,7 +114,13 @@ defineExpose({ requestClose })
             </DialogDescription>
             <DialogDescription v-else class="sr-only">{{ title }}</DialogDescription>
           </div>
-          <UiIconButton icon="close" label="关闭" :disabled="busy" @click="dismiss" />
+          <UiIconButton
+            v-if="dismissible"
+            icon="close"
+            label="关闭"
+            :disabled="busy"
+            @click="dismiss"
+          />
         </header>
         <div ref="body" class="ui-dialog-body"><slot /></div>
         <footer v-if="$slots.footer" class="ui-dialog-footer">
@@ -133,7 +137,7 @@ defineExpose({ requestClose })
     size="sm"
   >
     <template #footer>
-      <UiButton autofocus @click="discardPrompt = false">继续编辑</UiButton>
+      <UiButton @click="discardPrompt = false">继续编辑</UiButton>
       <UiButton variant="danger-solid" :disabled="busy" @click="!busy && close()">不保存</UiButton>
       <UiButton v-if="save" variant="primary" :disabled="busy" @click="saveAndClose">
         {{ saveLabel || '保存并关闭' }}
@@ -166,6 +170,10 @@ defineExpose({ requestClose })
   outline: none;
 }
 
+.ui-dialog:focus-visible {
+  outline: none;
+}
+
 .ui-dialog--sm {
   width: min(440px, calc(100vw - 32px));
 }
@@ -176,14 +184,6 @@ defineExpose({ requestClose })
 
 .ui-dialog--xl {
   width: min(1200px, calc(100vw - 32px));
-}
-
-.ui-dialog--top {
-  --dialog-top-gap: clamp(24px, 10dvh, 96px);
-
-  top: var(--dialog-top-gap);
-  max-height: calc(100dvh - var(--dialog-top-gap) - 24px);
-  transform: translateX(-50%);
 }
 
 .ui-dialog--drawer {

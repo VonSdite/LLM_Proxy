@@ -2036,6 +2036,7 @@ class CodexOAuthServiceTests(unittest.TestCase):
         model_ids = [model["id"] for model in result["models"]]
         self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), model_ids)
         self.assertIn("gpt-6.1-sol", model_ids)
+        self.assertNotIn("gpt-5.6-sol", model_ids)
         self.assertNotIn("gpt-6.1-terra", model_ids)
         self.assertIn("gpt-6-luna", model_ids)
         self.assertNotIn("gpt-6-sol", model_ids)
@@ -2086,6 +2087,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
             service = self._build_service(root)
 
             initial = service.list_image_models()
+            self.assertIn("gpt-image-2.6-sunburst", initial["built_in_models"])
+            self.assertIn("gpt-image-2.6-flare", initial["built_in_models"])
             service.add_image_model("gpt-image-custom")
             service.set_default_image_model("gpt-image-custom")
             service.delete_image_model(DEFAULT_CODEX_IMAGE_MODEL_ID)

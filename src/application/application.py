@@ -60,6 +60,7 @@ from ..utils.async_logging import AsyncLogHandler, NativeLogListener, RotatingLo
 from ..utils.blocking_io import run_blocking
 from ..utils.database import create_connection_factory
 from .app_context import AppContext, Logger
+from .listener_runtime import ListenerRuntime
 
 
 class Application:
@@ -72,6 +73,7 @@ class Application:
 
         self._setup_config()
         self._setup_logging()
+        self._listener_runtime = ListenerRuntime(self._flask_app, self._logger)
         self._setup_context()
         self._setup_repositories()
         self._setup_provider_manager()
@@ -343,6 +345,7 @@ class Application:
             self._ctx,
             reload_logging_callback=self.reload_logging_settings,
             model_catalog_changed_callback=self._sync_model_permissions,
+            prepare_listener_callback=self._listener_runtime.prepare,
         )
 
         self._auth_controller = AuthenticationController(self._ctx, auth_service)
@@ -431,19 +434,18 @@ class Application:
         host = self._config_manager.get_server_host()
         port = self._config_manager.get_server_port()
 
-        from gevent.pywsgi import WSGIServer
-
         self._start_background_workers()
-        server = WSGIServer((host, port), self._flask_app)
         self._logger.info("Starting LLM Proxy on %s:%s...", host, port)
         try:
-            server.serve_forever()
+            self._listener_runtime.start(host, port)
+            self._listener_runtime.wait()
         finally:
-            server.stop()
             self.close()
 
     def close(self) -> None:
         """关闭 Agent 会话并排空应用持有的日志资源。"""
+        if hasattr(self, "_listener_runtime"):
+            self._listener_runtime.close()
         if hasattr(self, "_agent_config_service"):
             self._agent_config_service.close()
         self._log_listener.close()

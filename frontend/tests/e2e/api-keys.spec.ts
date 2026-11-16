@@ -9,7 +9,7 @@ for (const [width, touch] of [
 ] as const) {
   test.describe(`${width}px ${touch ? '触屏' : '桌面'}`, () => {
     test.use({ hasTouch: touch })
-    test(`API Key 明文在 ${width}px 保持单行，旧列宽不挤压按钮`, async ({ page }) => {
+    test(`API Key 在 ${width}px 气泡查看明文，表格尺寸保持不变`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await mockAdmin(page)
       const key = `sk-${'a'.repeat(48)}`
@@ -39,10 +39,17 @@ for (const [width, touch] of [
       await page.goto('/api-keys')
       const row = page.locator('tbody tr').first()
       await expect(row).toContainText('long-key')
-      const before = (await row.boundingBox())!.height
+      const before = (await row.boundingBox())!
+      const columnBefore = (await row.locator('.key-cell').boundingBox())!
       await row.getByRole('button', { name: '显示 Key', exact: true }).click()
-      await expect(row.locator('code')).toHaveText(key)
-      expect((await row.boundingBox())!.height).toBe(before)
+      const popover = page.getByRole('dialog', { name: 'API Key', exact: true })
+      await expect(popover.locator('.key-full')).toHaveText(key)
+      await expect(popover.getByRole('heading')).toHaveCount(0)
+      await expect(popover.locator('.key-full')).toHaveCSS('white-space', 'nowrap')
+      await expect(row.locator('code')).toHaveText('sk-aaaaaaa••••aaaaaa')
+      expect((await row.boundingBox())!.width).toBe(before.width)
+      expect((await row.locator('.key-cell').boundingBox())!.width).toBe(columnBefore.width)
+      expect((await row.boundingBox())!.height).toBe(before.height)
       const layout = await row.locator('.key-cell').evaluate((cell) => {
         const code = cell.querySelector('code')!
         const firstButton = cell.querySelector('button')!
@@ -63,8 +70,11 @@ for (const [width, touch] of [
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       )
-      await row.getByRole('button', { name: '隐藏 Key', exact: true }).click()
-      expect((await row.boundingBox())!.height).toBe(before)
+      await page.keyboard.press('Escape')
+      await expect(popover).toHaveCount(0)
+      await row.getByRole('button', { name: 'long-key', exact: true }).click()
+      await expect(page.getByRole('dialog', { name: '编辑 API Key', exact: true })).toBeVisible()
+      expect((await row.boundingBox())!.height).toBe(before.height)
     })
   })
 }

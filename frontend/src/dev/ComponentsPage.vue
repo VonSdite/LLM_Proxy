@@ -31,6 +31,7 @@ import {
   UiBadge,
   UiStatus,
   UiTable,
+  UiTrendChart,
   UiSortableList,
   UiSelectableRow,
   UiPagination,
@@ -229,6 +230,19 @@ const rows = [
       >
         <template #default="{ item }">{{ item.name }}</template>
       </UiSortableList>
+    </section>
+    <section class="specimen surface stack">
+      <h2>趋势图</h2>
+      <UiTrendChart
+        label="请求"
+        :points="[
+          { label: '11-10', value: 20 },
+          { label: '11-11', value: 42 },
+          { label: '11-12', value: null },
+          { label: '11-13', value: 30 },
+        ]"
+        :format="String"
+      />
     </section>
     <UiDialog v-model:open="open" title="配置文件">
       <UiCodeEditor v-model="code" language="json" />

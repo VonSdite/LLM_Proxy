@@ -6,8 +6,8 @@ import { errorMessage } from '@/api/client'
 import { useLifetime } from '@/features/shared/useLifetime'
 import { useDraftChanges } from '@/features/shared/useDraftChanges'
 import ModelPermissionPicker from '@/features/shared/ModelPermissionPicker.vue'
-import { UiAlert, UiButton, UiDialog, UiField, UiInput, UiSwitch } from '@/components/ui'
-const props = defineProps<{ user?: User; models: string[]; whitelist: boolean }>()
+import { UiAlert, UiButton, UiDialog, UiField, UiInput } from '@/components/ui'
+const props = defineProps<{ user?: User; models: string[] }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 const draft = reactive({
   username: props.user?.username || '',
@@ -83,10 +83,7 @@ const dirty = useDraftChanges(() => ({
           <UiInput v-model="draft.ip_address" placeholder="IPv4 / IPv6" mono :disabled="busy" />
         </UiField>
       </div>
-      <template v-if="user && whitelist">
-        <UiSwitch v-model="draft.whitelist_access_enabled" :disabled="busy">
-          允许白名单访问
-        </UiSwitch>
+      <template v-if="user">
         <UiField label="模型权限" group>
           <ModelPermissionPicker
             v-model="draft.model_permissions"

@@ -1,11 +1,27 @@
 <script setup lang="ts">
 import { TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
+import { nextTick, ref, watch } from 'vue'
 import type { SelectOption } from './types'
-withDefaults(
+const props = withDefaults(
   defineProps<{ modelValue: string; items: SelectOption[]; label?: string; segmented?: boolean }>(),
   { label: '页面分区' },
 )
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+const list = ref<InstanceType<typeof TabsList>>()
+watch(
+  () => [props.modelValue, props.items],
+  async () => {
+    await nextTick()
+    const container = list.value?.$el as HTMLElement | undefined
+    const active = container?.querySelector<HTMLElement>('[data-state="active"]')
+    if (!container || !active) return
+    const frame = container.getBoundingClientRect()
+    const item = active.getBoundingClientRect()
+    if (item.right > frame.right) container.scrollLeft += item.right - frame.right + 4
+    else if (item.left < frame.left) container.scrollLeft -= frame.left - item.left + 4
+  },
+  { immediate: true, flush: 'post' },
+)
 </script>
 <template>
   <TabsRoot
@@ -13,7 +29,12 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
     :model-value="modelValue"
     @update:model-value="emit('update:modelValue', String($event))"
   >
-    <TabsList class="ui-tabs" :class="{ 'ui-tabs--segmented': segmented }" :aria-label="label">
+    <TabsList
+      ref="list"
+      class="ui-tabs"
+      :class="{ 'ui-tabs--segmented': segmented }"
+      :aria-label="label"
+    >
       <TabsTrigger
         v-for="item in items"
         :key="item.value"
@@ -44,6 +65,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
 .ui-tab {
   position: relative;
+  flex-shrink: 0;
   padding: var(--space-2) var(--space-4);
   min-height: var(--control);
   border: 0;

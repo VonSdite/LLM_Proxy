@@ -171,7 +171,7 @@ test('模型映射使用完整目标 ID，空白附加行不进入保存', async
   })
 })
 
-test('设置开关保存后立即更新导航，数值端口不提交非法草稿', async ({ page }) => {
+test('功能开关在所属页面保存且保留导航，数值端口不提交非法草稿', async ({ page }) => {
   const fixture = await mockAdmin(page)
   await page.route('**/api/settings/system/api-keys', async (route) => {
     fixture.bootstrap.features.api_keys = false
@@ -184,28 +184,35 @@ test('设置开关保存后立即更新导航，数值端口不提交非法草�
   await basic.getByLabel('端口', { exact: true }).fill('70000')
   await basic.getByLabel('端口', { exact: true }).press('Tab')
   await expect(basic.getByLabel('端口', { exact: true })).toHaveAttribute('aria-invalid', 'true')
-  await expect(basic.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+  await expect(basic.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+  await expect(basic.getByText('端口范围为 1–65535', { exact: true })).toBeVisible()
   expect(fixture.calls.some((call) => call.path.endsWith('/basic'))).toBe(false)
   await basic.getByLabel('端口', { exact: true }).fill('8081')
   await basic.getByLabel('端口', { exact: true }).press('Tab')
-  await basic.getByRole('button', { name: '保存', exact: true }).click()
   await expect
     .poll(() => fixture.calls.find((call) => call.path.endsWith('/basic'))?.body)
     .toMatchObject({ server: { port: 8081 } })
-  const keys = page
-    .locator('form')
-    .filter({ has: page.getByRole('heading', { name: 'API Key', exact: true }) })
-  await keys.getByRole('switch', { name: '启用 API Key 管理', exact: true }).click()
-  await keys.getByRole('button', { name: '保存', exact: true }).click()
+  await page.goto('/api-keys')
+  await page.getByRole('switch', { name: '启用 API Key', exact: true }).click()
   await expect(
     page
       .getByRole('navigation', { name: '主导航' })
       .getByRole('link', { name: 'API Key', exact: true }),
-  ).toHaveCount(0)
+  ).toHaveCount(1)
 })
 
 test('OAuth 生成授权链接且认证失败保持当前登录弹窗', async ({ page }) => {
   await mockAdmin(page)
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          document.documentElement.dataset.copiedLink = text
+        },
+      },
+    })
+  })
   await page.route('**/api/oauth/codex/session', (route) =>
     route.fulfill({
       json: {
@@ -226,9 +233,50 @@ test('OAuth 生成授权链接且认证失败保持当前登录弹窗', async ({
     'href',
     'https://auth.example/authorize?state=fixture',
   )
+  const authorization = dialog.getByRole('textbox', { name: '授权链接', exact: true })
+  const copyBubble = page.getByRole('dialog', { name: '复制授权链接', exact: true })
+  await expect(authorization).toBeFocused()
+  await expect
+    .poll(() =>
+      authorization.evaluate(
+        (element: HTMLInputElement) =>
+          element.selectionStart === 0 && element.selectionEnd === element.value.length,
+      ),
+    )
+    .toBe(true)
+  await expect(copyBubble).toBeVisible()
+  await expect(copyBubble.getByRole('button', { name: '复制授权链接', exact: true })).toBeEnabled()
+  await dialog.getByRole('button', { name: '重新生成链接', exact: true }).click()
+  await expect(copyBubble).toBeVisible()
+  await expect(authorization).toBeFocused()
+  await expect
+    .poll(() =>
+      authorization.evaluate(
+        (element: HTMLInputElement) =>
+          element.selectionStart === 0 && element.selectionEnd === element.value.length,
+      ),
+    )
+    .toBe(true)
+  await expect(copyBubble.getByRole('button', { name: '复制授权链接', exact: true })).toBeVisible()
+  await expect(copyBubble.locator('.ui-popover-arrow')).toBeVisible()
+  await expect(page.getByRole('button', { name: '复制链接', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(copyBubble).toHaveCount(0)
+  await expect(dialog).toBeVisible()
+  await authorization.click()
+  await expect(copyBubble).toBeVisible()
+  await copyBubble.getByRole('button', { name: '复制授权链接', exact: true }).click()
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-copied-link',
+    'https://auth.example/authorize?state=fixture',
+  )
+  await expect(copyBubble).toHaveCount(0)
+  await authorization.click()
+  await expect(copyBubble).toBeVisible()
   await dialog
     .getByLabel('回调 URL', { exact: true })
     .fill('http://localhost:1455/auth/callback?code=fixture&state=fixture')
+  await expect(copyBubble).toHaveCount(0)
   await dialog.getByRole('button', { name: '完成登录' }).click()
   await expect(dialog.getByRole('alert')).toContainText('OAuth callback failed')
   await expect(page).toHaveURL(/\/oauth$/)

@@ -1,0 +1,156 @@
+id: opencode_v2
+name: Opencode v2
+order: 35
+help:
+  - 按 V2 的 providers / settings、permissions 规则数组和 compaction.buffer 格式保存。
+  - V1 与 V2 的官方默认路径相同；页签不会转换版本，需分别保存时可指定不同文件路径。
+  - 修改当前默认模型对应的服务与模型条目，保留其他服务、模型和未编辑字段。
+files:
+  opencodeV2:
+    path: ~/.config/opencode/opencode.json
+    format: jsonc
+groups: {connection: 2, models: 2, parameters: 4, runtime: 4, services: 2}
+fields:
+  - id: base-url
+    label: API 地址
+    group: connection
+    component: url
+    role: baseUrl
+    file: opencodeV2
+    path: [connection, baseURL]
+    required: true
+    help: [V2 使用 providers 下的 settings.baseURL；已有模型级地址优先回显并在原位置修改。本服务地址支持模型下拉。]
+  - id: api-key
+    label: API Key
+    group: connection
+    component: secret
+    file: opencodeV2
+    path: [connection, apiKey]
+    help: [写入当前服务或已有模型级 settings.apiKey；支持保留原有环境变量与文件引用，清空表示删除对应配置字段。]
+  - id: model
+    label: 默认主模型
+    group: models
+    component: model
+    file: opencodeV2
+    path: [selection, model]
+    required: true
+    help:
+      - 填写发给上游的完整模型 ID；本服务的 Provider 前缀保持不变。
+      - 保留现有模型别名；选择新模型时添加对应条目，保留旧条目。新文件使用 llm-proxy 服务名。
+  - id: protocol
+    label: API 协议
+    group: models
+    component: select
+    file: opencodeV2
+    path: [connection, package]
+    default: '@opencode/ai/providers/openai-compatible'
+    options:
+      - {value: '@opencode/ai/providers/openai-compatible', label: Chat Completions}
+      - {value: '@opencode/ai/providers/openai-compatible/responses', label: Responses}
+      - {value: '@opencode/ai/providers/anthropic-compatible', label: Anthropic Messages}
+    help: [V2 使用 @opencode/ai 提供的协议包；不设置时沿用内置服务的默认包。已有其他原生或自定义包在未修改时保留。]
+  - id: effort
+    label: 思考强度
+    group: parameters
+    component: select
+    file: opencodeV2
+    path: [modelSettings, reasoningEffort]
+    options:
+      - {value: none, label: 关闭}
+      - {value: minimal, label: 极低}
+      - {value: low, label: 低}
+      - {value: medium, label: 中}
+      - {value: high, label: 高}
+      - {value: xhigh, label: 极高}
+      - {value: max, label: 最高}
+    help: [写入当前模型的 settings.reasoningEffort；实际支持档位取决于模型与协议包。]
+  - id: context
+    label: 模型上下文
+    group: parameters
+    component: number
+    file: opencodeV2
+    path: [limits, context]
+    limit: context
+    min: 1
+    help: [当前模型的 limit.context，单位 Token；用于上下文预算与自动压缩判断。不设置时沿用模型目录或协议包默认值。]
+  - id: buffer
+    label: 压缩预留
+    group: parameters
+    component: text
+    file: opencodeV2
+    path: [buffer]
+    help:
+      - V2 的 compaction.buffer 表示自动压缩前保留的空余上下文，不是已使用比例。
+      - 填写 15% 表示预留 15%；也可填写正整数 Token 数，例如 20000。留空沿用默认值，需启用自动压缩。
+  - id: output
+    label: 最大输出
+    group: parameters
+    component: number
+    file: opencodeV2
+    path: [limits, output]
+    limit: output
+    min: 1
+    help: [当前模型的 limit.output，单位 Token，描述模型输出容量；实际请求输出还受模型与协议包控制。]
+  - id: permission
+    label: 操作确认策略
+    group: runtime
+    component: select
+    file: opencodeV2
+    path: [permissions]
+    options:
+      - {value: allow, label: 跳过确认}
+      - {value: ask, label: 每次询问}
+      - {value: deny, label: 拒绝操作}
+    help:
+      - V2 使用 permissions 规则数组，选定策略会替换为匹配所有操作与资源的一条规则。
+      - 原有细分规则显示为保留自定义配置，未更改时原样保留；选择不设置会删除顶层规则，沿用默认行为。
+      - Agent 自身规则、其他配置层及组织策略仍可能限制或覆盖此设置；跳过确认不等于绕过这些限制。
+  - id: auto-compress
+    label: 自动压缩
+    group: runtime
+    component: boolean
+    file: opencodeV2
+    path: [compaction, auto]
+    help: [控制 V2 的自动上下文压缩；关闭后不会自动触发新的压缩，手动压缩仍可使用。]
+  - id: snapshots
+    label: 文件快照
+    group: runtime
+    component: boolean
+    file: opencodeV2
+    path: [snapshots]
+    help: [控制文件系统快照，用于撤销与恢复 Agent 的文件修改；不设置时沿用 Opencode 默认行为。]
+  - id: update
+    default: disable
+    label: 更新检查
+    group: runtime
+    component: select
+    file: opencodeV2
+    path: [update]
+    options:
+      - {value: disable, label: 关闭}
+      - {value: notify, label: 仅通知}
+      - {value: auto, label: 自动安装}
+    help: [仅全局配置生效，项目级设置会被忽略；自动安装后仍需重启 Opencode 服务加载新版本。]
+  - id: disabled-providers
+    label: 禁用服务
+    group: services
+    component: text
+    file: opencodeV2
+    path: [disabled_providers]
+    help:
+      - 选择常用服务，或输入 Provider ID 后按 Enter 确认；支持逗号或空格分隔多个 ID，点击徽标上的 × 移除，清空后移除列表。
+      - 写入兼容字段 disabled_providers，V2 会转成 provider.use 禁用策略；原有 policies 保留，其他配置层的策略仍参与判断。
+  - id: share
+    default: disabled
+    label: 会话分享
+    group: services
+    component: select
+    file: opencodeV2
+    path: [share]
+    options:
+      - {value: manual, label: 手动分享}
+      - {value: auto, label: 自动分享}
+      - {value: disabled, label: 禁用分享}
+    help:
+      - 写入 share，控制会话手动分享、自动分享或禁用分享；不设置时沿用默认行为。
+      - 分享会将会话内容发布为可访问的链接；禁用此项不等于撤销此前已分享的链接。

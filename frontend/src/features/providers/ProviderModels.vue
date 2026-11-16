@@ -5,6 +5,7 @@ import { errorMessage, isAbort } from '@/api/client'
 import { moveItem, type RowMove } from '@/features/shared/order'
 import { useDraftChanges } from '@/features/shared/useDraftChanges'
 import ModelPickerDialog from '@/features/shared/ModelPickerDialog.vue'
+import TextImportDialog from '@/features/shared/TextImportDialog.vue'
 import { modelTpsHelp, modelTtftHelp } from './modelTestHelp'
 import {
   UiAlert,
@@ -15,6 +16,7 @@ import {
   UiHelpPopover,
   UiIconButton,
   UiInput,
+  UiListToolbar,
   UiSelect,
   UiSelectionBar,
   UiTable,
@@ -54,6 +56,41 @@ const selectionTesting = computed(() =>
 )
 const error = ref('')
 const fetched = ref<string[]>()
+const editing = ref(false)
+const modelSource = ref('')
+function editModels() {
+  modelSource.value = rows.value.map((row) => row.model).join('\n')
+  editing.value = true
+}
+async function applyModelText(text: string) {
+  if (props.disabled || testing.value || fetching.value) throw new Error('请等待当前操作完成')
+  const models = [
+    ...new Set(
+      text
+        .split(/\r?\n/)
+        .map((model) => model.trim())
+        .filter(Boolean),
+    ),
+  ]
+  if (!models.length) throw new Error('至少填写一个模型 ID')
+  const existing = new Map<string, ModelRow>()
+  for (const row of rows.value) {
+    const model = row.model.trim()
+    const old = existing.get(model)
+    if (old) old.visible ||= row.visible
+    else existing.set(model, row)
+  }
+  rows.value = models.map((model) => {
+    const row = existing.get(model)
+    if (row) {
+      row.model = model
+      return row
+    }
+    return { id: String(++sequence), model, visible: true, testing: false }
+  })
+  selected.value = []
+  publish()
+}
 const allVisible = computed(() => rows.value.length > 0 && rows.value.every((row) => row.visible))
 function visibilityAll() {
   const visible = !allVisible.value
@@ -306,8 +343,8 @@ async function test(ids: string[], bulk = false) {
 </script>
 <template>
   <div ref="root" class="stack">
-    <div class="toolbar">
-      <div class="actions">
+    <UiListToolbar :selecting="selected.length > 0">
+      <template #actions>
         <h2>模型</h2>
         <UiHelpPopover
           label="模型列表操作说明"
@@ -315,13 +352,48 @@ async function test(ids: string[], bulk = false) {
             '拉取：使用当前表单的地址、认证与代理，依次尝试推导出的 /v1/models 和 /models。',
             '选择：已有模型自动勾选，取消勾选后确认会从草稿移除；未在本次拉取结果中的模型保留。',
             '整理：去除首尾空白、空行和重复模型，再按模型 ID 排序。',
+            '编辑：每行一个模型 ID，确认后按文本顺序更新列表，已有模型保留显示状态。',
             '显示：仅控制模型目录中的展示，隐藏后仍可直接请求模型。',
             '测试：真实请求上游，可能产生用量；仅锁定正在测试行的模型 ID、测试和删除，其他行可操作，拖动排序不影响结果归属。',
             '保存：当前模型列表配置保存后生效。',
           ]"
         />
         <small class="muted">{{ rows.length }} 项</small>
-      </div>
+        <UiButton size="sm" :disabled="disabled || testing || fetching" @click="editModels">
+          编辑
+        </UiButton>
+        <UiButton size="sm" :disabled="disabled || testing" @click="tidy">整理</UiButton>
+        <UiButton
+          size="sm"
+          icon="download"
+          :disabled="disabled"
+          :loading="fetching"
+          @click="fetchModels"
+        >
+          拉取模型
+        </UiButton>
+      </template>
+      <template #selection>
+        <UiSelectionBar
+          v-if="selected.length"
+          embedded
+          :count="selected.length"
+          :disabled="disabled"
+          @clear="selected = []"
+        >
+          <UiButton :loading="bulkTesting" :disabled="disabled" @click="test(selected, true)">
+            测试
+          </UiButton>
+          <UiConfirmPopover
+            :message="`删除所选 ${selected.length} 个模型？`"
+            @confirm="remove(selected)"
+          >
+            <UiButton variant="danger-outline" :disabled="disabled || selectionTesting">
+              删除
+            </UiButton>
+          </UiConfirmPopover>
+        </UiSelectionBar>
+      </template>
       <div class="actions model-toolbar-actions">
         <UiField
           v-if="group"
@@ -345,35 +417,9 @@ async function test(ids: string[], bulk = false) {
             :disabled="disabled"
           />
         </UiField>
-        <UiButton size="sm" :disabled="disabled || testing" @click="tidy">整理</UiButton>
         <UiButton v-if="testing" size="sm" @click="cancel">停止测试</UiButton>
-        <UiButton
-          size="sm"
-          icon="download"
-          :disabled="disabled"
-          :loading="fetching"
-          @click="fetchModels"
-        >
-          拉取模型
-        </UiButton>
       </div>
-    </div>
-    <UiSelectionBar
-      v-if="selected.length"
-      :count="selected.length"
-      :disabled="disabled"
-      @clear="selected = []"
-    >
-      <UiButton :loading="bulkTesting" :disabled="disabled" @click="test(selected, true)">
-        测试
-      </UiButton>
-      <UiConfirmPopover
-        :message="`删除所选 ${selected.length} 个模型？`"
-        @confirm="remove(selected)"
-      >
-        <UiButton variant="danger-outline" :disabled="disabled || selectionTesting">删除</UiButton>
-      </UiConfirmPopover>
-    </UiSelectionBar>
+    </UiListToolbar>
     <UiAlert v-if="error">{{ error }}</UiAlert>
     <UiTable
       v-model:selected="selected"
@@ -461,6 +507,22 @@ async function test(ids: string[], bulk = false) {
         </span>
       </template>
     </UiTable>
+    <TextImportDialog
+      v-if="editing"
+      v-model:open="editing"
+      title="编辑模型列表"
+      language="text"
+      :allow-file="false"
+      :initial-value="modelSource"
+      confirm-label="确定"
+      :help="[
+        '每行填写一个上游模型 ID，保留组织或路径前缀，无需引号和逗号。',
+        '按文本顺序替换列表，自动去除首尾空白、空行及重复项；删除某行即移除对应模型。',
+        '已有模型保留显示 / 隐藏状态，新模型默认显示；至少保留一个模型。',
+        '确定后更新当前草稿，保存 Provider 后生效。',
+      ]"
+      :submit="applyModelText"
+    />
     <ModelPickerDialog
       v-if="fetched"
       title="选择上游模型"
@@ -480,11 +542,9 @@ async function test(ids: string[], bulk = false) {
 }
 
 .model-toolbar-actions {
-  flex: 1 1 480px;
   justify-content: flex-end;
   min-width: 0;
   max-width: 100%;
-  margin-left: auto;
 }
 
 .model-error {

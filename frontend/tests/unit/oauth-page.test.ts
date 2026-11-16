@@ -1,8 +1,10 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 import OAuthPage from '@/pages/OAuthPage.vue'
 import OAuthFileCard from '@/features/oauth/OAuthFileCard.vue'
 import { oauthApi, type OAuthFile } from '@/api/oauth'
+import { settingsApi } from '@/api/settings'
 import { UiSelect } from '@/components/ui'
 function file(name: string, enabled = true): OAuthFile {
   return {
@@ -35,7 +37,23 @@ describe('OAuth 页面状态', () => {
       total: 2,
       auth_dir: '/data',
     })
-    const wrapper = mount(OAuthPage)
+    vi.spyOn(settingsApi, 'get').mockResolvedValue({
+      server: { host: '127.0.0.1', port: 8080 },
+      admin: { username: '', password: '' },
+      client_ip: { real_ip_enabled: false, real_ip_header: 'X-Forwarded-For' },
+      logging: { path: 'logs', level: 'INFO', llm_request_debug_enabled: false },
+      oauth: {
+        enabled: true,
+        proxy_mode: 'direct',
+        proxy: '',
+        verify_ssl: false,
+        safe_desensitization_enabled: false,
+      },
+      api_keys: { enabled: false },
+      model_mapping: { enabled: true },
+      auth_enabled: false,
+    })
+    const wrapper = mount(OAuthPage, { global: { plugins: [createPinia()] } })
     await flushPromises()
     const tabs = wrapper.findAll('[role="tab"]')
     const available = tabs.find((tab) => tab.text().startsWith('可用'))!

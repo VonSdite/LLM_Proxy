@@ -41,13 +41,13 @@ test('三个 Agent 页签、文件编辑器和自定义路径的说明可读', a
   test.setTimeout(60_000)
   const fixture = await mockAdmin(page)
   await page.goto('/agents')
-  for (const agent of ['Claude', 'Codex', 'opencode']) {
+  for (const agent of ['Claude', 'Codex', 'Opencode v1']) {
     await page.getByRole('tab', { name: agent, exact: true }).click()
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0)
     await inspectHelp(page)
   }
   await page
-    .getByRole('button', { name: fixture.snapshot.files.opencode.path, exact: true })
+    .getByRole('button', { name: fixture.snapshot.files.opencode!.path, exact: true })
     .click()
   await inspectHelp(page, page.getByRole('dialog'))
   await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).first().click()
@@ -60,10 +60,13 @@ test('系统设置所有分组及代理字段的说明可读', async ({ page }) 
   test.setTimeout(60_000)
   const fixture = await mockAdmin(page)
   await page.goto('/settings')
+  await expect(page.getByRole('form')).toHaveCount(4)
+  for (const section of await page.getByRole('form').all()) await inspectHelp(page, section)
+  await page.goto('/oauth')
+  await page.getByRole('button', { name: '网络设置', exact: true }).click()
   await page.getByRole('combobox', { name: '连接方式' }).click()
   await page.getByRole('option', { name: '自定义代理' }).click()
-  await expect(page.getByRole('form')).toHaveCount(6)
-  for (const section of await page.getByRole('form').all()) await inspectHelp(page, section)
+  await inspectHelp(page, page.getByRole('dialog', { name: 'OAuth 网络设置', exact: true }))
   expect(fixture.unexpected).toEqual([])
 })
 
@@ -144,9 +147,7 @@ for (const path of ['/', '/users', '/model-mappings', '/statistics']) {
   test(`${path} 导入弹窗提供对应的覆盖或合并规则`, async ({ page }) => {
     const fixture = await mockAdmin(page)
     await page.goto(path)
-    if (path === '/statistics')
-      await page.getByRole('button', { name: '导入数据', exact: true }).click()
-    else await page.getByRole('button', { name: '导入', exact: true }).click()
+    await page.getByRole('button', { name: '导入', exact: true }).click()
     await inspectHelp(page, page.getByRole('dialog'))
     expect(fixture.unexpected).toEqual([])
   })
@@ -180,6 +181,7 @@ test('长说明在短窗口可滚动，移入弹层保持打开且不改变表�
 test('表头问号与排序、列宽操作独立', async ({ page }) => {
   const fixture = await mockAdmin(page)
   await page.goto('/statistics')
+  await page.getByRole('tab', { name: '用量', exact: true }).click()
   const heading = page
     .getByRole('columnheader')
     .filter({ has: page.getByRole('button', { name: '缓存命中率', exact: true }) })
@@ -202,7 +204,7 @@ test.describe('触屏说明', () => {
     await mockAdmin(page)
     await page.clock.install()
     await page.goto('/agents')
-    const help = page.getByRole('button', { name: 'ANTHROPIC_MODEL说明', exact: true })
+    const help = page.getByRole('button', { name: '默认主模型说明', exact: true })
     await help.tap()
     await expect(page.locator('.ui-help-content')).toBeVisible()
     await page.clock.runFor(300)

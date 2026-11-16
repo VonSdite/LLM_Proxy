@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
@@ -15,6 +17,15 @@ from ..utils.local_time import (
     format_local_datetime,
     now_local_datetime_text,
 )
+from .statistics_queries import (
+    OUTCOME_COUNTS_SQL,
+    REQUEST_TPS_REASON_SQL,
+    REQUEST_TPS_SQL,
+    SUCCESS_RATE_SQL,
+    overview,
+    upstream_rates,
+    usage_outcomes,
+)
 
 
 class LogRepository:
@@ -23,8 +34,7 @@ class LogRepository:
     _STATISTICS_SORT_COLUMNS = {
         "ip_address": "COALESCE(d.ip_address, '')",
         "username": "COALESCE(u.username, '-')",
-        "model_flow": "d.request_model || ' ' || COALESCE(NULLIF(d.target_model_id, ''), '') || ' ' "
-        "|| COALESCE(NULLIF(d.response_model, ''), '')",
+        "model_flow": "d.request_model || ' ' || COALESCE(NULLIF(d.target_model_id, ''), '')",
         "request_model": "d.request_model",
         "target_model_id": "NULLIF(d.target_model_id, '')",
         "response_model": "NULLIF(d.response_model, '')",
@@ -53,6 +63,7 @@ class LogRepository:
     }
 
     _API_KEY_USAGE_SORT_COLUMNS = {
+        "success_rate": SUCCESS_RATE_SQL,
         "key_name": "COALESCE(NULLIF(k.name, ''), '已删除 KEY #' || l.api_key_id)",
         "key_preview": "COALESCE(NULLIF(k.key_prefix, '') || '...' || NULLIF(k.key_suffix, ''), '')",
         "status": "CASE WHEN k.id IS NULL THEN 2 WHEN k.enabled = 1 THEN 0 ELSE 1 END",
@@ -70,8 +81,7 @@ class LogRepository:
     _LOG_SORT_COLUMNS = {
         "ip_address": "COALESCE(l.ip_address, '')",
         "username": "COALESCE(u.username, '-')",
-        "model_flow": "l.request_model || ' ' || COALESCE(l.target_model_id, '') || ' ' "
-        "|| COALESCE(l.response_model, '')",
+        "model_flow": "l.request_model || ' ' || COALESCE(l.target_model_id, '')",
         "request_model": "l.request_model",
         "target_model_id": "COALESCE(l.target_model_id, '')",
         "response_model": "COALESCE(l.response_model, '')",
@@ -82,14 +92,35 @@ class LogRepository:
         "cache_creation_input_tokens": "COALESCE(l.cache_creation_input_tokens, 0)",
         "cache_hit_rate": "CASE WHEN l.cache_usage_status = 'known' AND l.prompt_tokens > 0 "
         "THEN l.cache_read_input_tokens * 1.0 / l.prompt_tokens END",
+        "outcome": "l.outcome",
+        "first_token_latency_ms": "l.first_token_latency_ms",
+        "tps": REQUEST_TPS_SQL,
+        "duration_ms": "l.duration_ms",
         "start_time": "l.start_time",
         "end_time": "COALESCE(l.end_time, '')",
-        "duration": "MAX(COALESCE((julianday(l.end_time) - julianday(l.start_time)) * 86400.0, 0), 0)",
+        "duration": "COALESCE(l.duration_ms / 1000.0, "
+        "MAX(COALESCE((julianday(l.end_time) - julianday(l.start_time)) * 86400.0, 0), 0))",
     }
 
     def __init__(self, get_connection: ConnectionFactory):
         self._get_connection = get_connection
         self._ensure_table()
+
+    @database_operation()
+    def get_overview(
+        self, start_date, end_date, username=None, request_model=None, *, response_model=None, ip_address=None
+    ):
+        with self._get_connection() as conn:
+            conn.execute("BEGIN")
+            return overview(
+                conn,
+                start_date,
+                end_date,
+                username,
+                request_model,
+                response_model=response_model,
+                ip_address=ip_address,
+            )
 
     @database_operation(write=True)
     def _ensure_table(self) -> None:
@@ -150,6 +181,19 @@ class LogRepository:
                 cursor.execute("ALTER TABLE request_logs ADD COLUMN auth_account_id TEXT")
             if "estimated_cost_usd" not in request_log_columns:
                 cursor.execute("ALTER TABLE request_logs ADD COLUMN estimated_cost_usd REAL")
+            for name, sql_type in {
+                "outcome": "TEXT",
+                "http_status": "INTEGER",
+                "error_type": "TEXT",
+                "is_stream": "INTEGER",
+                "duration_ms": "REAL",
+                "first_token_latency_ms": "REAL",
+                "tps": "REAL",
+                "tps_unavailable_reason": "TEXT",
+                "upstream_attempts": "TEXT",
+            }.items():
+                if name not in request_log_columns:
+                    cursor.execute(f"ALTER TABLE request_logs ADD COLUMN {name} {sql_type}")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_start_time ON request_logs(start_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_address ON request_logs(ip_address)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_api_key ON request_logs(api_key_id)")
@@ -305,6 +349,15 @@ class LogRepository:
         auth_file_name: str | None = None,
         auth_account_id: str | None = None,
         estimated_cost_usd: float | None = None,
+        outcome: str | None = None,
+        http_status: int | None = None,
+        error_type: str | None = None,
+        is_stream: bool | None = None,
+        duration_ms: float | None = None,
+        first_token_latency_ms: float | None = None,
+        tps: float | None = None,
+        tps_unavailable_reason: str | None = None,
+        upstream_attempts: list[dict[str, Any]] | None = None,
     ) -> int | None:
         """写入单条请求日志，并同步更新日聚合统计。"""
         start_time_value = ensure_local_datetime(start_time)
@@ -363,6 +416,11 @@ class LogRepository:
                 ),
             )
             log_id = cursor.lastrowid
+            observation = self._normalize_observation(locals())
+            cursor.execute(
+                "UPDATE request_logs SET outcome = ?, http_status = ?, error_type = ?, is_stream = ?, duration_ms = ?, first_token_latency_ms = ?, tps = ?, tps_unavailable_reason = ?, upstream_attempts = ? WHERE id = ?",
+                (*observation.values(), log_id),
+            )
             stat_date = format_local_date(start_time_value)
             cursor.execute(
                 """
@@ -562,7 +620,9 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
-    ) -> list[SQLiteRow]:
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """按条件查询聚合统计。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -578,6 +638,8 @@ class LogRepository:
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "d.request_model", request_model)
+            self._append_text_filter(conditions, params, "d.ip_address", ip_address)
+            self._append_text_filter(conditions, params, "d.response_model", response_model)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             order_clause = self._build_order_clause(
@@ -627,7 +689,19 @@ class LogRepository:
                 {order_clause}
             """
             cursor.execute(query, params)
-            return cursor.fetchall()
+            return usage_outcomes(
+                conn,
+                cursor.fetchall(),
+                "stats",
+                start_date,
+                end_date,
+                username,
+                request_model,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
+                response_model=response_model,
+                ip_address=ip_address,
+            )
 
     @database_operation()
     def get_user_usage_summary(
@@ -638,7 +712,9 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
-    ) -> list[SQLiteRow]:
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """按用户名查询用量汇总。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -654,6 +730,8 @@ class LogRepository:
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "d.request_model", request_model)
+            self._append_text_filter(conditions, params, "d.ip_address", ip_address)
+            self._append_text_filter(conditions, params, "d.response_model", response_model)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             order_clause = self._build_order_clause(
@@ -700,7 +778,19 @@ class LogRepository:
                 {order_clause}
             """
             cursor.execute(query, params)
-            return cursor.fetchall()
+            return usage_outcomes(
+                conn,
+                cursor.fetchall(),
+                "user_usage",
+                start_date,
+                end_date,
+                username,
+                request_model,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
+                response_model=response_model,
+                ip_address=ip_address,
+            )
 
     @database_operation()
     def get_api_key_usage_summary(
@@ -711,7 +801,9 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
-    ) -> list[SQLiteRow]:
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """按 API Key 查询指定时间范围内的用量汇总。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -726,6 +818,8 @@ class LogRepository:
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "l.request_model", request_model)
+            self._append_text_filter(conditions, params, "l.ip_address", ip_address)
+            self._append_text_filter(conditions, params, "l.response_model", response_model)
 
             where_clause = " AND ".join(conditions)
             order_clause = self._build_order_clause(
@@ -738,6 +832,8 @@ class LogRepository:
             query = f"""
                 SELECT
                     l.api_key_id,
+                    {OUTCOME_COUNTS_SQL},
+                    {SUCCESS_RATE_SQL} AS success_rate,
                     COALESCE(NULLIF(k.name, ''), '已删除 KEY #' || l.api_key_id) as key_name,
                     CASE
                         WHEN NULLIF(k.key_prefix, '') IS NOT NULL AND NULLIF(k.key_suffix, '') IS NOT NULL
@@ -785,7 +881,19 @@ class LogRepository:
                 {order_clause}
             """
             cursor.execute(query, params)
-            return cursor.fetchall()
+            return upstream_rates(
+                conn,
+                cursor.fetchall(),
+                "api_key_usage",
+                start_date,
+                end_date,
+                username,
+                request_model,
+                sort_key=sort_key,
+                sort_direction=sort_direction,
+                response_model=response_model,
+                ip_address=ip_address,
+            )
 
     @database_operation()
     def get_logs(
@@ -798,6 +906,8 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """按条件分页查询原始请求日志。"""
         offset = (page - 1) * page_size
@@ -815,6 +925,8 @@ class LogRepository:
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "l.request_model", request_model)
+            self._append_text_filter(conditions, params, "l.ip_address", ip_address)
+            self._append_text_filter(conditions, params, "l.response_model", response_model)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -839,6 +951,7 @@ class LogRepository:
                        l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
                        l.cache_read_input_tokens, l.cache_creation_input_tokens, l.cache_usage_status,
                        l.auth_file_name, l.auth_account_id, l.estimated_cost_usd,
+                       l.outcome, l.http_status, l.error_type, l.is_stream, l.duration_ms, l.first_token_latency_ms, {REQUEST_TPS_SQL} AS tps, {REQUEST_TPS_REASON_SQL} AS tps_unavailable_reason, l.upstream_attempts,
                        CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
                            as cache_known_prompt_tokens,
                        CASE
@@ -873,6 +986,8 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> list[SQLiteRow]:
         """按条件查询完整请求日志列表。"""
         with self._get_connection() as conn:
@@ -888,6 +1003,8 @@ class LogRepository:
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "l.request_model", request_model)
+            self._append_text_filter(conditions, params, "l.ip_address", ip_address)
+            self._append_text_filter(conditions, params, "l.response_model", response_model)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             order_clause = self._build_order_clause(
@@ -903,6 +1020,7 @@ class LogRepository:
                        l.total_tokens, l.prompt_tokens, l.completion_tokens, l.usage_status,
                        l.cache_read_input_tokens, l.cache_creation_input_tokens, l.cache_usage_status,
                        l.auth_file_name, l.auth_account_id, l.estimated_cost_usd,
+                       l.outcome, l.http_status, l.error_type, l.is_stream, l.duration_ms, l.first_token_latency_ms, {REQUEST_TPS_SQL} AS tps, {REQUEST_TPS_REASON_SQL} AS tps_unavailable_reason, l.upstream_attempts,
                        CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END
                            as cache_known_prompt_tokens,
                        CASE
@@ -926,6 +1044,8 @@ class LogRepository:
         end_date: str | None = None,
         username: str | Sequence[str] | None = None,
         request_model: str | Sequence[str] | None = None,
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """按条件导出请求明细原始行。"""
         with self._get_connection() as conn:
@@ -941,6 +1061,8 @@ class LogRepository:
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "l.request_model", request_model)
+            self._append_text_filter(conditions, params, "l.ip_address", ip_address)
+            self._append_text_filter(conditions, params, "l.response_model", response_model)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             cursor.execute(
@@ -962,6 +1084,7 @@ class LogRepository:
                     l.auth_file_name,
                     l.auth_account_id,
                     l.estimated_cost_usd,
+                    l.outcome, l.http_status, l.error_type, l.is_stream, l.duration_ms, l.first_token_latency_ms, {REQUEST_TPS_SQL} AS tps, {REQUEST_TPS_REASON_SQL} AS tps_unavailable_reason, l.upstream_attempts,
                     l.start_time,
                     l.end_time,
                     l.created_at
@@ -982,6 +1105,7 @@ class LogRepository:
         username: str | Sequence[str] | None = None,
         request_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        response_model: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """按条件导出日聚合统计原始行。"""
         with self._get_connection() as conn:
@@ -997,6 +1121,7 @@ class LogRepository:
                 params.append(end_date)
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "d.request_model", request_model)
+            self._append_text_filter(conditions, params, "d.response_model", response_model)
             self._append_text_filter(conditions, params, "d.ip_address", ip_address)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
@@ -1154,6 +1279,26 @@ class LogRepository:
                         row["created_at"],
                     ),
                 )
+                cursor.execute(
+                    "UPDATE request_logs SET outcome = ?, http_status = ?, error_type = ?, is_stream = ?, duration_ms = ?, first_token_latency_ms = ?, tps = ?, tps_unavailable_reason = ?, upstream_attempts = ? WHERE id = ?",
+                    (
+                        *[
+                            row[key]
+                            for key in (
+                                "outcome",
+                                "http_status",
+                                "error_type",
+                                "is_stream",
+                                "duration_ms",
+                                "first_token_latency_ms",
+                                "tps",
+                                "tps_unavailable_reason",
+                                "upstream_attempts",
+                            )
+                        ],
+                        cursor.lastrowid,
+                    ),
+                )
                 inserted_count += 1
 
         return {
@@ -1161,6 +1306,31 @@ class LogRepository:
             "inserted_count": inserted_count,
             "skipped_count": skipped_count,
             "duplicate_count": skipped_count,
+        }
+
+    @database_operation()
+    def get_filter_options(self) -> dict[str, list[str]]:
+        """提供请求明细与历史日聚合中的筛选候选。"""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                WITH sources AS (
+                    SELECT ip_address, request_model, response_model FROM request_logs
+                    UNION
+                    SELECT ip_address, request_model, response_model FROM daily_request_stats
+                )
+                SELECT s.*, u.username FROM sources s
+                LEFT JOIN users u ON u.ip_address = s.ip_address
+                """
+            ).fetchall()
+        return {
+            key: sorted({row[column] for row in rows if row[column] and row[column].strip()})
+            for key, column in (
+                ("users", "username"),
+                ("models", "request_model"),
+                ("response_models", "response_model"),
+                ("ip_addresses", "ip_address"),
+            )
         }
 
     @database_operation()
@@ -1285,6 +1455,7 @@ class LogRepository:
             row.get("cache_creation_input_tokens"), field_name="cache_creation_input_tokens"
         )
         return {
+            **cls._normalize_observation(row),
             "api_key_id": cls._normalize_optional_positive_int(row.get("api_key_id"), field_name="api_key_id"),
             "ip_address": cls._normalize_stat_text(row.get("ip_address"), field_name="ip_address", required=False),
             "request_model": cls._normalize_stat_text(
@@ -1319,6 +1490,66 @@ class LogRepository:
             "created_at": cls._normalize_stat_text(row.get("created_at"), field_name="created_at", required=False)
             or default_created_at,
         }
+
+    @classmethod
+    def _normalize_observation(cls, row):
+        """导入和实时写入共用观测字段校验，缺失值保持未知。"""
+        outcome = row.get("outcome")
+        if outcome not in (None, "success", "error", "cancelled"):
+            raise ValueError("Invalid request outcome")
+        status = cls._normalize_optional_positive_int(row.get("http_status"), field_name="http_status")
+        if status is not None and not 100 <= status <= 599:
+            raise ValueError("Invalid HTTP status")
+        stream = row.get("is_stream")
+        if stream is not None and (type(stream) not in (int, bool) or stream not in (0, 1)):
+            raise ValueError("Invalid streaming flag")
+        values = {
+            "outcome": outcome,
+            "http_status": status,
+            "error_type": str(row.get("error_type") or "")[:120] or None,
+            "is_stream": int(stream) if stream is not None else None,
+        }
+        for key in ("duration_ms", "first_token_latency_ms", "tps"):
+            value = cls._normalize_optional_stat_float(row.get(key), field_name=key)
+            if value is not None and not math.isfinite(value):
+                raise ValueError("Request metrics must be finite")
+            values[key] = value
+        values["tps_unavailable_reason"] = (
+            (str(row.get("tps_unavailable_reason") or "")[:120] or None) if values["tps"] is None else None
+        )
+        attempts = row.get("upstream_attempts")
+        if isinstance(attempts, str):
+            attempts = json.loads(attempts)
+        if attempts is not None:
+            if not isinstance(attempts, list) or len(attempts) > 10000:
+                raise ValueError("Invalid upstream attempts")
+            normalized = []
+            for attempt in attempts:
+                if not isinstance(attempt, dict) or attempt.get("outcome") not in {
+                    "success",
+                    "error",
+                    "exception",
+                    "cancelled",
+                }:
+                    raise ValueError("Invalid upstream attempt outcome")
+                status = cls._normalize_optional_positive_int(attempt.get("http_status"), field_name="http_status")
+                if status is not None and not 100 <= status <= 599:
+                    raise ValueError("Invalid upstream attempt HTTP status")
+                normalized.append(
+                    {
+                        "outcome": attempt["outcome"],
+                        "http_status": status,
+                        "target_model_id": cls._normalize_stat_text(
+                            attempt.get("target_model_id"), field_name="target_model_id", required=False
+                        ),
+                        "response_model": cls._normalize_stat_text(
+                            attempt.get("response_model"), field_name="response_model", required=False
+                        ),
+                    }
+                )
+            attempts = json.dumps(normalized, ensure_ascii=False)
+        values["upstream_attempts"] = attempts
+        return values
 
     @classmethod
     def _normalize_optional_stat_int(cls, value: Any, *, field_name: str) -> int | None:

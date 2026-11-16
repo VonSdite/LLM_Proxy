@@ -50,6 +50,7 @@ const protocols: Record<Provider['source_format'], string> = {
       <UiTooltip :text="row.name">
         <UiButton
           class="provider-name"
+          size="title"
           variant="link"
           :aria-label="`编辑 Provider ${row.name}`"
           aria-haspopup="dialog"
@@ -126,8 +127,6 @@ const protocols: Record<Provider['source_format'], string> = {
 .provider-name {
   display: flex;
   max-width: 100%;
-  font-size: var(--text-section);
-  font-weight: var(--weight-emphasis);
   line-height: var(--control);
 }
 

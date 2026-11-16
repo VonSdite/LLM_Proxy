@@ -24,9 +24,9 @@
 
 控制平面除了 Provider、Auth Group、用户、统计和系统设置，还可以：
 
-- 在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成、查看、启停、导入、导出和归档删除 CLI/OAuth 类本地认证文件
-- 在启用 `api_keys.enabled` 后提供 API Key 管理入口，用于创建下游访问 key、设置模型权限、设置总 token 上限并查看 key 级用量
-- 在启用 `model_mapping.enabled` 后提供模型映射入口，用于维护独立对外模型 ID，以及跨 Provider / OAuth 模型的最高优先级或粘滞故障切换目标
+- 提供常驻 OAuth 管理入口，用于生成、查看、启停、导入、导出和归档删除 CLI/OAuth 类本地认证文件
+- 提供常驻 API Key 管理入口，用于创建下游访问 key、设置模型权限、设置总 token 上限并查看 key 级用量
+- 提供常驻模型映射入口，用于维护独立对外模型 ID，以及跨 Provider / OAuth 模型的最高优先级或粘滞故障切换目标
 - 在 `/agents` 提供本机和 SSH 机器上的 Claude、Codex、opencode 配置编辑、逐字段预览、文件编辑和备份恢复
 
 ## 2. Logical View
@@ -39,11 +39,11 @@
 
 `render_ui` 从 `static/app/manifest.json` 解析内容哈希资源。HTML 使用 `no-store`，manifest 使用 `no-cache`，内容哈希资源使用长期不可变缓存。Vue 生产资源由 Flask 同源提供，Node.js 属于开发与构建工具。实现与验证状态记录在 [前端迁移验收记录](frontend-migration-audit.md)。
 
-`/login`、`/`、`/providers`、`/users`、`/api-keys`、`/model-mappings`、`/oauth`、`/agents`、`/statistics`、`/settings` 使用同一 Vue 入口。Flask 保留页面认证、API Key / 模型映射功能跳转与 Agent 访问保护；Vue Router 处理站内导航和界面功能门控。API、数据平面与未知路径使用各自 Flask 路由，不进入页面兜底。旧业务模板、页面脚本、Bootstrap 资源不参与生产装配；Ace 由本地 vendor 按需加载。
+`/login`、`/`、`/providers`、`/users`、`/api-keys`、`/model-mappings`、`/oauth`、`/agents`、`/statistics`、`/settings` 使用同一 Vue 入口。Flask 保留页面认证与 Agent 访问保护；Vue Router 处理站内导航和登录校验，OAuth、API Key 和模型映射管理页始终可进入。API、数据平面与未知路径使用各自 Flask 路由，不进入页面兜底。旧业务模板、页面脚本、Bootstrap 资源不参与生产装配；Ace 由本地 vendor 按需加载。
 
 表单草稿与服务器快照分开保存，列表使用稳定业务 ID。`useRequest` 管理替换读取与迟到响应，`useAction` 管理串行操作、错误和操作后刷新，页面与弹窗卸载时取消未完成请求。Agent 预览按当前机器、Agent 和草稿版本关联，原始文件编辑期间暂停表单预览。OAuth 首次读取本地账号快照，每分钟按已到期窗口同步，页面隐藏或操作忙碌时跳过，卸载时移除定时器和监听器。客户端取消不回滚已经完成的服务端事务。
 
-单项开关由 `useToggle` 保存临时目标值和记录锁，已确认数据通过 `useRequest.patch` 写入页面快照；在途读取完成时合并期间已确认的更新，后续新读取接收服务器最新状态。同一模型映射及其目标共享记录锁，不同记录可独立提交。用户与 API Key 的开关调用既有 PUT 接口，携带显式布尔值。OAuth 单项启停期间暂停自动同步，认证组条目操作后读取当前运行快照。系统设置的各分组在同一页展示，按保存分组维护已确认值与草稿，保存响应仅更新对应分组。这些状态均属于当前页面，卸载时取消未完成请求；控制平面 API、数据平面和部署拓扑保持既有职责。
+单项开关由 `useToggle` 保存临时目标值和记录锁，已确认数据通过 `useRequest.patch` 写入页面快照；在途读取完成时合并期间已确认的更新，后续新读取接收服务器最新状态。同一模型映射及其目标共享记录锁，不同记录可独立提交。用户与 API Key 的开关调用既有 PUT 接口，携带显式布尔值。OAuth 单项启停期间暂停自动同步，认证组条目操作后读取当前运行快照。系统设置仅展示服务监听、管理登录、客户端 IP 和日志；API Key 与 OAuth 的总开关位于所属页面，OAuth 网络选项位于该页弹窗。监听地址与端口在离开编辑区域或按 Enter 时一起自动保存，组内切换焦点不提交；其他开关、选择与编辑完成的文本自动提交。每组维护已确认值、草稿和串行提交队列，在途修改合并为下一次提交；响应只合并仍与提交值相同的字段，不覆盖后续输入。这些状态均属于当前页面，卸载时取消未完成请求；控制平面 API、数据平面和部署拓扑保持既有职责。
 
 浏览器非敏感偏好使用 `localStorage.theme` 和 `table-widths:*`。API Key、SSH 密码和文件内容仅处于当前页面或既有服务器隔离会话中。样式、菜单、帮助和对话框来自共享控件，文件编辑器实例随所属弹窗销毁。
 
@@ -162,7 +162,8 @@ decoder
   - 根据当前 route family 选择下游接口协议
   - 根据 `client_ip.real_ip_enabled` 和 `client_ip.real_ip_header` 解析白名单、模型权限、统计和 trace 使用的客户端 IP
   - 在 `api_keys.enabled=true` 时校验下游 API Key，并按 key 模型权限、总 token 上限、并发及分钟/每日请求限制执行准入
-  - 同时启用 Chat 白名单和 API Key 管理时，最终模型权限为用户权限与 key 权限的交集
+  - 每次请求按客户端 IP 查询已登记用户；Chat 白名单开启时要求用户存在且 whitelist_access_enabled=1，关闭时允许未登记 IP，已登记用户仍执行模型权限检查
+  - 启用 API Key 管理时，已登记用户的最终模型权限为用户权限与 key 权限的交集；白名单关闭的未登记 IP 仅受 key 权限约束
   - 处理 `/v1/images/generations` 与 `/v1/images/edits`，图片模型使用 Codex OAuth 图片模型目录和默认图片模型
   - 对模型映射 ID 执行配置的目标选择策略，并在目标自身候选耗尽后切换 Provider、Codex OAuth 或 Claude OAuth 文本目标
   - 构造标准错误体
@@ -172,9 +173,7 @@ decoder
 - `WebController`
   - 提供 Provider、用户、API Key、统计与系统设置页面
   - 暴露统计汇总、用户用量汇总、请求明细、当前页签 Excel 导出与统计迁移 JSON 导入导出接口
-  - 在 `oauth.enabled=true` 时显示 OAuth 顶层导航入口
-  - 在 `api_keys.enabled=true` 时显示 API Key 管理顶层导航入口
-  - 在 `model_mapping.enabled=true` 时显示模型映射顶层导航入口
+  - OAuth、API Key 管理和模型映射顶层导航入口常驻
   - 暴露系统设置读取与保存接口
 - `ProviderService`
   - 维护 Provider 配置的创建、复制、编辑、删除、启停、排序和批量删除
@@ -196,7 +195,7 @@ decoder
   - 支持按筛选条件导出统计迁移 JSON，迁移包包含请求明细和日聚合统计
   - 导入请求明细时按明细业务字段识别重复行；导入日聚合统计时按日期、IP、请求模型、映射目标模型和响应模型累加数值
 - `ApiKeyController`
-  - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限、Token 上限与三项请求限制更新接口
+  - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限、Token 上限与三项请求限制更新接口；PUT /api/api-keys/order 接收移动项、目标项及前后位置，经 Service 校验后由 Repository 在单个事务中写入 api_keys.sort_order
 - `ApiKeyService`
   - 生成 `sk-` 前缀的下游 API Key
   - 持久化明文 key 供管理端复制和显示，同时保留 hash 用于数据面鉴权
@@ -328,7 +327,11 @@ decoder
   - Hook 返回 `None` 时使用 `/v1/models` 与 `/models` 候选端点探测
 - `SettingsService`
   - 维护 `server`、`admin`、`oauth`、`api_keys`、`model_mapping` 与 `logging`
-  - 管理立即生效项与重启生效项的边界
+  - 在配置写锁内协调监听预绑定、配置落盘与监听启用，启用失败时回写原配置
+- `ListenerRuntime`
+  - 由 Application 装配并管理内置 gevent HTTP 监听，提供候选监听上下文给 SettingsService
+  - 应用等待事件独立于单个 WSGIServer；监听切换保留服务实例、登录会话和后台任务
+  - 旧监听停止接收新连接，已接入请求继续完成；连接响应结束后退出 keep-alive
 - `ProviderRuntimeFactory`
   - 负责临时 / 正式 Provider 运行时对象构建
   - 统一 hook 路径校验、懒加载、文件签名检查与弱引用缓存
@@ -420,7 +423,7 @@ route family 直接决定当前请求的下游接口协议：
 当 `api_keys.enabled=true` 时，`GET /v1/models` 与模型请求接口一样必须携带有效 API Key。返回模型列表会按以下顺序收窄：
 
 1. 当前运行时模型，其中 Provider 模型按 `hidden_model_list` 过滤公开可见项
-2. 如果启用 Chat 白名单，取当前客户端 IP 对应用户可访问模型
+2. 当前客户端 IP 已登记时，取该用户可访问模型；白名单开启时同时要求已登记且允许白名单访问，关闭时未登记 IP 不执行用户权限过滤
 3. 如果启用 API Key 管理，再取当前 key 可访问模型
 
 因此同时启用用户模型权限和 API Key 模型权限时，下游最终看到和能请求的模型是两者交集。
@@ -475,17 +478,22 @@ OAuth 模型是数据平面的例外路由：
 - `oauth.proxy`
 - `oauth.verify_ssl`
 - `api_keys.enabled`
-- `model_mapping.enabled`
 
 行为约束：
 
-- `server.*` / `admin.*`
-  - 归类为“基础设置”
-  - 需要显式点击保存后提交
+- `PUT /api/settings/system/basic`
+  - 接收 `server`、`admin` 中至少一组完整配置；省略组保持当前服务端值，读取与写入共用配置写锁
+  - 服务监听和管理登录独立自动提交，各组在离开整个编辑区域或按 Enter 时提交；组内切换焦点与无变化不发送请求
 - `server.host` / `server.port`
-  - 保存时写回配置文件
-  - 如果值发生变化，需要重启服务后生效
+  - 页面先校验完整 IP 和端口范围，错误显示在对应字段下；格式正确且有变化时自动提交
+  - 内置服务先绑定新监听，再写回配置文件并启用新监听；Python 进程持续运行
+  - 绑定或写入失败时保留旧监听；候选监听启用失败时回写原配置
+  - 同端口的通配地址与具体地址可能冲突，此时使用空闲端口切换
+  - 旧监听只关闭接收入口，正在处理的流式与普通请求继续完成
+  - 保存后弹窗显示新访问地址，用户确认后跳转；域名、代理转发、端口映射及跨 IP 地址族等无法确定入口的场景仅展示监听地址，由部署方维护访问入口
+  - 外部 WSGI 宿主负责其监听，接口返回 server_restart_required；内置热切换返回 server_listener_changed
 - `admin.username` / `admin.password`
+  - 离开账号密码编辑区域或按 Enter 时一并保存，区域内切换焦点不提交
   - 两者都非空时启用后台登录
   - 任一为空时关闭后台登录
   - 保存后会清空进程内 session，避免旧凭据继续生效
@@ -497,7 +505,7 @@ OAuth 模型是数据平面的例外路由：
 - `client_ip.real_ip_header`
   - 归类为“客户端 IP”
   - 页面修改后自动生效
-  - 仅在 `client_ip.real_ip_enabled=true` 时参与客户端 IP 解析
+  - 输入框仅在 `client_ip.real_ip_enabled=true` 时显示，结束编辑后保存；此时请求头参与客户端 IP 解析
   - 默认值为 `X-Forwarded-For`
   - header 值为逗号分隔列表时取第一个 IP
   - header 缺失或首个值不是合法 IP 时回退到对端 IP
@@ -517,9 +525,9 @@ OAuth 模型是数据平面的例外路由：
     - 转换后的下游响应
   - 每条记录包含起始行、header 与 payload
 - `oauth.enabled`
-  - 保存后立即影响管理后台侧栏 OAuth 导航项是否显示
-  - 默认值为 `false`
-  - 只有开启后，系统设置页才展示 OAuth 出站代理和 SSL 校验设置
+  - 在 OAuth 页面即时保存，控制文本与图片模型是否参与数据面目录和新请求路由
+  - 默认值为 `false`；已在途请求继续完成
+  - OAuth 管理入口与网络设置弹窗始终可用，关闭时页面下方认证列表置灰并禁止操作，后台额度刷新保持独立
 - `oauth.proxy_mode`
   - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
   - 支持 `direct` / `system` / `custom`
@@ -534,17 +542,13 @@ OAuth 模型是数据平面的例外路由：
   - 默认值为 `false`
   - 关闭时不校验 HTTPS 证书，便于本地代理或抓包代理场景
 - `api_keys.enabled`
-  - 归类为“API Key 管理”
-  - 页面修改后自动生效
-  - 保存后立即影响后台侧栏 API Key 管理导航项是否显示
+  - 在 API Key 页面修改后自动生效
+  - 管理入口常驻，关闭认证时 Key 列表保留可见但置灰且不可操作，启用成功后可维护 Key 与权限
   - 保存后立即影响数据平面 `/v1/chat/completions`、`/v1/responses`、`/v1/responses/compact`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 是否要求下游携带 API Key
   - 默认值为 `false`
-- `model_mapping.enabled`
-  - 归类为“模型映射”
-  - 页面修改后自动生效
-  - 保存后立即影响后台侧栏模型映射导航项、数据平面模型目录和路由
-  - 映射定义与权限数据继续保存在 SQLite，关闭开关不会删除定义、运行状态或已有用户/API Key 权限
-  - 默认值为 `false`
+- 模型映射常驻
+  - 旧配置 `model_mapping.enabled=false` 不关闭功能，兼容读取入口始终返回启用
+  - 旧版总开关保存接口接受原格式并写回启用；单条映射与目标的启停继续生效
 
 运行时内存状态补充：
 
@@ -552,9 +556,7 @@ OAuth 模型是数据平面的例外路由：
   - 在保存日志配置后可重新装配 logger handler
   - 每次访问日志写入前读取当前 `client_ip.*` 配置解析客户端 IP
 - `WebController`
-  - 渲染后台页面时读取当前 `oauth.enabled`，用于决定是否输出 OAuth 顶层导航项
-  - 渲染后台页面时读取当前 `api_keys.enabled`，用于决定是否输出 API Key 管理顶层导航项
-  - 渲染后台页面时读取当前 `model_mapping.enabled`，用于决定是否输出模型映射顶层导航项
+  - 管理页面统一执行登录校验，功能总开关不影响页面可达性
 - `ProxyController`
   - 每次数据面请求读取当前 `client_ip.*` 配置解析客户端 IP
   - 解析结果用于白名单、模型权限、请求统计、访问日志关联和 LLM trace
@@ -594,9 +596,39 @@ OAuth 模型是数据平面的例外路由：
 - `ClaudeProxyService`
   - 每次 Claude 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
 
+#### 内置 HTTP 监听切换
+
+```mermaid
+sequenceDiagram
+    participant UI as SettingsPage
+    participant API as WebController
+    participant Settings as SettingsService
+    participant Runtime as ListenerRuntime
+    participant Config as ConfigManager
+    participant Old as Old WSGIServer
+    participant New as New WSGIServer
+    UI->>API: PUT basic / server
+    API->>Settings: validate and acquire config write lock
+    Settings->>Runtime: prepare host and port
+    Runtime->>New: bind candidate socket
+    alt bind succeeds
+        Settings->>Config: atomically persist config
+        Runtime->>New: start accepting
+        Runtime->>Old: close listener, retain active handlers
+        API-->>UI: applied + access URL when identifiable
+        UI->>UI: show confirmation, then navigate
+        Old-->>Old: finish active responses and close connections
+    else bind or persistence fails
+        Runtime->>New: release candidate socket
+        API-->>UI: error, retain old listener
+    end
+```
+
+Application 在独立停止事件上等待；切换期间复用 Flask 应用、服务实例与认证会话。候选监听启用失败时，SettingsService 在配置写锁内回写原配置，ListenerRuntime 保留旧监听。监听协程统一由进程级 Pool 跟踪，切换使用 close 排空连接，应用退出时统一结束剩余协程。
+
 ### 3.3 Control-Plane Model Mapping Management
 
-模型映射页在 `model_mapping.enabled=true` 时提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出、勾选批量删除和映射级启停。批量删除使用行内二次确认，并在确认后一次删除选中的映射。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、目标选择策略、故障冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。选择策略、优先级和故障冷却使用统一的说明卡片，支持悬停、点击、键盘焦点、关闭按钮和视口自动定位；选择策略说明两种策略，优先级说明排序和兜底规则，故障冷却说明临时冷却、自动禁用和请求级切换规则。人工禁用和自动禁用目标都显示“禁用”标签；人工禁用提示显示“手动禁用”，自动禁用提示展示最近一次失败的状态码和错误内容。重新启用并保存映射会清除该目标的运行故障状态。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。导入模型映射时保留当前目录中不存在的目标模型 ID，并在页面中标记为不可用。
+模型映射页始终提供顶层 `模型映射` 导航项。页面按映射级启用状态展示“已启用”和“已禁用”表格，支持组内拖拽排序、复制、勾选导出、勾选批量删除和映射级启停。批量删除使用行内二次确认，并在确认后一次删除选中的映射。复制项插入到源映射下方，只复制映射定义，不复制当前目标、冷却和自动禁用等运行状态。弹窗维护映射 ID、目标选择策略、故障冷却秒数和目标列表；目标模型通过可搜索下拉选择，并可设置优先级、启用状态、拖拽顺序或删除。选择策略、优先级和故障冷却使用统一的说明卡片，支持悬停、点击、键盘焦点、关闭按钮和视口自动定位；选择策略说明两种策略，优先级说明排序和兜底规则，故障冷却说明临时冷却、自动禁用和请求级切换规则。人工禁用和自动禁用目标都显示“禁用”标签；人工禁用提示显示“手动禁用”，自动禁用提示展示最近一次失败的状态码和错误内容。重新启用并保存映射会清除该目标的运行故障状态。目标模型候选包含当前已启用 Provider 的运行时模型、Codex OAuth 文本和图片本地模型目录、Claude OAuth 本地模型目录；已禁用 Provider 的模型不进入候选。导入模型映射时保留当前目录中不存在的目标模型 ID，并在页面中标记为不可用。
 
 页面与 API：
 
@@ -802,10 +834,11 @@ provider editor form snapshot
   - 两者都不经过 `AuthGroupManager.acquire()`
   - 两者都不写运行态冷却、并发、配额
 - 首字延迟从 executor 发起上游请求开始，到首个非空正文或推理增量完整到达时记录；请求构建与代理参数准备不计入
-- TPS 采用单请求生成阶段口径：`(completion_tokens - 1) / (末个输出片段时间 - 首个输出片段时间)`，时间单位为秒；不包含首字等待、末尾 usage 和终止事件等待
-- 接收时间在读取网络数据块时记录，同一数据块的事件共享时间；缺少用量、输出不超过一个 Token、单个输出数据块或无有效时间区间时，TPS 为空
-- 上游用量包含未观测到的思考输出、Responses 隐藏思考或摘要、Claude redacted thinking 时，TPS 为空；思考检测只在当前测试调用内保留状态
-- 每个成功模型测试写入一条请求历史；失败结果不写请求明细和日聚合统计
+- TPS 通过 `utils.request_metrics.output_tps` 计算 `completion_tokens × 1000 / duration_ms`，采用 Sub2API 的全程平均输出速度口径，包含首字等待、思考、末尾 usage 和终止事件等待
+- 首字接收时间在读取网络数据块时记录，同一数据块的事件共享时间；TPS 从调用上游到完成响应计时，缺少输出用量、输出为零或总时长无效时为空
+- 隐藏思考、Responses 思考摘要、Claude redacted thinking 和单数据块使用相同 TPS 公式；输出用量已包含的推理 Token 不重复相加
+- 每个成功模型测试写入一条请求历史，包含成功状态、HTTP 状态、流式标记、首字延迟、TPS、总耗时及缓存明细；失败结果不写请求明细和日聚合统计
+- 模型测试通过统一 usage 合并器保留缓存读取、缓存写入与已知零值，每次尝试独立收集；日志计时包含模型测试准备与重试，弹窗性能使用本次成功上游尝试
 - 上游重试属于同一次模型测试；最终成功时记录一次，最终失败时不记录
 - 测试基准请求省略 `temperature` 和 `top_p`；GLM Claude 兼容请求使用低档思考预算，并额外保留 192 Token 正文额度
 - OpenAI Chat 明确返回输出上限字段不兼容的 400/422 时，可在 `max_retries` 总尝试次数内将 `max_tokens` 切换为 `max_completion_tokens` 一次；兼容状态仅存在于当前模型测试的调用内，不跨模型缓存
@@ -825,7 +858,7 @@ provider editor form snapshot
 
 ### 3.8 Control-Plane OAuth Management
 
-OAuth 管理页在 `oauth.enabled=true` 时提供顶层 `OAuth` 导航项，页面直接展示 Codex 登录、模型目录和认证文件管理。页面初始化只请求 Codex 管理接口，认证文件自动同步按页面可见性和操作状态调度。Claude OAuth 管理能力由 `/api/oauth/claude/*` 接口提供。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
+OAuth 管理页始终提供顶层 `OAuth` 导航项，页面直接展示 Codex 登录、模型目录和认证文件管理。页面初始化只请求 Codex 管理接口，认证文件自动同步按页面可见性和操作状态调度。Claude OAuth 管理能力由 `/api/oauth/claude/*` 接口提供。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
 
 页面与 API：
 
@@ -972,8 +1005,8 @@ Claude OAuth management API
 - Codex 数据面请求收到上游额度耗尽响应后，会立即真实刷新该认证文件的配额快照；刷新结果写入 OAuth 页面展示数据，刷新失败写入配额错误且不阻断候选账号切换
 - Codex HTTP 400 或 429 响应中的 `error.type` 或顶层 `type` 为 `usage_limit_reached` 时进入套餐额度耗尽流程；普通 429、临时限流和缺少明确额度信号的响应保留上游错误、`Retry-After`，并按已有数据面流程尝试其他候选账号
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
-- OAuth 顶层导航项是否显示由系统设置中的 `oauth.enabled` 控制
-- token 交换、token 刷新与 OAuth 数据面代理使用系统设置中的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`；Codex 配额查询在认证文件没有 `proxy_url` 时使用该网络设置
+- OAuth 顶层导航项常驻，页面开关使用 `oauth.enabled` 控制数据面目录与新请求路由
+- token 交换、token 刷新与 OAuth 数据面代理使用 OAuth 网络设置弹窗维护的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`；Codex 配额查询在认证文件没有 `proxy_url` 时使用该网络设置
 - Codex 数据面请求在下游流提交前遇到上游错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
 - Codex 数据面请求在下游流提交后遇到 transport 失败时，会记录当前认证文件失败并发送下游协议错误事件，当前流不切换认证文件
 - Codex 数据面请求被客户端取消时会关闭上游响应，不更新当前认证文件成功或失败状态
@@ -991,7 +1024,7 @@ Claude OAuth management API
 
 ### 3.9 Control-Plane API Key Management
 
-API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` 导航项。`api_keys.enabled` 默认关闭，因此新配置默认不会展示 API Key 页签，也不会要求下游请求携带 key。
+API Key 管理页始终提供顶层 `API Key` 导航项。`api_keys.enabled` 默认关闭，新配置不要求下游请求携带 Key；页面总开关启用后即时执行认证。
 
 页面与 API：
 
@@ -1033,11 +1066,12 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 ```text
 /v1 request
   -> resolve client IP
-  -> optional Chat whitelist user lookup
+  -> registered user lookup by client IP
+  -> optional Chat whitelist admission (registered + enabled)
   -> optional API Key lookup by hash
   -> request body model validation
   -> provider / OAuth model lookup
-  -> user model permission check
+  -> model permission check for registered users
   -> API Key model permission check
   -> API Key token limit check
   -> API Key concurrency check + atomic minute/day request reservation
@@ -1052,7 +1086,7 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 
 - `api_keys.enabled=false`
   - 数据面不要求下游 key
-  - API Key 管理页签不显示
+  - API Key 管理页保持可见，可编辑记录与重新开启认证
 - `api_keys.enabled=true`
   - `/v1/chat/completions`、`/v1/responses`、`/v1/responses/compact`、`/v1/messages`、`/v1/images/generations`、`/v1/images/edits` 和 `/v1/models` 必须携带有效且启用的 key
   - 支持 `Authorization: Bearer sk-...`
@@ -1061,10 +1095,11 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
   - key 不存在或已停用返回 `invalid_api_key`
   - key 无权访问请求模型返回 `api_key_model_not_allowed`
   - key 的累计 `total_tokens` 已达到 `token_limit_k * 1000` 时返回 `api_key_token_limit_exceeded`
-- 同时开启 Chat 白名单时：
-  - 白名单仍按客户端 IP 解析用户
-  - 用户模型权限和 API Key 模型权限都必须允许目标模型
-  - `/v1/models` 只返回两者交集
+- 用户模型权限：
+  - 按客户端 IP 解析已登记用户，无论 Chat 白名单是否开启均执行其模型权限限制
+  - Chat 白名单关闭时，未登记 IP 不受用户模型权限限制，已登记用户的 whitelist_access_enabled 不参与准入
+  - Chat 白名单开启时，未登记 IP 或 whitelist_access_enabled=0 返回 ip_not_whitelisted
+  - API Key 管理开启时，已登记用户与 key 的模型权限都必须允许请求模型，`/v1/models` 只返回两者交集
 - 请求限速：
   - `ApiKeyService` 使用实例级 gevent `RLock` 保护 key ID 到在途数量的内存映射，更新后的限制在下一次准入时读取
   - `ApiKeyRepository.reserve_request()` 在 SQLite `BEGIN IMMEDIATE` 事务内检查分钟与每日配额并同步递增；每个 key 只保留最近两个周期的计数
@@ -1092,7 +1127,35 @@ API Key 管理页在 `api_keys.enabled=true` 时提供顶层 `API Key 管理` �
 
 缓存命中率按 `SUM(cache_read_input_tokens) / SUM(cache_known_prompt_tokens)` 计算。`cache_known_prompt_tokens` 只包含缓存 usage 已知请求的完整 prompt/input Token，混合已知和未知请求时未知请求不进入分母；没有有效分母时命中率为空，已知且缓存读取为零时命中率为 `0%`。
 
-统计管理页面在调用汇总和请求明细中使用“模型流向”展示请求模型、映射目标模型和响应模型；未经过模型映射的记录展示请求模型到响应模型。统计管理页面显示缓存读取 Token 和缓存命中率。Excel 导出同时显示 Token 状态和缓存写入 Token：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 4 并保留原始 `usage_status`、映射目标模型、缓存 Token 和 `cache_usage_status` 值；版本 2 包中的缓存状态按 `unknown` 导入，旧版本没有映射目标模型时按空值导入。
+统计管理页面使用概览、用量和请求明细三个视图。用量按来源与模型交叉、完整请求流向、响应模型、IP、用户或 API Key 分组；表格与 Excel 分别展示请求模型和响应模型，请求列包含映射 ID 与实际目标。概览提供核心汇总指标与通栏的按日请求量、Token、成功率、缓存命中率趋势，模型筛选与请求明细共用，模型维度统计位于用量页。`GET /api/statistics/overview` 经 `WebController`、`LogService`、`LogRepository` 调用 `statistics_queries`，在同一读取事务内组合日聚合用量与请求结果、性能样本，包含按响应模型汇总的 `response_models`。
+
+六个用量维度均提供上游成功率及调用结果计数。`statistics_queries.usage_outcomes` 使用同一日期、用户与请求模型筛选，按来源与完整模型流向、完整模型流向、响应模型、IP 或用户关联日聚合与请求日志；API Key 直接聚合请求日志。响应模型合并不同请求、映射目标和来源，空模型 ID 统一归入未知，不用请求模型替代。`upstream_rates` 通过 SQLite `json_each` 展开调用明细，按每次调用的实际目标与响应模型聚合。上游成功率为成功次数除以成功与失败总次数；异常、中止和未知单列。只有日聚合的记录保留未知，只有调用样本的分组不重复叠加用量。页面合计按调用次数加权，Excel 使用同一数据与筛选范围。
+
+`RequestObservation` 在数据面准入后创建，观察最终下游响应；上游完成回调向它提供规范化 usage、实际目标和上游协议。内部重试与模型映射切换只提交一条最终请求记录。普通响应、流式结束、异常及关闭共享幂等提交；未迭代的流关闭时也释放原始迭代器。统计不改变响应字节。
+
+控制器将路由结果中的映射标记传入 `RequestObservation`。上游调用的映射目标即使与请求 ID 相同也保留；直接调用省略该映射阶段。`upstream_rates` 查询对最终记录含映射目标、调用明细省略同名目标的历史记录按请求 ID 补齐分组键，原始记录与日聚合用量保持不变。
+
+`RequestObservation` 使用请求范围的 `ContextVar` 注册上游调用记录器。`upstream_observation.ObservedResponse` 在 Provider、Codex OAuth 和 Claude OAuth 的实际调用处捕获记录器，在转换与 Hook 之前读取原始响应结果；流式读取在请求派发范围结束后仍使用捕获的记录器。各次重试、认证重试及模型映射切换独立计数。明确的 HTTP 错误和响应错误事件计失败，连接失败、超时、连接中断计异常，本地处理失败不计上游失败。成功后发生本地转换错误时保留原始成功结果。SSE、NDJSON 和纯文本流按对应协议识别完成；提前关闭单列中止。
+
+```mermaid
+flowchart LR
+    Request[RequestObservation] --> Scope[请求范围 ContextVar]
+    Scope --> Attempt[Provider / OAuth 每次上游调用]
+    Attempt --> Raw[ObservedResponse 原始响应观测]
+    Raw --> Translate[协议转换与 Hook]
+    Raw --> Results[成功 / 失败 / 异常 / 中止]
+    Results --> Request
+    Translate --> Client[最终客户端结果与性能]
+    Client --> Request
+    Request --> Log[(request_logs 含 upstream_attempts)]
+    Request --> Usage[(同事务累计一次用量)]
+    Log --> Expand[json_each 按实际调用分组含响应模型维度]
+    Expand --> Rate[上游成功率与分类计数]
+```
+
+`request_logs` 的可空字段包含 `outcome`、`http_status`、`error_type`、`is_stream`、`duration_ms`、`first_token_latency_ms`、`tps`、`tps_unavailable_reason` 和 JSON 文本 `upstream_attempts`。最终客户端结果区分成功、失败、取消与未知；上游调用明细独立保存目标模型、响应模型、结果与 HTTP 状态。明细为空值代表未采集，空数组代表已采集但没有可记录调用。首字延迟使用单调时钟，从收到请求到首个正文、思考或工具参数片段；TPS 与模型测试共用 `utils.request_metrics.output_tps`，使用上游输出量除以完整请求秒数；隐藏思考、单数据块及非流式均可计算。观察器在结束时确定 TPS 缺失原因，与请求日志同事务持久化；管理页面通过悬浮提示展示原因，JSON 和 Excel 导出保留该信息。查询、排序、概览及导出通过 `statistics_queries` 的统一 SQL 表达式计算 TPS 与缺失原因，历史记录使用已存耗时或起止时间差，原始记录保持原样。概览仅平均已知成功请求的有效 TPS。其他未采集的历史观测字段保持空值。具体口径见 [统计与请求观测](statistics-design.md)。
+
+Excel 导出包含结果与性能列，以及 Token 状态和缓存写入 Token：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 6，保留结果、上游调用明细、性能、原始 `usage_status`、映射目标模型、缓存 Token 和 `cache_usage_status`；旧版本缺失的观测字段保持未知，版本 2 的缓存状态按 `unknown` 导入。
 
 ### 3.10 Blocking I/O Execution
 
@@ -1124,14 +1187,44 @@ flowchart LR
 
 ### 3.11 Control-Plane Agent Configuration
 
+DSH 的默认文件目标为 `$DSH_HOME/cordis.patch.yml`（未设置时使用 `~/.dsh/cordis.patch.yml`），与独立凭据文件共同参与预览及保存事务。全局补丁供加载对应插件的 Web、Desktop、headless、SDK、ACP 共用；自定义路径可定位单个 Profile。默认权限由 DSH 适配器维护 `permission` 的预设和 `defaultPreset`，既有会话权限不由文件编辑流程修改。sdk-minimal 的独立插件组合不在完整支持范围。
+
+浏览器以 localStorage 的 `agent-active-tab` 记忆最近选中的 Agent。页面在服务端定义加载完成后恢复该页签；已隐藏或不存在的项回退到第一个可见项。此偏好只保存页签 ID，配置文件仍在进入页面时重新读取。
+
+Agent 页签每次切入时请求最新文件快照，无修改的表单使用最新配置重建；未保存草稿保留原始文件版本指纹，外部文件变化时提示用户，保存继续执行版本冲突校验。快速切换取消前一次读取，迟到响应不更新当前页签；读取期间暂停预览和保存。表单保存预览由后端按选项顺序跨文件排列，自动生成的附属字段排在表单字段之后。
+
+表单预览在 Vue 当前批次的字段更新结束后立即请求，同批次多字段修改合并为一次请求。后续修改取消前次预览，响应同时校验请求取消状态与草稿版本；恢复相同草稿也只接收最新请求的结果。检查期间保留已显示的预览行，保存继续使用后端重新校验生成的票据。
+
+表单保存成功后，浏览器以已应用票据的目标值原位更新预览行，状态为“无修改”；缓存关联保存返回的文件版本和回填后的草稿。相同草稿不重复发起保存后预览，后续字段修改或重新读取恢复正常校验。失败保存保留现有草稿和预览。
+
+Agent 定义由 `AgentExtensions` 在服务启动时从根目录 `agents/*/agent.yaml` 加载，同目录 `adapter.py` 提供可选的受信任格式转换。bootstrap 返回声明式字段、文件格式和加载错误。前端登记表接收服务定义，Opencode v2 / DSH / Hermes / 用户扩展共用 `AgentExtensionForm`；已有三个 Agent 保留专用表单。JSONC、TOML 和 YAML 字段编辑均通过同一文件事务、本机或 SSH 传输完成。自定义文件路径按动态文件目标 ID 持久化；扩展加载失败不影响其他 Agent。
+
+```mermaid
+flowchart LR
+    Definitions["agents/*/agent.yaml + adapter.py"] --> Registry["AgentExtensions 启动注册表"]
+    Registry --> Bootstrap["bootstrap: 定义 / 字段 / 文件 / 错误"]
+    Bootstrap --> UI["Vue 通用表单 / 专用表单"]
+    UI --> Service["AgentConfigService 预览与保存事务"]
+    Registry --> Service
+    Service --> Adapter["字段校验 / JSONC / TOML / YAML 编辑"]
+    Adapter --> Service
+    Service --> Transport["LocalConfigFiles / SSH SFTP"]
+    Transport --> Files["Agent 配置 / 凭据 / 备份"]
+```
+
+Opencode v2 适配器管理 providers/settings、permissions 数组与 compaction.buffer，独立文件目标 opencodeV2 使用通用 JSONC 编辑流程；默认路径与 V1 相同，自定义路径分别登记。DSH 的全局或自定义 Profile 补丁与独立凭据文件在同一保存票据中校验和写入；Hermes 使用 YAML 配置，支持字符串模型简写。新扩展只新增目录并重启服务，声明式表单无需重新构建前端。接口、数据面路由和 SSH 会话隔离保持现有职责。
+
+- 前端 `features/agents/registry.ts` 接收服务端 Agent ID、名称和文件目标，供页签、工作区草稿初始化、预览缓存清理和文件路径行共用。页签设置复用 UiDialog / UiSortableList / UiSwitch，提供排序、显隐和恢复默认，弹窗内操作保留为本地草稿，保存时统一更新页签，取消放弃本次调整，外侧点击和 Escape 使用共享未保存确认；偏好以 `agent-tab-preferences` 保存到当前浏览器 localStorage，对所有机器共用，至少显示一项。隐藏当前项会切到第一个可见项，已有配置和内存草稿保留，保存期间禁止调整。此偏好只影响界面，不影响后端快照或文件读写授权。
+- Opencode v1 表单读写 V1 的 `provider/options`、`compaction.reserved` 和顶层 `permission`。权限策略使用 allow / ask / deny 字符串，自定义权限对象在未主动替换时保留；V2 字段不进入表单快照或写入计划，历史登记过的 `permissions` 不参与自动清理。
+
 - `GET /api/agent-config/bootstrap` 返回机器、当前模型目录、下游 Key 候选及页面和写入逻辑共用的模型限制候选。
 - `/api/agent-config/machines` 和 `/machines/<id>` 提供机器登记、更新和删除；`local` 表示服务进程所属用户所在的机器。
-- `/machines/<id>/connect`、`disconnect` 和 `snapshot` 提供 SSH 会话和文件快照。`PUT /machines/<id>/path` 接收 `target` 与 `path`，支持 Claude 配置文件、Codex 配置目录和 opencode 配置文件；未提供 `target` 的旧请求按 opencode 处理。
-- `agent-config/state.json` 使用版本 2，路径按机器 ID 与 Agent 保存；读取版本 1 时将 opencode 路径字符串转换为对应的路径记录。Codex 目录同时定位 `config.toml` 与 `auth.json`，清空某一 Agent 的路径后使用该 Agent 的默认位置。候选路径成功读取且登记文件写入成功后更新内存状态；配置内容格式错误通过快照的 `parseError` 展示。
+- `/machines/<id>/connect`、`disconnect` 和 `snapshot` 提供 SSH 会话和文件快照。`PUT /machines/<id>/path` 接收 `target` 与完整文件 `path`，支持已注册 Agent 的全部文件目标，包括 Codex 配置与认证、DSH 补丁与凭据；未提供 `target` 的旧请求按 opencode 处理。
+- `agent-config/state.json` 使用版本 3，路径按机器 ID 与文件目标保存；读取版本 1 时将 opencode 路径字符串转换为对应的路径记录，读取版本 1 / 2 时将 Codex 目录展开为 config.toml 与 auth.json 两个独立路径。清空路径仅恢复当前文件的默认位置。候选路径成功读取且登记文件写入成功后更新内存状态；配置内容格式错误通过快照的 `parseError` 展示。
 - 浏览器使用模型台账中的完整参数候选，配置输入与推荐独立。Claude 优先参考主模型或唯一已配置模型；多个模型且没有主模型时，菜单直接展示各模型的候选值与名称。切换模型和手填模型 ID 更新候选，选择候选时即时修改参数草稿，手填数值在失焦且值变化时提交草稿。Codex 压缩上限和 opencode 压缩预留显示在压缩阈值标题旁；每个模型的悬停说明显示上下文和最大输出参考值。
 - `/machines/<id>/<agent>/preview` 接受表单或文件编辑内容与读取版本，生成有效期五分钟的预览票据；进程内最多保留四十份票据。原文编辑的票据仅包含 `raw` 中提交的文件及其读取版本。
 - `/machines/<id>/apply` 核对浏览器、SSH 会话、路径、文件版本与受管字段摘要，轮转五份备份后原子替换票据中的文件。Codex 表单将配置与认证文件作为一组写入，文件路径入口单独编辑对应文件。写入失败时回滚已写文件；回滚遇到外部修改时返回需要人工恢复的文件。
-- `/machines/<id>/<agent>/files?backup=0..5` 提供文件编辑器和备份内容。浏览器复用本地 Ace 资源提供 JSON / JSONC / TOML 高亮，以当前文件文本为修改基线；关闭未保存的编辑器时提供保存、放弃和继续编辑选项。
+- `/machines/<id>/<agent>/files?backup=0..5` 提供文件编辑器和备份内容。浏览器复用本地 Ace 资源提供 JSON / JSONC / TOML / YAML 高亮，以当前文件文本为修改基线；关闭未保存的编辑器时提供保存、放弃和继续编辑选项。
 - 文件编辑器的保存动作依次请求 `/preview` 和 `/apply`，以最新校验票据写入当前文件。校验或写入失败时，浏览器保留编辑内容；保存期间编辑器只读，关闭后释放编辑器实例及主题观察器。
 - SSH 连接和密码按浏览器与机器隔离，闲置三十分钟释放；每分钟运行清理任务，应用退出关闭全部会话。管理操作使用独立协作锁，本机磁盘与状态文件操作使用原生 I/O 线程池，Paramiko 的协作网络连接保留在服务线程的 Hub 中。
 - Claude 默认路径为 `~/.claude/settings.json`；Codex 为 `~/.codex/config.toml` 和 `auth.json`；opencode 为 `~/.config/opencode/opencode.json`。本机支持 `CLAUDE_CONFIG_DIR` 和 `CODEX_HOME`；远程主目录由 SFTP 查询。每个文件上限为 2 MiB。
@@ -1145,9 +1238,9 @@ sequenceDiagram
     participant State as AgentConfigRepository
     Browser->>API: 同源请求 + 管理会话
     opt 保存自定义路径或恢复默认
-        API->>Service: 机器 ID + Agent + 路径
+        API->>Service: 机器 ID + 文件目标 + 完整文件路径
         Service->>Files: 读取候选路径的配置快照
-        Service->>State: 原子保存各机器各 Agent 的路径
+        Service->>State: 原子保存各机器各文件的路径
         Service-->>Browser: 新路径与文件快照
     end
     API->>Service: 读取机器文件
@@ -1323,6 +1416,7 @@ sequenceDiagram
     participant Controller
     participant KeyLimits as ApiKeyService
     participant Service
+    participant Observation as RequestObservation
     participant Translator
     participant Executor
     participant NativeIO
@@ -1330,6 +1424,10 @@ sequenceDiagram
 
     Client->>Controller: POST /v1/chat/completions
     Controller->>Controller: 按 client_ip.* 解析客户端 IP
+    Controller->>Controller: 查询已登记用户；存在则检查请求模型权限
+    opt chat.whitelist_enabled=true
+        Controller->>Controller: 要求用户已登记且允许白名单访问
+    end
     opt api_keys.enabled=true
         Controller->>Controller: 校验 API Key hash、key 模型权限和 token 上限
         Controller->>KeyLimits: acquire_request(key)
@@ -1339,12 +1437,14 @@ sequenceDiagram
         SQLite-->>KeyLimits: 准入结果
         KeyLimits-->>Controller: 幂等释放回调，或 429 + Retry-After
     end
+    Controller->>Observation: 准入后创建，保留请求入口的计时起点
     Controller->>Service: proxy_request()
     Service->>Translator: openai_chat -> openai_responses
     Note over Translator: 工具结果按 input_text / input_image / input_file 保留，并关联原调用 ID
     break 工具媒体来源无法由上游协议承载
         Translator-->>Service: UnsupportedToolResultContent
         Service-->>Controller: 400 invalid_request_error / unsupported_tool_result_content
+        Controller->>Observation: 记录最终失败结果
         Controller-->>Client: 当前下游协议的错误响应
     end
     Translator-->>Service: translated upstream request
@@ -1358,6 +1458,7 @@ sequenceDiagram
         Service->>Service: 下一次尝试重新进入请求、转换、编码与首块预取
     else 首个下游字节就绪
         Service-->>Controller: SSE response + prefetched bytes
+        Controller->>Observation: 包装最终响应，观察内容与协议错误
         Controller-->>Client: first chat.completion.chunk
         Note over Controller,Client: 首个下游字节发送后流已提交
         loop remaining stream events
@@ -1368,11 +1469,7 @@ sequenceDiagram
             Controller-->>Client: chat.completion.chunk
         end
         alt 目标协议终止事件完成
-            Service->>Service: 成功完成回调
-            Service->>NativeIO: 提交请求明细、日统计与 API Key 用量事务
-            NativeIO->>SQLite: BEGIN / INSERT / UPSERT / COMMIT
-            SQLite-->>NativeIO: 提交结果
-            NativeIO-->>Service: 唤醒等待协程
+            Service->>Observation: 完成回调提供 usage 与上游协议
         else 提交后 transport 或流处理失败
             Service-->>Controller: OpenAI error data + [DONE]
             Controller-->>Client: protocol error in stream
@@ -1380,9 +1477,12 @@ sequenceDiagram
             Client-->>Controller: close downstream connection
             Controller-->>Service: close response iterator
             Service->>Executor: close upstream response
-            Service->>Service: 记录 known、partial 或 unknown usage 统计
+            Service->>Observation: 提供已获取的 usage
         end
     end
+    Observation->>NativeIO: 经 LogService 提交最终结果、性能与用量
+    NativeIO->>SQLite: 请求明细、日统计与 Key 用量同事务提交
+    SQLite-->>NativeIO: 提交结果
     opt API Key 已准入
         Controller->>KeyLimits: 完成、异常或响应 close 时释放并发
     end
@@ -1656,3 +1756,25 @@ sequenceDiagram
 上游到底是 SSE、NDJSON 还是非流式，由 executor / decoder 自动判断。
 
 流提交边界由首个非空目标协议编码字节定义。提交后的错误输出格式由下游协议决定，当前流不执行透明重试。目标协议终止事件已经发出时，后续 HTTP framing 异常保持逻辑完成状态。
+
+API Key 管理列表默认读取持久化自定义顺序。旧库首次增加 sort_order 时按 created_at 降序、id 升序初始化，新建 Key 位于列表开头。排序操作读取全量 ID 并在同一事务内移动单项，分页外记录保持相对顺序；此顺序不参与鉴权、限流或数据平面路由，不持有新增运行时缓存。
+
+统计候选接口 GET /api/statistics/filter-options 经 WebController、LogService、LogRepository 合并请求明细与日聚合中的用户、请求模型、响应模型和 IP。全部统计、请求明细与导出沿相同分层传递多选条件；响应模型按最终请求记录筛选，该请求的所有上游重试仍参与成功率计算。架构未变化。
+
+### 功能设置与数据面准入
+
+`FeatureSettings` 与 `useFeatureSettings` 共用当前页面的设置快照和串行提交队列。API Key 总开关控制既有下游鉴权流程；OAuth 总开关由 Codex / Claude 代理服务在模型枚举、路由匹配和转发入口逐次读取。关闭时不发布 OAuth 文本或图片模型，转发入口返回 `oauth_disabled`，不触发上游请求；已有请求继续完成。账号管理、凭据刷新和网络配置保持独立。模型映射始终启用，仍尊重映射及目标自身的启停状态。
+
+```mermaid
+flowchart LR
+    Page[API Key / OAuth 页面] --> Save[SettingsService / 配置写锁]
+    Save --> Snapshot[ConfigManager 快照]
+    Request[新模型请求] --> Key[既有 API Key 鉴权]
+    Snapshot -. api_keys.enabled .-> Key
+    Key --> Route[Provider / 模型映射 / OAuth 路由]
+    Snapshot -. oauth.enabled .-> Gate[OAuth 目录与转发入口]
+    Route --> Gate
+    Gate -->|启用| Upstream[OAuth 上游请求]
+    Gate -->|关闭| Skip[不发布模型 / 不转发]
+    Page --> Manage[认证文件 / 模型目录 / 网络弹窗]
+```

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,7 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.application.app_context import AppContext
 from src.config.provider_runtime_factory import ProviderRuntimeFactory
 from src.executors import OpenedUpstreamResponse
+from src.repositories import LogRepository, UserRepository
 from src.services.provider_model_test_service import ProviderModelTestService
+from src.utils.database import create_connection_factory
 
 
 class FakeLogger:
@@ -146,6 +149,14 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         )
         self.assertIsNotNone(self.log_service.calls[0]["start_time"])
         self.assertIsNotNone(self.log_service.calls[0]["end_time"])
+        row = self.log_service.calls[0]
+        self.assertEqual("success", row["outcome"])
+        self.assertEqual(200, row["http_status"])
+        self.assertTrue(row["is_stream"])
+        self.assertGreater(row["first_token_latency_ms"], 0)
+        self.assertGreaterEqual(row["duration_ms"], row["first_token_latency_ms"])
+        self.assertEqual("unknown", row["cache_usage_status"])
+        self.assertEqual(round(8 * 1000 / row["duration_ms"], 2), row["tps"])
 
     def test_glm_claude_test_enables_reasoning_by_default(self) -> None:
         provider = self.service._build_provider(
@@ -412,7 +423,7 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertTrue(result["results"][0]["available"])
         self.assertIsNone(result["results"][0]["tps"])
 
-    def test_stream_tps_is_unavailable_when_output_events_arrive_in_one_network_chunk(self) -> None:
+    def test_stream_tps_uses_total_duration_for_one_network_chunk(self) -> None:
         fake_response = FakeStreamResponse(
             [
                 (
@@ -440,7 +451,7 @@ class ProviderModelTestServiceTests(unittest.TestCase):
 
         with patch(
             "src.services.provider_model_test_service.time.perf_counter",
-            side_effect=[100.0, 110.0],
+            side_effect=[100.0, 100.0, 110.0, 110.0],
         ):
             result = self.service.test_models(
                 {
@@ -451,7 +462,7 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(10000.0, result["results"][0]["first_token_latency_ms"])
-        self.assertIsNone(result["results"][0]["tps"])
+        self.assertEqual(10.0, result["results"][0]["tps"])
 
     def _measure_timed_stream(self, events, source_format="openai_chat"):
         """通过真实解码与翻译链路验证接收时间，准备请求耗时不进入 TTFT。"""
@@ -496,7 +507,173 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertTrue(result["available"])
         return result
 
-    def test_ttft_ignores_preparation_and_empty_events_tps_excludes_both_waits(self) -> None:
+    def test_test_log_persists_timing_and_cache_usage_across_protocols(self):
+        for protocol in ("openai_chat", "openai_responses", "claude_chat"):
+            for cached in (0, 8, None):
+                with self.subTest(protocol=protocol, cached=cached):
+                    if protocol == "openai_chat":
+                        usage = {"prompt_tokens": 12, "completion_tokens": 8}
+                        if cached is not None:
+                            usage["prompt_tokens_details"] = {"cached_tokens": cached}
+                        events = [
+                            (102, {"choices": [{"delta": {"content": "Hello"}}]}),
+                            (105, {"usage": usage}),
+                            (110, b"data: [DONE]\n\n"),
+                        ]
+                    elif protocol == "openai_responses":
+                        usage = {"input_tokens": 12, "output_tokens": 8}
+                        if cached is not None:
+                            usage["input_tokens_details"] = {"cached_tokens": cached}
+                        events = [
+                            (102, {"type": "response.output_text.delta", "delta": "Hello"}),
+                            (
+                                110,
+                                {
+                                    "type": "response.completed",
+                                    "response": {
+                                        "id": "r1",
+                                        "model": "test-model",
+                                        "status": "completed",
+                                        "output": [],
+                                        "usage": usage,
+                                    },
+                                },
+                            ),
+                        ]
+                    else:
+                        usage = {"input_tokens": 12 - (cached or 0), "output_tokens": 0}
+                        if cached is not None:
+                            usage["cache_read_input_tokens"] = cached
+                        events = [
+                            (
+                                101,
+                                {
+                                    "type": "message_start",
+                                    "message": {
+                                        "id": "m1",
+                                        "model": "test-model",
+                                        "usage": usage,
+                                    },
+                                },
+                            ),
+                            (
+                                102,
+                                {
+                                    "type": "content_block_delta",
+                                    "index": 0,
+                                    "delta": {"type": "text_delta", "text": "Hello"},
+                                },
+                            ),
+                            (
+                                105,
+                                {
+                                    "type": "message_delta",
+                                    "delta": {"stop_reason": "end_turn"},
+                                    "usage": {"output_tokens": 8},
+                                },
+                            ),
+                            (110, {"type": "message_stop"}),
+                        ]
+                    result = self._measure_timed_stream(events, protocol)
+                    row = self.log_service.calls[-1]
+                    self.assertEqual("success", row["outcome"])
+                    self.assertEqual(200, row["http_status"])
+                    self.assertTrue(row["is_stream"])
+                    self.assertEqual(100000, row["duration_ms"])
+                    self.assertEqual(92000, row["first_token_latency_ms"])
+                    self.assertEqual(2000, result["first_token_latency_ms"])
+                    self.assertEqual(0.08, row["tps"])
+                    self.assertEqual(0.8, result["tps"])
+                    self.assertEqual(
+                        (12, 8, 20), tuple(row[key] for key in ("prompt_tokens", "completion_tokens", "total_tokens"))
+                    )
+                    self.assertEqual(cached or 0, row["cache_read_input_tokens"])
+                    self.assertEqual("unknown" if cached is None else "known", row["cache_usage_status"])
+
+    def test_model_test_log_exposes_success_cache_and_latency_in_statistics(self):
+        self._measure_timed_stream(
+            [
+                (102, {"choices": [{"delta": {"content": "Hello"}}]}),
+                (
+                    110,
+                    {
+                        "usage": {
+                            "prompt_tokens": 20,
+                            "completion_tokens": 10,
+                            "prompt_tokens_details": {"cached_tokens": 8},
+                        }
+                    },
+                ),
+            ]
+        )
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / "tmp") as directory:
+            factory = create_connection_factory(Path(directory) / "metrics.db")
+            UserRepository(factory)
+            repo = LogRepository(factory)
+            logged = self.log_service.calls[-1]
+            repo.insert(**logged)
+            row = repo.get_logs()["logs"][0]
+            self.assertEqual("success", row["outcome"])
+            self.assertEqual(0.4, row["cache_hit_rate"])
+            self.assertEqual(92000, row["first_token_latency_ms"])
+            self.assertEqual(0.1, row["tps"])
+            date = logged["start_time"].strftime("%Y-%m-%d")
+            total = repo.get_overview(date, date)["totals"]
+            self.assertEqual(1, total["success_count"])
+            self.assertEqual(1, total["latency_sample_count"])
+            self.assertEqual(0.4, total["cache_hit_rate"])
+            self.assertEqual(92000, total["first_token_latency_ms"])
+
+    def test_interrupted_attempt_usage_does_not_leak_into_success(self):
+        import requests
+
+        failed = FakeStreamResponse([])
+
+        def interrupted(chunk_size=None):
+            yield b'data: {"choices":[{"delta":{"content":"partial"}}],"usage":{"prompt_tokens":100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":80}}}\n\n'
+            raise requests.exceptions.ConnectionError("disconnected")
+
+        failed.iter_content = interrupted
+        success = FakeBufferedResponse(
+            b'{"choices":[{"message":{"content":"Hello"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}'
+        )
+        opened = [
+            OpenedUpstreamResponse(
+                response=failed,
+                status_code=200,
+                content_type="text/event-stream",
+                is_stream=True,
+                stream_format="sse_json",
+            ),
+            OpenedUpstreamResponse(
+                response=success,
+                status_code=200,
+                content_type="application/json",
+                is_stream=False,
+                stream_format="nonstream",
+            ),
+        ]
+        with (
+            patch.object(self.service, "_open_upstream_response", side_effect=opened),
+            patch("src.services.provider_model_test_service.time.perf_counter", side_effect=[100, 101, 102, 104, 110]),
+        ):
+            result = self.service.test_models(
+                {"api": "https://example.com", "source_format": "openai_chat", "models": ["test"], "max_retries": 2}
+            )
+        self.assertTrue(result["results"][0]["available"])
+        self.assertEqual(0.33, result["results"][0]["tps"])
+        self.assertEqual(1, len(self.log_service.calls))
+        row = self.log_service.calls[0]
+        self.assertEqual("success", row["outcome"])
+        self.assertEqual(5, row["total_tokens"])
+        self.assertEqual("unknown", row["cache_usage_status"])
+        self.assertEqual(0, row["cache_read_input_tokens"])
+        self.assertIsNone(row["first_token_latency_ms"])
+        self.assertFalse(row["is_stream"])
+        self.assertEqual(10000, row["duration_ms"])
+        self.assertEqual(0.2, row["tps"])
+
+    def test_ttft_ignores_preparation_and_empty_events_tps_includes_total_duration(self) -> None:
         result = self._measure_timed_stream(
             [
                 (101.0, b": heartbeat\n\n"),
@@ -508,9 +685,9 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             ]
         )
         self.assertEqual(2000.0, result["first_token_latency_ms"])
-        self.assertEqual(50.0, result["tps"])
+        self.assertEqual(4.04, result["tps"])
 
-    def test_tps_handles_missing_small_counts_and_invalid_intervals(self) -> None:
+    def test_tps_handles_missing_small_counts_and_same_chunk_timestamps(self) -> None:
         for tokens, last_time in ((None, 104.0), (0, 104.0), (1, 104.0), (101, 102.0), (101, 101.0)):
             with self.subTest(tokens=tokens, last_time=last_time):
                 result = self._measure_timed_stream(
@@ -522,9 +699,9 @@ class ProviderModelTestServiceTests(unittest.TestCase):
                     ]
                 )
                 self.assertEqual(2000.0, result["first_token_latency_ms"])
-                self.assertIsNone(result["tps"])
+                self.assertEqual(round(tokens / 25, 2) if tokens else None, result["tps"])
 
-    def test_reasoning_counts_only_when_its_generation_interval_is_observable(self) -> None:
+    def test_reasoning_uses_total_output_and_duration_without_double_counting(self) -> None:
         for reasoning_streamed in (False, True):
             with self.subTest(reasoning_streamed=reasoning_streamed):
                 result = self._measure_timed_stream(
@@ -552,9 +729,9 @@ class ProviderModelTestServiceTests(unittest.TestCase):
                     ]
                 )
                 self.assertEqual(2000.0, result["first_token_latency_ms"])
-                self.assertEqual(50.0 if reasoning_streamed else None, result["tps"])
+                self.assertEqual(4.04, result["tps"])
 
-    def test_responses_translation_uses_same_formula_and_rejects_reasoning_summaries(self) -> None:
+    def test_responses_translation_uses_same_formula_with_reasoning_summaries(self) -> None:
         for reasoning in (False, True):
             with self.subTest(reasoning=reasoning):
                 result = self._measure_timed_stream(
@@ -586,9 +763,9 @@ class ProviderModelTestServiceTests(unittest.TestCase):
                     "openai_responses",
                 )
                 self.assertEqual(2000.0, result["first_token_latency_ms"])
-                self.assertEqual(None if reasoning else 50.0, result["tps"])
+                self.assertEqual(5.05, result["tps"])
 
-    def test_claude_translation_uses_same_formula_and_rejects_redacted_thinking(self) -> None:
+    def test_claude_translation_uses_same_formula_with_redacted_thinking(self) -> None:
         for redacted in (False, True):
             with self.subTest(redacted=redacted):
                 result = self._measure_timed_stream(
@@ -641,9 +818,9 @@ class ProviderModelTestServiceTests(unittest.TestCase):
                     "claude_chat",
                 )
                 self.assertEqual(2000.0, result["first_token_latency_ms"])
-                self.assertEqual(None if redacted else 50.0, result["tps"])
+                self.assertEqual(4.04, result["tps"])
 
-    def test_split_sse_event_is_timed_when_complete_and_usage_does_not_extend_generation(self) -> None:
+    def test_split_sse_event_ttft_and_tps_includes_usage_tail(self) -> None:
         result = self._measure_timed_stream(
             [
                 (101.0, b'data: {"choices": [{"delta": {"content": "He'),
@@ -654,7 +831,7 @@ class ProviderModelTestServiceTests(unittest.TestCase):
             ]
         )
         self.assertEqual(2000.0, result["first_token_latency_ms"])
-        self.assertEqual(50.0, result["tps"])
+        self.assertEqual(4.04, result["tps"])
 
     def test_retry_attempts_write_one_request_log(self) -> None:
         responses = [
@@ -764,7 +941,7 @@ class ProviderModelTestServiceTests(unittest.TestCase):
         self.assertFalse(result["results"][0]["available"])
         self.assertIn("no valid model output", result["results"][0]["error"])
 
-    def test_nonstream_success_marks_available_but_without_latency_and_tps(self) -> None:
+    def test_nonstream_success_has_tps_without_first_token_latency(self) -> None:
         fake_response = FakeBufferedResponse(
             (
                 b'{"id":"chatcmpl_1","object":"chat.completion","model":"demo-model","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],'
@@ -784,17 +961,24 @@ class ProviderModelTestServiceTests(unittest.TestCase):
 
         self.service._open_upstream_response = stub_open_upstream_response  # type: ignore[method-assign]
 
-        result = self.service.test_models(
-            {
-                "api": "https://example.com/v1/chat/completions",
-                "source_format": "openai_chat",
-                "models": ["demo-model"],
-            }
-        )
+        with patch("src.services.provider_model_test_service.time.perf_counter", side_effect=[100.0, 100.0, 104.0]):
+            result = self.service.test_models(
+                {
+                    "api": "https://example.com/v1/chat/completions",
+                    "source_format": "openai_chat",
+                    "models": ["demo-model"],
+                }
+            )
 
         self.assertTrue(result["results"][0]["available"])
         self.assertIsNone(result["results"][0]["first_token_latency_ms"])
-        self.assertIsNone(result["results"][0]["tps"])
+        self.assertEqual(0.5, result["results"][0]["tps"])
+        row = self.log_service.calls[-1]
+        self.assertEqual("success", row["outcome"])
+        self.assertFalse(row["is_stream"])
+        self.assertIsNone(row["first_token_latency_ms"])
+        self.assertEqual(4000, row["duration_ms"])
+        self.assertEqual(0.5, row["tps"])
 
     def test_nonstream_success_without_model_output_marks_unavailable(self) -> None:
         fake_response = FakeBufferedResponse(b'{"status":"ok"}')

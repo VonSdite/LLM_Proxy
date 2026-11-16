@@ -1,0 +1,8 @@
+id: opencode
+name: Opencode v1
+order: 30
+legacy: true
+files:
+  opencode:
+    path: ~/.config/opencode/opencode.json
+    format: jsonc

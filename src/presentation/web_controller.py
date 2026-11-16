@@ -7,12 +7,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from io import BytesIO
+from ipaddress import ip_address
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from xml.sax.saxutils import escape
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from flask import jsonify, make_response, redirect, request
+from flask import jsonify, make_response, request
 from flask.typing import ResponseReturnValue
 
 from ..application.app_context import AppContext
@@ -53,6 +54,7 @@ class WebController:
         self._app.route("/settings")(auth(self.settings_page))
 
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
+        self._app.route("/api/statistics/overview", methods=["GET"])(auth(self.get_statistics_overview))
         self._app.route("/api/statistics/user-usage-summary", methods=["GET"])(auth(self.get_user_usage_summary))
         self._app.route("/api/statistics/api-key-usage-summary", methods=["GET"])(auth(self.get_api_key_usage_summary))
         self._app.route("/api/statistics/export", methods=["GET"])(auth(self.export_statistics))
@@ -61,6 +63,7 @@ class WebController:
         self._app.route("/api/request-logs", methods=["GET"])(auth(self.get_request_logs))
         self._app.route("/api/usernames", methods=["GET"])(auth(self.get_usernames))
         self._app.route("/api/request-models", methods=["GET"])(auth(self.get_request_models))
+        self._app.route("/api/statistics/filter-options", methods=["GET"])(auth(self.get_filter_options))
         self._app.route("/api/settings/system", methods=["GET"])(auth(self.get_system_settings))
         self._app.route("/api/settings/system", methods=["PUT"])(auth(self.update_system_settings))
         self._app.route("/api/settings/system/basic", methods=["PUT"])(auth(self.update_basic_settings))
@@ -83,13 +86,9 @@ class WebController:
         return render_ui()
 
     def model_mappings_page(self) -> ResponseReturnValue:
-        if not self._is_model_mapping_enabled():
-            return redirect("/settings")
         return render_ui()
 
     def api_keys_page(self) -> ResponseReturnValue:
-        if not self._is_api_key_management_enabled():
-            return redirect("/settings")
         return render_ui()
 
     def providers_page(self) -> ResponseReturnValue:
@@ -97,20 +96,6 @@ class WebController:
 
     def settings_page(self) -> ResponseReturnValue:
         return render_ui()
-
-    def _is_api_key_management_enabled(self) -> bool:
-        if self._config_manager is None:
-            return False
-        read_enabled = getattr(self._config_manager, "is_api_key_management_enabled", None)
-        if read_enabled is None:
-            return False
-        return bool(read_enabled())
-
-    def _is_model_mapping_enabled(self) -> bool:
-        if self._config_manager is None:
-            return False
-        read_enabled = getattr(self._config_manager, "is_model_mapping_enabled", None)
-        return bool(read_enabled()) if callable(read_enabled) else False
 
     @staticmethod
     def _get_multi_filter_values(name: str) -> list[str]:
@@ -283,14 +268,43 @@ class WebController:
             return "未知"
 
     @staticmethod
-    def _format_model_flow(item: dict[str, Any]) -> str:
-        """将请求模型、映射目标和响应模型格式化为展示链路。"""
+    def _format_tps_unavailable_reason(item: dict[str, Any]) -> str:
+        if item.get("tps") is not None:
+            return ""
+        return {
+            "missing_usage": "缺少有效输出 Token 用量",
+            "no_output": "没有正数的输出 Token 用量",
+            "invalid_duration": "缺少有效请求总耗时",
+            "unsuccessful": "请求失败或取消",
+        }.get(item.get("tps_unavailable_reason"), "缺少有效输出用量或总耗时")
+
+    @staticmethod
+    def _format_request_model(item: dict[str, Any]) -> str:
+        """请求列展示原始模型及映射目标，响应模型独立成列。"""
         parts = [
             str(item.get("request_model") or "").strip(),
             str(item.get("target_model_id") or "").strip(),
-            str(item.get("response_model") or "").strip(),
         ]
         return " -> ".join(part for part in parts if part)
+
+    def get_statistics_overview(self) -> ResponseReturnValue:
+        try:
+            self._validate_dashboard_date_range(request.args.get("start_date"), request.args.get("end_date"))
+            return jsonify(
+                self._log_service.get_overview(
+                    request.args.get("start_date"),
+                    request.args.get("end_date"),
+                    self._get_multi_filter_values("username") or None,
+                    self._get_multi_filter_values("request_model") or None,
+                    response_model=self._get_multi_filter_values("response_model") or None,
+                    ip_address=self._get_multi_filter_values("ip_address") or None,
+                )
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error getting statistics overview: %s", exc)
+            return jsonify({"error": "Unable to load statistics overview"}), 500
 
     def get_statistics(self) -> ResponseReturnValue:
         try:
@@ -314,6 +328,8 @@ class WebController:
                 request_models or None,
                 sort_key=request.args.get("sort_key"),
                 sort_direction=request.args.get("sort_direction"),
+                response_model=self._get_multi_filter_values("response_model") or None,
+                ip_address=self._get_multi_filter_values("ip_address") or None,
             )
             return jsonify(stats)
         except ValueError as exc:
@@ -344,6 +360,8 @@ class WebController:
                 request_models or None,
                 sort_key=request.args.get("sort_key"),
                 sort_direction=request.args.get("sort_direction"),
+                response_model=self._get_multi_filter_values("response_model") or None,
+                ip_address=self._get_multi_filter_values("ip_address") or None,
             )
             return jsonify(summary)
         except ValueError as exc:
@@ -374,6 +392,8 @@ class WebController:
                 request_models or None,
                 sort_key=request.args.get("sort_key"),
                 sort_direction=request.args.get("sort_direction"),
+                response_model=self._get_multi_filter_values("response_model") or None,
+                ip_address=self._get_multi_filter_values("ip_address") or None,
             )
             return jsonify(summary)
         except ValueError as exc:
@@ -394,7 +414,88 @@ class WebController:
             sort_key = request.args.get("sort_key")
             sort_direction = request.args.get("sort_direction")
 
-            if tab == "api_key_usage":
+            if tab in {"models", "model_usage", "response_model_usage", "ip_usage"}:
+                overview = self._log_service.get_overview(
+                    request.args.get("start_date"),
+                    request.args.get("end_date"),
+                    usernames or None,
+                    request_models or None,
+                    response_model=self._get_multi_filter_values("response_model") or None,
+                    ip_address=self._get_multi_filter_values("ip_address") or None,
+                )
+                if tab == "models":
+                    data = overview["models"]
+                    columns = [
+                        ("request_model", "请求模型"),
+                        ("request_count", "请求数"),
+                        ("upstream_success_count", "上游成功"),
+                        ("upstream_error_count", "上游失败"),
+                        ("upstream_exception_count", "上游异常"),
+                        ("upstream_cancelled_count", "中止"),
+                        ("upstream_unknown_count", "未知调用结果"),
+                        ("upstream_success_rate", "上游成功率"),
+                        ("cache_hit_rate", "缓存 Token 命中率"),
+                        ("cache_request_hit_rate", "缓存请求命中率"),
+                        ("first_token_latency_ms", "平均首字延迟(ms)"),
+                        ("latency_sample_count", "首字样本数"),
+                        ("tps", "平均 TPS(tok/s)"),
+                        ("tps_sample_count", "TPS 样本数"),
+                        ("total_tokens", "总 Token"),
+                    ]
+                    sheet_name, file_prefix = "模型表现", "model-performance"
+                elif tab in {"model_usage", "response_model_usage"}:
+                    data = (
+                        [{**item, "model_flow": self._format_request_model(item)} for item in overview["model_flows"]]
+                        if tab == "model_usage"
+                        else overview["response_models"]
+                    )
+                    columns = [
+                        *([("model_flow", "请求模型")] if tab == "model_usage" else []),
+                        ("response_model", "响应模型"),
+                        ("prompt_tokens", "输入 Token"),
+                        ("completion_tokens", "输出 Token"),
+                        ("total_tokens", "总 Token"),
+                        ("cache_read_input_tokens", "缓存读取 Token"),
+                        ("cache_hit_rate", "缓存命中率"),
+                        ("request_count", "请求数"),
+                    ]
+                    sheet_name, file_prefix = (
+                        ("请求模型用量", "model-usage")
+                        if tab == "model_usage"
+                        else ("响应模型用量", "response-model-usage")
+                    )
+                else:
+                    data = overview["ips"]
+                    columns = [
+                        ("ip_address", "IP"),
+                        ("username", "用户名"),
+                        ("request_count", "请求数"),
+                        ("prompt_tokens", "输入 Token"),
+                        ("completion_tokens", "输出 Token"),
+                        ("total_tokens", "总 Token"),
+                        ("cache_read_input_tokens", "缓存读取 Token"),
+                        ("cache_hit_rate", "缓存命中率"),
+                    ]
+                    sheet_name, file_prefix = "IP 用量", "ip-usage"
+                if sort_key in {key for key, _ in columns} | {"upstream_success_rate"}:
+                    present = [row for row in data if row.get(sort_key) is not None]
+                    missing = [row for row in data if row.get(sort_key) is None]
+                    data = sorted(present, key=lambda row: row[sort_key], reverse=sort_direction != "asc") + missing
+                headers = [label for _, label in columns]
+                rows = [
+                    [
+                        "未知"
+                        if key == "response_model" and not item.get(key)
+                        else "—"
+                        if key == "upstream_success_rate" and item.get(key) is None
+                        else self._format_cache_hit_rate(item.get(key))
+                        if key.endswith("_rate")
+                        else item.get(key)
+                        for key, _ in columns
+                    ]
+                    for item in data
+                ]
+            elif tab == "api_key_usage":
                 data = self._log_service.get_api_key_usage_summary(
                     request.args.get("start_date"),
                     request.args.get("end_date"),
@@ -402,6 +503,8 @@ class WebController:
                     request_models or None,
                     sort_key=sort_key,
                     sort_direction=sort_direction,
+                    response_model=self._get_multi_filter_values("response_model") or None,
+                    ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
                 headers = [
                     "KEY 名称",
@@ -447,6 +550,8 @@ class WebController:
                     request_models or None,
                     sort_key=sort_key,
                     sort_direction=sort_direction,
+                    response_model=self._get_multi_filter_values("response_model") or None,
+                    ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
                 headers = [
                     "用户名",
@@ -487,11 +592,14 @@ class WebController:
                     request_models or None,
                     sort_key=sort_key,
                     sort_direction=sort_direction,
+                    response_model=self._get_multi_filter_values("response_model") or None,
+                    ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
                 headers = [
                     "IP",
                     "用户名",
-                    "模型流向",
+                    "请求模型",
+                    "响应模型",
                     "输入token",
                     "输出token",
                     "总 Token",
@@ -502,12 +610,20 @@ class WebController:
                     "开始时间",
                     "结束时间",
                     "耗时(秒)",
+                    "结果",
+                    "HTTP 状态",
+                    "错误类型",
+                    "首字延迟(ms)",
+                    "TPS(tok/s)",
+                    "流式响应",
+                    "TPS 缺失原因",
                 ]
                 rows = [
                     [
                         item["ip_address"],
                         item["username"],
-                        self._format_model_flow(item),
+                        self._format_request_model(item),
+                        item.get("response_model") or "未知",
                         item["prompt_tokens"],
                         item["completion_tokens"],
                         item["total_tokens"],
@@ -517,7 +633,16 @@ class WebController:
                         self._format_cache_hit_rate(item.get("cache_hit_rate")),
                         item["start_time"],
                         item["end_time"],
-                        self._calculate_log_duration(item["start_time"], item["end_time"]),
+                        item["duration_ms"] / 1000
+                        if item.get("duration_ms") is not None
+                        else self._calculate_log_duration(item["start_time"], item["end_time"]),
+                        {"success": "成功", "error": "失败", "cancelled": "取消"}.get(item.get("outcome"), "未知"),
+                        item.get("http_status"),
+                        item.get("error_type"),
+                        item.get("first_token_latency_ms"),
+                        item.get("tps"),
+                        item.get("is_stream"),
+                        self._format_tps_unavailable_reason(item),
                     ]
                     for item in data
                 ]
@@ -531,11 +656,14 @@ class WebController:
                     request_models or None,
                     sort_key=sort_key,
                     sort_direction=sort_direction,
+                    response_model=self._get_multi_filter_values("response_model") or None,
+                    ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
                 headers = [
                     "IP",
                     "用户名",
-                    "模型流向",
+                    "请求模型",
+                    "响应模型",
                     "输入token",
                     "输出token",
                     "总 Token",
@@ -549,7 +677,8 @@ class WebController:
                     [
                         item["ip_address"],
                         item["username"],
-                        self._format_model_flow(item),
+                        self._format_request_model(item),
+                        item.get("response_model") or "未知",
                         item["prompt_tokens"],
                         item["completion_tokens"],
                         item["total_tokens"],
@@ -561,9 +690,27 @@ class WebController:
                     ]
                     for item in data
                 ]
-                sheet_name = "调用汇总"
+                sheet_name = "来源与模型"
                 file_prefix = "call-summary"
 
+            if tab in {"stats", "model_usage", "response_model_usage", "ip_usage", "user_usage", "api_key_usage"}:
+                index = headers.index("请求数") + 1
+                headers[index:index] = ["上游成功率", "上游成功", "上游失败", "上游异常", "中止", "未知调用结果"]
+                for row, item in zip(rows, data):
+                    rate = item.get("upstream_success_rate")
+                    row[index:index] = [
+                        self._format_cache_hit_rate(rate) if rate is not None else "—",
+                        *(
+                            item.get(key, 0)
+                            for key in (
+                                "upstream_success_count",
+                                "upstream_error_count",
+                                "upstream_exception_count",
+                                "upstream_cancelled_count",
+                                "upstream_unknown_count",
+                            )
+                        ),
+                    ]
             content = self._build_xlsx(sheet_name, headers, rows)
             filename = f"{file_prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
             self._logger.debug("Statistics exported: tab=%s rows=%s filename=%s", tab, len(rows), filename)
@@ -586,6 +733,8 @@ class WebController:
                 end_date,
                 usernames or None,
                 request_models or None,
+                response_model=self._get_multi_filter_values("response_model") or None,
+                ip_address=self._get_multi_filter_values("ip_address") or None,
             )
             self._logger.debug(
                 "Statistics JSON exported: request_logs=%s daily_request_stats=%s",
@@ -644,12 +793,21 @@ class WebController:
                 request_models or None,
                 sort_key=request.args.get("sort_key"),
                 sort_direction=request.args.get("sort_direction"),
+                response_model=self._get_multi_filter_values("response_model") or None,
+                ip_address=self._get_multi_filter_values("ip_address") or None,
             )
             return jsonify(logs)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error getting request logs: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def get_filter_options(self) -> ResponseReturnValue:
+        try:
+            return jsonify(self._log_service.get_filter_options())
+        except Exception as exc:
+            self._logger.error("Error getting statistics filter options: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def get_usernames(self) -> ResponseReturnValue:
@@ -684,6 +842,8 @@ class WebController:
     ) -> ResponseReturnValue:
         payload = require_json_object()
         result = update_func(payload)
+        if result.get("server_listener_changed"):
+            result["server_access_url"] = self._listener_access_url(result["settings"]["server"])
         if result.get("auth_config_changed"):
             self._auth_service.clear_sessions()
 
@@ -691,6 +851,39 @@ class WebController:
         if result.get("auth_config_changed"):
             response.delete_cookie("session_token")
         return response
+
+    @staticmethod
+    def _listener_access_url(server: dict[str, Any]) -> str | None:
+        """仅对可识别的直接访问生成入口，不推测代理或端口映射。"""
+        if request.scheme != "http" or any(
+            name in request.headers
+            for name in (
+                "Forwarded",
+                "X-Forwarded-Host",
+                "X-Forwarded-Port",
+                "X-Forwarded-Proto",
+                "X-Forwarded-For",
+                "X-Real-IP",
+            )
+        ):
+            return None
+        try:
+            origin = urlsplit(request.host_url)
+            current_host = origin.hostname or ""
+            if (origin.port or 80) != int(request.environ.get("SERVER_PORT", 0)):
+                return None
+            current_ip = ip_address("127.0.0.1" if current_host == "localhost" else current_host)
+            target_ip = ip_address(server["host"])
+        except ValueError:
+            return None
+        if target_ip.is_loopback and not current_ip.is_loopback:
+            return None
+        if target_ip.is_unspecified and target_ip.version != current_ip.version:
+            return None
+        target_host = current_host if target_ip.is_unspecified else str(target_ip)
+        if ":" in target_host:
+            target_host = f"[{target_host}]"
+        return f"http://{target_host}:{server['port']}/settings"
 
     def update_system_settings(self) -> ResponseReturnValue:
         try:

@@ -2,7 +2,9 @@
 import { computed } from 'vue'
 import type { AgentDraft, AgentId } from '@/api/agents'
 import { UiField, UiSelect, type SelectOption } from '@/components/ui'
+import DisabledProvidersField from './DisabledProvidersField.vue'
 import { CLAUDE_MODES, setRuntime } from './configuration'
+import { agentVersionHelp } from './versionHelp'
 const props = defineProps<{ agent: AgentId; draft: AgentDraft; disabled?: boolean }>()
 const choices = (entries: [string, string][]) => [
   { value: '', label: '不设置' },
@@ -48,12 +50,12 @@ const fields = computed<
         },
         {
           key: 'attribution',
-          label: 'Attribution',
+          label: '提交与 PR 署名',
           help: [
             '控制 Claude 在 Git 提交和 PR 描述中添加的署名，写入 settings.json 顶层 attribution。默认提交带 Co-Authored-By，PR 描述带 Claude 署名。',
             '不设置：移除当前文件的覆盖，沿用 Claude 默认行为或其他作用域的配置，不代表关闭署名。禁用：写入 false，关闭提交、PR 和会话链接署名；需要 Claude Code 2.1.281 或更新版本。',
             '旧版本可在配置文件中使用 {"commit":"","pr":"","sessionUrl":false}。已有对象显示为“文件自定义”，修改其他选项时原样保留；commit / pr 可分别设置自定义署名，空字符串表示隐藏。',
-            'Attribution Header 控制系统提示中的客户端标识，与这里的 Git / PR 署名独立。',
+            '“客户端标识”（Attribution Header）控制系统提示中的版本和提示指纹，与这里的 Git / PR 署名独立。',
           ],
           options: [
             { value: 'unset', label: '不设置' },
@@ -62,6 +64,16 @@ const fields = computed<
               ? [{ value: 'custom', label: '文件自定义', disabled: true }]
               : []),
           ],
+        },
+        {
+          key: 'autoMemoryEnabled',
+          label: '自动记忆',
+          help: [
+            '允许 Claude 自动保存项目经验和偏好，并在后续会话中使用。写入 settings.json 顶层 autoMemoryEnabled：启用为 true，禁用为 false。',
+            '不设置：移除当前文件的覆盖，遵循其他配置层与 Claude 默认行为；本地会话通常默认启用，部分托管或嵌套会话受额外限制。',
+            '禁用不会删除已有记忆文件，也不控制 CLAUDE.md 指令文件的加载。环境变量 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 仍可强制关闭自动记忆。',
+          ],
+          options: tri,
         },
         ...CLAUDE_MODES.map((setting) => ({
           ...setting,
@@ -77,7 +89,7 @@ const fields = computed<
         })),
         {
           key: 'skipWebFetchPreflight',
-          label: '跳过 WebFetch 预检',
+          label: '跳过网页抓取预检',
           help: [
             '写入 settings.json 顶层 skipWebFetchPreflight：启用为 true，禁用为 false，不设置移除此字段。',
             '启用后跳过 WebFetch 抓取前向 api.anthropic.com 发起的域名安全检查，适用于无法访问该预检服务的网络。',
@@ -89,22 +101,8 @@ const fields = computed<
     : props.agent === 'codex'
       ? [
           {
-            key: 'serviceTier',
-            label: 'Service tier',
-            help: [
-              '服务处理档位，按选定值写入 service_tier。auto / default / flex / priority 分别表达自动、标准、弹性、优先处理偏好；弹性通常更慢，优先通常费用更高。',
-              '可用名称取决于 Codex 版本、模型和上游。新版 Codex 以模型目录公布的档位为准（例如 fast，对应请求中的 priority）；本页未列出的值可通过配置文件编辑器维护。',
-            ],
-            options: choices([
-              ['auto', 'auto（自动）'],
-              ['default', 'default（标准）'],
-              ['flex', 'flex'],
-              ['priority', 'priority（Fast）'],
-            ]),
-          },
-          {
             key: 'sandboxMode',
-            label: 'Sandbox mode',
+            label: '沙箱访问范围',
             help: [
               'read-only：只读。workspace-write：工作区与允许目录可写。danger-full-access：取消沙箱的文件系统与网络限制。确认策略另行控制是否询问。',
               '写入 sandbox_mode；工作区模式的网络权限还取决于 sandbox_workspace_write.network_access。',
@@ -118,7 +116,7 @@ const fields = computed<
           },
           {
             key: 'approvalPolicy',
-            label: 'Approval policy',
+            label: '操作确认策略',
             help: [
               'on-request：允许在需要时请求确认。never：不请求确认，受限操作会失败；不会因此解除沙箱限制。写入 approval_policy。',
               'untrusted 是旧版本选项，非信任命令需确认；当前官方文档已不支持直接设置此值。新版本使用 on-request 或 never，已有旧版配置请结合目标机器版本处理。',
@@ -137,13 +135,94 @@ const fields = computed<
             options: tri,
           },
         ]
-      : [],
+      : [
+          {
+            key: 'disabledProviders',
+            label: '禁用服务',
+            help: [
+              '选择常用服务，或输入 Provider ID 后按 Enter 确认；支持逗号或空格分隔多个 ID，点击徽标上的 × 移除。清空后移除此设置，写入 disabled_providers 数组。',
+              '即使已提供凭据，被禁用的服务也不会加载；优先级高于 enabled_providers。这里填写服务 ID，不是模型 ID。',
+            ],
+            options: [],
+          },
+          {
+            key: 'share',
+            label: '会话分享',
+            help: [
+              '写入 share：manual 为手动分享，auto 为自动分享，disabled 为禁用分享。',
+              '分享会将会话内容发布为可访问的链接；禁用此项不等于撤销此前已分享的链接。不设置时沿用 Opencode 默认行为。',
+            ],
+            options: [
+              ...choices([
+                ['manual', '手动分享'],
+                ['auto', '自动分享'],
+                ['disabled', '禁用分享'],
+              ]),
+              ...(props.draft.runtime.share === 'custom'
+                ? [{ value: 'custom', label: '文件自定义', disabled: true }]
+                : []),
+            ],
+          },
+          {
+            key: 'autoupdate',
+            label: '更新检查',
+            help: [
+              'V1 写入 autoupdate：false 关闭检查，true 或 notify 开启版本检查与通知。当前 V1 文档说明不会自动安装，仍需主动更新。',
+              '已有 true 原样显示并保留；选择不设置移除该字段。V2 使用独立的 update 设置。',
+            ],
+            options: [
+              ...choices([
+                ['false', '关闭'],
+                ['notify', '仅通知'],
+                ['true', '开启检查'],
+              ]),
+              ...(props.draft.runtime.autoupdate === 'custom'
+                ? [{ value: 'custom', label: '文件自定义', disabled: true }]
+                : []),
+            ],
+          },
+          {
+            key: 'permissionPolicy',
+            label: '操作确认策略',
+            help: [
+              '适用于 Opencode v1，写入顶层 permission，统一设置所有操作的全局权限。',
+              '跳过确认：allow，直接允许操作。每次询问：ask，执行前请求批准。全部拒绝：deny，阻止操作。此设置不提供命令沙箱。',
+              '不设置：移除此文件的全局权限规则，沿用其他配置和内置默认行为，不等同于每次询问。Agent 自身的权限规则可覆盖全局规则，组织策略仍可拒绝操作。',
+              '已有细粒度规则显示为“文件自定义”，修改其他选项时保留；主动选择其他策略会替换本文件的 permission。V2 字段原样保留，不参与此表单读写。',
+            ],
+            options: [
+              ...choices([
+                ['allow', '跳过确认'],
+                ['ask', '每次询问'],
+                ['deny', '全部拒绝'],
+              ]),
+              ...(props.draft.runtime.permissionPolicy === 'custom'
+                ? [{ value: 'custom', label: '文件自定义', disabled: true }]
+                : []),
+            ],
+          },
+        ],
 )
 </script>
 <template>
   <div v-if="fields.length" class="form-grid form-grid--four" role="group" aria-label="运行设置">
-    <UiField v-for="field in fields" :key="field.key" :label="field.label" :help="field.help">
+    <UiField
+      v-for="field in fields"
+      :key="field.key"
+      :label="field.label"
+      :help="[
+        ...(typeof field.help === 'string' ? [field.help] : field.help),
+        ...agentVersionHelp(agent, field.key),
+      ]"
+    >
+      <DisabledProvidersField
+        v-if="field.key === 'disabledProviders'"
+        :model-value="draft.runtime[field.key] || ''"
+        :disabled="disabled"
+        @update:model-value="setRuntime(draft, field.key, $event)"
+      />
       <UiSelect
+        v-else
         :model-value="draft.runtime[field.key] || ''"
         :options="field.options"
         :disabled="disabled"

@@ -14,7 +14,7 @@ export function createAppRouter(pinia: Pinia) {
       {
         path: '/oauth',
         component: () => import('@/pages/OAuthPage.vue'),
-        meta: { title: 'Codex OAuth', feature: 'oauth' },
+        meta: { title: 'Codex OAuth' },
       },
       {
         path: '/',
@@ -25,13 +25,13 @@ export function createAppRouter(pinia: Pinia) {
       {
         path: '/model-mappings',
         component: () => import('@/pages/ModelMappingsPage.vue'),
-        meta: { title: '模型映射', feature: 'model_mapping' },
+        meta: { title: '模型映射' },
       },
       { path: '/users', component: () => import('@/pages/UsersPage.vue'), meta: { title: '用户' } },
       {
         path: '/api-keys',
         component: () => import('@/pages/ApiKeysPage.vue'),
-        meta: { title: 'API Key', feature: 'api_keys' },
+        meta: { title: 'API Key' },
       },
       {
         path: '/agents',
@@ -74,8 +74,6 @@ export function createAppRouter(pinia: Pinia) {
     if (to.path === '/login' && context?.authenticated) {
       return '/'
     }
-    const gate = to.meta.feature as 'oauth' | 'api_keys' | 'model_mapping' | undefined
-    if (gate && !context?.features[gate]) return '/settings'
     return true
   })
   router.afterEach((to) => {

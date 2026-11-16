@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from ipaddress import ip_address
 from typing import Any
 
@@ -31,10 +32,29 @@ class SettingsService:
         ctx: AppContext,
         reload_logging_callback: Callable[[], None] | None = None,
         model_catalog_changed_callback: Callable[[], None] | None = None,
+        prepare_listener_callback: Callable[[str, int], AbstractContextManager[bool]] | None = None,
     ):
         self._config_manager = ctx.config_manager
         self._reload_logging_callback = reload_logging_callback
         self._model_catalog_changed_callback = model_catalog_changed_callback
+        self._prepare_listener_callback = prepare_listener_callback
+
+    def _write_settings_config(self, config: dict[str, Any], listener_changed: bool) -> bool:
+        """监听绑定与配置落盘共同提交，返回是否已热切换。"""
+        if not listener_changed or self._prepare_listener_callback is None:
+            self._config_manager.write_raw_config(config)
+            return False
+        previous = self._config_manager.get_raw_config()
+        written = False
+        try:
+            with self._prepare_listener_callback(config["server"]["host"], config["server"]["port"]) as active:
+                self._config_manager.write_raw_config(config)
+                written = True
+            return active
+        except BaseException:
+            if written:
+                self._config_manager.write_raw_config(previous)
+            raise
 
     def get_system_settings(self) -> dict[str, Any]:
         admin_config = self._config_manager.get_admin_config() or {}
@@ -95,15 +115,17 @@ class SettingsService:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
 
-        server_payload = payload.get("server")
-        admin_payload = payload.get("admin")
+        if "server" not in payload and "admin" not in payload:
+            raise ValueError("Server or admin settings are required")
+        current_settings = self.get_system_settings()
+        server_payload = payload.get("server", current_settings["server"])
+        admin_payload = payload.get("admin", current_settings["admin"])
 
         if not isinstance(server_payload, dict):
             raise ValueError("Config field 'server' must be an object")
         if not isinstance(admin_payload, dict):
             raise ValueError("Config field 'admin' must be an object")
 
-        current_settings = self.get_system_settings()
         host = self._parse_server_host(server_payload.get("host"))
         port = self._parse_server_port(server_payload.get("port"))
         username = self._normalize_admin_value(admin_payload.get("username"))
@@ -121,7 +143,7 @@ class SettingsService:
         admin_config["username"] = username
         admin_config["password"] = password
 
-        self._config_manager.write_raw_config(config)
+        listener_switched = self._write_settings_config(config, server_restart_required)
 
         updated_settings = self.get_system_settings()
         return {
@@ -129,7 +151,8 @@ class SettingsService:
             "auth_config_changed": (
                 current_settings["admin"]["username"] != username or current_settings["admin"]["password"] != password
             ),
-            "server_restart_required": server_restart_required,
+            "server_restart_required": server_restart_required and not listener_switched,
+            "server_listener_changed": listener_switched,
         }
 
     @synchronized("_config_manager.write_lock")
@@ -269,7 +292,7 @@ class SettingsService:
 
     @synchronized("_config_manager.write_lock")
     def update_model_mapping_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """更新模型映射总开关并同步权限模型目录。"""
+        """兼容旧版总开关提交，模型映射保持启用。"""
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")
 
@@ -286,7 +309,7 @@ class SettingsService:
 
         config = self._config_manager.get_raw_config()
         model_mapping_config = self._ensure_mapping(config, "model_mapping")
-        model_mapping_config["enabled"] = enabled
+        model_mapping_config["enabled"] = True
         self._config_manager.write_raw_config(config)
         if self._model_catalog_changed_callback is not None:
             self._model_catalog_changed_callback()
@@ -419,14 +442,15 @@ class SettingsService:
             api_keys_config = self._ensure_mapping(config, "api_keys")
             api_keys_config["enabled"] = api_key_values[0]
 
-        self._config_manager.write_raw_config(config)
+        listener_switched = self._write_settings_config(config, server_restart_required)
         if logging_settings_changed and self._reload_logging_callback is not None:
             self._reload_logging_callback()
 
         return {
             "settings": self.get_system_settings(),
             "auth_config_changed": auth_config_changed,
-            "server_restart_required": server_restart_required,
+            "server_restart_required": server_restart_required and not listener_switched,
+            "server_listener_changed": listener_switched,
         }
 
     @staticmethod

@@ -371,8 +371,8 @@ class ApiKeyService:
         page: int = 1,
         page_size: int = 50,
         keyword: str | None = None,
-        sort_key: str | None = "created_at",
-        sort_direction: str | None = "desc",
+        sort_key: str | None = "sort_order",
+        sort_direction: str | None = "asc",
     ) -> list[dict[str, Any]]:
         """分页查询 API Key 列表。"""
         try:
@@ -407,6 +407,14 @@ class ApiKeyService:
         except Exception as exc:
             self._logger.error("Failed to get API key count: %s", exc)
             return 0
+
+    def move_api_key(self, key_id: Any, target_id: Any, after: Any) -> None:
+        """校验并保存管理列表的自定义顺序。"""
+        if type(key_id) is not int or type(target_id) is not int or key_id < 1 or target_id < 1:
+            raise ValueError("API key IDs must be positive integers")
+        if not isinstance(after, bool):
+            raise ValueError("After must be a boolean")
+        self._repository.move(key_id, target_id, after)
 
     def update_api_key(
         self,

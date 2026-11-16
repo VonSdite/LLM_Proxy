@@ -38,6 +38,7 @@ from .outbound_privacy import OutboundPrivacyContext, OutboundPrivacyService
 from .proxy_response_builder import ProxyResponseBuilder
 from .proxy_trace_logger import ProxyTraceLogger
 from .proxy_transport_gateway import ProxyTransportGateway
+from .upstream_observation import observe_opened
 from .upstream_request_builder import build_upstream_request
 
 
@@ -297,15 +298,18 @@ class ProxyService:
                     self._auth_group_manager.mark_request_dispatched(selected_auth)
 
                 opened = self._coerce_opened_response(
-                    self._open_upstream_response(
-                        provider,
-                        headers,
-                        translated_body,
-                        requested_stream,
-                        target_url,
-                        request_proxies,
-                        timeout_seconds,
-                        verify_ssl,
+                    observe_opened(
+                        lambda: self._open_upstream_response(
+                            provider,
+                            headers,
+                            translated_body,
+                            requested_stream,
+                            target_url,
+                            request_proxies,
+                            timeout_seconds,
+                            verify_ssl,
+                        ),
+                        requested_model,
                     )
                 )
 

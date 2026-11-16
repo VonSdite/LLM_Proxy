@@ -231,16 +231,6 @@ function columnWidth(id: string, size: number) {
                     @click="header.column.toggleSorting()"
                   >
                     {{ header.column.columnDef.header }}
-                    <UiIcon
-                      :name="
-                        header.column.getIsSorted() === 'asc'
-                          ? 'up'
-                          : header.column.getIsSorted() === 'desc'
-                            ? 'arrowDown'
-                            : 'sort'
-                      "
-                      :size="13"
-                    />
                   </button>
                   <span v-else>{{ header.column.columnDef.header }}</span>
                 </slot>
@@ -249,6 +239,23 @@ function columnWidth(id: string, size: number) {
                   :label="`${header.column.columnDef.header}说明`"
                   :text="props.columns.find((column) => column.key === header.id)?.help"
                 />
+                <button
+                  v-if="header.column.getCanSort()"
+                  class="ui-table-heading ui-table-sort"
+                  :aria-label="`按${header.column.columnDef.header}排序`"
+                  @click="header.column.toggleSorting()"
+                >
+                  <UiIcon
+                    :name="
+                      header.column.getIsSorted() === 'asc'
+                        ? 'up'
+                        : header.column.getIsSorted() === 'desc'
+                          ? 'arrowDown'
+                          : 'sort'
+                    "
+                    :size="13"
+                  />
+                </button>
               </div>
               <div
                 class="ui-table-resize"
@@ -468,6 +475,10 @@ function columnWidth(id: string, size: number) {
   color: inherit;
   font-size: inherit;
   font-weight: inherit;
+}
+
+.ui-table-sort {
+  flex-shrink: 0;
 }
 
 .ui-table-header-content {

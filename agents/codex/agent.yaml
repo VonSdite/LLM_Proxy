@@ -1,0 +1,15 @@
+id: codex
+name: Codex
+order: 20
+legacy: true
+files:
+  codex:
+    path: ~/.codex/config.toml
+    format: toml
+    homeEnv: CODEX_HOME
+    homeRelative: [config.toml]
+  codexAuth:
+    path: ~/.codex/auth.json
+    format: json
+    homeEnv: CODEX_HOME
+    homeRelative: [auth.json]

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FeatureSettings from '@/features/settings/FeatureSettings.vue'
 import { computed, ref, watch } from 'vue'
 import { useOAuthFiles } from '@/features/oauth/useOAuthFiles'
 import { fileCategory, fileLabels, type FileFilter } from '@/features/oauth/quota'
@@ -6,6 +7,7 @@ import OAuthCatalog from '@/features/oauth/OAuthCatalog.vue'
 import OAuthFileCard from '@/features/oauth/OAuthFileCard.vue'
 import OAuthLoginDialog from '@/features/oauth/OAuthLoginDialog.vue'
 import {
+  UiDisabledRegion,
   UiAlert,
   UiButton,
   UiCheckbox,
@@ -22,6 +24,7 @@ import {
   UiSelectionBar,
   UiTooltip,
 } from '@/components/ui'
+const featureAvailable = ref(false)
 const workspace = useOAuthFiles()
 const keyword = ref('')
 const filter = ref<FileFilter>('available')
@@ -135,172 +138,185 @@ function exportFiltered() {
           </p>
         </UiHelpPopover>
       </template>
+      <template #controls>
+        <FeatureSettings group="oauth" @availability="featureAvailable = $event" />
+      </template>
     </UiPageHeader>
-    <UiListToolbar wide-filters>
-      <template #actions>
-        <UiButton
-          variant="primary"
-          icon="plus"
-          :disabled="workspace.blocked.value"
-          @click="loginOpen = true"
-        >
-          添加账号
-        </UiButton>
-        <UiCheckbox
-          class="oauth-select-all"
-          :model-value="allSelected ? true : selectedNames.length ? 'indeterminate' : false"
-          :disabled="!filtered.length || workspace.blocked.value"
-          label="选择当前筛选的账号"
-          @update:model-value="selectAll"
-        >
-          全选
-        </UiCheckbox>
-        <UiButton @click="catalogOpen = true">模型目录</UiButton>
-        <UiSegmented v-model="filter" :items="filters" label="认证文件状态" />
-        <UiButton icon="import" :disabled="workspace.blocked.value" @click="fileInput?.click()">
-          导入
-        </UiButton>
-        <UiTooltip :text="`导出当前状态和搜索条件下的 ${filtered.length} 个认证文件，包含所有分页`">
-          <UiButton
-            icon="export"
-            :loading="workspace.busy.value === 'export'"
+    <UiDisabledRegion :disabled="!featureAvailable">
+      <UiListToolbar :selecting="selectedNames.length > 0" wide-filters>
+        <template #persistent>
+          <UiCheckbox
+            class="oauth-select-all"
+            variant="button"
+            :model-value="allSelected ? true : selectedNames.length ? 'indeterminate' : false"
             :disabled="!filtered.length || workspace.blocked.value"
-            @click="exportFiltered"
+            label="选择当前筛选的账号"
+            @update:model-value="selectAll"
           >
-            导出
+            全选
+          </UiCheckbox>
+        </template>
+        <template #actions>
+          <UiButton
+            variant="primary"
+            icon="plus"
+            :disabled="workspace.blocked.value"
+            @click="loginOpen = true"
+          >
+            添加账号
           </UiButton>
-        </UiTooltip>
-      </template>
-      <template #search>
-        <UiSearchInput
-          v-model="keyword"
-          placeholder="搜索文件、邮箱或套餐"
-          aria-label="搜索认证文件"
+          <UiButton @click="catalogOpen = true">模型目录</UiButton>
+          <UiSegmented v-model="filter" :items="filters" label="认证文件状态" />
+          <UiButton icon="import" :disabled="workspace.blocked.value" @click="fileInput?.click()">
+            导入
+          </UiButton>
+          <UiTooltip
+            :text="`导出当前状态和搜索条件下的 ${filtered.length} 个认证文件，包含所有分页`"
+          >
+            <UiButton
+              icon="export"
+              :loading="workspace.busy.value === 'export'"
+              :disabled="!filtered.length || workspace.blocked.value"
+              @click="exportFiltered"
+            >
+              导出
+            </UiButton>
+          </UiTooltip>
+        </template>
+        <template #search>
+          <UiSearchInput
+            v-model="keyword"
+            placeholder="搜索文件、邮箱或套餐"
+            aria-label="搜索认证文件"
+          />
+        </template>
+        <UiIconButton
+          icon="refresh"
+          label="同步认证文件列表"
+          :loading="workspace.busy.value === 'loading'"
+          :disabled="workspace.blocked.value"
+          @click="workspace.reload"
         />
-      </template>
-      <UiIconButton
-        icon="refresh"
-        label="同步认证文件列表"
+        <template #selection>
+          <UiSelectionBar
+            v-if="selectedNames.length"
+            embedded
+            :count="selectedNames.length"
+            :disabled="workspace.blocked.value"
+            @clear="selectAll(false)"
+          >
+            <UiButton :disabled="workspace.blocked.value" @click="workspace.refresh(selectedNames)">
+              刷新额度
+            </UiButton>
+            <UiButton
+              v-if="enableNames.length"
+              :disabled="workspace.blocked.value"
+              @click="workspace.mutate(enableNames, 'enable')"
+            >
+              启用
+            </UiButton>
+            <UiButton
+              v-if="disableNames.length"
+              :disabled="workspace.blocked.value"
+              @click="workspace.mutate(disableNames, 'disable')"
+            >
+              禁用
+            </UiButton>
+            <UiButton
+              :disabled="workspace.blocked.value"
+              @click="workspace.exportFiles(selectedNames)"
+            >
+              导出所选
+            </UiButton>
+            <UiConfirmPopover
+              :message="`删除当前筛选中所选的 ${selectedNames.length} 个认证文件？`"
+              @confirm="workspace.mutate(selectedNames, 'delete')"
+            >
+              <UiButton variant="danger-outline" :disabled="workspace.blocked.value">删除</UiButton>
+            </UiConfirmPopover>
+          </UiSelectionBar>
+        </template>
+      </UiListToolbar>
+      <input
+        ref="fileInput"
+        type="file"
+        accept=".json,.zip"
+        multiple
+        class="sr-only"
+        aria-label="导入认证文件"
+        @change="importFiles"
+      />
+      <UiAlert v-if="workspace.error.value">{{ workspace.error.value }}</UiAlert>
+      <div class="oauth-files">
+        <OAuthFileCard
+          v-for="file in visible"
+          :key="file.name"
+          :file="file"
+          :selected="selected.has(file.name)"
+          :disabled="workspace.blocked.value"
+          :loading="workspace.loadingFile.value === file.name"
+          :error="workspace.fileErrors.value[file.name]"
+          :now="workspace.now.value"
+          :enabled="workspace.toggles.value(file.name, file.enabled !== false)"
+          :toggling="workspace.toggles.pending(file.name)"
+          :toggle-disabled="workspace.toggleDisabled.value"
+          @select="select(file.name, $event)"
+          @enabled="workspace.setEnabled(file.name, $event)"
+          @remove="workspace.mutate([file.name], 'delete')"
+          @refresh="workspace.refresh([file.name])"
+          @consume="workspace.consume(file.name, $event)"
+        />
+      </div>
+      <UiEmptyState
+        v-if="!visible.length"
         :loading="workspace.busy.value === 'loading'"
-        :disabled="workspace.blocked.value"
-        @click="workspace.reload"
+        :title="
+          workspace.files.value.length
+            ? filter === 'available' && !keyword
+              ? '暂无可用账号'
+              : '没有匹配的认证文件'
+            : '添加账号或导入认证文件'
+        "
+      >
+        <UiButton
+          v-if="workspace.files.value.length && filter !== 'all'"
+          size="sm"
+          @click="filter = 'all'"
+        >
+          查看全部
+        </UiButton>
+      </UiEmptyState>
+      <UiPagination v-model:page="page" v-model:page-size="pageSize" :total="filtered.length" />
+      <OAuthLoginDialog
+        v-if="loginOpen"
+        @close="loginOpen = false"
+        @working="workspace.externalBusy.value = $event"
+        @completed="completed"
       />
-    </UiListToolbar>
-    <UiSelectionBar
-      v-if="selectedNames.length"
-      :count="selectedNames.length"
-      :disabled="workspace.blocked.value"
-      @clear="selectAll(false)"
-    >
-      <UiButton :disabled="workspace.blocked.value" @click="workspace.refresh(selectedNames)">
-        刷新额度
-      </UiButton>
-      <UiButton
-        v-if="enableNames.length"
-        :disabled="workspace.blocked.value"
-        @click="workspace.mutate(enableNames, 'enable')"
+      <UiDialog v-model:open="catalogOpen" title="Codex 模型目录" size="xl">
+        <div class="oauth-catalogs">
+          <OAuthCatalog />
+          <OAuthCatalog image />
+        </div>
+      </UiDialog>
+      <UiDialog
+        v-if="workspace.importResult.value"
+        open
+        title="认证文件导入结果"
+        @update:open="workspace.importResult.value = undefined"
       >
-        启用
-      </UiButton>
-      <UiButton
-        v-if="disableNames.length"
-        :disabled="workspace.blocked.value"
-        @click="workspace.mutate(disableNames, 'disable')"
-      >
-        禁用
-      </UiButton>
-      <UiButton :disabled="workspace.blocked.value" @click="workspace.exportFiles(selectedNames)">
-        导出所选
-      </UiButton>
-      <UiConfirmPopover
-        :message="`删除当前筛选中所选的 ${selectedNames.length} 个认证文件？`"
-        @confirm="workspace.mutate(selectedNames, 'delete')"
-      >
-        <UiButton variant="danger-outline" :disabled="workspace.blocked.value">删除</UiButton>
-      </UiConfirmPopover>
-    </UiSelectionBar>
-    <input
-      ref="fileInput"
-      type="file"
-      accept=".json,.zip"
-      multiple
-      class="sr-only"
-      aria-label="导入认证文件"
-      @change="importFiles"
-    />
-    <UiAlert v-if="workspace.error.value">{{ workspace.error.value }}</UiAlert>
-    <small v-if="['refresh', 'import'].includes(workspace.busy.value)" class="muted" role="status">
-      读取额度 {{ workspace.progress.value.done }} / {{ workspace.progress.value.total }}
-    </small>
-    <div class="oauth-files">
-      <OAuthFileCard
-        v-for="file in visible"
-        :key="file.name"
-        :file="file"
-        :selected="selected.has(file.name)"
-        :disabled="workspace.blocked.value"
-        :loading="workspace.loadingFile.value === file.name"
-        :error="workspace.fileErrors.value[file.name]"
-        :now="workspace.now.value"
-        :enabled="workspace.toggles.value(file.name, file.enabled !== false)"
-        :toggling="workspace.toggles.pending(file.name)"
-        :toggle-disabled="workspace.toggleDisabled.value"
-        @select="select(file.name, $event)"
-        @enabled="workspace.setEnabled(file.name, $event)"
-        @remove="workspace.mutate([file.name], 'delete')"
-        @refresh="workspace.refresh([file.name])"
-        @consume="workspace.consume(file.name, $event)"
-      />
-    </div>
-    <UiEmptyState
-      v-if="!visible.length"
-      :loading="workspace.busy.value === 'loading'"
-      :title="
-        workspace.files.value.length
-          ? filter === 'available' && !keyword
-            ? '暂无可用账号'
-            : '没有匹配的认证文件'
-          : '添加账号或导入认证文件'
-      "
-    >
-      <UiButton
-        v-if="workspace.files.value.length && filter !== 'all'"
-        size="sm"
-        @click="filter = 'all'"
-      >
-        查看全部
-      </UiButton>
-    </UiEmptyState>
-    <UiPagination v-model:page="page" v-model:page-size="pageSize" :total="filtered.length" />
-    <OAuthLoginDialog
-      v-if="loginOpen"
-      @close="loginOpen = false"
-      @working="workspace.externalBusy.value = $event"
-      @completed="completed"
-    />
-    <UiDialog v-model:open="catalogOpen" title="Codex 模型目录" size="xl">
-      <div class="oauth-catalogs">
-        <OAuthCatalog />
-        <OAuthCatalog image />
-      </div>
-    </UiDialog>
-    <UiDialog
-      v-if="workspace.importResult.value"
-      open
-      title="认证文件导入结果"
-      @update:open="workspace.importResult.value = undefined"
-    >
-      <div class="stack">
-        <p>
-          成功 {{ workspace.importResult.value.imported }} · 失败
-          {{ workspace.importResult.value.failed }}
-        </p>
-        <UiAlert v-for="item in workspace.importResult.value.failed_files" :key="item.name">
-          <strong>{{ item.name }}</strong>
-          <p>{{ item.reason }}</p>
-        </UiAlert>
-      </div>
-    </UiDialog>
+        <div class="stack">
+          <p>
+            成功 {{ workspace.importResult.value.imported }} · 失败
+            {{ workspace.importResult.value.failed }}
+          </p>
+          <UiAlert v-for="item in workspace.importResult.value.failed_files" :key="item.name">
+            <strong>{{ item.name }}</strong>
+            <p>{{ item.reason }}</p>
+          </UiAlert>
+        </div>
+      </UiDialog>
+    </UiDisabledRegion>
   </div>
 </template>
 <style scoped>
@@ -311,7 +327,7 @@ function exportFiltered() {
 
 .oauth-files {
   display: grid;
-  align-items: start;
+  align-items: stretch;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
   gap: var(--space-4);
 }

@@ -1,0 +1,10 @@
+id: claude
+name: Claude
+order: 10
+legacy: true
+files:
+  claude:
+    path: ~/.claude/settings.json
+    format: json
+    homeEnv: CLAUDE_CONFIG_DIR
+    homeRelative: [settings.json]

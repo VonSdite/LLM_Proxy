@@ -81,8 +81,8 @@ test('表格列宽支持键盘调整并在刷新后保留', async ({ page }) => 
 test('统计多选标题关联按钮，键盘选择筛选并提交完整模型 ID', async ({ page }) => {
   const fixture = await mockAdmin(page)
   await page.goto('/statistics')
-  const trigger = page.getByRole('button', { name: '请求模型', exact: true })
-  await page.getByText('请求模型', { exact: true }).click()
+  const trigger = page.getByLabel('请求模型', { exact: true })
+  await page.locator('label').filter({ hasText: '请求模型' }).click()
   await expect(page.getByRole('textbox', { name: '搜索选项' })).toBeFocused()
   await page.getByRole('textbox', { name: '搜索选项' }).fill('smart')
   const option = page.getByRole('checkbox', { name: 'smart', exact: true })
@@ -91,10 +91,11 @@ test('统计多选标题关联按钮，键盘选择筛选并提交完整模型 I
   await expect(option).toBeChecked()
   await page.keyboard.press('Escape')
   await expect(trigger).toBeFocused()
-  await expect(trigger).toContainText('smart')
-  await page.getByRole('button', { name: '查询', exact: true }).click()
+  await expect(page.getByRole('button', { name: '移除 smart', exact: true })).toBeVisible()
   await expect
-    .poll(() => fixture.calls.filter((call) => call.path === '/api/statistics').at(-1)?.url)
+    .poll(
+      () => fixture.calls.filter((call) => call.path === '/api/statistics/overview').at(-1)?.url,
+    )
     .toContain('request_model=smart')
   expect(fixture.unexpected).toEqual([])
 })

@@ -24,14 +24,19 @@ for (const width of [1920, 1440, 1024, 390, 320]) {
       await expect(page.getByRole('region', { name: '批量操作' })).toHaveCount(0)
       const header = (await page.locator('.ui-page-header').boundingBox())!
       const action = (await primary.boundingBox())!
-      expect(action.x).toBe((await heading.boundingBox())!.x)
+      const firstAction =
+        item.path === '/oauth'
+          ? page.getByRole('checkbox', { name: '选择当前筛选的账号' })
+          : primary
+      expect((await firstAction.boundingBox())!.x).toBe((await heading.boundingBox())!.x)
       expect(action.y).toBeGreaterThanOrEqual(header.y + header.height)
       await expect(
         page
           .locator('.ui-list-toolbar-actions')
           .getByRole('button', { name: item.primary, exact: true }),
       ).toBeVisible()
-      if (width <= 390) expect((await search.boundingBox())!.x).toBe(action.x)
+      if (width <= 390)
+        expect((await search.boundingBox())!.x).toBe((await heading.boundingBox())!.x)
       else expect((await search.boundingBox())!.x).toBeGreaterThan(action.x + action.width)
       if (item.path === '/') {
         const status = page
@@ -50,7 +55,7 @@ for (const width of [1920, 1440, 1024, 390, 320]) {
       if (item.path === '/oauth') {
         const actions = page.locator('.ui-list-toolbar-actions')
         await expect(actions.getByRole('button', { name: '模型目录', exact: true })).toBeVisible()
-        await expect(actions.getByRole('checkbox', { name: '选择当前筛选的账号' })).toBeVisible()
+        await expect(page.getByRole('checkbox', { name: '选择当前筛选的账号' })).toBeVisible()
         await expect(page.locator('.ui-pagination')).toHaveCount(0)
       }
       await search.fill('lookup')
@@ -81,9 +86,13 @@ test('Provider 批量工具按需出现，清空选择恢复勾选框焦点并�
   await page.goto('/')
   const search = await page.getByRole('textbox', { name: '搜索配置' }).elementHandle()
   const checkbox = page.getByRole('checkbox', { name: '选择 main', exact: true })
+  await expect(checkbox).toBeVisible()
+  const before = (await checkbox.boundingBox())!
   await checkbox.click()
   const bar = page.getByRole('region', { name: '批量操作' })
   await expect(bar).toContainText('已选 1 项')
+  expect((await checkbox.boundingBox())!.y).toBe(before.y)
+  await expect(bar).toHaveCSS('position', 'static')
   const clear = bar.getByRole('button', { name: '清空选择', exact: true })
   await expect(clear).toHaveText('')
   await clear.hover()
@@ -96,18 +105,36 @@ test('Provider 批量工具按需出现，清空选择恢复勾选框焦点并�
   expect(fixture.calls.filter((call) => call.method !== 'GET')).toEqual([])
 })
 
-test('窄屏 OAuth 批量选择保留筛选入口，清空选择不触发写入', async ({ page }) => {
+test('窄屏 OAuth 工具栏原位切换，清空选择恢复入口且不触发写入', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 1000 })
   const fixture = await mockOAuthCards(page)
   await page.goto('/oauth')
+  const card = page.locator('.oauth-file').first()
+  await expect(card).toBeVisible()
+  const before = (await card.boundingBox())!
   await page.getByRole('checkbox', { name: '选择当前筛选的账号', exact: true }).click()
   const bar = page.getByRole('region', { name: '批量操作' })
   await expect(bar).toContainText('已选 2 项')
-  await page.getByRole('tab', { name: '全部 6', exact: true }).click()
+  expect((await card.boundingBox())!.y).toBe(before.y)
+  const selectAll = page.getByRole('checkbox', { name: '选择当前筛选的账号', exact: true })
+  await expect(selectAll).toBeVisible()
+  await expect(selectAll).toBeChecked()
+  await selectAll.click()
+  await expect(bar).toHaveCount(0)
+  await card.getByRole('checkbox').click()
+  await expect(selectAll).toHaveAttribute('data-state', 'indeterminate')
+  await selectAll.click()
   await expect(bar).toContainText('已选 2 项')
+  expect((await card.boundingBox())!.y).toBe(before.y)
+  await expect(bar).toHaveCSS('position', 'static')
+  const actions = (await bar.boundingBox())!
+  expect(actions.x).toBeGreaterThanOrEqual(0)
+  expect(actions.y + actions.height).toBeLessThanOrEqual(1000)
   await bar.getByRole('button', { name: '清空选择' }).click()
   await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(0)
   await expect(bar).toHaveCount(0)
+  expect((await card.boundingBox())!.y).toBe(before.y)
+  await expect(page.getByRole('button', { name: '添加账号', exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   expect(fixture.calls.filter((call) => call.method !== 'GET')).toEqual([])
 })
@@ -328,7 +355,7 @@ test('认证文件直接导出当前状态和搜索结果，空结果禁用导�
   const button = page.getByRole('button', { name: '导出', exact: true })
   for (const [state, names] of [
     ['可用 2', fixture.files.slice(0, 2).map((file) => file.name)],
-    ['已禁用 1', [fixture.files[2]!.name]],
+    ['禁用 1', [fixture.files[2]!.name]],
     ['全部 6', fixture.files.map((file) => file.name)],
   ] as const) {
     await page.getByRole('tab', { name: state, exact: true }).click()

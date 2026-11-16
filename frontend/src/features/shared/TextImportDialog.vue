@@ -10,12 +10,13 @@ const props = withDefaults(
     open: boolean
     title: string
     help?: string | readonly string[]
-    language: 'json' | 'yaml'
+    language: 'json' | 'yaml' | 'text'
     initialValue?: string
     confirmLabel?: string
+    allowFile?: boolean
     submit: (text: string, signal: AbortSignal) => Promise<string | void>
   }>(),
-  { initialValue: '', confirmLabel: '导入' },
+  { initialValue: '', confirmLabel: '导入', allowFile: true },
 )
 const emit = defineEmits<{ 'update:open': [value: boolean]; imported: [message: string] }>()
 const text = ref(props.initialValue)
@@ -68,7 +69,7 @@ const dirty = useDraftChanges(() => text.value)
   >
     <div class="stack">
       <UiAlert v-if="error">{{ error }}</UiAlert>
-      <div class="actions">
+      <div v-if="allowFile" class="actions">
         <UiButton icon="upload" :disabled="busy" @click="fileInput?.click()">
           {{ language === 'json' ? '选择 JSON 文件' : '选择 YAML / JSON 文件' }}
         </UiButton>
@@ -82,7 +83,7 @@ const dirty = useDraftChanges(() => text.value)
           @change="loadFile"
         />
       </div>
-      <UiField label="导入内容" :help="help">
+      <UiField :label="allowFile ? '导入内容' : '编辑内容'" :help="help">
         <UiCodeEditor
           v-model="text"
           :language="language"

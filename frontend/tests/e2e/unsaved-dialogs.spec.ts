@@ -36,7 +36,15 @@ for (const editor of editors) {
     const prompt = page.getByRole('dialog', { name: promptTitle, exact: true })
     await expect(prompt).toBeVisible()
     await expect(prompt.getByRole('button', { name: '关闭', exact: true })).not.toBeFocused()
-    await expect(prompt.getByRole('button', { name: '继续编辑', exact: true })).toBeFocused()
+    await expect(prompt).toBeFocused()
+    await expect(prompt).toHaveCSS('outline-style', 'none')
+    await expect(prompt.getByRole('button', { name: '继续编辑', exact: true })).not.toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(prompt.getByRole('button', { name: '关闭', exact: true })).toBeFocused()
+    await expect(prompt.getByRole('button', { name: '关闭', exact: true })).toHaveCSS(
+      'outline-style',
+      'solid',
+    )
     await prompt.getByRole('button', { name: '继续编辑', exact: true }).click()
     await expect(input).toHaveValue('unsaved-draft')
     await page.keyboard.press('Escape')

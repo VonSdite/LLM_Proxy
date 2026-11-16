@@ -71,11 +71,13 @@ function toggleVisible(enabled: boolean) {
         <p>
           选择当前筛选只影响搜索结果，其他已选项保留。标为当前不可用的 ID 不代表模型可以实际调用。
         </p>
-        <p>同时启用用户白名单和 API Key 校验时，最终权限取两者交集；模型目录也按权限过滤。</p>
+        <p>
+          已登记 IP 的用户模型权限始终生效；白名单关闭时，未登记 IP 不受用户权限限制。启用 API Key
+          校验后，还需满足该 Key 的模型权限；模型目录也按相同规则过滤。
+        </p>
       </UiHelpPopover>
     </div>
-    <p v-if="modelValue === '*'" class="muted permission-summary">包括后续新增的模型</p>
-    <template v-else>
+    <template v-if="modelValue !== '*'">
       <UiInput
         v-model="search"
         placeholder="搜索模型"
@@ -96,6 +98,8 @@ function toggleVisible(enabled: boolean) {
         <UiCheckbox
           v-for="model in visible"
           :key="model"
+          class="permission-option"
+          variant="button"
           :model-value="selected.has(model)"
           :disabled="disabled"
           @update:model-value="toggle(model, $event)"
@@ -109,10 +113,6 @@ function toggleVisible(enabled: boolean) {
   </div>
 </template>
 <style scoped>
-.permission-summary {
-  font-size: var(--text-xs);
-}
-
 .permission-toolbar {
   display: flex;
   align-items: center;
@@ -123,16 +123,47 @@ function toggleVisible(enabled: boolean) {
 .permission-list {
   display: grid;
   align-content: start;
-  gap: var(--space-3);
+  gap: var(--space-1);
   max-height: 280px;
   overflow: auto;
-  padding: var(--space-3);
+  padding: var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--input);
 }
 
 .permission-list .mono {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.permission-option {
+  min-width: 0;
+}
+
+.permission-option :deep(.ui-checkbox--button) {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+  border-color: transparent;
+  background: transparent;
+  transition: background var(--motion);
+}
+
+.permission-option :deep(.ui-checkbox--button > span:last-child) {
+  min-width: 0;
+}
+
+.permission-option :deep(.ui-checkbox--button:hover:not(:disabled)) {
+  background: var(--hover);
+}
+
+.permission-option :deep(.ui-checkbox--button[data-state='checked']) {
+  background: var(--selected);
+}
+
+.permission-option :deep(.ui-checkbox--button[data-state='checked']:hover:not(:disabled)) {
+  background: color-mix(in srgb, var(--selected) 85%, var(--link));
 }
 </style>

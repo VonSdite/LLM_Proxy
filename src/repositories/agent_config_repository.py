@@ -1,6 +1,8 @@
 """Agent 目标机器、配置路径与受管字段摘要的持久化。"""
 
 import json
+import os
+import posixpath
 from copy import deepcopy
 from pathlib import Path
 
@@ -17,10 +19,10 @@ class AgentConfigRepository:
     def load(self) -> dict:
         raw = self.files.read(str(self.path))
         if raw is None:
-            return {"version": 2, "machines": {}, "paths": {}, "managed": {}}
+            return {"version": 3, "machines": {}, "paths": {}, "managed": {}}
         try:
             data = json.loads(raw)
-            if data.get("version") not in (1, 2) or any(
+            if data.get("version") not in (1, 2, 3) or any(
                 not isinstance(data.get(key), dict) for key in ("machines", "paths", "managed")
             ):
                 raise ValueError
@@ -29,11 +31,16 @@ class AgentConfigRepository:
                     paths = {"opencode": paths} if paths else {}
                     data["paths"][machine_id] = paths
                 if not isinstance(paths, dict) or any(
-                    target not in ("claude", "codex", "opencode") or not isinstance(path, str)
+                    not isinstance(target, str) or not target or not isinstance(path, str)
                     for target, path in paths.items()
                 ):
                     raise ValueError
-            data["version"] = 2
+                if data["version"] < 3 and paths.get("codex"):
+                    join = os.path.join if machine_id == "local" else posixpath.join
+                    directory = paths["codex"]
+                    paths["codex"] = join(directory, "config.toml")
+                    paths["codexAuth"] = join(directory, "auth.json")
+            data["version"] = 3
             return data
         except (ValueError, TypeError, AttributeError) as exc:
             raise ValueError("Agent configuration registry is invalid") from exc

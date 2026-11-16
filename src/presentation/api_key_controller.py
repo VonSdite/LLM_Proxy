@@ -28,6 +28,7 @@ class ApiKeyController:
 
         self._app.route("/api/api-keys", methods=["GET"])(auth(self.get_api_keys))
         self._app.route("/api/api-keys", methods=["POST"])(auth(self.create_api_key))
+        self._app.route("/api/api-keys/order", methods=["PUT"])(auth(self.order_api_keys))
         self._app.route("/api/api-keys/<int:key_id>", methods=["GET"])(auth(self.get_api_key))
         self._app.route("/api/api-keys/<int:key_id>", methods=["PUT"])(auth(self.update_api_key))
         self._app.route("/api/api-keys/<int:key_id>", methods=["DELETE"])(auth(self.delete_api_key))
@@ -38,8 +39,8 @@ class ApiKeyController:
             page = request.args.get("page", 1, type=int)
             page_size = request.args.get("page_size", 50, type=int)
             keyword = (request.args.get("keyword", "", type=str) or "").strip()
-            sort_key = (request.args.get("sort_key", "created_at", type=str) or "created_at").strip() or "created_at"
-            sort_direction = (request.args.get("sort_direction", "desc", type=str) or "desc").strip() or "desc"
+            sort_key = (request.args.get("sort_key", "sort_order", type=str) or "sort_order").strip() or "sort_order"
+            sort_direction = (request.args.get("sort_direction", "asc", type=str) or "asc").strip() or "asc"
             self._logger.debug(
                 "List API keys requested: page=%s, page_size=%s, keyword=%r, sort_key=%r, sort_direction=%r",
                 page,
@@ -73,6 +74,18 @@ class ApiKeyController:
             )
         except Exception as exc:
             self._logger.error("Error getting API keys: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def order_api_keys(self) -> ResponseReturnValue:
+        """按目标行位置保存 API Key 顺序。"""
+        try:
+            data = get_json_object()
+            self._api_key_service.move_api_key(data.get("id"), data.get("target_id"), data.get("after"))
+            return jsonify({"message": "API key order saved"})
+        except ValueError as exc:
+            return build_value_error_response(exc)
+        except Exception as exc:
+            self._logger.error("Error ordering API keys: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def get_api_key(self, key_id: int) -> ResponseReturnValue:

@@ -4,6 +4,7 @@ export interface Toast {
   id: number
   message: string
   variant: 'success' | 'danger' | 'info' | 'warning'
+  loading?: boolean
 }
 export const toasts = shallowRef<Toast[]>([])
 let nextId = 0
@@ -12,4 +13,15 @@ export function notify(message: string, variant: Toast['variant'] = 'success') {
 }
 export function dismissToast(id: number) {
   toasts.value = toasts.value.filter((toast) => toast.id !== id)
+}
+
+export function notifyProgress(message: string) {
+  const id = ++nextId
+  toasts.value = [...toasts.value, { id, message, variant: 'info', loading: true }]
+  return {
+    update(message: string) {
+      toasts.value = toasts.value.map((toast) => (toast.id === id ? { ...toast, message } : toast))
+    },
+    close: () => dismissToast(id),
+  }
 }

@@ -5,6 +5,7 @@ import { mappingsApi, type ModelMapping } from '@/api/model-mappings'
 import { providerDraft } from '@/features/providers/provider'
 import MappingDialog from '@/features/model-mappings/MappingDialog.vue'
 import TargetTest from '@/features/model-mappings/TargetTest.vue'
+import ModelTestResultView from '@/features/providers/ModelTestResult.vue'
 import { UiCombobox, UiSelect } from '@/components/ui'
 
 afterEach(() => {
@@ -91,8 +92,11 @@ describe('模型映射目标', () => {
       expect.objectContaining({ models: ['org/model'], name: 'region/main' }),
       expect.any(AbortSignal),
     )
-    expect(wrapper.text()).toContain('— · —')
-    expect(wrapper.text()).not.toContain('0 ms')
+    const result = wrapper.emitted('result')!.at(-1)![0] as ModelTestResult
+    const display = mount(ModelTestResultView, { props: { result } })
+    expect(display.text()).toContain('— · —')
+    expect(display.text()).not.toContain('0 ms')
+    display.unmount()
     wrapper.unmount()
   })
   it('Auth Group 默认选择首个启用条目，后续测试保留手动选择', async () => {

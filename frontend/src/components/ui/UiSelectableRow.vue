@@ -4,7 +4,12 @@ defineProps<{ selected: boolean; disabled?: boolean; title?: string }>()
 const emit = defineEmits<{ select: [] }>()
 </script>
 <template>
-  <div class="ui-selectable-row" :data-selected="selected || undefined">
+  <div
+    class="ui-selectable-row"
+    :class="{ 'ui-selectable-row-with-prefix': $slots.prefix }"
+    :data-selected="selected || undefined"
+  >
+    <div v-if="$slots.prefix" class="ui-selectable-row-prefix"><slot name="prefix" /></div>
     <UiButton
       class="ui-selectable-row-trigger"
       variant="ghost"
@@ -31,6 +36,16 @@ const emit = defineEmits<{ select: [] }>()
 
 .ui-selectable-row:hover {
   background: var(--hover);
+}
+
+.ui-selectable-row-with-prefix {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.ui-selectable-row-prefix {
+  display: flex;
+  align-items: center;
+  padding-left: var(--space-2);
 }
 
 .ui-selectable-row[data-selected] {

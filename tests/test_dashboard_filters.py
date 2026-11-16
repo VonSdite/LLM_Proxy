@@ -8,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
+from xml.etree import ElementTree
 from zipfile import ZipFile
 
 from flask import Flask
@@ -107,7 +108,7 @@ class DashboardFilterApiTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.root_path = Path(__file__).resolve().parents[1]
-        self.db_path = self.root_path / f"dashboard-filters-{uuid4().hex}.db"
+        self.db_path = self.root_path / "tmp" / f"dashboard-filters-{uuid4().hex}.db"
         self.app = Flask(__name__)
         self.ctx = AppContext(
             logger=cast(Logger, FakeLogger()),
@@ -136,6 +137,95 @@ class DashboardFilterApiTests(unittest.TestCase):
         self._log_request("model-c", "resp-c", 20, "10.0.0.1", datetime(2026, 4, 8, 10, 0, 0))
         self._log_request("model-b", "resp-b", 30, "10.0.0.2", datetime(2026, 4, 8, 11, 0, 0))
         self._log_request("model-a", "resp-a", 40, "10.0.0.3", datetime(2026, 4, 8, 12, 0, 0))
+
+    def test_response_and_ip_filters_apply_to_all_views_and_exports(self) -> None:
+        query = {**self.DATE_FILTER, "response_model": ["resp-a", "resp-b"], "ip_address": ["10.0.0.1", "10.0.0.2"]}
+        for path in ("/api/statistics", "/api/statistics/user-usage-summary"):
+            with self.subTest(path=path):
+                response = self.client.get(path, query_string=query)
+                self.assertEqual(200, response.status_code)
+                rows = response.get_json()
+                self.assertEqual(40, sum(row["total_tokens"] for row in rows))
+                self.assertEqual(2, sum(row["request_count"] for row in rows))
+        overview = self.client.get("/api/statistics/overview", query_string=query).get_json()
+        self.assertEqual(40, overview["totals"]["total_tokens"])
+        for dimension in ("series", "models", "model_flows", "response_models", "ips"):
+            self.assertEqual(40, sum(row["total_tokens"] for row in overview[dimension]))
+        logs = self.client.get("/api/request-logs", query_string={**query, "page_size": 1}).get_json()
+        self.assertEqual(2, logs["total"])
+        self.assertEqual(1, len(logs["logs"]))
+        package = self.client.get("/api/statistics/daily-stats/export", query_string=query).get_json()
+        for key in ("request_logs", "daily_request_stats"):
+            self.assertEqual(2, len(package[key]))
+            self.assertEqual(40, sum(row["total_tokens"] for row in package[key]))
+        for tab in ("stats", "model_usage", "response_model_usage", "user_usage", "ip_usage", "models", "logs"):
+            with self.subTest(tab=tab):
+                response = self.client.get("/api/statistics/export", query_string={**query, "tab": tab})
+                self.assertEqual(200, response.status_code)
+                with ZipFile(BytesIO(response.data)) as archive:
+                    sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+                self.assertNotIn("resp-c", sheet)
+                self.assertNotIn("carol", sheet)
+                self.assertNotIn("model-c", sheet)
+                self.assertGreater(len(ElementTree.fromstring(sheet).findall(".//{*}row")), 1)
+        empty = self.client.get("/api/request-logs", query_string={**query, "username": "carol"}).get_json()
+        self.assertEqual(0, empty["total"])
+        literal = self.client.get(
+            "/api/request-logs", query_string={**query, "response_model": "' OR 1=1 --"}
+        ).get_json()
+        self.assertEqual(0, literal["total"])
+
+    def test_response_filter_preserves_retry_failures_and_api_key_scope(self) -> None:
+        key_id = self._create_api_key("filtered", "abcd")
+        self.log_repository.insert(
+            request_model="retry",
+            response_model="actual",
+            total_tokens=12,
+            prompt_tokens=8,
+            completion_tokens=4,
+            start_time="2026-04-08 13:00:00",
+            end_time="2026-04-08 13:00:01",
+            ip_address="10.0.0.1",
+            api_key_id=key_id,
+            outcome="success",
+            upstream_attempts=[{"outcome": "error"}, {"outcome": "success", "response_model": "actual"}],
+        )
+        query = {**self.DATE_FILTER, "response_model": "actual", "ip_address": "10.0.0.1"}
+        overview = self.client.get("/api/statistics/overview", query_string=query).get_json()
+        self.assertEqual(1, overview["totals"]["request_count"])
+        for row in [overview["totals"], *overview["series"], *overview["models"], *overview["ips"]]:
+            if not row["request_count"]:
+                continue
+            self.assertEqual(0.5, row["upstream_success_rate"])
+            self.assertEqual(1, row["upstream_error_count"])
+        rows = self.client.get("/api/statistics/api-key-usage-summary", query_string=query).get_json()
+        self.assertEqual(1, len(rows))
+        self.assertEqual(12, rows[0]["total_tokens"])
+        self.assertEqual(0.5, rows[0]["upstream_success_rate"])
+        wrong_ip = {**query, "ip_address": "10.0.0.2"}
+        self.assertEqual([], self.client.get("/api/statistics/api-key-usage-summary", query_string=wrong_ip).get_json())
+        for filters, expected_rows in ((query, 2), (wrong_ip, 1)):
+            response = self.client.get("/api/statistics/export", query_string={**filters, "tab": "api_key_usage"})
+            with ZipFile(BytesIO(response.data)) as archive:
+                sheet = ElementTree.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            self.assertEqual(expected_rows, len(sheet.findall(".//{*}row")))
+
+    def test_filter_options_include_daily_only_and_unregistered_sources(self) -> None:
+        self._log_request("archived", "historical", 10, "2001:db8::1", datetime(2026, 4, 8))
+        with self.connection_factory() as conn:
+            conn.execute("DELETE FROM request_logs WHERE request_model = 'archived'")
+            conn.commit()
+        response = self.client.get("/api/statistics/filter-options")
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {
+                "users": ["alice", "bob", "carol"],
+                "models": ["archived", "model-a", "model-b", "model-c"],
+                "response_models": ["historical", "resp-a", "resp-b", "resp-c"],
+                "ip_addresses": ["10.0.0.1", "10.0.0.2", "10.0.0.3", "2001:db8::1"],
+            },
+            response.get_json(),
+        )
 
     def tearDown(self) -> None:
         if self.db_path.exists():
@@ -181,10 +271,410 @@ class DashboardFilterApiTests(unittest.TestCase):
         assert key_id is not None
         return key_id
 
-    def test_model_flow_formatter_keeps_all_present_stages(self) -> None:
+    def test_all_usage_dimensions_report_filtered_outcomes_and_export(self) -> None:
+        key_id = self._create_api_key("Rates", "rates")
+        for outcome in ("success", "success", "error", "cancelled", None):
+            self.log_repository.insert(
+                request_model="rates",
+                target_model_id="target/a",
+                response_model="actual",
+                total_tokens=10,
+                prompt_tokens=8,
+                completion_tokens=2,
+                start_time=datetime(2026, 4, 10),
+                ip_address="10.0.0.1",
+                api_key_id=key_id,
+                outcome=outcome,
+                upstream_attempts=[{"outcome": outcome, "target_model_id": "target/a", "response_model": "actual"}]
+                if outcome
+                else None,
+            )
+        # 不同用户、模型、日期和流向不混入当前分组。
+        for changes in (
+            {"ip_address": "10.0.0.2"},
+            {"request_model": "other"},
+            {"start_time": datetime(2026, 5, 1)},
+            {"target_model_id": "target/b"},
+        ):
+            self.log_repository.insert(
+                **{
+                    "request_model": "rates",
+                    "target_model_id": "target/a",
+                    "response_model": "actual",
+                    "total_tokens": 10,
+                    "prompt_tokens": 8,
+                    "completion_tokens": 2,
+                    "start_time": datetime(2026, 4, 10),
+                    "ip_address": "10.0.0.1",
+                    "api_key_id": key_id,
+                    "outcome": "error",
+                    "upstream_attempts": [
+                        {
+                            "outcome": "error",
+                            "target_model_id": changes.get("target_model_id", "target/a"),
+                            "response_model": "actual",
+                        }
+                    ],
+                    **changes,
+                }
+            )
+        filters = {**self.DATE_FILTER, "username": "alice", "request_model": "rates"}
+        overview = self.client.get("/api/statistics/overview", query_string=filters).get_json()
+        source_rows = self.client.get("/api/statistics", query_string=filters).get_json()
+        for rows in (source_rows, overview["model_flows"]):
+            self.assertEqual(2, len(rows))
+            row = next(item for item in rows if item["target_model_id"] == "target/a")
+            self.assertAlmostEqual(2 / 3, row["success_rate"])
+            self.assertEqual(
+                [2, 1, 1, 1],
+                [row[name] for name in ("success_count", "error_count", "cancelled_count", "unknown_count")],
+            )
+        for rows in (
+            overview["ips"],
+            self.client.get("/api/statistics/user-usage-summary", query_string=filters).get_json(),
+            self.client.get("/api/statistics/api-key-usage-summary", query_string=filters).get_json(),
+        ):
+            self.assertEqual(1, len(rows))
+            self.assertEqual(0.5, rows[0]["success_rate"])
+            self.assertEqual(6, rows[0]["request_count"])
+        for direction, expected in (("asc", [0, 2 / 3]), ("desc", [2 / 3, 0])):
+            rows = self.client.get(
+                "/api/statistics", query_string={**filters, "sort_key": "success_rate", "sort_direction": direction}
+            ).get_json()
+            self.assertEqual(expected, [row["success_rate"] for row in rows])
+        for view in ("stats", "model_usage", "ip_usage", "user_usage", "api_key_usage"):
+            response = self.client.get("/api/statistics/export", query_string={**filters, "tab": view})
+            self.assertEqual(200, response.status_code)
+            with ZipFile(BytesIO(response.data)) as archive:
+                sheet = archive.read("xl/worksheets/sheet1.xml").decode()
+                self.assertIn("成功率", sheet)
+                self.assertIn("未知调用结果", sheet)
+                self.assertIn("66.67%" if view in {"stats", "model_usage"} else "50.00%", sheet)
+
+    def test_usage_outcomes_preserve_daily_only_and_log_only_records(self) -> None:
+        self.log_repository.insert(
+            request_model="observed",
+            response_model="actual",
+            total_tokens=10,
+            prompt_tokens=8,
+            completion_tokens=2,
+            start_time=datetime(2026, 4, 10),
+            ip_address="10.0.0.1",
+            outcome="error",
+        )
+        with self.connection_factory() as conn:
+            conn.execute("DELETE FROM request_logs WHERE request_model != 'observed'")
+            conn.execute("DELETE FROM daily_request_stats WHERE request_model = 'observed'")
+        historical = self.client.get(
+            "/api/statistics", query_string={**self.DATE_FILTER, "request_model": "model-a"}
+        ).get_json()
+        self.assertTrue(
+            all(row["success_rate"] is None and row["unknown_count"] == row["request_count"] for row in historical)
+        )
+        filters = {**self.DATE_FILTER, "request_model": "observed"}
+        overview = self.client.get("/api/statistics/overview", query_string=filters).get_json()
+        for rows in (
+            overview["model_flows"],
+            overview["ips"],
+            self.client.get("/api/statistics", query_string=filters).get_json(),
+            self.client.get("/api/statistics/user-usage-summary", query_string=filters).get_json(),
+        ):
+            self.assertEqual(1, len(rows))
+            self.assertEqual(0, rows[0]["success_rate"])
+            self.assertEqual(1, rows[0]["error_count"])
+            self.assertEqual(0, rows[0]["total_tokens"])
+
+    def test_same_name_mapping_attempts_join_usage_without_empty_rows(self) -> None:
+        base = {
+            "request_model": "same-model",
+            "target_model_id": "same-model",
+            "response_model": "same-model",
+            "total_tokens": 10,
+            "prompt_tokens": 8,
+            "completion_tokens": 2,
+            "start_time": datetime(2026, 4, 10),
+            "ip_address": "10.0.0.1",
+            "outcome": "success",
+        }
+        # 兼容已保存的省略目标、当前完整目标与未采集调用明细三种记录。
+        for target in (None, "same-model"):
+            self.log_repository.insert(
+                **base,
+                upstream_attempts=[{"target_model_id": target, "response_model": "same-model", "outcome": "success"}],
+            )
+        self.log_repository.insert(**base)
+        filters = {**self.DATE_FILTER, "request_model": "same-model"}
+        overview = self.client.get("/api/statistics/overview", query_string=filters).get_json()
+        for rows in (
+            self.client.get("/api/statistics", query_string=filters).get_json(),
+            overview["model_flows"],
+        ):
+            self.assertEqual(1, len(rows))
+            row = rows[0]
+            self.assertEqual("same-model", row["target_model_id"])
+            self.assertEqual(3, row["request_count"])
+            self.assertEqual(30, row["total_tokens"])
+            self.assertEqual(2, row["upstream_success_count"])
+            self.assertEqual(1, row["upstream_unknown_count"])
+            self.assertEqual(1, row["upstream_success_rate"])
+
+        # 同名模型的直接调用保持两段流向，不与三段映射流向合并。
+        self.log_repository.insert(
+            **{**base, "target_model_id": None},
+            upstream_attempts=[{"target_model_id": None, "response_model": "same-model", "outcome": "success"}],
+        )
+        rows = self.client.get("/api/statistics", query_string=filters).get_json()
+        self.assertEqual(2, len(rows))
+        self.assertTrue(all(row["request_count"] > 0 for row in rows))
+        self.assertEqual(4, sum(row["request_count"] for row in rows))
+        self.assertEqual(3, sum(row["upstream_success_count"] for row in rows))
+
+    def test_upstream_retry_rate_excludes_internal_and_transport_failures(self) -> None:
+        key_id = self._create_api_key("Attempts", "attempts")
+        base = {
+            "request_model": "retried",
+            "target_model_id": "target/b",
+            "response_model": "actual",
+            "total_tokens": 10,
+            "prompt_tokens": 8,
+            "completion_tokens": 2,
+            "start_time": datetime(2026, 4, 10),
+            "ip_address": "10.0.0.1",
+            "api_key_id": key_id,
+        }
+        self.log_repository.insert(
+            **base,
+            outcome="success",
+            upstream_attempts=[
+                {"target_model_id": "target/a", "outcome": "error", "http_status": 503},
+                {"target_model_id": "target/b", "response_model": "actual", "outcome": "success", "http_status": 200},
+            ],
+        )
+        self.log_repository.insert(**base, outcome="error", error_type="server_error", upstream_attempts=[])
+        self.log_repository.insert(
+            **base, outcome="error", upstream_attempts=[{"target_model_id": "target/b", "outcome": "exception"}]
+        )
+        filters = {**self.DATE_FILTER, "request_model": "retried"}
+        overview = self.client.get("/api/statistics/overview", query_string=filters).get_json()
+        # 无响应模型的异常与最终用量分行，不应被误认为缺失历史观测。
+        self.assertTrue(all(row["upstream_unknown_count"] == 0 for row in overview["model_flows"]))
+        for row in [
+            overview["totals"],
+            overview["models"][0],
+            overview["ips"][0],
+            *self.client.get("/api/statistics/user-usage-summary", query_string=filters).get_json(),
+            *self.client.get("/api/statistics/api-key-usage-summary", query_string=filters).get_json(),
+        ]:
+            self.assertEqual(3, row["request_count"])
+            self.assertEqual(0.5, row["upstream_success_rate"])
+            self.assertEqual(
+                [1, 1, 1, 0],
+                [
+                    row[key]
+                    for key in (
+                        "upstream_success_count",
+                        "upstream_error_count",
+                        "upstream_exception_count",
+                        "upstream_unknown_count",
+                    )
+                ],
+            )
+        failed = next(row for row in overview["model_flows"] if row["target_model_id"] == "target/a")
+        self.assertEqual(0, failed["upstream_success_rate"])
+        self.assertEqual(0, failed["total_tokens"])
+        day = next(row for row in overview["series"] if row["date"] == "2026-04-10")
+        self.assertEqual(0.5, day["upstream_success_rate"])
+        for direction, expected in (("asc", [0, 1, None]), ("desc", [1, 0, None])):
+            rows = self.client.get(
+                "/api/statistics",
+                query_string={**filters, "sort_key": "upstream_success_rate", "sort_direction": direction},
+            ).get_json()
+            self.assertEqual(expected, [row["upstream_success_rate"] for row in rows])
+        historical = self.client.get(
+            "/api/statistics/overview", query_string={**self.DATE_FILTER, "request_model": "model-a"}
+        ).get_json()["totals"]
+        self.assertIsNone(historical["upstream_success_rate"])
+        self.assertEqual(2, historical["upstream_unknown_count"])
+        exported = self.log_repository.export_request_logs("2026-04-10", "2026-04-10", request_model="retried")
+        with self.connection_factory() as conn:
+            conn.execute("DELETE FROM request_logs WHERE request_model = 'retried'")
+        self.log_repository.import_request_logs(exported)
+        reloaded = self.client.get("/api/statistics/overview", query_string=filters).get_json()["totals"]
+        self.assertEqual(0.5, reloaded["upstream_success_rate"])
+        self.assertEqual(1, reloaded["upstream_exception_count"])
+
+    def test_overview_filters_and_performance_exports(self) -> None:
+        self.log_service.log_request(
+            request_model="model-a",
+            response_model="resp-a",
+            total_tokens=100,
+            prompt_tokens=80,
+            completion_tokens=20,
+            ip_address="10.0.0.1",
+            start_time=datetime(2026, 4, 8, 13),
+            outcome="success",
+            http_status=200,
+            duration_ms=3500,
+            first_token_latency_ms=1200,
+            tps=12.5,
+            cache_read_input_tokens=40,
+            cache_usage_status="known",
+            is_stream=True,
+        )
+        filters = {**self.DATE_FILTER, "username": "alice", "request_model": "model-a"}
+        response = self.client.get("/api/statistics/overview", query_string=filters)
+        self.assertEqual(200, response.status_code)
+        result = response.get_json()
+        self.assertEqual(2, result["totals"]["request_count"])
+        self.assertEqual(1, result["totals"]["unknown_count"])
+        self.assertEqual(1, result["totals"]["success_rate"])
+        self.assertEqual(0.5, result["totals"]["cache_hit_rate"])
+        self.assertEqual(1200, result["totals"]["first_token_latency_ms"])
+        self.assertEqual(30, len(result["series"]))
+        for view, sheet in (
+            ("models", "模型表现"),
+            ("model_usage", "请求模型用量"),
+            ("ip_usage", "IP 用量"),
+            ("logs", "请求明细"),
+        ):
+            exported = self.client.get("/api/statistics/export", query_string={**filters, "tab": view})
+            self.assertEqual(200, exported.status_code)
+            with ZipFile(BytesIO(exported.data)) as archive:
+                self.assertIn(sheet, archive.read("xl/workbook.xml").decode())
+                values = archive.read("xl/worksheets/sheet1.xml").decode()
+                if view in {"models", "logs"}:
+                    self.assertIn("1200", values)
+                    self.assertIn("5.71", values)
+                elif view == "model_usage":
+                    self.assertIn("model-a", values)
+                    self.assertNotIn("model-b", values)
+                    self.assertIn("缓存读取 Token", values)
+                    self.assertIn('<c r="C2"><v>85</v></c>', values)
+                    self.assertIn('<c r="E2"><v>110</v></c>', values)
+        self.assertEqual(400, self.client.get("/api/statistics/overview").status_code)
         self.assertEqual(
-            "public-model -> target/model -> actual-model",
-            WebController._format_model_flow(
+            400,
+            self.client.get(
+                "/api/statistics/overview",
+                query_string={
+                    "start_date": "2025-01-01",
+                    "end_date": "2026-01-02",
+                },
+            ).status_code,
+        )
+
+    def test_model_usage_export_preserves_distinct_flows(self) -> None:
+        for target, response in (("target/a", "response-a"), ("target/b", "response-a"), ("target/b", "response-b")):
+            self.log_service.log_request(
+                request_model="flow-model",
+                target_model_id=target,
+                response_model=response,
+                prompt_tokens=80,
+                completion_tokens=20,
+                total_tokens=100,
+                ip_address="10.0.0.1",
+                start_time=datetime(2026, 4, 8, 13),
+            )
+        exported = self.client.get(
+            "/api/statistics/export",
+            query_string={
+                **self.DATE_FILTER,
+                "tab": "model_usage",
+                "request_model": "flow-model",
+                "sort_key": "model_flow",
+                "sort_direction": "desc",
+            },
+        )
+        self.assertEqual(200, exported.status_code)
+        with ZipFile(BytesIO(exported.data)) as archive:
+            sheet = ElementTree.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+        ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        rows = sheet.findall("s:sheetData/s:row", ns)
+        self.assertEqual(4, len(rows))
+        self.assertEqual(
+            [
+                "flow-model -> target/b",
+                "flow-model -> target/b",
+                "flow-model -> target/a",
+            ],
+            [row.find("s:c/s:is/s:t", ns).text for row in rows[1:]],
+        )
+        self.assertCountEqual(
+            ["response-a", "response-a", "response-b"],
+            [row.findall("s:c", ns)[1].find("s:is/s:t", ns).text for row in rows[1:]],
+        )
+
+    def test_response_model_usage_merges_sources_and_requests_with_weighted_rates(self) -> None:
+        for request_model, ip, target, response_model, prompt, cached in (
+            ("response-request-a", "10.0.0.1", "target/a", "actual", 80, 40),
+            ("response-request-b", "10.0.0.2", "target/b", "actual", 160, 120),
+            ("response-request-a", "10.0.0.2", "target/c", "other", 40, 0),
+            ("response-request-a", "10.0.0.1", "target/a", None, 0, 0),
+        ):
+            attempt = {
+                "target_model_id": target,
+                "response_model": response_model,
+                "outcome": "success" if response_model else "exception",
+            }
+            attempts = [attempt]
+            if prompt == 80:
+                attempts.insert(0, {**attempt, "outcome": "error"})
+            self.log_repository.insert(
+                request_model=request_model,
+                target_model_id=target,
+                response_model=response_model,
+                prompt_tokens=prompt,
+                completion_tokens=prompt // 4,
+                total_tokens=prompt * 5 // 4,
+                cache_read_input_tokens=cached,
+                cache_usage_status="known" if prompt else "unknown",
+                ip_address=ip,
+                start_time=datetime(2026, 4, 10),
+                upstream_attempts=attempts,
+                outcome="success" if response_model else "error",
+            )
+        filters = {**self.DATE_FILTER, "request_model": ["response-request-a", "response-request-b"]}
+        overview = self.client.get("/api/statistics/overview", query_string=filters).get_json()
+        rows = {row["response_model"]: row for row in overview["response_models"]}
+        self.assertEqual({"actual", "other", None}, set(rows))
+        self.assertEqual(2, rows["actual"]["request_count"])
+        self.assertEqual(300, rows["actual"]["total_tokens"])
+        self.assertEqual(160, rows["actual"]["cache_read_input_tokens"])
+        self.assertAlmostEqual(2 / 3, rows["actual"]["cache_hit_rate"])
+        self.assertAlmostEqual(2 / 3, rows["actual"]["upstream_success_rate"])
+        self.assertEqual(1, rows[None]["request_count"])
+        self.assertEqual(1, rows[None]["upstream_exception_count"])
+        self.assertIsNone(rows[None]["upstream_success_rate"])
+        self.assertEqual(overview["totals"]["total_tokens"], sum(row["total_tokens"] for row in rows.values()))
+        filtered = self.client.get(
+            "/api/statistics/overview",
+            query_string={**filters, "username": "bob", "request_model": "response-request-b"},
+        ).get_json()["response_models"]
+        self.assertEqual(1, len(filtered))
+        self.assertEqual(200, filtered[0]["total_tokens"])
+        exported = self.client.get(
+            "/api/statistics/export",
+            query_string={
+                **filters,
+                "tab": "response_model_usage",
+                "sort_key": "total_tokens",
+                "sort_direction": "desc",
+            },
+        )
+        self.assertEqual(200, exported.status_code)
+        with ZipFile(BytesIO(exported.data)) as archive:
+            sheet = ElementTree.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+        ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        sheet_rows = sheet.findall("s:sheetData/s:row", ns)
+        self.assertEqual(4, len(sheet_rows))
+        self.assertEqual(
+            ["响应模型", "actual", "other", "未知"], [row.find("s:c/s:is/s:t", ns).text for row in sheet_rows]
+        )
+
+    def test_request_model_formatter_keeps_mapping_target(self) -> None:
+        self.assertEqual(
+            "public-model -> target/model",
+            WebController._format_request_model(
                 {
                     "request_model": "public-model",
                     "target_model_id": "target/model",
@@ -193,8 +683,8 @@ class DashboardFilterApiTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            "public-model -> target/model -> target/model",
-            WebController._format_model_flow(
+            "public-model -> target/model",
+            WebController._format_request_model(
                 {
                     "request_model": "public-model",
                     "target_model_id": "target/model",
@@ -203,8 +693,8 @@ class DashboardFilterApiTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            "plain-model -> actual-model",
-            WebController._format_model_flow(
+            "plain-model",
+            WebController._format_request_model(
                 {
                     "request_model": "plain-model",
                     "response_model": "actual-model",
@@ -439,14 +929,14 @@ class DashboardFilterApiTests(unittest.TestCase):
         with ZipFile(BytesIO(response.data)) as archive:
             sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
 
-        self.assertIn("模型流向", sheet_xml)
-        self.assertNotIn("请求模型", sheet_xml)
+        self.assertIn("请求模型", sheet_xml)
+        self.assertIn("响应模型", sheet_xml)
         self.assertIn("Token 状态", sheet_xml)
         self.assertIn("完整", sheet_xml)
         self.assertIn("model-a", sheet_xml)
         self.assertIn("model-b", sheet_xml)
         self.assertIn("model-c", sheet_xml)
-        self.assertIn("mapped-model -&gt; target/provider-model -&gt; actual-upstream-model", sheet_xml)
+        self.assertIn("mapped-model -&gt; target/provider-model", sheet_xml)
 
     def test_statistics_export_summary_returns_xlsx(self) -> None:
         self._log_request(
@@ -473,15 +963,15 @@ class DashboardFilterApiTests(unittest.TestCase):
             workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
             sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
 
-        self.assertIn("调用汇总", workbook_xml)
-        self.assertIn("模型流向", sheet_xml)
-        self.assertNotIn("响应模型", sheet_xml)
+            self.assertIn("来源与模型", workbook_xml)
+        self.assertIn("请求模型", sheet_xml)
+        self.assertIn("响应模型", sheet_xml)
         self.assertIn("Token 状态", sheet_xml)
         self.assertIn("缓存读取 Token", sheet_xml)
         self.assertIn("缓存写入 Token", sheet_xml)
         self.assertIn("缓存命中率", sheet_xml)
         self.assertIn("resp-a", sheet_xml)
-        self.assertIn("mapped-model -&gt; target/provider-model -&gt; actual-upstream-model", sheet_xml)
+        self.assertIn("mapped-model -&gt; target/provider-model", sheet_xml)
 
     def test_statistics_export_user_usage_summary_returns_xlsx(self) -> None:
         response = self.client.get(
@@ -557,7 +1047,7 @@ class DashboardFilterApiTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
-        self.assertEqual(4, payload["version"])
+        self.assertEqual(6, payload["version"])
         self.assertEqual("llm_proxy.statistics", payload["kind"])
         self.assertEqual("known", payload["request_logs"][0]["usage_status"])
         self.assertEqual("known", payload["daily_request_stats"][0]["usage_status"])
@@ -1104,7 +1594,7 @@ class DashboardFilterApiTests(unittest.TestCase):
 
 class LogRepositoryUsageStatusMigrationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.db_path = Path(__file__).resolve().parents[1] / f"usage-status-migration-{uuid4().hex}.db"
+        self.db_path = Path(__file__).resolve().parents[1] / "tmp" / f"usage-status-migration-{uuid4().hex}.db"
         conn = sqlite3.connect(self.db_path)
         try:
             conn.executescript(
@@ -1177,6 +1667,12 @@ class LogRepositoryUsageStatusMigrationTests(unittest.TestCase):
             )
 
         self.assertIn("usage_status", request_columns)
+        self.assertTrue(
+            {"outcome", "http_status", "is_stream", "duration_ms", "first_token_latency_ms", "tps"} <= request_columns
+        )
+        with connection_factory() as conn:
+            for row in conn.execute("SELECT outcome, duration_ms, first_token_latency_ms, tps FROM request_logs"):
+                self.assertEqual((None, None, None, None), tuple(row))
         self.assertIn("usage_status", daily_columns)
         self.assertEqual({"known-log": "known", "unknown-log": "unknown"}, request_statuses)
         self.assertEqual({"known-stat": "known", "unknown-stat": "unknown"}, daily_statuses)

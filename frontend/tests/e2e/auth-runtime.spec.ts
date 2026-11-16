@@ -25,12 +25,14 @@ test('运行状态直接显示完整结果和上限，刷新与重置保持当�
   const refresh = dialog.getByRole('button', { name: '刷新运行状态', exact: true })
   await expect(refresh).toHaveText('')
   const original = await expired.elementHandle()
-  const top = (await dialog.boundingBox())!.y
+  const beforeRefresh = (await dialog.boundingBox())!
+  expect(beforeRefresh.y + beforeRefresh.height / 2).toBeCloseTo(page.viewportSize()!.height / 2, 0)
   fixture.runtime.entries[1]!.last_error_message = 'Updated upstream error after refresh'
   await refresh.click()
   await expect(expired).toContainText('Updated upstream error after refresh')
   expect(await expired.evaluate((row, previous) => row === previous, original)).toBe(true)
-  expect((await dialog.boundingBox())!.y).toBe(top)
+  const afterRefresh = (await dialog.boundingBox())!
+  expect(afterRefresh.y + afterRefresh.height / 2).toBeCloseTo(page.viewportSize()!.height / 2, 0)
   expect(fixture.reads()).toBe(2)
   await page.route('**/api/auth-groups/team-pool/entries/expired-key/reset', async (route) => {
     Object.assign(fixture.runtime.entries[1]!, {
@@ -53,7 +55,7 @@ test('运行状态直接显示完整结果和上限，刷新与重置保持当�
   expect(fixture.unexpected).toEqual([])
 })
 
-test('短窗口中大量条目仍从上方打开，表格在弹窗内部滚动', async ({ page }) => {
+test('短窗口中大量条目保持居中，表格在弹窗内部滚动', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 480 })
   const fixture = await mockAuthRuntime(page)
   fixture.runtime.entries = Array.from({ length: 24 }, (_, index) => ({
@@ -67,7 +69,7 @@ test('短窗口中大量条目仍从上方打开，表格在弹窗内部滚动',
   await expect(dialog.getByRole('row')).toHaveCount(25)
   const box = (await dialog.boundingBox())!
   expect(box.y).toBeGreaterThanOrEqual(24)
-  expect(box.y).toBeLessThanOrEqual(96)
+  expect(box.y + box.height / 2).toBeCloseTo(240, 0)
   expect(box.y + box.height).toBeLessThanOrEqual(480 - 24 + 1)
   expect(
     await dialog

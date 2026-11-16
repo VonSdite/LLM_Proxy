@@ -27,6 +27,13 @@ test('卡片正文与空白切换选择，内部控件和复制文字保持独�
   await expect(checkbox).not.toBeChecked()
   for (const name of [`删除 ${fixture.files[0]!.name}`, '使用']) {
     await card.getByRole('button', { name, exact: true }).click()
+    if (name.startsWith('删除')) {
+      await expect(page.locator('.ui-confirm-message')).toHaveText('是否删除？')
+      await expect(
+        page.locator('.ui-confirm').getByRole('button', { name: '确认', exact: true }),
+      ).toBeVisible()
+      await expect(page.locator('.ui-confirm')).not.toContainText(fixture.files[0]!.name)
+    }
     await page.getByRole('button', { name: '取消', exact: true }).click()
     await expect(checkbox).not.toBeChecked()
   }
@@ -51,16 +58,18 @@ test('认证文件默认可用、全部位于末项，搜索与全选遵循当�
   )
   await expect(page.getByRole('tab')).toHaveText([
     '可用 2',
+    '禁用 1',
     '额度用完 1',
     '认证失败 1',
-    '已禁用 1',
     '全部 6',
   ])
   await expect(page.getByRole('article')).toHaveCount(2)
   await page.getByRole('checkbox', { name: /当前筛选/ }).click()
+  await expect(page.getByRole('article').getByRole('checkbox', { checked: true })).toHaveCount(2)
+  await page.getByRole('button', { name: '清空选择', exact: true }).click()
   await page.getByRole('tab', { name: '全部 6', exact: true }).click()
   await expect(page.getByRole('article')).toHaveCount(6)
-  await expect(page.getByRole('article').getByRole('checkbox', { checked: true })).toHaveCount(2)
+  await expect(page.getByRole('article').getByRole('checkbox', { checked: true })).toHaveCount(0)
   await page.getByRole('textbox', { name: '搜索认证文件' }).fill('very-long')
   await expect(page.getByRole('article')).toHaveCount(1)
   await expect(page.getByRole('article')).toHaveAttribute('aria-label', fixture.files[2]!.name)
@@ -90,11 +99,10 @@ for (const width of [1440, 390]) {
     await expect(disabled).toContainText('上次额度')
     await expect(disabled).toContainText('等待刷新')
     await expect(disabled).toContainText('认证失败，请重新登录')
-    await expect(disabled.getByText(fixture.files[2]!.quota_error, { exact: true })).toHaveCount(0)
-    await disabled.getByRole('button', { name: '查看原因', exact: true }).click()
     await expect(disabled.getByText(fixture.files[2]!.quota_error, { exact: true })).toBeVisible()
-    await disabled.getByRole('button', { name: '收起', exact: true }).click()
+    await expect(disabled.getByRole('button', { name: '查看原因', exact: true })).toHaveCount(0)
     const name = disabled.locator('.oauth-file-name')
+    await expect(disabled.locator('header .oauth-file-status')).toContainText('禁用')
     await expect(name).toHaveAttribute('title', fixture.files[2]!.name)
     await expect(name).toHaveCSS('text-overflow', 'ellipsis')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

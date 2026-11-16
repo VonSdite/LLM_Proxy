@@ -17,6 +17,7 @@ class ApiKeyRepository:
     MODEL_PERMISSIONS_ALL = "*"
     REQUEST_LIMIT_FIELDS = ("max_concurrency", "request_quota_per_minute", "request_quota_per_day")
     _SORT_COLUMNS = {
+        "sort_order": "k.sort_order",
         "id": "k.id",
         "name": "k.name",
         "enabled": "k.enabled",
@@ -62,6 +63,13 @@ class ApiKeyRepository:
                 """
             )
             columns = {str(row["name"]).strip() for row in cursor.execute("PRAGMA table_info(api_keys)").fetchall()}
+            if "sort_order" not in columns:
+                cursor.execute("ALTER TABLE api_keys ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+                existing = cursor.execute("SELECT id FROM api_keys ORDER BY created_at DESC, id ASC").fetchall()
+                cursor.executemany(
+                    "UPDATE api_keys SET sort_order = ? WHERE id = ?",
+                    [(position, row["id"]) for position, row in enumerate(existing)],
+                )
             if "api_key" not in columns:
                 cursor.execute("ALTER TABLE api_keys ADD COLUMN api_key TEXT")
             if "model_permissions" not in columns:
@@ -162,7 +170,29 @@ class ApiKeyRepository:
                     *(request_limits.get(field) for field in self.REQUEST_LIMIT_FIELDS),
                 ),
             )
-            return cursor.lastrowid
+            key_id = cursor.lastrowid
+            cursor.execute(
+                "UPDATE api_keys SET sort_order = (SELECT COALESCE(MIN(sort_order), 0) - 1 FROM api_keys) WHERE id = ?",
+                (key_id,),
+            )
+            return key_id
+
+    @database_operation(write=True)
+    def move(self, key_id: int, target_id: int, after: bool) -> None:
+        """在完整持久顺序中移动一个 Key，其余记录保持相对顺序。"""
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            ids = [row["id"] for row in conn.execute("SELECT id FROM api_keys ORDER BY sort_order, id")]
+            if key_id not in ids or target_id not in ids:
+                raise ValueError("API key no longer exists; refresh the list and retry")
+            if key_id == target_id:
+                return
+            ids.remove(key_id)
+            ids.insert(ids.index(target_id) + int(after), key_id)
+            conn.executemany(
+                "UPDATE api_keys SET sort_order = ? WHERE id = ?",
+                [(position, item) for position, item in enumerate(ids)],
+            )
 
     @staticmethod
     def _build_search_clause(keyword: str | None, table_alias: str = "k") -> tuple[str, list[Any]]:

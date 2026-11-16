@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentBootstrap, AgentSnapshot, FileTarget } from '@/api/agents'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { parse } from 'yaml'
 import {
   createDraft,
   derivedCompact,
@@ -68,13 +71,31 @@ function draft(agent: 'claude' | 'codex' | 'opencode', source = snapshot()) {
 }
 
 describe('Agent 配置语义', () => {
+  it('OpenCode 权限识别全局策略，保留自定义规则并支持显式清空', () => {
+    const source = snapshot()
+    source.files.opencode!.managed.permissions = [{ action: '*', resource: '*', effect: 'deny' }]
+    expect(draft('opencode', source).runtime.permissionPolicy).toBe('')
+    for (const effect of ['allow', 'ask', 'deny']) {
+      source.files.opencode!.managed.permission = effect
+      expect(draft('opencode', source).runtime.permissionPolicy).toBe(effect)
+    }
+    for (const rules of [[], { bash: { 'git push *': 'ask' } }, { '*': 'allow', edit: 'deny' }]) {
+      source.files.opencode!.managed.permission = rules
+      expect(draft('opencode', source).runtime.permissionPolicy).toBe('custom')
+    }
+    const form = draft('opencode', source)
+    setRuntime(form, 'permissionPolicy', '')
+    expect(form.clearFields).toContain('runtime.permissionPolicy')
+    setRuntime(form, 'permissionPolicy', 'allow')
+    expect(form.clearFields).toBeUndefined()
+  })
   it('外部地址没有配置模型时不默认选本服务模型，异常字段保持可编辑', () => {
     const source = snapshot()
-    source.files.claude.managed = {
+    source.files.claude!.managed = {
       'env.ANTHROPIC_BASE_URL': 'https://external.test',
       'env.ANTHROPIC_MODEL': { malformed: true },
     }
-    source.files.codex.managed = {
+    source.files.codex!.managed = {
       model_provider: 'external',
       'model_providers.external.base_url': 'https://external.test/v1',
       model: ['malformed'],
@@ -123,22 +144,85 @@ describe('Agent 配置语义', () => {
     expect(draft('claude', source).runtime.attribution).toBe('unset')
     expect(draft('claude', source).runtime.attributionHeader).toBe('unset')
     expect(draft('claude', source).runtime.sandboxEnabled).toBe('unset')
-    source.files.claude.exists = false
+    expect(draft('claude', source).runtime.autoMemoryEnabled).toBe('unset')
+    source.files.claude!.exists = false
     expect(draft('claude', source).runtime).toMatchObject({
       sandboxEnabled: 'unset',
-      attribution: 'unset',
+      autoMemoryEnabled: 'disabled',
+      attribution: 'disabled',
       attributionHeader: 'disabled',
       disableNonessentialTraffic: 'enabled',
       experimentalAgentTeams: 'enabled',
       enableToolSearch: 'enabled',
       sandbox: 'enabled',
-      skipWebFetchPreflight: 'enabled',
+      skipWebFetchPreflight: 'disabled',
     })
+  })
+
+  it('新建 Opencode 和 Hermes 使用默认值，已有文件缺项或显式值保持原样', () => {
+    const source = snapshot()
+    expect(draft('opencode', source).runtime).toMatchObject({ share: '', autoupdate: '' })
+    source.files.opencode!.exists = false
+    expect(draft('opencode', source).runtime).toMatchObject({
+      share: 'disabled',
+      autoupdate: 'false',
+    })
+    source.files.opencode!.exists = true
+    source.files.opencode!.managed = { share: 'auto', autoupdate: true }
+    expect(draft('opencode', source).runtime).toMatchObject({ share: 'auto', autoupdate: 'true' })
+    const context: AgentBootstrap = {
+      ...bootstrap,
+      agents: ['opencode_v2', 'hermes'].map((id) => {
+        const definition = parse(readFileSync(resolve('../agents', id, 'agent.yaml'), 'utf8'))
+        return {
+          id,
+          label: definition.name,
+          files: Object.keys(definition.files),
+          fields: definition.fields,
+        }
+      }),
+    }
+    for (const [agent, target, defaults, existing] of [
+      [
+        'opencode_v2',
+        'opencodeV2',
+        { share: 'disabled', update: 'disable' },
+        { share: 'auto', update: 'auto' },
+      ],
+      [
+        'hermes',
+        'hermes',
+        { memory: true, 'user-profile': true },
+        { memory: false, 'user-profile': false },
+      ],
+    ] as const) {
+      source.files[target] = { ...source.files.claude!, exists: false, managed: {} }
+      expect(createDraft(agent, source, context, []).values).toMatchObject(defaults)
+      source.files[target]!.exists = true
+      for (const key of Object.keys(defaults))
+        expect(createDraft(agent, source, context, []).values).not.toHaveProperty(key)
+      source.files[target]!.managed = { ...existing }
+      expect(createDraft(agent, source, context, []).values).toMatchObject(existing)
+    }
+  })
+
+  it('Claude 自动记忆读取布尔值，清空时明确移除当前文件设置', () => {
+    const source = snapshot()
+    for (const [stored, expected] of [
+      [true, 'enabled'],
+      [false, 'disabled'],
+    ] as const) {
+      source.files.claude!.managed.autoMemoryEnabled = stored
+      const value = draft('claude', source)
+      expect(value.runtime.autoMemoryEnabled).toBe(expected)
+      setRuntime(value, 'autoMemoryEnabled', 'unset')
+      expect(value.clearFields).toContain('runtime.autoMemoryEnabled')
+    }
   })
 
   it('Attribution 区分禁用与文件自定义，清空只移除署名设置', () => {
     const source = snapshot()
-    source.files.claude.managed = {
+    source.files.claude!.managed = {
       attribution: false,
       'env.CLAUDE_CODE_ATTRIBUTION_HEADER': '1',
     }
@@ -154,7 +238,7 @@ describe('Agent 配置语义', () => {
       { commit: 'Co-Authored-By: Example <example@example.com>' },
       { commit: '', pr: '', sessionUrl: false },
     ]) {
-      source.files.claude.managed.attribution = attribution
+      source.files.claude!.managed.attribution = attribution
       const custom = draft('claude', source)
       expect(custom.runtime.attribution).toBe('custom')
       setRuntime(custom, 'sandboxEnabled', 'enabled')
@@ -165,12 +249,12 @@ describe('Agent 配置语义', () => {
 
   it('命令沙箱、记忆布尔值和流量字符串按实际文件解释', () => {
     const source = snapshot()
-    source.files.claude.managed = {
+    source.files.claude!.managed = {
       'sandbox.enabled': false,
       'env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': 'false',
       'env.CLAUDE_CODE_EFFORT_LEVEL': 'unset',
     }
-    source.files.codex.managed['features.memories'] = false
+    source.files.codex!.managed['features.memories'] = false
     expect(draft('claude', source).runtime).toMatchObject({
       sandboxEnabled: 'disabled',
       disableNonessentialTraffic: 'enabled',
@@ -194,7 +278,7 @@ describe('Agent 配置语义', () => {
 
   it('显示相同百分比时保留原始精确压缩 Token，真正修改才重新计算', () => {
     const source = snapshot()
-    source.files.codex.managed = {
+    source.files.codex!.managed = {
       model_context_window: 372000,
       model_auto_compact_token_limit: 350000,
     }
@@ -209,7 +293,7 @@ describe('Agent 配置语义', () => {
 
   it('opencode 完整路由模型和零预留值往返保留', () => {
     const source = snapshot()
-    source.files.opencode.managed = {
+    source.files.opencode!.managed = {
       model: 'main/main/org/model.v1',
       'provider.main.models.main/org/model.v1': {
         limit: { context: 200000, output: 32000 },

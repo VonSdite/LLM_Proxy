@@ -34,6 +34,7 @@ const id = field?.id || useId()
 <style scoped>
 .ui-switch-control {
   display: inline-flex;
+  vertical-align: middle;
   align-items: center;
   gap: var(--space-2);
 }

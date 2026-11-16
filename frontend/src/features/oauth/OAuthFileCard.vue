@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { OAuthFile, QuotaWindow } from '@/api/oauth'
 import { dateTime, number, tokenK } from '@/features/shared/format'
 import {
@@ -72,8 +72,6 @@ const historicalQuota = computed(
   () => windows.value.length > 0 && (!!props.file.quota_error || quotaDue(props.file, props.now)),
 )
 const updatedAt = computed(() => props.file.quota_refreshed_at || props.file.quota?.refreshed_at)
-const issueOpen = ref(false)
-const issueId = useId()
 const selectedCard = ref('')
 watch(
   cards,
@@ -130,10 +128,41 @@ function resetLabel(window: QuotaWindow) {
         @update:model-value="emit('select', $event)"
       />
       <div class="oauth-file-title">
-        <strong :title="file.email || file.name">{{ file.email || file.name }}</strong>
-        <span v-if="file.email" class="oauth-file-name muted" :title="file.name">
-          {{ file.name }}
-        </span>
+        <div class="oauth-file-title-line">
+          <strong class="record-title" :title="file.email || file.name">
+            {{ file.email || file.name }}
+          </strong>
+          <div class="oauth-file-status">
+            <UiBadge
+              :variant="
+                category === 'available'
+                  ? 'success'
+                  : category === 'auth_failed'
+                    ? 'danger'
+                    : category === 'quota_exhausted'
+                      ? 'warning'
+                      : 'neutral'
+              "
+            >
+              {{ fileLabels[category] }}
+            </UiBadge>
+            <UiBadge v-if="file.plan_type" class="oauth-file-plan">{{ file.plan_type }}</UiBadge>
+            <UiHelpPopover label="认证文件详情">
+              <p>文件：{{ file.name }}</p>
+              <p>路径：{{ file.path }}</p>
+              <p>Token 到期：{{ dateTime(file.expired) }}</p>
+              <p v-if="file.usage_status_message && file.usage_status_message !== 'success'">
+                {{ file.usage_status_message }}
+              </p>
+              <p v-if="file.availability_retry_at">
+                预计恢复：{{ dateTime(file.availability_retry_at) }}
+              </p>
+              <p v-if="historicalQuota">
+                上次额度来自已保存的快照。额度查询失败或窗口到期时，数值不代表账号目前仍可使用的额度。
+              </p>
+            </UiHelpPopover>
+          </div>
+        </div>
       </div>
       <UiSwitch
         :model-value="enabled ?? file.enabled !== false"
@@ -142,38 +171,9 @@ function resetLabel(window: QuotaWindow) {
         :disabled="toggleDisabled ?? disabled"
         @update:model-value="emit('enabled', $event)"
       />
-    </header>
-    <div class="oauth-file-meta">
-      <div class="oauth-file-status">
-        <UiBadge
-          :variant="
-            category === 'available'
-              ? 'success'
-              : category === 'auth_failed'
-                ? 'danger'
-                : category === 'quota_exhausted'
-                  ? 'warning'
-                  : 'neutral'
-          "
-        >
-          {{ fileLabels[category] }}
-        </UiBadge>
-        <UiBadge v-if="file.plan_type" class="oauth-file-plan">{{ file.plan_type }}</UiBadge>
-        <UiHelpPopover label="认证文件详情">
-          <p>文件：{{ file.name }}</p>
-          <p>路径：{{ file.path }}</p>
-          <p>Token 到期：{{ dateTime(file.expired) }}</p>
-          <p v-if="file.usage_status_message && file.usage_status_message !== 'success'">
-            {{ file.usage_status_message }}
-          </p>
-          <p v-if="file.availability_retry_at">
-            预计恢复：{{ dateTime(file.availability_retry_at) }}
-          </p>
-          <p v-if="historicalQuota">
-            上次额度来自已保存的快照。额度查询失败或窗口到期时，数值不代表账号目前仍可使用的额度。
-          </p>
-        </UiHelpPopover>
-      </div>
+      <span v-if="file.email" class="oauth-file-name muted" :title="file.name">
+        {{ file.name }}
+      </span>
       <div class="oauth-file-actions">
         <UiIconButton
           icon="refresh"
@@ -182,25 +182,14 @@ function resetLabel(window: QuotaWindow) {
           :disabled="disabled"
           @click="emit('refresh')"
         />
-        <UiConfirmPopover :message="`删除认证文件 ${file.name}？`" @confirm="emit('remove')">
+        <UiConfirmPopover message="是否删除？" confirm-label="确认" @confirm="emit('remove')">
           <UiIconButton icon="delete" :label="`删除 ${file.name}`" :disabled="disabled" />
         </UiConfirmPopover>
       </div>
-    </div>
+    </header>
     <UiAlert v-if="issue">
-      <div class="oauth-issue-heading">
-        <span>{{ issueTitle }}</span>
-        <UiButton
-          size="sm"
-          variant="ghost"
-          :aria-expanded="issueOpen"
-          :aria-controls="issueId"
-          @click="issueOpen = !issueOpen"
-        >
-          {{ issueOpen ? '收起' : '查看原因' }}
-        </UiButton>
-      </div>
-      <p v-if="issueOpen" :id="issueId" class="oauth-issue-details">{{ issue }}</p>
+      <span>{{ issueTitle }}</span>
+      <p class="oauth-issue-details">{{ issue }}</p>
     </UiAlert>
     <div class="quota-section">
       <div class="quota-heading">
@@ -325,17 +314,29 @@ function resetLabel(window: QuotaWindow) {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-1) var(--space-3);
+}
+
+.oauth-file-header > :first-child {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  min-height: 24px;
+}
+
+.oauth-file-header > .ui-switch-control {
+  grid-column: 3;
+  grid-row: 1;
+  place-self: start end;
+  min-height: 24px;
 }
 
 .oauth-file-title {
+  grid-column: 2;
+  grid-row: 1;
   display: grid;
   min-width: 0;
   gap: var(--space-1);
-}
-
-.oauth-file-title strong {
-  font-size: var(--text-base);
 }
 
 .oauth-file-title strong,
@@ -346,16 +347,19 @@ function resetLabel(window: QuotaWindow) {
 }
 
 .oauth-file-name {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
   font-size: var(--text-sm);
 }
 
-.oauth-file-meta,
-.quota-heading,
-.oauth-issue-heading {
+.quota-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--text-base);
 }
 
 .oauth-file-status,
@@ -367,8 +371,20 @@ function resetLabel(window: QuotaWindow) {
   gap: var(--space-2);
 }
 
+.oauth-file-title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 24px;
+}
+
+.oauth-file-title-line > strong {
+  min-width: 0;
+}
+
 .oauth-file-status {
-  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .oauth-file-plan {
@@ -376,6 +392,9 @@ function resetLabel(window: QuotaWindow) {
 }
 
 .oauth-file-actions {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
   flex-shrink: 0;
   gap: var(--space-1);
 }
@@ -383,6 +402,7 @@ function resetLabel(window: QuotaWindow) {
 .oauth-issue-details {
   margin-top: var(--space-2);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .quota-section {
@@ -390,13 +410,8 @@ function resetLabel(window: QuotaWindow) {
   gap: var(--space-3);
 }
 
-.quota-heading {
-  flex-wrap: wrap;
-  font-size: var(--text-sm);
-}
-
 .quota-heading > .muted {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 
 .quota-windows {
@@ -421,7 +436,7 @@ function resetLabel(window: QuotaWindow) {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
 }
 
@@ -444,7 +459,7 @@ function resetLabel(window: QuotaWindow) {
 .oauth-usage-values dd {
   margin: 0;
   font-size: var(--text-base);
-  font-weight: 500;
+  font-weight: var(--weight-emphasis);
 }
 
 .oauth-file-footer {
@@ -470,6 +485,10 @@ function resetLabel(window: QuotaWindow) {
 @media (width <= 600px) {
   .oauth-file {
     padding: var(--space-4);
+  }
+
+  .oauth-file-title-line {
+    flex-wrap: wrap;
   }
 
   .oauth-usage-row {

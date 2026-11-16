@@ -18,7 +18,10 @@ export function useAction(after?: () => void | Promise<void>) {
       await after?.()
       return !signal.aborted
     } catch (reason) {
-      if (!signal.aborted && !isAbort(reason)) error.value = errorMessage(reason)
+      if (!signal.aborted && !isAbort(reason)) {
+        error.value = errorMessage(reason)
+        notify(error.value, 'danger')
+      }
       return false
     } finally {
       busy.value = false

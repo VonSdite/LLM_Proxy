@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import requests
 from flask import Flask
+from src.services.upstream_observation import attempt_recorder
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -272,6 +273,9 @@ class CodexProxyServiceTests(unittest.TestCase):
                     self.assertEqual("available", entry["availability_status"])
 
     def test_authentication_error_reuses_credentials_updated_by_another_request(self) -> None:
+        attempts = []
+        token = attempt_recorder.set(attempts.append)
+        self.addCleanup(attempt_recorder.reset, token)
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             write_auth_file(root, "codex-only.json", "access-old", mtime=2000)
@@ -317,6 +321,7 @@ class CodexProxyServiceTests(unittest.TestCase):
             self.assertEqual(200, status_code)
             self.assertIsNotNone(response)
             self.assertEqual(["Bearer access-old", "Bearer access-new"], authorizations)
+            self.assertEqual(["error", "success"], [item["outcome"] for item in attempts])
 
     def test_codex_body_defaults_normalize_responses_payload(self) -> None:
         body: dict[str, Any] = {

@@ -138,6 +138,28 @@ export async function mockAdmin(page: Page, authenticated = true) {
     api_key_id: 1,
     key_name: '开发 Key',
     key_preview: 'sk-fixt...demo',
+    outcome: 'success',
+    http_status: 200,
+    first_token_latency_ms: 680,
+    tps: 42.5,
+    duration_ms: 1250,
+    success_count: 10,
+    error_count: 1,
+    cancelled_count: 0,
+    unknown_count: 1,
+    recorded_count: 12,
+    success_rate: 10 / 11,
+    upstream_success_rate: 10 / 11,
+    upstream_success_count: 10,
+    upstream_error_count: 1,
+    upstream_exception_count: 2,
+    upstream_cancelled_count: 0,
+    upstream_unknown_count: 1,
+    latency_sample_count: 8,
+    tps_sample_count: 7,
+    cache_sample_count: 10,
+    cache_hit_count: 6,
+    cache_request_hit_rate: 0.6,
   }
   const calls: { path: string; method: string; body: unknown; url: string }[] = []
   const unexpected: string[] = []
@@ -281,7 +303,61 @@ export async function mockAdmin(page: Page, authenticated = true) {
         return send({ settings, auth_config_changed: false })
       }
       if (path === '/api/usernames') return send(['开发用户', '另一位用户'])
+      if (path === '/api/statistics/daily-stats/export')
+        return send({ version: 6, request_logs: [], daily_request_stats: [] })
+      if (path === '/api/statistics/filter-options')
+        return send({
+          users: ['开发用户', '另一位用户'],
+          models: ['smart', ...models],
+          response_models: ['response-a', 'response-b', 'response-c'],
+          ip_addresses: ['192.168.1.10', '192.168.1.20'],
+        })
       if (path === '/api/request-models') return send(['smart', ...models])
+      if (path === '/api/statistics/overview') {
+        const end = url.searchParams.get('end_date') || '2026-11-13'
+        const start = url.searchParams.get('start_date') || end
+        const series: (typeof statistics & { date: string })[] = []
+        for (
+          const day = new Date(`${start}T12:00:00`);
+          day <= new Date(`${end}T12:00:00`);
+          day.setDate(day.getDate() + 1)
+        ) {
+          const count = [12, 28, 19, 43, 32, 54, 38][series.length % 7]!
+          series.push({
+            ...statistics,
+            date: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`,
+            request_count: count,
+            total_tokens: count * 12000,
+          })
+        }
+        const selected = url.searchParams.getAll('request_model')
+        const modelRows = [
+          statistics,
+          ...models.slice(0, 4).map((name, i) => ({
+            ...statistics,
+            request_model: name,
+            total_tokens: 240000 / (i + 1),
+            request_count: 9 - i,
+          })),
+        ].filter((row) => !selected.length || selected.includes(row.request_model))
+        const modelFlows = [
+          { ...statistics, target_model_id: 'provider/a', response_model: 'response-a' },
+          { ...statistics, target_model_id: 'provider/b', response_model: 'response-b' },
+          { ...statistics, target_model_id: 'provider/b', response_model: 'response-c' },
+        ].filter((row) => !selected.length || selected.includes(row.request_model))
+        return send({
+          totals: statistics,
+          series,
+          models: modelRows,
+          model_flows: modelFlows,
+          response_models: modelFlows.map((row) => ({
+            ...row,
+            request_model: undefined,
+            target_model_id: undefined,
+          })),
+          ips: [statistics],
+        })
+      }
       if (path === '/api/request-logs')
         return send({
           logs: [statistics],
@@ -356,6 +432,23 @@ export async function mockAdmin(page: Page, authenticated = true) {
         })
       if (path === '/api/agent-config/bootstrap') return send(agent)
       if (path.endsWith('/snapshot') || path.endsWith('/apply')) return send(snapshot)
+      if (path.endsWith('/preview') && (body as { draft?: { values?: unknown } })?.draft?.values) {
+        const definition = agent.agents?.find((item) => item.id === path.split('/').at(-2))
+        const values = (body as { draft: { values: Record<string, unknown> } }).draft.values
+        return send({
+          token: 'fixture-ticket',
+          hasChanges: true,
+          rows: (definition?.fields || [])
+            .filter((field) => field.id in values)
+            .map((field) => ({
+              file: field.file,
+              path: field.path.join('.'),
+              kind: 'add',
+              current: null,
+              next: field.component === 'secret' ? '••••••••' : values[field.id],
+            })),
+        })
+      }
       if (path.endsWith('/preview'))
         return send({
           token: 'fixture-ticket',
@@ -378,7 +471,7 @@ export async function mockAdmin(page: Page, authenticated = true) {
         return send({
           files: targets.map((target) => ({
             target,
-            path: snapshot.files[target].path,
+            path: snapshot.files[target]!.path,
             text:
               target === 'codex'
                 ? 'model = "fixture-model"\n'

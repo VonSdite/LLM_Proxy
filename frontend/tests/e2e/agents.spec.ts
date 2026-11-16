@@ -82,7 +82,7 @@ test('SSH 必填字段标红，代理、主机指纹、连接与断开使用当�
   await page.getByRole('button', { name: '断开', exact: true }).click()
   await expect(page.getByText('连接后编辑配置')).toBeVisible()
   await page.getByRole('button', { name: '删除机器', exact: true }).click()
-  await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  await page.getByRole('button', { name: '确认', exact: true }).click()
   await expect(page.getByRole('button', { name: /本机 Windows/ })).toHaveAttribute(
     'aria-pressed',
     'true',
@@ -159,19 +159,20 @@ test('API Key 候选在移入和停留时稳定，可选已有凭据也可手填
   await expect(page.getByRole('textbox', { name: 'API Key', exact: true })).toHaveValue(
     'manual-api-key',
   )
-  await expect(page.getByRole('textbox', { name: 'ANTHROPIC_MODEL', exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '默认主模型', exact: true })).toBeVisible()
 })
 
-test('路径文字独立命中，三种 Agent 自定义路径刷新后保留，Codex 两文件关联', async ({ page }) => {
+test('路径文字独立命中，三种 Agent 自定义路径刷新后保留，Codex 两文件独立设置', async ({
+  page,
+}) => {
   const fixture = await mockAdmin(page)
   await page.route('**/api/agent-config/machines/local/path', async (route) => {
     const { target, path } = route.request().postDataJSON() as {
-      target: 'claude' | 'codex' | 'opencode'
+      target: 'claude' | 'codex' | 'codexAuth' | 'opencode'
       path: string
     }
-    fixture.snapshot.files[target].customPath = path
-    fixture.snapshot.files[target].path = target === 'codex' ? `${path}/config.toml` : path
-    if (target === 'codex') fixture.snapshot.files.codexAuth.path = `${path}/auth.json`
+    fixture.snapshot.files[target]!.customPath = path
+    fixture.snapshot.files[target]!.path = path || fixture.snapshot.files[target]!.defaultPath
     await route.fulfill({ json: fixture.snapshot })
   })
   await page.goto('/agents')
@@ -193,14 +194,21 @@ test('路径文字独立命中，三种 Agent 自定义路径刷新后保留，C
     {
       tab: 'Codex',
       file: 'config.toml',
-      title: 'Codex 配置目录',
-      label: '目录路径',
-      value: 'D:/custom/codex',
+      title: 'Codex 配置文件（config.toml）',
+      label: '文件路径',
+      value: 'D:/custom/codex/config.toml',
     },
     {
-      tab: 'opencode',
+      tab: 'Codex',
+      file: 'auth.json',
+      title: 'Codex 认证文件（auth.json）',
+      label: '文件路径',
+      value: 'D:/credentials/auth.json',
+    },
+    {
+      tab: 'Opencode v1',
       file: 'opencode.json',
-      title: 'opencode 配置文件',
+      title: 'Opencode v1 配置文件',
       label: '文件路径',
       value: 'D:/custom/opencode.jsonc',
     },
@@ -215,13 +223,13 @@ test('路径文字独立命中，三种 Agent 自定义路径刷新后保留，C
     await page.getByRole('tab', { name: item.tab, exact: true }).click()
     await expect(
       page.getByRole('button', {
-        name: item.tab === 'Codex' ? `${item.value}/config.toml` : item.value,
+        name: item.value,
         exact: true,
       }),
     ).toBeVisible()
-    if (item.tab === 'Codex')
+    if (item.file === 'auth.json')
       await expect(
-        page.getByRole('button', { name: `${item.value}/auth.json`, exact: true }),
+        page.getByRole('button', { name: 'D:/custom/codex/config.toml', exact: true }),
       ).toBeVisible()
   }
 })
@@ -231,23 +239,22 @@ test('已有 Claude 缺失项显示不设置，新建文件使用约定默认值
   await page.goto('/agents')
   const sandbox = page.getByRole('combobox', { name: '命令沙箱', exact: true })
   await expect(sandbox).toHaveText('不设置')
-  await expect(page.getByRole('combobox', { name: 'Attribution', exact: true })).toHaveText(
+  await expect(page.getByRole('combobox', { name: '提交与 PR 署名', exact: true })).toHaveText(
     '不设置',
   )
-  await expect(page.getByRole('combobox', { name: 'Attribution Header', exact: true })).toHaveText(
-    '不设置',
-  )
-  fixture.snapshot.files.claude.exists = false
+  await expect(page.getByRole('combobox', { name: '客户端标识', exact: true })).toHaveText('不设置')
+  fixture.snapshot.files.claude!.exists = false
   await page.reload()
   for (const [name, value] of [
     ['命令沙箱', '不设置'],
-    ['Attribution', '不设置'],
-    ['Attribution Header', '禁用'],
+    ['提交与 PR 署名', '禁用'],
+    ['自动记忆', '禁用'],
+    ['客户端标识', '禁用'],
     ['非必要流量', '禁用'],
-    ['实验性 Agent Teams', '启用'],
-    ['Tool Search', '启用'],
+    ['多智能体协作（实验性）', '启用'],
+    ['工具按需加载', '启用'],
     ['隔离环境标记', '启用'],
-    ['跳过 WebFetch 预检', '启用'],
+    ['跳过网页抓取预检', '禁用'],
   ])
     await expect(page.getByRole('combobox', { name, exact: true })).toHaveText(value!)
   for (const [label, state] of [
@@ -270,14 +277,14 @@ test('已有 Claude 缺失项显示不设置，新建文件使用约定默认值
 
 test('Attribution 保留文件自定义，支持禁用和清空，并解释署名与 Header 的区别', async ({ page }) => {
   const fixture = await mockAdmin(page)
-  fixture.snapshot.files.claude.managed.attribution = { commit: 'Custom', pr: '' }
+  fixture.snapshot.files.claude!.managed.attribution = { commit: 'Custom', pr: '' }
   await page.goto('/agents')
-  const attribution = page.getByRole('combobox', { name: 'Attribution', exact: true })
+  const attribution = page.getByRole('combobox', { name: '提交与 PR 署名', exact: true })
   await expect(attribution).toHaveText('文件自定义')
   const preview = () =>
     (fixture.calls.filter((c) => c.path.endsWith('/preview')).at(-1)?.body as PreviewInput)?.draft
   await expect.poll(() => preview()?.runtime.attribution).toBe('custom')
-  await page.getByRole('button', { name: 'Attribution说明', exact: true }).hover()
+  await page.getByRole('button', { name: '提交与 PR 署名说明', exact: true }).hover()
   const help = page.locator('.ui-help-content')
   await expect(help).toContainText('Git 提交和 PR 描述')
   await expect(help).toContainText('2.1.281')
@@ -296,14 +303,14 @@ test('Attribution 保留文件自定义，支持禁用和清空，并解释署�
   await page.getByRole('option', { name: '不设置', exact: true }).click()
   await expect(attribution).toHaveText('不设置')
   await expect.poll(() => preview()?.clearFields).toContain('runtime.attribution')
-  fixture.snapshot.files.claude.managed.attribution = false
+  fixture.snapshot.files.claude!.managed.attribution = false
   await page.reload()
   await expect(attribution).toHaveText('禁用')
 })
 
 test('参数候选包含多个参考模型和来源，问号悬停并可移入', async ({ page }) => {
   const fixture = await mockAdmin(page)
-  fixture.snapshot.files.claude.managed = {
+  fixture.snapshot.files.claude!.managed = {
     'env.ANTHROPIC_DEFAULT_HAIKU_MODEL': 'main/unknown-model',
     'env.ANTHROPIC_DEFAULT_OPUS_MODEL': 'main/sonnet-alias',
   }
@@ -336,19 +343,19 @@ test('参数候选包含多个参考模型和来源，问号悬停并可移入',
 for (const agent of ['codex', 'opencode'] as const) {
   test(`${agent} 保留精确压缩 Token，数值改变后失焦刷新标题`, async ({ page }) => {
     const fixture = await mockAdmin(page)
-    fixture.snapshot.files.codex.managed = {
+    fixture.snapshot.files.codex!.managed = {
       model: 'main/claude-sonnet-4-6',
       model_context_window: 200000,
       model_auto_compact_token_limit: 123457,
     }
-    fixture.snapshot.files.opencode.managed = {
+    fixture.snapshot.files.opencode!.managed = {
       model: 'main/main/claude-sonnet-4-6',
       'provider.main.models.main/claude-sonnet-4-6': { limit: { context: 200000, output: 64000 } },
       'compaction.reserved': 76543,
     }
     await page.goto('/agents')
     await page
-      .getByRole('tab', { name: agent === 'codex' ? 'Codex' : 'opencode', exact: true })
+      .getByRole('tab', { name: agent === 'codex' ? 'Codex' : 'Opencode v1', exact: true })
       .click()
     const compact = page.getByRole('textbox', { name: '压缩阈值 %', exact: true })
     const label = page.locator('.ui-field-label').filter({ hasText: '压缩阈值 %' })
@@ -386,7 +393,7 @@ test('文件高亮、备份、空白关闭保存及冲突后保留内容', async
         files: [
           {
             target: 'claude',
-            path: fixture.snapshot.files.claude.path,
+            path: fixture.snapshot.files.claude!.path,
             version: 'original-version',
             exists: true,
             text: JSON.stringify(
@@ -415,7 +422,7 @@ test('文件高亮、备份、空白关闭保存及冲突后保留内容', async
     )
   })
   await page.goto('/agents')
-  await page.getByRole('button', { name: fixture.snapshot.files.claude.path, exact: true }).click()
+  await page.getByRole('button', { name: fixture.snapshot.files.claude!.path, exact: true }).click()
   const editor = page.getByRole('dialog', { name: 'settings.json', exact: true })
   await expect(editor.locator('.ace_string').first()).toBeVisible()
   await editor.getByRole('combobox', { name: '读取备份' }).click()
@@ -449,7 +456,7 @@ test('连续编辑预览保持 DOM、滚动和焦点，离开配置页无需确�
   await expect(all).toBeFocused()
   expect(await all.evaluate((element, old) => element === old, input)).toBe(true)
   expect((await all.boundingBox())?.y).toBe(before?.y)
-  const main = page.getByRole('textbox', { name: 'ANTHROPIC_MODEL', exact: true })
+  const main = page.getByRole('textbox', { name: '默认主模型', exact: true })
   await main.fill('different-model')
   await expect(all).toHaveValue('')
   await page
@@ -458,4 +465,23 @@ test('连续编辑预览保持 DOM、滚动和焦点，离开配置页无需确�
     .click()
   await expect(page).toHaveURL(/\/settings$/)
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+test('保存完成后预览行原位保留，不出现加载状态或重复预览请求', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  await page.goto('/agents')
+  await expect(page.getByText('有待保存的修改')).toBeVisible()
+  const preview = page.locator('.agent-preview')
+  const row = preview.locator('.agent-preview-row').first()
+  const original = await row.elementHandle()
+  const bounds = await preview.boundingBox()
+  const count = fixture.calls.filter((call) => call.path.endsWith('/preview')).length
+  await preview.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(preview.getByRole('status')).toHaveText('无修改')
+  await expect(preview.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+  await expect(row).toContainText('保持')
+  expect(await row.evaluate((element, old) => element === old, original)).toBe(true)
+  expect((await preview.boundingBox())?.height).toBe(bounds?.height)
+  expect(fixture.calls.filter((call) => call.path.endsWith('/preview'))).toHaveLength(count + 1)
+  await expect(preview.locator('[aria-busy="true"], .agent-preview-empty')).toHaveCount(0)
 })

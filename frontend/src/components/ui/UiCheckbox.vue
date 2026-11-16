@@ -2,7 +2,12 @@
 import { CheckboxIndicator, CheckboxRoot } from 'reka-ui'
 import { useId } from 'vue'
 import UiIcon from './UiIcon.vue'
-defineProps<{ modelValue?: boolean | 'indeterminate'; disabled?: boolean; label?: string }>()
+defineProps<{
+  modelValue?: boolean | 'indeterminate'
+  disabled?: boolean
+  label?: string
+  variant?: 'button'
+}>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const id = useId()
 </script>
@@ -14,6 +19,7 @@ const id = useId()
       :disabled="disabled"
       :aria-label="label"
       class="ui-checkbox"
+      :class="{ 'ui-checkbox--button': variant === 'button' }"
       @update:model-value="emit('update:modelValue', $event === true)"
     >
       <span class="ui-checkbox-mark">
@@ -22,8 +28,9 @@ const id = useId()
           <UiIcon v-else name="check" :size="13" />
         </CheckboxIndicator>
       </span>
+      <span v-if="variant === 'button' && $slots.default"><slot /></span>
     </CheckboxRoot>
-    <label v-if="$slots.default" :for="id"><slot /></label>
+    <label v-if="$slots.default && variant !== 'button'" :for="id"><slot /></label>
   </span>
 </template>
 <style scoped>
@@ -69,8 +76,29 @@ const id = useId()
   opacity: 0.5;
 }
 
+.ui-checkbox--button {
+  min-height: var(--control);
+  gap: var(--space-2);
+  padding-inline: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ui-checkbox--button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.ui-checkbox--button:disabled {
+  cursor: not-allowed;
+}
+
 @media (pointer: coarse) {
-  .ui-checkbox {
+  .ui-checkbox:not(.ui-checkbox--button) {
     width: var(--control);
     height: var(--control);
   }

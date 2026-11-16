@@ -50,9 +50,9 @@ export function fileCategory(file: OAuthFile, now = Date.now()): FileFilter {
 }
 export const fileLabels: Record<FileFilter, string> = {
   available: '可用',
+  disabled: '禁用',
   quota_exhausted: '额度用完',
   auth_failed: '认证失败',
-  disabled: '已禁用',
   other_unavailable: '其他',
   all: '全部',
 }

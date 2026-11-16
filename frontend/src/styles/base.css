@@ -81,7 +81,7 @@ code,
 pre,
 .mono {
   font-family: var(--font-code);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 
 small {
@@ -102,6 +102,16 @@ strong {
 
 .number {
   font-variant-numeric: tabular-nums;
+}
+
+.record-title {
+  font-family: var(--font-ui);
+  font-size: var(--text-section);
+  font-weight: var(--weight-emphasis);
+}
+
+.text-caption {
+  font-size: var(--text-sm);
 }
 
 .sr-only {

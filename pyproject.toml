@@ -1,6 +1,6 @@
 [project]
 name = "llm-proxy"
-version = "2.4.0"
+version = "3.0.0"
 description = "One API LLM proxy with unified routing and customizable request and response transformations"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,6 +12,7 @@ dependencies = [
     "pysqlite3-binary>=0.5.4.post2; sys_platform == 'linux'",
     "pyyaml>=6.0.3",
     "requests>=2.33.1",
+    "ruamel-yaml>=0.18.6,<0.19",
     "tomlkit>=0.13.3",
     "urllib3>=2.6.3",
 ]

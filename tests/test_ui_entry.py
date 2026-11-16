@@ -107,8 +107,9 @@ class UiEntryTests(unittest.TestCase):
                 self.assertNotIn(b"bootstrap.bundle", response.data)
         self.config.is_model_mapping_enabled.return_value = False
         self.config.is_api_key_management_enabled.return_value = False
-        for path in ["/model-mappings", "/api-keys"]:
-            self.assertEqual(self.client.get(path).headers["Location"], "/settings")
+        self.config.is_oauth_enabled.return_value = False
+        for path in ["/model-mappings", "/api-keys", "/oauth"]:
+            self.assertEqual(self.client.get(path).status_code, 200)
         self.assertEqual(self.client.get("/login").headers["Location"], "/")
         self.auth.is_auth_enabled.return_value = True
         for path in pages:

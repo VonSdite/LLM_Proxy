@@ -76,13 +76,16 @@ class FakeOAuthModelService:
 
 
 class FakeUserService:
+    def __init__(self, models: tuple[str, ...] = ("demo/m1",)) -> None:
+        self.models = models
+
     def get_user_by_ip(
         self,
         ip_address: str,
         require_whitelist_access: bool = True,
     ) -> dict[str, Any] | None:
         del ip_address, require_whitelist_access
-        return {"username": "tester", "model_permissions": "*", "model_permissions_mode": "all"}
+        return {"username": "tester", "model_permissions": list(self.models), "model_permissions_mode": "custom"}
 
     def can_user_access_model(
         self,
@@ -91,7 +94,7 @@ class FakeUserService:
         available_models=None,
     ) -> bool:
         del user, available_models
-        return model_name == "demo/m1"
+        return model_name in self.models
 
     def get_accessible_models_for_user(
         self,
@@ -99,7 +102,7 @@ class FakeUserService:
         available_models=None,
     ) -> list[str]:
         del user
-        return [model_name for model_name in list(available_models or []) if model_name == "demo/m1"]
+        return [model_name for model_name in list(available_models or []) if model_name in self.models]
 
 
 class FakeProviderManager:
@@ -170,6 +173,42 @@ class ApiKeyManagementTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._tempdir.cleanup()
+
+    def test_manual_order_migration_persistence_and_validation(self) -> None:
+        keys = [self.api_key_service.create_api_key(name=f"key-{index}") for index in range(4)]
+        ids = [key["id"] for key in keys]
+        with self.connection_factory() as conn:
+            conn.execute("ALTER TABLE api_keys DROP COLUMN sort_order")
+            for index, key_id in enumerate(ids):
+                conn.execute("UPDATE api_keys SET created_at = ? WHERE id = ?", (f"2026-11-0{index + 1}", key_id))
+        self.api_key_repository = ApiKeyRepository(self.connection_factory)
+        self.api_key_service = ApiKeyService(self.ctx, self.api_key_repository)
+        ApiKeyController(self.ctx, self.api_key_service, cast(Any, SimpleNamespace(is_auth_enabled=lambda: False)))
+        client = self.app.test_client()
+
+        def order():
+            return [item["id"] for item in client.get("/api/api-keys").get_json()["api_keys"]]
+
+        self.assertEqual(list(reversed(ids)), order())
+        response = client.put("/api/api-keys/order", json={"id": ids[3], "target_id": ids[0], "after": True})
+        self.assertEqual(200, response.status_code)
+        expected = [ids[2], ids[1], ids[0], ids[3]]
+        self.assertEqual(expected, order())
+        restarted = ApiKeyRepository(self.connection_factory)
+        self.assertEqual(expected, [row["id"] for row in restarted.get(sort_key="sort_order", sort_direction="asc")])
+        self.assertEqual(expected[2:], [row["id"] for row in self.api_key_service.get_api_keys(page=2, page_size=2)])
+        for payload in [
+            {"id": True, "target_id": ids[0], "after": True},
+            {"id": ids[0], "target_id": ids[1], "after": "false"},
+            {"id": ids[0], "target_id": 999999, "after": False},
+        ]:
+            self.assertEqual(400, client.put("/api/api-keys/order", json=payload).status_code)
+            self.assertEqual(expected, order())
+        response = client.put("/api/api-keys/order", json={"id": ids[0], "target_id": ids[2], "after": False})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([ids[0], ids[2], ids[1], ids[3]], order())
+        created = self.api_key_service.create_api_key(name="new")
+        self.assertEqual(created["id"], order()[0])
 
     def _register_proxy(self, *, whitelist_enabled: bool = False) -> CompletingProxyService:
         proxy_ctx = AppContext(
@@ -551,7 +590,7 @@ class ApiKeyManagementTests(unittest.TestCase):
         ProxyController(
             self.ctx,
             CompletingProxyService(),
-            cast(Any, FakeUserService()),
+            cast(Any, FakeUserService(models=("codex-model", "image-model"))),
             self.log_service,
             cast(Any, FakeProviderManager()),
             api_key_service=self.api_key_service,

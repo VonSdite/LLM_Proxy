@@ -18,7 +18,10 @@ vi.mock('@/api/oauth', () => ({
     export: vi.fn(),
   },
 }))
-vi.mock('@/components/ui', () => ({ notify: vi.fn() }))
+vi.mock('@/components/ui', () => ({
+  notify: vi.fn(),
+  notifyProgress: vi.fn(() => ({ update: vi.fn(), close: vi.fn() })),
+}))
 
 const current = new Date('2026-11-06T10:00:00Z').getTime()
 function file(name: string, overrides: Partial<OAuthFile> = {}): OAuthFile {

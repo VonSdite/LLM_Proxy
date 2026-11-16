@@ -37,6 +37,7 @@ from .claude_oauth_service import ClaudeAuthCandidate, ClaudeOAuthService
 from .outbound_privacy import OutboundPrivacyContext, OutboundPrivacyService
 from .proxy_response_builder import ProxyResponseBuilder, StreamPrivacyRestorer
 from .proxy_service import ProxyErrorInfo
+from .upstream_observation import observe_response
 
 CLAUDE_MESSAGES_URL = "https://api.anthropic.com/v1/messages?beta=true"
 CLAUDE_PROVIDER_NAME = "claude"
@@ -91,13 +92,18 @@ class ClaudeProxyService:
             return privacy_result.body, context
         return upstream_body, None
 
+    def _is_oauth_enabled(self) -> bool:
+        """逐次读取总开关，已在途的请求继续完成。"""
+        read_enabled = getattr(self._config_manager, "is_oauth_enabled", None)
+        return bool(read_enabled()) if callable(read_enabled) else True
+
     def has_model(self, model_name: str) -> bool:
         """判断 Claude OAuth 是否支持指定模型。"""
-        return self._claude_oauth_service.has_model(model_name)
+        return self._is_oauth_enabled() and self._claude_oauth_service.has_model(model_name)
 
     def list_model_names(self) -> tuple[str, ...]:
         """返回 Claude OAuth 当前模型名。"""
-        return self._claude_oauth_service.list_model_names()
+        return self._claude_oauth_service.list_model_names() if self._is_oauth_enabled() else ()
 
     def proxy_request(
         self,
@@ -113,6 +119,17 @@ class ClaudeProxyService:
         force_safe_desensitization: bool = False,
     ) -> tuple[Response | None, int, ProxyErrorInfo | None]:
         """按认证文件顺序代理 Claude OAuth 请求。"""
+        if not self._is_oauth_enabled():
+            return (
+                None,
+                503,
+                ProxyErrorInfo(
+                    message="OAuth is disabled",
+                    status_code=503,
+                    error_type="service_unavailable_error",
+                    error_code="oauth_disabled",
+                ),
+            )
         del trace_id, forward_stream_usage
         model_name = str(request_data.get("model") or "").strip()
         target_format = str(resolved_target_format or "").strip().lower()
@@ -233,19 +250,22 @@ class ClaudeProxyService:
         request_options = self._build_request_options()
 
         try:
-            upstream_response = request_with_proxy_warning_retry(
-                lambda: requests.post(
-                    CLAUDE_MESSAGES_URL,
-                    headers=upstream_headers,
-                    json=upstream_body,
-                    stream=requested_stream,
-                    timeout=1200,
-                    allow_redirects=False,
-                    **request_options,
+            upstream_response = observe_response(
+                lambda: request_with_proxy_warning_retry(
+                    lambda: requests.post(
+                        CLAUDE_MESSAGES_URL,
+                        headers=upstream_headers,
+                        json=upstream_body,
+                        stream=requested_stream,
+                        timeout=1200,
+                        allow_redirects=False,
+                        **request_options,
+                    ),
+                    request_options=request_options,
+                    logger=self._logger,
+                    log_context=f"provider=claude model={model_name} auth_file={candidate.name}",
                 ),
-                request_options=request_options,
-                logger=self._logger,
-                log_context=f"provider=claude model={model_name} auth_file={candidate.name}",
+                request_data["model"],
             )
         except ProxyWarningRequired as exc:
             self._logger.warning(

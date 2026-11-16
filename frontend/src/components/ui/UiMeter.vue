@@ -38,7 +38,7 @@ const percent = computed(() =>
   justify-content: space-between;
   gap: var(--space-2);
   align-items: baseline;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 
 .ui-meter-label .number {

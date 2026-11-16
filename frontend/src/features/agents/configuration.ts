@@ -10,15 +10,15 @@ import type {
 } from '@/api/agents'
 
 export const CLAUDE_MODEL_KEYS = [
+  'ANTHROPIC_MODEL',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
-  'ANTHROPIC_MODEL',
 ] as const
 export const CLAUDE_MODES = [
   {
     key: 'attributionHeader',
-    label: 'Attribution Header',
+    label: '客户端标识',
     env: 'CLAUDE_CODE_ATTRIBUTION_HEADER',
     enabled: '1',
     disabled: '0',
@@ -34,7 +34,7 @@ export const CLAUDE_MODES = [
   },
   {
     key: 'experimentalAgentTeams',
-    label: '实验性 Agent Teams',
+    label: '多智能体协作（实验性）',
     env: 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS',
     enabled: '1',
     disabled: '0',
@@ -42,7 +42,7 @@ export const CLAUDE_MODES = [
   },
   {
     key: 'enableToolSearch',
-    label: 'Tool Search',
+    label: '工具按需加载',
     env: 'ENABLE_TOOL_SEARCH',
     enabled: 'true',
     disabled: 'false',
@@ -138,8 +138,52 @@ export function createDraft(
   bootstrap: AgentBootstrap,
   machines: AgentMachine[],
 ): AgentDraft {
+  const definition = bootstrap.agents?.find((item) => item.id === agent)
+  if (definition && !definition.legacy) {
+    const values: NonNullable<AgentDraft['values']> = {}
+    const customFields: string[] = []
+    for (const field of definition.fields || []) {
+      const file = snapshot.files[field.file]!
+      const value = file.managed[field.id]
+      if (value !== undefined) {
+        const compatible =
+          field.component === 'boolean'
+            ? typeof value === 'boolean'
+            : field.component === 'number'
+              ? typeof value === 'number'
+              : typeof value === 'string' &&
+                (field.component !== 'select' ||
+                  field.options?.some((item) => item.value === value))
+        if (compatible) values[field.id] = value as string | number | boolean
+        else customFields.push(field.id)
+      } else if (!file.exists && field.default !== undefined) values[field.id] = field.default
+      else if (field.role === 'baseUrl')
+        values[field.id] = defaultBaseUrl(snapshot.machine, agent, bootstrap)
+      else if (field.component === 'model' && field.required) {
+        const address = definition.fields?.find((item) => item.role === 'baseUrl')
+        const base = address
+          ? String(
+              values[address.id] ||
+                snapshot.files[address.file]?.managed[address.id] ||
+                defaultBaseUrl(snapshot.machine, agent, bootstrap),
+            )
+          : ''
+        values[field.id] = isOwnServiceUrl(base, bootstrap, machines)
+          ? defaultModel(agent, bootstrap)
+          : ''
+      } else if (field.required && field.default !== undefined) values[field.id] = field.default
+    }
+    return {
+      baseUrl: '',
+      apiKey: '',
+      runtime: {},
+      limits: { context: null, compact: null, output: null },
+      values,
+      customFields,
+    }
+  }
   const files = snapshot.files
-  const m = files[agent].managed
+  const m = files[agent]!.managed
   const baseDefault = defaultBaseUrl(snapshot.machine, agent, bootstrap)
   if (agent === 'claude') {
     const models = Object.fromEntries(
@@ -151,6 +195,7 @@ export function createDraft(
       effortLevel: effort === 'unset' ? 'auto' : effort,
       permissionMode: permission === 'manual' ? 'default' : permission,
       sandboxEnabled: triState(m['sandbox.enabled']),
+      autoMemoryEnabled: triState(m.autoMemoryEnabled),
       attribution:
         m.attribution === undefined ? 'unset' : m.attribution === false ? 'disabled' : 'custom',
       skipWebFetchPreflight: triState(m.skipWebFetchPreflight),
@@ -168,15 +213,17 @@ export function createDraft(
               ? 'disabled'
               : 'unset'
     }
-    if (!files.claude.exists) {
+    if (!files.claude!.exists) {
       Object.assign(runtime, {
         sandboxEnabled: 'unset',
+        autoMemoryEnabled: 'disabled',
+        attribution: 'disabled',
         attributionHeader: 'disabled',
         disableNonessentialTraffic: 'enabled',
         experimentalAgentTeams: 'enabled',
         enableToolSearch: 'enabled',
         sandbox: 'enabled',
-        skipWebFetchPreflight: 'enabled',
+        skipWebFetchPreflight: 'disabled',
       })
       if (!Object.values(models).some((model) => model.trim()))
         models.ANTHROPIC_MODEL = defaultModel(agent, bootstrap)
@@ -200,7 +247,7 @@ export function createDraft(
     const compactTokens = positiveInt(m.model_auto_compact_token_limit)
     return {
       baseUrl,
-      apiKey: textValue(files.codexAuth.managed.OPENAI_API_KEY),
+      apiKey: textValue(files.codexAuth!.managed.OPENAI_API_KEY),
       model:
         textValue(m.model) ||
         (isOwnServiceUrl(baseUrl, bootstrap, machines) ? defaultModel(agent, bootstrap) : ''),
@@ -235,7 +282,33 @@ export function createDraft(
     baseUrl,
     apiKey: textValue(m[`provider.${provider}.options.apiKey`]),
     model,
-    runtime: { reasoningEffort: textValue(object(entry.options).reasoningEffort) },
+    runtime: {
+      reasoningEffort: textValue(object(entry.options).reasoningEffort),
+      permissionPolicy: openCodePermissionPolicy(m.permission),
+      disabledProviders: Array.isArray(m.disabled_providers)
+        ? m.disabled_providers.filter((id): id is string => typeof id === 'string').join(', ')
+        : '',
+      share:
+        m.share === undefined
+          ? files.opencode!.exists
+            ? ''
+            : 'disabled'
+          : ['manual', 'auto', 'disabled'].includes(String(m.share))
+            ? String(m.share)
+            : 'custom',
+      autoupdate:
+        m.autoupdate === undefined
+          ? files.opencode!.exists
+            ? ''
+            : 'false'
+          : m.autoupdate === true
+            ? 'true'
+            : m.autoupdate === false
+              ? 'false'
+              : m.autoupdate === 'notify'
+                ? 'notify'
+                : 'custom',
+    },
     limits: {
       context,
       output: positiveInt(limits.output),
@@ -243,6 +316,12 @@ export function createDraft(
       reserved,
     },
   }
+}
+
+function openCodePermissionPolicy(value: unknown): string {
+  if (value === undefined) return ''
+  if (typeof value === 'string' && ['allow', 'ask', 'deny'].includes(value)) return value
+  return 'custom'
 }
 
 export function markClear(draft: AgentDraft, field: string, cleared: boolean) {

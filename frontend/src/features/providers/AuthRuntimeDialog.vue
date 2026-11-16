@@ -119,7 +119,6 @@ const columns: TableColumn[] = [
     open
     :title="`${name} · 运行状态`"
     size="xl"
-    placement="top"
     :busy="action.busy.value || toggles.busy.value"
     @update:open="emit('close')"
   >
@@ -144,9 +143,7 @@ const columns: TableColumn[] = [
           @click="request.refresh"
         />
       </div>
-      <UiAlert v-if="request.error.value || action.error.value">
-        {{ action.error.value || request.error.value }}
-      </UiAlert>
+      <UiAlert v-if="request.error.value">{{ request.error.value }}</UiAlert>
       <UiTable
         :rows="request.data.value?.entries || []"
         :columns="columns"

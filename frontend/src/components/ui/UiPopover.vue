@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { useId } from 'vue'
-import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
+import { useId, useSlots } from 'vue'
+import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import UiIconButton from './UiIconButton.vue'
 import UiPopoverArrow from './UiPopoverArrow.vue'
 
-defineProps<{ open: boolean; title: string }>()
+defineProps<{ open: boolean; title: string; compact?: boolean | 'icon'; side?: 'top' | 'bottom' }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 const titleId = useId()
+const slots = useSlots()
 function close() {
   emit('update:open', false)
 }
 function focusInput(event: Event) {
+  if (slots.anchor) {
+    event.preventDefault()
+    return
+  }
   const target = event.target
   if (!(target instanceof HTMLElement)) return
   const input = target.querySelector<HTMLElement>('input:not(:disabled), textarea:not(:disabled)')
@@ -19,25 +24,35 @@ function focusInput(event: Event) {
     input.focus()
   }
 }
+function restoreFocus(event: Event) {
+  if (slots.anchor) event.preventDefault()
+}
 </script>
 <template>
-  <PopoverRoot :open="open" modal @update:open="emit('update:open', $event)">
-    <PopoverTrigger as-child><slot name="trigger" /></PopoverTrigger>
+  <PopoverRoot :open="open" :modal="!slots.anchor" @update:open="emit('update:open', $event)">
+    <PopoverAnchor v-if="slots.anchor" as-child><slot name="anchor" /></PopoverAnchor>
+    <PopoverTrigger v-else as-child><slot name="trigger" /></PopoverTrigger>
     <PopoverPortal>
       <PopoverContent
         as-child
         class="ui-popover"
-        align="end"
+        :class="{ 'ui-popover--compact': compact, 'ui-popover--icon': compact === 'icon' }"
+        :align="slots.anchor ? 'center' : 'end'"
+        :side="side || 'bottom'"
         :side-offset="6"
         :arrow-padding="12"
         :collision-padding="12"
         @open-auto-focus="focusInput"
+        @close-auto-focus="restoreFocus"
         @escape-key-down="$event.stopPropagation()"
       >
-        <div :aria-labelledby="titleId">
+        <div
+          :aria-labelledby="compact ? undefined : titleId"
+          :aria-label="compact ? title : undefined"
+        >
           <UiPopoverArrow bordered />
           <div class="ui-popover-panel">
-            <header class="ui-popover-header">
+            <header v-if="!compact" class="ui-popover-header">
               <h3 :id="titleId">{{ title }}</h3>
               <UiIconButton icon="close" :label="`关闭${title}`" @click="close" />
             </header>
@@ -68,6 +83,23 @@ function focusInput(event: Event) {
   overscroll-behavior: contain;
   padding: var(--space-4);
   border-radius: inherit;
+}
+
+:global(.ui-popover--compact) {
+  width: max-content;
+  max-width: calc(100vw - 24px);
+}
+
+:global(.ui-popover--compact .ui-popover-panel) {
+  padding: var(--space-2) var(--space-3);
+}
+
+:global(.ui-popover--icon) {
+  border-radius: var(--radius-control);
+}
+
+:global(.ui-popover--icon .ui-popover-panel) {
+  padding: var(--space-1);
 }
 
 :global(.ui-popover-header) {

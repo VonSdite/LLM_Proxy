@@ -18,12 +18,13 @@ from ..config.provider_runtime_factory import ProviderRuntimeFactory
 from ..executors import OpenedUpstreamResponse, build_default_executor_registry
 from ..hooks import HookContext, HookErrorType
 from ..proxy_core import decode_stream_events
-from ..proxy_core.usage import extract_canonical_usage
+from ..proxy_core.usage import create_usage_meta, merge_usage_meta
 from ..translators import build_default_translator_registry
 from ..translators.reasoning_utils import openai_reasoning_effort_to_claude_thinking
 from ..utils.http_headers import merge_http_headers, normalize_http_headers
 from ..utils.local_time import now_local_datetime
 from ..utils.net import build_requests_proxy_settings, build_requests_request_proxies
+from ..utils.request_metrics import output_tps
 from .log_service import LogService
 from .upstream_request_builder import build_upstream_request
 
@@ -114,6 +115,7 @@ class ProviderModelTestService:
         ip_address: str | None,
     ) -> dict[str, Any]:
         log_started_at = now_local_datetime()
+        log_started_clock = time.perf_counter()
         response_meta = self._create_empty_meta()
         result = self._test_single_model(
             provider,
@@ -125,7 +127,24 @@ class ProviderModelTestService:
         if result.get("available") is not True:
             return result
 
+        duration_ms = max(response_meta["_finished_at"] - log_started_clock, 0) * 1000
+        first_token_at = response_meta.get("_first_token_at")
+        tps, tps_reason = output_tps(
+            response_meta.get("completion_tokens"),
+            duration_ms,
+            usage_status=response_meta.get("usage_status"),
+            outcome="success",
+        )
         self._log_service.log_request(
+            outcome="success",
+            http_status=response_meta["http_status"],
+            is_stream=response_meta["is_stream"],
+            duration_ms=duration_ms,
+            first_token_latency_ms=(
+                round(max(first_token_at - log_started_clock, 0) * 1000, 2) if first_token_at is not None else None
+            ),
+            tps=tps,
+            tps_unavailable_reason=tps_reason,
             request_model=request_model,
             response_model=str(response_meta.get("response_model") or "") or None,
             total_tokens=int(response_meta.get("total_tokens") or 0),
@@ -158,6 +177,9 @@ class ProviderModelTestService:
         use_completion_token_limit = False
 
         for attempt in range(max_retries):
+            # 每次尝试独立收集用量，失败响应的缓存和计时不进入最终成功记录。
+            response_meta.clear()
+            response_meta.update(self._create_empty_meta())
             opened: OpenedUpstreamResponse | None = None
             try:
                 headers, benchmark_request, translated_request, request_ctx = self._build_upstream_request(
@@ -218,6 +240,8 @@ class ProviderModelTestService:
                         error=error_message,
                     )
 
+                response_meta["http_status"] = opened.status_code
+                response_meta["is_stream"] = opened.is_stream
                 if opened.is_stream:
                     return self._collect_stream_result(
                         opened=opened,
@@ -237,6 +261,7 @@ class ProviderModelTestService:
                     translated_request=translated_request,
                     translator=translator,
                     meta=response_meta,
+                    request_started_at=request_started_at,
                 )
             except requests.RequestException as exc:
                 previous_error_type = self._classify_request_error(exc)
@@ -393,11 +418,7 @@ class ProviderModelTestService:
         meta: dict[str, Any],
     ) -> dict[str, Any]:
         first_token_at: float | None = None
-        last_token_at: float | None = None
         received_at = request_started_at
-        reasoning_observed = False
-        reasoning_tokens = 0
-        redacted_reasoning = False
         stream_error: str | None = None
         has_model_output = False
         state: dict[str, Any] = {}
@@ -406,20 +427,12 @@ class ProviderModelTestService:
             nonlocal received_at
             for data in opened.response.iter_content(chunk_size=None):
                 if data:
-                    # 同一网络数据块中的多个事件共享到达时间，避免本地解析制造虚假生成区间。
+                    # 同一网络数据块中的多个事件共享到达时间，首字计时使用实际接收时间。
                     received_at = time.perf_counter()
                     yield data
 
         try:
             for event in decode_stream_events(timed_chunks(), opened.stream_format):
-                if event.kind == "json":
-                    if isinstance(event.payload, dict):
-                        block = event.payload.get("content_block")
-                        if isinstance(block, dict) and block.get("type") == "redacted_thinking":
-                            redacted_reasoning = True
-                    usage = extract_canonical_usage(event.payload, provider.source_format)
-                    if usage is not None and "reasoning_tokens" in usage:
-                        reasoning_tokens = int(usage["reasoning_tokens"])
                 translated_chunks = translator.translate_stream_event(
                     model_name,
                     original_request,
@@ -433,10 +446,7 @@ class ProviderModelTestService:
                         if self._has_openai_chat_output_delta(chunk.payload):
                             if first_token_at is None:
                                 first_token_at = received_at
-                            last_token_at = received_at
                             has_model_output = True
-                        if self._has_openai_chat_output_delta(chunk.payload, fields=("reasoning_content",)):
-                            reasoning_observed = True
                         error_message = self._extract_error_message(chunk.payload)
                         if error_message:
                             stream_error = error_message
@@ -461,16 +471,13 @@ class ProviderModelTestService:
             )
 
         return self._build_success_result(
+            meta=meta,
             model_name=model_name,
             response_model=str(meta.get("response_model") or "") or None,
             first_token_at=first_token_at,
-            last_token_at=last_token_at,
             request_started_at=request_started_at,
             completion_tokens=int(meta.get("completion_tokens") or 0),
-            # Responses 思考摘要不是逐 Token 的完整思考输出，不能用于隐藏思考的生成区间。
-            unobserved_reasoning=redacted_reasoning
-            or (reasoning_tokens > 0 and not reasoning_observed)
-            or (provider.source_format == "openai_responses" and (reasoning_tokens > 0 or reasoning_observed)),
+            usage_status=str(meta.get("usage_status") or "unknown"),
         )
 
     def _collect_nonstream_result(
@@ -482,6 +489,7 @@ class ProviderModelTestService:
         translated_request: dict[str, Any],
         translator,
         meta: dict[str, Any],
+        request_started_at: float,
     ) -> dict[str, Any]:
         raw_body = self._read_response_body(opened)
         decoded_payload = self._decode_response_payload(raw_body)
@@ -512,12 +520,13 @@ class ProviderModelTestService:
             )
 
         return self._build_success_result(
+            meta=meta,
             model_name=model_name,
             response_model=str(meta.get("response_model") or "") or None,
             first_token_at=None,
-            last_token_at=None,
-            request_started_at=None,
+            request_started_at=request_started_at,
             completion_tokens=int(meta.get("completion_tokens") or 0),
+            usage_status=str(meta.get("usage_status") or "unknown"),
         )
 
     @classmethod
@@ -527,25 +536,20 @@ class ProviderModelTestService:
         model_name: str,
         response_model: str | None,
         first_token_at: float | None,
-        last_token_at: float | None,
         request_started_at: float | None,
         completion_tokens: int,
-        unobserved_reasoning: bool = False,
+        usage_status: str = "known",
+        meta: dict[str, Any],
     ) -> dict[str, Any]:
         first_token_latency_ms: float | None = None
-        tps: float | None = None
 
         if first_token_at is not None and request_started_at is not None:
             first_token_latency_ms = round(max((first_token_at - request_started_at) * 1000, 0), 2)
-        if (
-            first_token_at is not None
-            and last_token_at is not None
-            and completion_tokens > 1
-            and not unobserved_reasoning
-        ):
-            elapsed_seconds = last_token_at - first_token_at
-            if elapsed_seconds > 0:
-                tps = round((completion_tokens - 1) / elapsed_seconds, 2)
+        finished_at = time.perf_counter()
+        meta["_finished_at"] = finished_at
+        meta["_first_token_at"] = first_token_at
+        duration_ms = (finished_at - request_started_at) * 1000 if request_started_at is not None else None
+        tps, _ = output_tps(completion_tokens, duration_ms, usage_status=usage_status)
 
         return {
             "requested_model": model_name,
@@ -574,39 +578,14 @@ class ProviderModelTestService:
 
     @staticmethod
     def _create_empty_meta() -> dict[str, Any]:
-        return {
-            "response_model": None,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-            "usage_status": "unknown",
-        }
+        return create_usage_meta()
 
     @staticmethod
     def _update_meta_from_payload(meta: dict[str, Any], payload: dict[str, Any]) -> None:
         model = payload.get("model")
         if model:
             meta["response_model"] = str(model)
-
-        usage = payload.get("usage")
-        if not isinstance(usage, dict):
-            return
-
-        prompt_tokens = usage.get("prompt_tokens")
-        completion_tokens = usage.get("completion_tokens")
-        total_tokens = usage.get("total_tokens")
-        if prompt_tokens is not None:
-            meta["prompt_tokens"] = int(prompt_tokens or 0)
-        if completion_tokens is not None:
-            meta["completion_tokens"] = int(completion_tokens or 0)
-        if total_tokens not in (None, "") and int(total_tokens or 0) > 0:
-            meta["total_tokens"] = int(total_tokens)
-        elif prompt_tokens is not None or completion_tokens is not None:
-            meta["total_tokens"] = int(meta["prompt_tokens"]) + int(meta["completion_tokens"])
-        if prompt_tokens is not None and completion_tokens is not None:
-            meta["usage_status"] = "known"
-        elif prompt_tokens is not None or completion_tokens is not None:
-            meta["usage_status"] = "partial"
+        merge_usage_meta(meta, payload, source_format="openai_chat")
 
     @staticmethod
     def _has_openai_chat_output_delta(

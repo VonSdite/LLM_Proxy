@@ -10,6 +10,43 @@ from src.services.openai_model_pricing import estimate_openai_request_cost_usd
 
 
 class OpenAIModelPricingTests(unittest.TestCase):
+    def test_new_models_and_unverified_aliases(self) -> None:
+        usage = {
+            "usage_status": "known",
+            "prompt_tokens": 100_000,
+            "completion_tokens": 10_000,
+            "cache_read_input_tokens": 20_000,
+            "cache_creation_input_tokens": 0,
+        }
+        for model, expected in (
+            ("gpt-6-cyber", 2.64),
+            ("gpt-6-rosalind", 1.98),
+            ("gpt-6-astra-law", 1.32),
+            ("gpt-rosalind-research", 0.66),
+            ("gpt-rosalind-discovery", 0.66),
+            ("gpt-5.4-mini", 0.1065),
+            ("gpt-5.4-nano", 0.0289),
+        ):
+            with self.subTest(model=model):
+                self.assertAlmostEqual(expected, estimate_openai_request_cost_usd(model, usage))
+        for model in ("gpt-daybreak-blue-latest", "gpt-daybreak-red-latest"):
+            self.assertIsNone(estimate_openai_request_cost_usd(model, usage))
+        self.assertIsNone(estimate_openai_request_cost_usd("gpt-6-cyber", {**usage, "prompt_tokens": 300_000}))
+        self.assertIsNone(estimate_openai_request_cost_usd("gpt-6-cyber", {**usage, "service_tier": "fast"}))
+        self.assertIsNone(
+            estimate_openai_request_cost_usd("gpt-5.5-cyber", {**usage, "cache_creation_input_tokens": 10_000})
+        )
+        self.assertAlmostEqual(
+            0.267,
+            estimate_openai_request_cost_usd("gpt-6.1-sol", {**usage, "cache_creation_input_tokens": 10_000}),
+        )
+        self.assertAlmostEqual(
+            2.69,
+            estimate_openai_request_cost_usd(
+                "gpt-6-astra", {**usage, "service_tier": "fast", "cache_creation_input_tokens": 10_000}
+            ),
+        )
+
     def test_estimates_each_model_with_its_own_long_context_prices(self) -> None:
         usage = {
             "usage_status": "known",
@@ -57,7 +94,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
         self.assertAlmostEqual(0.4, estimate_openai_request_cost_usd("gpt-5.4", usage) or 0)
         self.assertAlmostEqual(4.8, estimate_openai_request_cost_usd("gpt-5.4-pro", usage) or 0)
         self.assertAlmostEqual(2.0, estimate_openai_request_cost_usd("gpt-5.6-cyber", usage) or 0)
-        self.assertAlmostEqual(2.0, estimate_openai_request_cost_usd("gpt-daybreak-red-latest", usage) or 0)
+        self.assertIsNone(estimate_openai_request_cost_usd("gpt-daybreak-red-latest", usage))
 
     def test_uses_fast_mode_prices_for_fast_and_priority_service_tiers(self) -> None:
         usage = {
@@ -167,6 +204,8 @@ class OpenAIModelPricingTests(unittest.TestCase):
         }
 
         self.assertAlmostEqual(1.2, estimate_openai_request_cost_usd("gpt-image-2.5-sunburst", usage) or 0)
+        self.assertAlmostEqual(1.2, estimate_openai_request_cost_usd("gpt-image-2.6-sunburst", usage))
+        self.assertAlmostEqual(1.2, estimate_openai_request_cost_usd("gpt-image-2.6-flare", usage))
         self.assertAlmostEqual(1.2, estimate_openai_request_cost_usd("gpt-image-2.5-flare", usage) or 0)
         self.assertAlmostEqual(
             1.2,

@@ -1,0 +1,100 @@
+id: dsh
+name: DSH
+order: 40
+help:
+  - DeepSeek Harness；默认编辑全局 cordis.patch.yml，Web、Desktop、headless、SDK、ACP 共用，无需重复配置。自定义路径可单独指定某个 profile。
+  - 本页管理 llm-proxy 模型路由，并将其设为新会话的默认模型；保留其他路由和插件配置。
+  - 全局补丁优先于 profile 补丁；启动参数和 DSH 内已保存的设置可能覆盖默认值。profile 需加载对应模型与权限插件，sdk-minimal 不包含完整插件组合。
+files:
+  dsh:
+    path: ~/.dsh/cordis.patch.yml
+    format: yaml
+    homeEnv: DSH_HOME
+    homeRelative: [cordis.patch.yml]
+  dshCredentials:
+    path: ~/.dsh/.credentials.yaml
+    format: yaml
+    homeEnv: DSH_HOME
+    homeRelative: [.credentials.yaml]
+groups: {connection: 2, models: 2, parameters: 4}
+fields:
+  - id: base-url
+    group: connection
+    label: API 地址
+    component: url
+    file: dsh
+    path: [connection, baseURL]
+    role: baseUrl
+    required: true
+    help: [配置 llm-pi-ai 中 llm-proxy 路由的基础地址，通常以 /v1 结尾。]
+  - id: api-key
+    group: connection
+    label: API Key
+    component: secret
+    file: dshCredentials
+    path: [refs, LLM_PROXY_API_KEY]
+    help: [写入独立凭据文件的 LLM_PROXY_API_KEY，模型配置仅保存引用。主动清空时同时移除凭据与引用，适用于无需认证的端点。]
+  - id: model
+    group: models
+    label: 默认主模型
+    component: model
+    file: dsh
+    path: [selection, model]
+    required: true
+    help: [将模型加入 llm-proxy 路由并设为新 Agent 的默认模型；已有会话可以保留自身的模型选择。]
+  - id: protocol
+    group: models
+    label: API 协议
+    component: select
+    file: dsh
+    path: [connection, api]
+    default: openai-completions
+    required: true
+    options:
+      - {value: openai-completions, label: Chat Completions}
+      - {value: openai-responses, label: Responses}
+      - {value: anthropic-messages, label: Anthropic Messages}
+    help: [必须与上游服务支持的协议一致；本服务支持以上三种协议。]
+  - id: permission
+    group: parameters
+    label: 默认权限模式
+    component: select
+    file: dsh
+    path: [permission, defaultPreset]
+    options:
+      - {value: read-only, label: 仅可查看}
+      - {value: workspace-write, label: 工作区内修改}
+      - {value: danger-full-access, label: 完全权限}
+    help:
+      - 设置 permission 插件的 defaultPreset，用于新会话；已有或恢复的会话保留自身权限，可在 DSH 内通过 /permission 切换。
+      - 仅可查看：read-only + ask，默认不允许写文件，需要额外授权时询问。工作区内修改：workspace-write + ask，允许工作区内写入，超出范围时申请授权。
+      - 完全权限：danger-full-access + never，取消 DSH 文件修改限制且不发起审批。never 不是自动批准；仍需审批的操作会被拒绝。
+      - 不设置仅移除此文件的默认预设，保留预设列表及其他配置；没有其他覆盖时，官方常规 Profile 默认使用工作区内修改。Auto 自动审查仅支持当前会话，不作为默认值。
+  - id: effort
+    group: parameters
+    label: 思考强度
+    component: text
+    file: dsh
+    path: [selection, reasoningEffort]
+    help: [填写该模型声明的推理档位，例如 low、medium、high；未声明档位的模型应留空。]
+  - id: context
+    limit: context
+    group: parameters
+    label: 模型上下文
+    component: number
+    file: dsh
+    path: [limits, contextWindow]
+    min: 1
+    help: [声明所选模型的上下文容量，单位 Token；不会扩展上游模型的真实窗口。]
+  - id: output
+    limit: output
+    group: parameters
+    label: 最大输出容量
+    component: number
+    file: dsh
+    path: [limits, maxTokens]
+    min: 1
+    help: [声明所选模型的输出容量，单位 Token；DSH 将其作为模型能力信息，不等同于每次请求的输出上限。]
+constants:
+  dshCredentials:
+    - {path: [version], value: 1}

@@ -1,0 +1,1 @@
+function e(e,t,n){let r=e.find(e=>n(e)===t.id);if(!r||t.id===t.targetId||!e.some(e=>n(e)===t.targetId))return[...e];let i=e.filter(e=>n(e)!==t.id),a=i.findIndex(e=>n(e)===t.targetId);return i.splice(a+ +!!t.after,0,r),i}export{e as t};

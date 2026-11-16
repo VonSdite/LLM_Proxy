@@ -53,6 +53,25 @@ async function add() {
               Chat Completions、Responses 和 Messages 请求会转换为 Codex OAuth
               上游请求，并使用认证文件访问上游。
             </p>
+            <p>
+              模型信息参考：
+              <a
+                href="https://models.router-for.me/models.json"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                模型目录
+              </a>
+              ·
+              <a
+                href="https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                GitHub 源文件
+              </a>
+              。目录信息仅供参考，实际可用性以账号和上游响应为准。
+            </p>
           </template>
           <p>
             这是本地目录，添加 ID
@@ -81,9 +100,7 @@ async function add() {
         添加
       </UiButton>
     </form>
-    <UiAlert v-if="request.error.value || action.error.value || clipboard.error.value">
-      {{ action.error.value || clipboard.error.value || request.error.value }}
-    </UiAlert>
+    <UiAlert v-if="request.error.value">{{ request.error.value }}</UiAlert>
     <div class="catalog-models">
       <div v-for="item in request.data.value?.models" :key="item.id" class="catalog-model">
         <code>{{ item.id }}</code>
@@ -113,7 +130,7 @@ async function add() {
           @click="clipboard.run(() => copyText(item.id), '已复制模型 ID')"
         />
         <UiConfirmPopover
-          :message="`从目录删除 ${item.id}？`"
+          message="是否从目录删除？"
           @confirm="
             action.run((signal) => oauthApi.removeModel(item.id, image, signal), '已删除模型')
           "

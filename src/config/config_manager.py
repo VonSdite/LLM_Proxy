@@ -91,7 +91,8 @@ class ConfigManager:
         return self._read_bool("api_keys.enabled", default=False)
 
     def is_model_mapping_enabled(self) -> bool:
-        return self._read_bool("model_mapping.enabled", default=False)
+        """模型映射始终可用，兼容历史总开关读取入口。"""
+        return True
 
     def is_oauth_verify_ssl_enabled(self) -> bool:
         return self._read_bool("oauth.verify_ssl", default=False)

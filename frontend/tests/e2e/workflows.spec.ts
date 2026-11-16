@@ -1,6 +1,91 @@
 import { expect, test } from '../browser-test'
 import { mockAdmin } from '../browser-fixtures'
 
+test('映射目标文本编辑保留优先级与启用状态，表格草稿保存后提交', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  let saved: unknown
+  await page.route('**/api/model-mappings/smart', async (route) => {
+    saved = route.request().postDataJSON()
+    await route.fulfill({ json: saved })
+  })
+  await page.goto('/model-mappings')
+  await page.getByRole('button', { name: '编辑模型映射 smart', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑模型映射', exact: true })
+  await dialog.getByRole('textbox', { name: '目标 1 优先级', exact: true }).fill('7')
+  await dialog.getByRole('switch', { name: '启用目标 1', exact: true }).click()
+  await dialog.getByRole('button', { name: '编辑', exact: true }).click()
+  const editor = page.getByRole('dialog', { name: '编辑目标模型', exact: true })
+  await expect(editor.locator('input[type=file]')).toHaveCount(0)
+  await editor.locator('.ace_text-input').focus()
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.insertText(' missing/model\nmain/claude-sonnet-4-6\n\nmissing/model ')
+  await editor.getByRole('button', { name: '确定', exact: true }).click()
+  await expect(editor).toHaveCount(0)
+  await expect(dialog.getByRole('combobox', { name: '目标 1', exact: true })).toHaveValue(
+    'missing/model',
+  )
+  await expect(dialog.getByRole('textbox', { name: '目标 2 优先级', exact: true })).toHaveValue('7')
+  await expect(dialog.getByRole('switch', { name: '启用目标 2', exact: true })).not.toBeChecked()
+  await expect(dialog.getByText('当前不可用', { exact: true })).toBeVisible()
+  expect(fixture.calls.filter((call) => call.method !== 'GET')).toEqual([])
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(saved).toMatchObject({
+    targets: [
+      { model_id: 'missing/model', priority: 1, enabled: true },
+      { model_id: 'main/claude-sonnet-4-6', priority: 7, enabled: false },
+    ],
+  })
+})
+
+test('文本编辑模型保留隐藏状态、按行去重排序并在保存 Provider 后提交', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: '编辑 main', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑 Provider', exact: true })
+  await dialog.getByRole('button', { name: '隐藏 claude-sonnet-4-6', exact: true }).click()
+  await dialog.getByRole('button', { name: '编辑', exact: true }).click()
+  const editor = page.getByRole('dialog', { name: '编辑模型列表', exact: true })
+  await expect(editor.locator('.ace_content')).toContainText('claude-sonnet-4-6')
+  await expect(editor.locator('input[type=file]')).toHaveCount(0)
+  const input = editor.locator('.ace_text-input')
+  await input.focus()
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.insertText(' org/new-model\n\nclaude-sonnet-4-6 \norg/new-model')
+  await page.keyboard.press('Escape')
+  const prompt = page.getByRole('dialog', { name: '保存修改？', exact: true })
+  await expect(prompt).toBeVisible()
+  await prompt.getByRole('button', { name: '继续编辑', exact: true }).click()
+  await editor.getByRole('button', { name: '确定', exact: true }).click()
+  await expect(editor).toHaveCount(0)
+  const models = dialog.locator('input[aria-label^="模型 "]')
+  await expect(models).toHaveCount(2)
+  await expect(models.nth(0)).toHaveValue('org/new-model')
+  await expect(models.nth(1)).toHaveValue('claude-sonnet-4-6')
+  await expect(
+    dialog.getByRole('button', { name: '显示 claude-sonnet-4-6', exact: true }),
+  ).toBeVisible()
+  await expect(
+    dialog.getByRole('button', { name: '隐藏 org/new-model', exact: true }),
+  ).toBeVisible()
+  await dialog.getByRole('button', { name: '编辑', exact: true }).click()
+  await editor.locator('.ace_text-input').focus()
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.insertText('discarded-model')
+  await editor.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(models.nth(0)).toHaveValue('org/new-model')
+  expect(fixture.calls.filter((call) => call.method !== 'GET')).toEqual([])
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(
+    fixture.calls.find((call) => call.path === '/api/providers/main' && call.method === 'PUT')
+      ?.body,
+  ).toMatchObject({
+    model_list: ['org/new-model', 'claude-sonnet-4-6'],
+    hidden_model_list: ['claude-sonnet-4-6'],
+  })
+})
+
 test('Provider 拉取模型使用当前表单，嵌套选择后可测试并保存', async ({ page }) => {
   const fixture = await mockAdmin(page)
   let fetchedUrl = ''

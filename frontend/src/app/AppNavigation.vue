@@ -18,14 +18,14 @@ const initial = computed(() =>
 const navigation = computed(() =>
   [
     { path: '/', label: 'Provider', icon: 'server', show: true },
-    { path: '/oauth', label: 'OAuth', icon: 'shield', show: session.context?.features.oauth },
+    { path: '/oauth', label: 'OAuth', icon: 'shield', show: true },
     {
       path: '/model-mappings',
       label: '模型映射',
       icon: 'network',
-      show: session.context?.features.model_mapping,
+      show: true,
     },
-    { path: '/api-keys', label: 'API Key', icon: 'key', show: session.context?.features.api_keys },
+    { path: '/api-keys', label: 'API Key', icon: 'key', show: true },
     { path: '/agents', label: 'Agent 配置', icon: 'terminal', show: true },
     { path: '/users', label: '用户', icon: 'users', show: true },
     { path: '/statistics', label: '统计', icon: 'chart', show: true },

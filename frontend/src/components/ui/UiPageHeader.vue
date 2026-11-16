@@ -8,6 +8,7 @@ defineProps<{ title: string; count?: number }>()
       <span v-if="count !== undefined" class="ui-page-header-count">{{ count }}</span>
       <slot name="help" />
     </div>
+    <div v-if="$slots.controls" class="ui-page-header-controls"><slot name="controls" /></div>
     <div v-if="$slots.navigation" class="ui-page-header-navigation">
       <slot name="navigation" />
     </div>
@@ -25,6 +26,7 @@ defineProps<{ title: string; count?: number }>()
 }
 
 .ui-page-header-title,
+.ui-page-header-controls,
 .ui-page-header-actions {
   display: flex;
   align-items: center;
@@ -33,6 +35,11 @@ defineProps<{ title: string; count?: number }>()
 
 .ui-page-header-title {
   min-width: 0;
+}
+
+.ui-page-header-controls {
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .ui-page-header-count {

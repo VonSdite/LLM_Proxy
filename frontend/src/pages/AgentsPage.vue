@@ -24,6 +24,10 @@ import {
   notify,
 } from '@/components/ui'
 import { useAgentWorkspace } from '@/features/agents/useAgentWorkspace'
+import { useAgentTabs } from '@/features/agents/useAgentTabs'
+import { AGENT_DEFINITIONS, agentDefinition } from '@/features/agents/registry'
+import AgentExtensionForm from '@/features/agents/AgentExtensionForm.vue'
+import AgentTabSettings from '@/features/agents/AgentTabSettings.vue'
 import {
   defaultBaseUrl,
   isOwnServiceUrl,
@@ -34,6 +38,7 @@ import AgentModelFields from '@/features/agents/AgentModelFields.vue'
 import AgentParameters from '@/features/agents/AgentParameters.vue'
 import AgentRuntime from '@/features/agents/AgentRuntime.vue'
 import AgentPreview from '@/features/agents/AgentPreview.vue'
+import { agentVersionHelp } from '@/features/agents/versionHelp'
 import MachineDialog from '@/features/agents/MachineDialog.vue'
 import PathDialog from '@/features/agents/PathDialog.vue'
 import ApiKeyField from '@/features/shared/ApiKeyField.vue'
@@ -59,7 +64,7 @@ const {
 const search = ref('')
 const machineDialog = ref(false)
 const editingMachine = ref<AgentMachine>()
-const pathAgent = ref<AgentId>()
+const pathAgent = ref<FileTarget>()
 const refreshConfirm = ref(false)
 const raw = shallowRef<{ source: FileSource; id: string; agent: AgentId }>()
 const fileLoading = ref(false)
@@ -69,11 +74,13 @@ const agentForm = ref<HTMLFormElement>()
 function save() {
   if (agentForm.value?.reportValidity()) void workspace.save()
 }
-const tabs = [
-  { value: 'claude', label: 'Claude' },
-  { value: 'codex', label: 'Codex' },
-  { value: 'opencode', label: 'opencode' },
-]
+const agentTabs = useAgentTabs(
+  activeAgent,
+  computed(() => !!bootstrap.value),
+)
+const tabs = computed(() =>
+  agentTabs.visible.value.map((item) => ({ value: item.id, label: item.label })),
+)
 const visibleMachines = computed(() =>
   machines.value.filter((item) =>
     `${item.name} ${item.host} ${item.user}`.toLowerCase().includes(search.value.toLowerCase()),
@@ -85,9 +92,8 @@ const ownService = computed(
     !!draft.value &&
     isOwnServiceUrl(draft.value.baseUrl, bootstrap.value, machines.value),
 )
-const paths = computed<FileTarget[]>(() =>
-  activeAgent.value === 'codex' ? ['codex', 'codexAuth'] : [activeAgent.value],
-)
+const definition = computed(() => agentDefinition(activeAgent.value))
+const paths = computed<FileTarget[]>(() => definition.value?.files || [])
 const addressOptions = computed(() => {
   if (!bootstrap.value || !machine.value) return []
   const context = bootstrap.value
@@ -129,10 +135,10 @@ function confirmRefresh() {
   refreshConfirm.value = false
   void workspace.refresh()
 }
-async function savePath(agent: AgentId, path: string) {
+async function savePath(agent: FileTarget, path: string) {
   const result = await agentsApi.path(selectedId.value, agent, path, lifetime.signal)
   if (lifetime.signal.aborted) return
-  workspace.install(result, agent)
+  workspace.install(result, AGENT_DEFINITIONS.find((item) => item.files.includes(agent))!.id)
   notify(path ? '路径已保存' : '已恢复默认路径')
 }
 async function openFile(target: FileTarget) {
@@ -259,12 +265,24 @@ function trustHost() {
       </aside>
       <section class="agent-panel surface">
         <header class="agent-panel-toolbar">
-          <UiSegmented
-            :model-value="activeAgent"
-            :items="tabs.map((tab) => ({ ...tab, disabled: saving }))"
-            label="Agent 类型"
-            @update:model-value="activeAgent = $event as AgentId"
-          />
+          <div class="actions agent-tab-actions">
+            <UiSegmented
+              :model-value="activeAgent"
+              :items="tabs.map((tab) => ({ ...tab, disabled: saving }))"
+              label="Agent 类型"
+              @update:model-value="activeAgent = $event as AgentId"
+            />
+            <AgentTabSettings
+              :items="agentTabs.items.value"
+              :disabled="saving || editorOpen"
+              @change="agentTabs.apply"
+            />
+            <UiHelpPopover
+              v-if="definition?.help?.length && !['opencode', 'opencode_v2'].includes(activeAgent)"
+              :label="`${definition.label} 说明`"
+              :text="definition.help"
+            />
+          </div>
           <div class="actions">
             <UiButton
               v-if="machine && !machine.local && !machine.connected"
@@ -284,24 +302,26 @@ function trustHost() {
             >
               断开
             </UiButton>
-            <UiButton
+            <UiIconButton
               icon="refresh"
+              label="重新读取"
               size="sm"
               :disabled="!ready || saving"
               :loading="loading"
               @click="refresh"
-            >
-              重新读取
-            </UiButton>
+            />
             <UiConfirmPopover
               v-if="machine && !machine.local"
-              :message="`删除机器 ${machine.name}？`"
+              message="是否删除？"
               @confirm="workspace.removeMachine(machine.id)"
             >
               <UiIconButton icon="delete" label="删除机器" :disabled="saving" />
             </UiConfirmPopover>
           </div>
         </header>
+        <UiAlert v-for="failure in bootstrap.extensionErrors || []" :key="failure.id">
+          {{ failure.id }}：{{ failure.message }}
+        </UiAlert>
         <UiEmptyState
           v-if="!ready || !draft || !state"
           :loading="loading || machine?.connecting"
@@ -321,14 +341,14 @@ function trustHost() {
           <div class="agent-paths">
             <template v-for="target in paths" :key="target">
               <ConfigPathRow
-                :path="state.snapshot.files[target].path"
-                :exists="state.snapshot.files[target].exists"
+                :path="state.snapshot.files[target]!.path"
+                :exists="state.snapshot.files[target]!.exists"
                 :disabled="saving || fileLoading"
                 @open="openFile(target)"
-                @settings="pathAgent = target === 'codexAuth' ? 'codex' : target"
+                @settings="pathAgent = target"
               />
-              <UiAlert v-if="state.snapshot.files[target].parseError">
-                {{ state.snapshot.files[target].parseError }}
+              <UiAlert v-if="state.snapshot.files[target]!.parseError">
+                {{ state.snapshot.files[target]!.parseError }}
                 <UiButton variant="ghost" size="sm" @click="openFile(target)">编辑文件</UiButton>
               </UiAlert>
             </template>
@@ -340,62 +360,80 @@ function trustHost() {
             :inert="saving || undefined"
             @submit.prevent="save"
           >
-            <div class="form-grid">
-              <UiField
-                label="API 地址"
-                :help="[
-                  '填写目标 Agent 实际能访问的模型服务地址。Claude 通常使用根地址，Codex / opencode 使用带 /v1 的基础地址，不填写 /chat/completions 等请求端点。',
-                  '本服务地址使用模型下拉；外部地址手动填写该服务的模型 ID。远程 Agent 的 127.0.0.1 指远程机器自身，应选择它能访问的网卡或域名地址。',
-                  ...(unreachable
-                    ? [
-                        '当前 LLM Proxy 仅监听回环地址，远程机器可能无法直连。可在系统设置调整监听地址并重启，或填写远程可达的反向代理地址。',
-                      ]
-                    : []),
-                ]"
-              >
-                <template #label>
-                  <UiIcon
-                    v-if="unreachable"
-                    name="alert"
-                    class="danger"
-                    :size="14"
-                    aria-label="本服务仅监听回环地址，远程机器可能无法访问"
-                  />
-                </template>
-                <UiCombobox
-                  :model-value="draft.baseUrl"
-                  :options="addressOptions"
-                  allow-custom
-                  placeholder="输入 API 地址"
-                  @update:model-value="setBaseUrl"
-                />
-              </UiField>
-              <UiField
-                label="API Key"
-                :help="
-                  ownService && bootstrap.apiKeyEnabled
-                    ? '当前地址为本服务且已启用 API Key 校验。聚焦后可选择已创建的 Key，也可手动输入；该 Key 还需有目标模型的权限与剩余配额。点击保存后写入 Agent 文件，预览始终打码。'
-                    : '填写所选 API 服务的访问凭据；不校验 Key 的服务可留空。显式清空已有值后的操作见保存预览，确认保存后才修改目标文件。'
-                "
-              >
-                <ApiKeyField
-                  :model-value="draft.apiKey"
-                  :candidates="bootstrap.apiKeys"
-                  :offer-candidates="ownService && bootstrap.apiKeyEnabled"
-                  @update:model-value="setKey"
-                />
-              </UiField>
-            </div>
-            <AgentModelFields
-              :agent="activeAgent"
+            <AgentExtensionForm
+              v-if="definition && !definition.legacy && machine"
+              :definition="definition"
               :draft="draft"
-              :own-service="ownService"
               :bootstrap="bootstrap"
+              :machine="machine"
+              :machines="machines"
             />
-            <AgentParameters :agent="activeAgent" :draft="draft" :bootstrap="bootstrap" />
-            <AgentRuntime :agent="activeAgent" :draft="draft" />
+            <template v-else>
+              <div class="form-grid">
+                <UiField
+                  label="API 地址"
+                  :help="[
+                    '填写目标 Agent 实际能访问的模型服务地址。Claude 通常使用根地址，Codex / opencode 使用带 /v1 的基础地址，不填写 /chat/completions 等请求端点。',
+                    '本服务地址使用模型下拉；外部地址手动填写该服务的模型 ID。远程 Agent 的 127.0.0.1 指远程机器自身，应选择它能访问的网卡或域名地址。',
+                    ...agentVersionHelp(activeAgent, 'baseUrl'),
+                    ...(unreachable
+                      ? [
+                          '当前 LLM Proxy 仅监听回环地址，远程机器可能无法直连。可在系统设置调整监听地址并重启，或填写远程可达的反向代理地址。',
+                        ]
+                      : []),
+                  ]"
+                >
+                  <template #label>
+                    <UiIcon
+                      v-if="unreachable"
+                      name="alert"
+                      class="danger"
+                      :size="14"
+                      aria-label="本服务仅监听回环地址，远程机器可能无法访问"
+                    />
+                  </template>
+                  <UiCombobox
+                    :model-value="draft.baseUrl"
+                    :options="addressOptions"
+                    allow-custom
+                    placeholder="输入 API 地址"
+                    @update:model-value="setBaseUrl"
+                  />
+                </UiField>
+                <UiField
+                  label="API Key"
+                  :help="[
+                    ownService && bootstrap.apiKeyEnabled
+                      ? '当前地址为本服务且已启用 API Key 校验。聚焦后可选择已创建的 Key，也可手动输入；该 Key 还需有目标模型的权限与剩余配额。点击保存后写入 Agent 文件，预览始终打码。'
+                      : '填写所选 API 服务的访问凭据；不校验 Key 的服务可留空。显式清空已有值后的操作见保存预览，确认保存后才修改目标文件。',
+                    ...agentVersionHelp(activeAgent, 'apiKey'),
+                  ]"
+                >
+                  <ApiKeyField
+                    :model-value="draft.apiKey"
+                    :candidates="bootstrap.apiKeys"
+                    :offer-candidates="ownService && bootstrap.apiKeyEnabled"
+                    @update:model-value="setKey"
+                  />
+                </UiField>
+              </div>
+              <AgentModelFields
+                :agent="activeAgent"
+                :draft="draft"
+                :own-service="ownService"
+                :bootstrap="bootstrap"
+              />
+              <AgentParameters :agent="activeAgent" :draft="draft" :bootstrap="bootstrap" />
+              <AgentRuntime :agent="activeAgent" :draft="draft" />
+            </template>
           </form>
-          <AgentPreview :preview="preview" :saving="saving" :disabled="!ready" @save="save" />
+          <AgentPreview
+            :agent="activeAgent"
+            :preview="preview"
+            :saving="saving"
+            :disabled="!ready || loading"
+            @save="save"
+          />
         </template>
       </section>
     </div>
@@ -410,7 +448,7 @@ function trustHost() {
       v-if="pathAgent && state"
       :open="true"
       :agent="pathAgent"
-      :file="state.snapshot.files[pathAgent]"
+      :file="state.snapshot.files[pathAgent]!"
       :save="savePath"
       @update:open="!$event && (pathAgent = undefined)"
     />
@@ -420,11 +458,12 @@ function trustHost() {
       :open="editorOpen"
       :source="raw.source"
       :language="
-        raw.source.target === 'codex'
+        definition?.fileFormats?.[raw.source.target] ||
+        (raw.source.target === 'codex'
           ? 'toml'
           : /\.jsonc$/i.test(raw.source.path)
             ? 'jsonc'
-            : 'json'
+            : 'json')
       "
       :save="saveFile"
       :load-backup="loadBackup"
@@ -554,6 +593,7 @@ function trustHost() {
 
 .agent-panel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-6);
   padding: var(--space-6);
   min-width: 0;
@@ -565,6 +605,12 @@ function trustHost() {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--space-3);
+}
+
+.agent-tab-actions {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
 }
 
 .agent-paths {

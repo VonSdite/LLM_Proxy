@@ -129,7 +129,7 @@ test('Provider 键盘排序保留焦点和选择，失败可重试，全部视�
   await selected.click()
   const handle = page.getByRole('button', { name: '拖动 gateway 排序', exact: true })
   await handle.press('End')
-  await expect(page.getByRole('alert')).toContainText('排序暂时无法保存')
+  await expect(page.locator('.ui-toast--danger')).toContainText('排序暂时无法保存')
   await expect(page.locator('.provider-name').first()).toContainText('gateway')
   await expect(handle).toBeFocused()
   await expect(selected).toBeChecked()
@@ -233,14 +233,17 @@ test('Provider 模型草稿和映射目标共用排序交互，保存包含所�
   const dialog = page.getByRole('dialog', { name: '编辑模型映射', exact: true })
   await expect(dialog.getByRole('button', { name: /^(上移|下移)/ })).toHaveCount(0)
   const firstHandle = (await dialog
-    .getByRole('button', { name: '拖动第 1 项', exact: true })
+    .getByRole('button', { name: '拖动 1 排序', exact: true })
     .boundingBox())!
-  const lastTarget = (await dialog.getByRole('listitem').last().boundingBox())!
+  const lastTarget = (await dialog.locator('tbody tr[data-sort-id]').last().boundingBox())!
   await page.mouse.move(firstHandle.x + 16, firstHandle.y + 16)
   await page.mouse.down()
   await page.mouse.move(firstHandle.x + 16, firstHandle.y + 28)
   await page.mouse.move(firstHandle.x + 16, lastTarget.y + lastTarget.height + 12, { steps: 12 })
-  await expect(dialog.getByRole('listitem').last()).toHaveAttribute('data-drop-position', 'after')
+  await expect(dialog.locator('tbody tr[data-sort-id]').last()).toHaveAttribute(
+    'data-drop-position',
+    'after',
+  )
   await page.mouse.up()
   await expect(dialog.getByRole('combobox', { name: '目标 3', exact: true })).toHaveValue(
     'main/model-a',

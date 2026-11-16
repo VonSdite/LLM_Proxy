@@ -62,8 +62,10 @@ describe('页面操作生命周期', () => {
     const { wrapper, action } = harness()
     expect(await action.run(() => Promise.reject(new Error('保存失败')))).toBe(false)
     expect(action.error.value).toBe('保存失败')
+    expect(notify).toHaveBeenCalledWith('保存失败', 'danger')
     expect(await action.run(() => Promise.resolve())).toBe(true)
     expect(action.error.value).toBe('')
+    expect(notify).toHaveBeenCalledTimes(1)
     expect(await action.run(() => Promise.reject(new DOMException('Canceled', 'AbortError')))).toBe(
       false,
     )

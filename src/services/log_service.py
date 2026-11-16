@@ -48,6 +48,15 @@ class LogService:
         auth_file_name: str | None = None,
         auth_account_id: str | None = None,
         estimated_cost_usd: float | None = None,
+        outcome: str | None = None,
+        http_status: int | None = None,
+        error_type: str | None = None,
+        is_stream: bool | None = None,
+        duration_ms: float | None = None,
+        first_token_latency_ms: float | None = None,
+        tps: float | None = None,
+        tps_unavailable_reason: str | None = None,
+        upstream_attempts: list[dict[str, Any]] | None = None,
     ) -> int | None:
         """记录一次请求日志。"""
         try:
@@ -69,6 +78,15 @@ class LogService:
                 auth_file_name=auth_file_name,
                 auth_account_id=auth_account_id,
                 estimated_cost_usd=estimated_cost_usd,
+                outcome=outcome,
+                http_status=http_status,
+                error_type=error_type,
+                is_stream=is_stream,
+                duration_ms=duration_ms,
+                first_token_latency_ms=first_token_latency_ms,
+                tps=tps,
+                tps_unavailable_reason=tps_unavailable_reason,
+                upstream_attempts=upstream_attempts,
             )
             self._logger.info(
                 "Request log saved: id=%s model=%s target_model_id=%s response_model=%s total_tokens=%s "
@@ -86,6 +104,14 @@ class LogService:
             self._logger.error(f"Failed to log request: {exc}")
             return None
 
+    def get_overview(
+        self, start_date, end_date, username=None, request_model=None, *, response_model=None, ip_address=None
+    ):
+        """日聚合用量和明细中的可观测性能分别保留统计口径。"""
+        return self._repository.get_overview(
+            start_date, end_date, username, request_model, response_model=response_model, ip_address=ip_address
+        )
+
     def get_statistics(
         self,
         start_date: str | None = None,
@@ -94,6 +120,8 @@ class LogService:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """获取统计聚合数据。"""
         try:
@@ -102,17 +130,31 @@ class LogService:
                 end_date,
                 username=username,
                 request_model=request_model,
+                response_model=response_model,
+                ip_address=ip_address,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
             result = [
                 {
                     "request_model": row["request_model"],
+                    **{
+                        key: row[key]
+                        for key in (
+                            "success_count",
+                            "error_count",
+                            "cancelled_count",
+                            "unknown_count",
+                            "recorded_count",
+                            "success_rate",
+                        )
+                    },
                     "target_model_id": row["target_model_id"],
                     "response_model": row["response_model"],
                     "ip_address": row["ip_address"],
                     "username": row["username"],
                     "request_count": row["request_count"],
+                    **{key: value for key, value in row.items() if key.startswith("upstream_")},
                     "total_tokens": row["total_tokens"],
                     "prompt_tokens": row["prompt_tokens"],
                     "completion_tokens": row["completion_tokens"],
@@ -149,6 +191,8 @@ class LogService:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """获取用户维度的用量汇总。"""
         try:
@@ -157,6 +201,8 @@ class LogService:
                 end_date,
                 username=username,
                 request_model=request_model,
+                response_model=response_model,
+                ip_address=ip_address,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -164,6 +210,7 @@ class LogService:
                 {
                     "username": row["username"],
                     "request_count": row["request_count"],
+                    **{key: value for key, value in row.items() if key.startswith("upstream_")},
                     "total_tokens": row["total_tokens"],
                     "prompt_tokens": row["prompt_tokens"],
                     "completion_tokens": row["completion_tokens"],
@@ -174,6 +221,17 @@ class LogService:
                     "cache_hit_rate": row["cache_hit_rate"],
                     "cache_usage_status": row["cache_usage_status"],
                     "ip_count": row["ip_count"],
+                    **{
+                        key: row[key]
+                        for key in (
+                            "success_count",
+                            "error_count",
+                            "cancelled_count",
+                            "unknown_count",
+                            "recorded_count",
+                            "success_rate",
+                        )
+                    },
                     "last_request_date": row["last_request_date"],
                 }
                 for row in rows
@@ -202,6 +260,8 @@ class LogService:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """获取 API Key 维度的时间范围用量汇总。"""
         try:
@@ -210,6 +270,8 @@ class LogService:
                 end_date,
                 username=username,
                 request_model=request_model,
+                response_model=response_model,
+                ip_address=ip_address,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -240,6 +302,8 @@ class LogService:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """获取请求日志分页数据。"""
         try:
@@ -250,6 +314,8 @@ class LogService:
                 end_date,
                 username=username,
                 request_model=request_model,
+                response_model=response_model,
+                ip_address=ip_address,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -273,6 +339,8 @@ class LogService:
         request_model: str | Sequence[str] | None = None,
         sort_key: str | None = None,
         sort_direction: str | None = None,
+        response_model: str | Sequence[str] | None = None,
+        ip_address: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """获取完整请求日志列表。"""
         try:
@@ -281,6 +349,8 @@ class LogService:
                 end_date,
                 username=username,
                 request_model=request_model,
+                response_model=response_model,
+                ip_address=ip_address,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -296,6 +366,7 @@ class LogService:
         username: str | Sequence[str] | None = None,
         request_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        response_model: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """导出统计迁移包。"""
         request_logs = self._repository.export_request_logs(
@@ -303,12 +374,15 @@ class LogService:
             end_date=end_date,
             username=username,
             request_model=request_model,
+            response_model=response_model,
+            ip_address=ip_address,
         )
         daily_stats = self._repository.export_daily_stats(
             start_date=start_date,
             end_date=end_date,
             username=username,
             request_model=request_model,
+            response_model=response_model,
             ip_address=ip_address,
         )
         self._logger.debug(
@@ -323,7 +397,7 @@ class LogService:
             len(daily_stats),
         )
         return {
-            "version": 4,
+            "version": 6,
             "kind": "llm_proxy.statistics",
             "request_logs": request_logs,
             "daily_request_stats": daily_stats,
@@ -380,6 +454,10 @@ class LogService:
             result.get("daily_request_stats_merged_count", 0),
         )
         return result
+
+    def get_filter_options(self) -> dict[str, list[str]]:
+        """读取统计筛选候选。"""
+        return self._repository.get_filter_options()
 
     def get_unique_usernames(self) -> list[str]:
         """获取有日志记录的用户名列表。"""

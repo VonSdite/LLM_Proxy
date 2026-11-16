@@ -30,16 +30,10 @@ from .agent_config_documents import (
     MISSING,
     MODEL_LIMIT_PRESETS,
     at_path,
-    desired_fields,
-    display_path,
-    edit_document,
-    parse_document,
     value_hash,
-    visible_fields,
 )
+from .agent_extensions import AgentExtensions
 
-TARGETS = ("claude", "codex", "codexAuth", "opencode")
-AGENTS = ("claude", "codex", "opencode")
 SESSION_TTL = 30 * 60
 PREVIEW_TTL = 5 * 60
 
@@ -68,6 +62,7 @@ class AgentConfigService:
         claude_oauth_service,
         *,
         home: Path | None = None,
+        agents_directory: Path | None = None,
     ):
         self.ctx = ctx
         self.providers = provider_manager
@@ -76,6 +71,9 @@ class AgentConfigService:
         self.codex_oauth = codex_oauth_service
         self.claude_oauth = claude_oauth_service
         self.local = LocalConfigFiles(home)
+        self.extensions = AgentExtensions(agents_directory) if agents_directory else AgentExtensions()
+        for error in self.extensions.errors:
+            ctx.logger.error("Agent extension %s failed to load: %s", error["id"], error["message"])
         self.repository = AgentConfigRepository(
             Path(ctx.config_manager.get_database_path()).resolve().parent / "agent-config"
         )
@@ -320,30 +318,14 @@ class AgentConfigService:
 
     def _paths(self, machine_id, files, overrides=None):
         path_module = os.path if files.local else posixpath
-        join = path_module.join
-        paths = {
-            "claude": join(files.home, ".claude", "settings.json"),
-            "codex": join(files.home, ".codex", "config.toml"),
-            "codexAuth": join(files.home, ".codex", "auth.json"),
-            "opencode": join(files.home, ".config", "opencode", "opencode.json"),
-        }
-        if files.local:
-            if os.environ.get("CODEX_HOME"):
-                paths.update(
-                    codex=join(os.environ["CODEX_HOME"], "config.toml"),
-                    codexAuth=join(os.environ["CODEX_HOME"], "auth.json"),
-                )
-            if os.environ.get("CLAUDE_CONFIG_DIR"):
-                paths["claude"] = join(os.environ["CLAUDE_CONFIG_DIR"], "settings.json")
+        paths = self.extensions.paths(files, path_module)
         overrides = self.state["paths"].get(machine_id, {}) if overrides is None else overrides
         result = {}
         for target, path in paths.items():
-            agent = "codex" if target == "codexAuth" else target
-            override = overrides.get(agent, "")
-            actual = join(override, path_module.basename(path)) if agent == "codex" and override else override
+            override = overrides.get(target, "")
             result[target] = {
                 "defaultPath": files.resolve(path),
-                "path": files.resolve(actual or path),
+                "path": files.resolve(override or path),
                 "customPath": override,
                 "defaultDirectory": files.resolve(path_module.dirname(path)),
             }
@@ -392,6 +374,8 @@ class AgentConfigService:
                 else []
             )
             return {
+                "agents": self.extensions.public(),
+                "extensionErrors": self.extensions.errors,
                 "machines": self.list_machines(owner),
                 "providers": providers,
                 "models": models,
@@ -421,7 +405,7 @@ class AgentConfigService:
                 raw = files.read(info["path"])
                 error = ""
                 try:
-                    managed = visible_fields(target, parse_document(target, _text(raw)))
+                    managed = self.extensions.visible(target, self.extensions.parse(target, _text(raw)))
                 except ValueError as exc:
                     managed, error = {}, str(exc)
                 result[target] = {
@@ -450,7 +434,7 @@ class AgentConfigService:
             self._files(owner, machine_id)
             target = payload.get("target", "opencode")
             path = payload.get("path", "")
-            if target not in AGENTS or not isinstance(path, str):
+            if target not in self.extensions.files or not isinstance(path, str):
                 raise AgentConfigError("配置路径参数无效")
             path = path.strip()
             if len(path) > 4096 or any(ord(char) < 32 for char in path):
@@ -459,12 +443,14 @@ class AgentConfigService:
                 raise AgentConfigError("Claude 路径需指向 .json 文件")
             if path and target == "opencode" and Path(path).suffix.lower() not in (".json", ".jsonc"):
                 raise AgentConfigError("opencode 路径需指向 .json 或 .jsonc 文件")
-            if (
-                path
-                and target == "codex"
-                and path.replace("\\", "/").rsplit("/", 1)[-1] in ("config.toml", "auth.json")
-            ):
-                raise AgentConfigError("请填写包含 config.toml 和 auth.json 的目录")
+            if path and target == "codex" and Path(path).suffix.lower() != ".toml":
+                raise AgentConfigError("Codex 配置路径需指向 .toml 文件")
+            if path and target == "codexAuth" and Path(path).suffix.lower() != ".json":
+                raise AgentConfigError("Codex 认证路径需指向 .json 文件")
+            file_format = self.extensions.files[target]["format"]
+            suffixes = {"yaml": (".yaml", ".yml"), "toml": (".toml",), "json": (".json",), "jsonc": (".json", ".jsonc")}
+            if path and Path(path).suffix.lower() not in suffixes[file_format]:
+                raise AgentConfigError("配置路径需指向 " + " / ".join(suffixes[file_format]) + " 文件")
             next_state = deepcopy(self.state)
             overrides = next_state["paths"].setdefault(machine_id, {})
             if path:
@@ -528,7 +514,7 @@ class AgentConfigService:
 
     def preview(self, owner, machine_id, agent, payload, *, origin=""):
         with self.lock:
-            if agent not in AGENTS:
+            if agent not in self.extensions.agents:
                 raise AgentConfigError("未知 Agent 类型")
             files, session = self._files(owner, machine_id)
             paths = self._paths(machine_id, files)
@@ -545,14 +531,13 @@ class AgentConfigService:
                     and not self._is_service_url(draft.get("baseUrl"), origin)
                 ):
                     catalog = []
-                desired = desired_fields(agent, draft, catalog)
+                desired = self.extensions.desired(agent, draft, catalog)
             raw_inputs = payload.get("raw")
             if "raw" in payload and (
-                not isinstance(raw_inputs, dict)
-                or set(raw_inputs) - ({"codex", "codexAuth"} if agent == "codex" else {agent})
+                not isinstance(raw_inputs, dict) or set(raw_inputs) - set(self.extensions.agents[agent]["files"])
             ):
                 raise AgentConfigError("文件编辑目标无效")
-            targets = ("codex", "codexAuth") if agent == "codex" else (agent,)
+            targets = tuple(self.extensions.agents[agent]["files"])
             if raw_inputs is not None:
                 targets = tuple(target for target in targets if target in raw_inputs)
             planned, rows = [], []
@@ -568,7 +553,7 @@ class AgentConfigService:
                     if not isinstance(content, str) or len(content.encode()) > 2 * 1024 * 1024:
                         raise AgentConfigError("配置文件内容无效或超过 2 MiB")
                     content = content.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
-                    parse_document(target, content)
+                    self.extensions.parse(target, content)
                     after = (content.rstrip() + "\n").encode()
                     updates = ownership
                     rows.append(
@@ -581,11 +566,16 @@ class AgentConfigService:
                         }
                     )
                 else:
-                    data = parse_document(target, _text(before))
+                    data = self.extensions.parse(target, _text(before))
                     fields = desired[target]
                     edits = dict(fields)
                     for old in ownership:
+                        if not self.extensions.agents[agent].get("legacy"):
+                            continue
                         old_path = tuple(old["path"])
+                        # V1 表单不清理历史版本登记过的 V2 权限字段。
+                        if target == "opencode" and old_path and old_path[0] == "permissions":
+                            continue
                         current = at_path(data, old_path)
                         if old_path not in fields and current is not MISSING and value_hash(current) == old["hash"]:
                             edits[old_path] = MISSING
@@ -597,17 +587,18 @@ class AgentConfigService:
                             kind = "add"
                         else:
                             kind = "same" if current == value and type(current) is type(value) else "change"
-                        secret = any(name in path_parts[-1].lower() for name in ("token", "api_key", "apikey"))
+                        secret = self.extensions.secret(target, path_parts)
                         rows.append(
                             {
-                                "path": display_path(path_parts),
+                                "path": self.extensions.display_path(target, path_parts),
+                                "_order": self.extensions.preview_order(agent, target, path_parts, draft),
                                 "file": posixpath.basename(path.replace("\\", "/")),
                                 "kind": kind,
                                 "current": None
                                 if current is MISSING
                                 else "••••••••"
                                 if secret and current
-                                else current,
+                                else self.extensions.preview_value(current),
                                 "next": None if value is MISSING else "••••••••" if secret and value else value,
                             }
                         )
@@ -621,7 +612,7 @@ class AgentConfigService:
                             and (at_path(data, path) != value or type(at_path(data, path)) is not type(value))
                         )
                     }
-                    after = edit_document(target, text, actual_edits).encode() if actual_edits else before
+                    after = self.extensions.edit(target, text, actual_edits).encode() if actual_edits else before
                     updates = [
                         {"path": list(path), "hash": value_hash(value)}
                         for path, value in fields.items()
@@ -641,6 +632,9 @@ class AgentConfigService:
                         "ownershipAfter": updates,
                     }
                 )
+            rows.sort(key=lambda row: row.get("_order", 10000))
+            for row in rows:
+                row.pop("_order", None)
             token = secrets.token_urlsafe(32)
             if len(self.previews) >= 40:
                 self.previews.pop(next(iter(self.previews)))
@@ -725,12 +719,12 @@ class AgentConfigService:
 
     def read_files(self, owner, machine_id, agent, backup=0):
         with self.lock:
-            if agent not in AGENTS or not isinstance(backup, int) or not 0 <= backup <= 5:
+            if agent not in self.extensions.agents or not isinstance(backup, int) or not 0 <= backup <= 5:
                 raise AgentConfigError("未知文件或备份编号")
             files, _ = self._files(owner, machine_id)
             paths = self._paths(machine_id, files)
             result = []
-            for target in ("codex", "codexAuth") if agent == "codex" else (agent,):
+            for target in self.extensions.agents[agent]["files"]:
                 path = paths[target]["path"]
                 raw = files.read(path + (f".bak.{backup}" if backup else ""))
                 result.append(

@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref } from 'vue'
 import UiIconButton from './UiIconButton.vue'
 import UiTooltip from './UiTooltip.vue'
-defineProps<{ count: number; disabled?: boolean }>()
+defineProps<{ count: number; disabled?: boolean; embedded?: boolean }>()
 const emit = defineEmits<{ clear: [] }>()
 const root = ref<HTMLElement>()
 const previousFocus = document.activeElement
@@ -17,7 +17,13 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <div ref="root" class="ui-selection-bar" role="region" aria-label="批量操作">
+  <div
+    ref="root"
+    class="ui-selection-bar"
+    :class="{ 'ui-selection-bar-embedded': embedded }"
+    role="region"
+    aria-label="批量操作"
+  >
     <div class="ui-selection-bar-summary">
       <span class="number" aria-live="polite">已选 {{ count }} 项</span>
       <UiTooltip text="清空选择">
@@ -67,6 +73,33 @@ onBeforeUnmount(() => {
 
 .ui-selection-bar-clear {
   color: var(--muted);
+}
+
+.ui-selection-bar-embedded {
+  flex: none;
+  flex-wrap: nowrap;
+  min-height: var(--control);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  container-type: normal;
+  background: transparent;
+}
+
+.ui-selection-bar-embedded .ui-selection-bar-actions {
+  flex-wrap: nowrap;
+  width: auto;
+}
+
+@container (height >= 80px) {
+  .ui-selection-bar-embedded {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  .ui-selection-bar-embedded .ui-selection-bar-actions {
+    flex-wrap: wrap;
+  }
 }
 
 @container (max-width: 560px) {

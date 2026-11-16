@@ -10,9 +10,11 @@ import UiIcon from './UiIcon.vue'
       :key="toast.id"
       class="ui-toast"
       :class="`ui-toast--${toast.variant}`"
+      :duration="toast.loading ? Infinity : 4500"
       @update:open="!$event && dismissToast(toast.id)"
     >
-      <UiIcon :name="toast.variant === 'success' ? 'check' : 'alert'" />
+      <UiIcon v-if="toast.loading" name="loading" />
+      <UiIcon v-else :name="toast.variant === 'success' ? 'check' : 'alert'" />
       <ToastDescription>
         {{ toast.message }}
       </ToastDescription>
@@ -27,11 +29,13 @@ import UiIcon from './UiIcon.vue'
 :global(.ui-toast-viewport) {
   position: fixed;
   right: var(--space-6);
-  bottom: var(--space-6);
+  top: max(var(--space-6), env(safe-area-inset-top));
   z-index: var(--z-toast);
   display: grid;
   gap: var(--space-2);
   width: min(380px, calc(100% - 48px));
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
   padding: 0;
   margin: 0;
   list-style: none;

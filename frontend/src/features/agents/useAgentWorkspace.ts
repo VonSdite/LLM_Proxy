@@ -12,6 +12,7 @@ import {
 import { ApiError, errorMessage, isAbort } from '@/api/client'
 import { createDraft, fileVersions } from './configuration'
 import { notify } from '@/components/ui'
+import { AGENT_DEFINITIONS, agentDefinition, installAgentDefinitions } from './registry'
 
 interface MachineState {
   snapshot: AgentSnapshot
@@ -22,6 +23,7 @@ interface PreviewState extends Partial<AgentPreview> {
   key: string
   pending: boolean
   error: string
+  saved?: boolean
 }
 export function useAgentWorkspace() {
   const bootstrap = shallowRef<AgentBootstrap>()
@@ -44,8 +46,8 @@ export function useAgentWorkspace() {
     () => state.value && JSON.stringify(draft.value) !== state.value.baselines[activeAgent.value],
   )
   const ready = computed(() => machine.value?.connected && !!draft.value)
-  let timer: ReturnType<typeof setTimeout> | undefined
   let previewController: AbortController | undefined
+  let tabReadController: AbortController | undefined
   const loadController = new AbortController()
   let disposed = false
 
@@ -57,25 +59,23 @@ export function useAgentWorkspace() {
     const existing = states[id]
     if (!existing || reset === 'all') {
       const drafts = Object.fromEntries(
-        (['claude', 'codex', 'opencode'] as AgentId[]).map((agent) => [
-          agent,
-          createDraft(agent, snapshot, bootstrap.value!, machines.value),
+        AGENT_DEFINITIONS.map((agent) => [
+          agent.id,
+          createDraft(agent.id, snapshot, bootstrap.value!, machines.value),
         ]),
       ) as Record<AgentId, AgentDraft>
       states[id] = {
         snapshot,
         drafts,
-        baselines: {
-          claude: JSON.stringify(drafts.claude),
-          codex: JSON.stringify(drafts.codex),
-          opencode: JSON.stringify(drafts.opencode),
-        },
+        baselines: Object.fromEntries(
+          Object.entries(drafts).map(([id, draft]) => [id, JSON.stringify(draft)]),
+        ),
       }
-      for (const agent of ['claude', 'codex', 'opencode']) delete previews[`${id}:${agent}`]
+      for (const agent of AGENT_DEFINITIONS) delete previews[`${id}:${agent.id}`]
     } else {
       existing.snapshot.machine = snapshot.machine
-      for (const target of reset === 'codex' ? (['codex', 'codexAuth'] as const) : [reset])
-        existing.snapshot.files[target] = snapshot.files[target]
+      for (const target of agentDefinition(reset)?.files || [])
+        existing.snapshot.files[target] = snapshot.files[target]!
       existing.drafts[reset] = createDraft(
         reset,
         existing.snapshot,
@@ -101,6 +101,7 @@ export function useAgentWorkspace() {
       const context = await agentsApi.bootstrap(loadController.signal)
       if (disposed) return
       bootstrap.value = context
+      installAgentDefinitions(context.agents)
       machines.value = bootstrap.value.machines
       const result = await agentsApi.snapshot('local', loadController.signal)
       if (!disposed) install(result)
@@ -158,7 +159,7 @@ export function useAgentWorkspace() {
       const item = machines.value.find((entry) => entry.id === id)
       if (item) item.connected = false
       delete states[id]
-      for (const agent of ['claude', 'codex', 'opencode']) delete previews[`${id}:${agent}`]
+      for (const agent of AGENT_DEFINITIONS) delete previews[`${id}:${agent.id}`]
     } catch (reason) {
       fail(reason, id)
     }
@@ -202,48 +203,109 @@ export function useAgentWorkspace() {
       loading.value = false
     }
   }
+  watch([selectedId, activeAgent], async ([id, agent]) => {
+    if (tabReadController) {
+      tabReadController.abort()
+      tabReadController = undefined
+      loading.value = false
+    }
+    if (!states[id] || !machine.value?.connected || saving.value || editorOpen.value) return
+    const controller = new AbortController()
+    tabReadController = controller
+    loading.value = true
+    error.value = ''
+    try {
+      const snapshot = await agentsApi.snapshot(id, controller.signal)
+      if (
+        disposed ||
+        controller.signal.aborted ||
+        id !== selectedId.value ||
+        agent !== activeAgent.value
+      )
+        return
+      const current = states[id]
+      if (!current) return
+      if (JSON.stringify(current.drafts[agent]) === current.baselines[agent]) {
+        install(snapshot, agent)
+      } else {
+        // 草稿保留旧版本指纹；文件有外部变化时，后续保存仍会触发冲突保护。
+        const changed = (agentDefinition(agent)?.files || []).some(
+          (target) =>
+            current.snapshot.files[target]?.version !== snapshot.files[target]?.version ||
+            current.snapshot.files[target]?.path !== snapshot.files[target]?.path,
+        )
+        if (changed) notify('配置文件已变化，已保留未保存的修改；请重新读取后编辑')
+      }
+    } catch (reason) {
+      if (!disposed && !controller.signal.aborted && !isAbort(reason)) fail(reason, id)
+    } finally {
+      if (tabReadController === controller) {
+        tabReadController = undefined
+        loading.value = false
+      }
+    }
+  })
   const formKey = computed(() =>
     ready.value && state.value
       ? JSON.stringify({ draft: draft.value, versions: fileVersions(state.value.snapshot) })
       : '',
   )
   watch(
-    [formKey, previewId, saving, editorOpen],
-    () => {
-      clearTimeout(timer)
+    [formKey, previewId, saving, editorOpen, loading],
+    async () => {
       previewController?.abort()
-      if (!formKey.value || saving.value || editorOpen.value || !state.value) return
+      if (!formKey.value || saving.value || loading.value || editorOpen.value || !state.value)
+        return
       const key = formKey.value
       const id = selectedId.value
       const agent = activeAgent.value
       const cache = `${id}:${agent}`
       const previous = previews[cache]
-      previews[cache] = { ...previous, key, pending: true, error: '' }
+      // 保存已确认当前文件与草稿；后续编辑或重新读取时再生成预览。
+      if (previous?.saved && previous.key === key) return
+      previews[cache] = { ...previous, key, pending: true, error: '', saved: false }
       const body = JSON.parse(key) as { draft: AgentDraft; versions: Record<string, string> }
-      timer = setTimeout(async () => {
-        previewController = new AbortController()
-        try {
-          const result = await agentsApi.preview(id, agent, body, previewController.signal)
-          if (!disposed && previews[cache]?.key === key)
-            previews[cache] = { ...result, key, pending: false, error: '' }
-        } catch (reason) {
-          if (!disposed && !isAbort(reason) && previews[cache]?.key === key) {
-            previews[cache] = {
-              ...previews[cache],
-              key,
-              pending: false,
-              error: errorMessage(reason),
-            }
-            if (reason instanceof ApiError && reason.details.code === 'disconnected')
-              fail(reason, id)
+      const controller = new AbortController()
+      previewController = controller
+      try {
+        const result = await agentsApi.preview(id, agent, body, controller.signal)
+        if (!disposed && !controller.signal.aborted && previews[cache]?.key === key)
+          previews[cache] = { ...result, key, pending: false, error: '' }
+      } catch (reason) {
+        if (
+          !disposed &&
+          !controller.signal.aborted &&
+          !isAbort(reason) &&
+          previews[cache]?.key === key
+        ) {
+          previews[cache] = {
+            ...previews[cache],
+            key,
+            pending: false,
+            error: errorMessage(reason),
           }
+          if (reason instanceof ApiError && reason.details.code === 'disconnected') fail(reason, id)
         }
-      }, 240)
+      }
     },
     { immediate: true },
   )
+  function settleSavedPreview(id: string, agent: AgentId, ticket: AgentPreview) {
+    const current = states[id]!
+    previews[`${id}:${agent}`] = {
+      key: JSON.stringify({
+        draft: current.drafts[agent],
+        versions: fileVersions(current.snapshot),
+      }),
+      rows: ticket.rows.map((row) => ({ ...row, current: row.next, kind: 'same' })),
+      hasChanges: false,
+      pending: false,
+      error: '',
+      saved: true,
+    }
+  }
   async function save() {
-    if (saving.value || !state.value || !draft.value || !ready.value) return
+    if (saving.value || loading.value || !state.value || !draft.value || !ready.value) return
     const id = selectedId.value
     const agent = activeAgent.value
     const payload = JSON.parse(formKey.value) as {
@@ -256,12 +318,14 @@ export function useAgentWorkspace() {
       const ticket = await agentsApi.preview(id, agent, payload, loadController.signal)
       if (disposed) return
       if (!ticket.hasChanges) {
+        settleSavedPreview(id, agent, ticket)
         notify('配置已是最新')
         return
       }
       const result = await agentsApi.apply(id, ticket.token, loadController.signal)
       if (!disposed) {
         install(result, agent)
+        settleSavedPreview(id, agent, ticket)
         notify('配置已保存，已有文件保留最近 5 份备份')
       }
     } catch (reason) {
@@ -272,8 +336,8 @@ export function useAgentWorkspace() {
   }
   onBeforeUnmount(() => {
     disposed = true
-    clearTimeout(timer)
     previewController?.abort()
+    tabReadController?.abort()
     loadController.abort()
     machines.value = []
     bootstrap.value = undefined

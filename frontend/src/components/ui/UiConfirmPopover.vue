@@ -38,7 +38,7 @@ function confirm() {
         <div class="ui-confirm-actions">
           <UiButton size="sm" @click="open = false">取消</UiButton>
           <UiButton size="sm" variant="danger-solid" :loading="busy" @click="confirm">
-            {{ confirmLabel || '确认删除' }}
+            {{ confirmLabel || '确认' }}
           </UiButton>
         </div>
       </PopoverContent>

@@ -1,7 +1,36 @@
 import { api, type RequestOptions } from './client'
 
-export type AgentId = 'claude' | 'codex' | 'opencode'
-export type FileTarget = AgentId | 'codexAuth'
+export type AgentId = string
+export type FileTarget = string
+export interface AgentField {
+  id: string
+  label: string
+  component: 'text' | 'secret' | 'model' | 'select' | 'boolean' | 'number' | 'url'
+  file: FileTarget
+  path: string[]
+  role?: 'baseUrl'
+  required?: boolean
+  default?: string | number | boolean
+  options?: { value: string; label: string }[]
+  help?: string[]
+  min?: number
+  max?: number
+  step?: number
+  integer?: boolean
+  group?: string
+  limit?: 'context' | 'output'
+  showWhen?: { field: string; equals: string | number | boolean }
+}
+export interface AgentDefinition {
+  id: AgentId
+  label: string
+  files: FileTarget[]
+  fields?: AgentField[]
+  legacy?: boolean
+  help?: string[]
+  fileFormats?: Record<string, 'json' | 'jsonc' | 'toml' | 'yaml'>
+  groups?: Record<string, number>
+}
 export interface AgentMachine {
   id: string
   name: string
@@ -69,6 +98,8 @@ export interface AgentProvider {
   }[]
 }
 export interface AgentBootstrap {
+  agents?: AgentDefinition[]
+  extensionErrors?: { id: string; message: string }[]
   machines: AgentMachine[]
   providers: AgentProvider[]
   models: string[]
@@ -81,6 +112,8 @@ export interface AgentBootstrap {
   apiKeys: { name: string; key: string }[]
 }
 export interface AgentDraft {
+  values?: Record<string, string | number | boolean | null>
+  customFields?: string[]
   baseUrl: string
   apiKey: string
   model?: string
@@ -144,7 +177,7 @@ export const agentsApi = {
     }),
   disconnect: (id: string, signal?: AbortSignal) =>
     request<void>(`${machinePath(id)}/disconnect`, { method: 'POST', signal }),
-  path: (id: string, target: AgentId, path: string, signal?: AbortSignal) =>
+  path: (id: string, target: FileTarget, path: string, signal?: AbortSignal) =>
     request<AgentSnapshot>(`${machinePath(id)}/path`, {
       method: 'PUT',
       body: { target, path },

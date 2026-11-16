@@ -234,7 +234,9 @@ function setEnabled(provider: Provider, value: boolean) {
         />
       </template>
     </UiPageHeader>
-    <UiListToolbar>
+    <UiListToolbar
+      :selecting="tab === 'providers' ? selected.length > 0 : selectedGroups.length > 0"
+    >
       <template #actions>
         <UiButton
           v-if="tab === 'providers'"
@@ -325,79 +327,81 @@ function setEnabled(provider: Provider, value: boolean) {
         :loading="request.loading.value"
         @click="request.refresh"
       />
-    </UiListToolbar>
-    <UiSelectionBar
-      v-if="selected.length && tab === 'providers'"
-      :count="selected.length"
-      :disabled="action.busy.value || toggles.busy.value"
-      @clear="selected = []"
-    >
-      <UiButton
-        v-if="canEnableSelected"
-        :disabled="action.busy.value || toggles.busy.value"
-        @click="batch('enable')"
-      >
-        启用
-      </UiButton>
-      <UiButton
-        v-if="canDisableSelected"
-        :disabled="action.busy.value || toggles.busy.value"
-        @click="batch('disable')"
-      >
-        禁用
-      </UiButton>
-      <UiButton
-        :disabled="
-          action.busy.value || toggles.busy.value || exporting.busy.value || request.loading.value
-        "
-        @click="exportProviders(selected)"
-      >
-        导出所选
-      </UiButton>
-      <UiConfirmPopover
-        :message="`删除所选 ${selected.length} 个 Provider？`"
-        @confirm="batch('delete')"
-      >
-        <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
-          删除
-        </UiButton>
-      </UiConfirmPopover>
-    </UiSelectionBar>
-    <UiSelectionBar
-      v-if="selectedGroups.length && tab === 'groups'"
-      :count="selectedGroups.length"
-      :disabled="action.busy.value || toggles.busy.value"
-      @clear="selectedGroups = []"
-    >
-      <UiButton
-        :disabled="
-          action.busy.value || toggles.busy.value || exporting.busy.value || request.loading.value
-        "
-        @click="exportGroups(selectedGroups)"
-      >
-        导出所选
-      </UiButton>
-      <UiConfirmPopover
-        :message="`删除所选 ${selectedGroups.length} 个 Auth Group？`"
-        @confirm="deleteGroups"
-      >
-        <UiButton
-          variant="danger-outline"
-          :disabled="action.busy.value || toggles.busy.value || request.loading.value"
+      <template #selection>
+        <UiSelectionBar
+          v-if="selected.length && tab === 'providers'"
+          embedded
+          :count="selected.length"
+          :disabled="action.busy.value || toggles.busy.value"
+          @clear="selected = []"
         >
-          删除
-        </UiButton>
-      </UiConfirmPopover>
-    </UiSelectionBar>
-    <UiAlert
-      v-if="
-        request.error.value || action.error.value || clipboard.error.value || exporting.error.value
-      "
-    >
-      {{
-        exporting.error.value || action.error.value || clipboard.error.value || request.error.value
-      }}
-    </UiAlert>
+          <UiButton
+            v-if="canEnableSelected"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="batch('enable')"
+          >
+            启用
+          </UiButton>
+          <UiButton
+            v-if="canDisableSelected"
+            :disabled="action.busy.value || toggles.busy.value"
+            @click="batch('disable')"
+          >
+            禁用
+          </UiButton>
+          <UiButton
+            :disabled="
+              action.busy.value ||
+              toggles.busy.value ||
+              exporting.busy.value ||
+              request.loading.value
+            "
+            @click="exportProviders(selected)"
+          >
+            导出所选
+          </UiButton>
+          <UiConfirmPopover
+            :message="`删除所选 ${selected.length} 个 Provider？`"
+            @confirm="batch('delete')"
+          >
+            <UiButton variant="danger-outline" :disabled="action.busy.value || toggles.busy.value">
+              删除
+            </UiButton>
+          </UiConfirmPopover>
+        </UiSelectionBar>
+        <UiSelectionBar
+          v-if="selectedGroups.length && tab === 'groups'"
+          embedded
+          :count="selectedGroups.length"
+          :disabled="action.busy.value || toggles.busy.value"
+          @clear="selectedGroups = []"
+        >
+          <UiButton
+            :disabled="
+              action.busy.value ||
+              toggles.busy.value ||
+              exporting.busy.value ||
+              request.loading.value
+            "
+            @click="exportGroups(selectedGroups)"
+          >
+            导出所选
+          </UiButton>
+          <UiConfirmPopover
+            :message="`删除所选 ${selectedGroups.length} 个 Auth Group？`"
+            @confirm="deleteGroups"
+          >
+            <UiButton
+              variant="danger-outline"
+              :disabled="action.busy.value || toggles.busy.value || request.loading.value"
+            >
+              删除
+            </UiButton>
+          </UiConfirmPopover>
+        </UiSelectionBar>
+      </template>
+    </UiListToolbar>
+    <UiAlert v-if="request.error.value">{{ request.error.value }}</UiAlert>
     <ProviderTable
       v-if="tab === 'providers'"
       v-model:selected="selected"
@@ -465,6 +469,7 @@ function setEnabled(provider: Provider, value: boolean) {
         <UiButton
           variant="link"
           :aria-label="`编辑 Auth Group ${row.name}`"
+          size="title"
           aria-haspopup="dialog"
           :disabled="action.busy.value || toggles.busy.value"
           @click="editGroup(row)"
@@ -496,7 +501,7 @@ function setEnabled(provider: Provider, value: boolean) {
             @click="editGroup(row)"
           />
           <UiConfirmPopover
-            :message="`删除认证组 ${row.name}？`"
+            message="是否删除？"
             @confirm="
               action.run((signal) => authGroupsApi.remove(row.name, signal), '已删除 Auth Group')
             "

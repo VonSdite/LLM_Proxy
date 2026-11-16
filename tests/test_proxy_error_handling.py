@@ -59,6 +59,9 @@ class FakeConfigManager:
     def is_chat_whitelist_enabled(self) -> bool:
         return self._whitelist_enabled
 
+    def is_llm_request_debug_enabled(self) -> bool:
+        return False
+
     def is_real_client_ip_enabled(self) -> bool:
         return self._real_ip_enabled
 
@@ -1397,6 +1400,93 @@ class ProxyServiceErrorLoggingTests(unittest.TestCase):
                 for msg in logger.messages("warning")
             )
         )
+
+
+class ProxyObservationIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.app = Flask(__name__)
+        self.ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=self.app,
+        )
+        self.provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+            max_retries=2,
+        )
+        self.service = ProxyService(self.ctx)
+        self.logs = RecordingLogService()
+        ProxyController(self.ctx, self.service, FakeUserService(), self.logs, FakeProviderManager(self.provider))
+        self.client = self.app.test_client()
+
+    def test_retry_then_success_records_one_final_request(self):
+        attempts = [
+            ProxyServiceRetryHookContextTests._chat_completion_response(429, b'{"error":{"message":"limited"}}'),
+            ProxyServiceRetryHookContextTests._success_response(),
+        ]
+        with patch.object(self.service, "_open_upstream_response", side_effect=attempts) as opened:
+            response = self.client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        response.close()
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        self.assertEqual(2, opened.call_count)
+        self.assertEqual(1, len(self.logs.calls))
+        self.assertEqual("success", self.logs.calls[0]["outcome"])
+        self.assertEqual(2, self.logs.calls[0]["total_tokens"])
+        self.assertEqual(
+            round(self.logs.calls[0]["completion_tokens"] * 1000 / self.logs.calls[0]["duration_ms"], 2),
+            self.logs.calls[0]["tps"],
+        )
+
+    def test_retry_exhaustion_records_one_failure(self):
+        with patch.object(self.service, "_open_upstream_response", side_effect=requests.exceptions.Timeout("timeout")):
+            response = self.client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "demo/gpt-4.1",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        response.close()
+        self.assertGreaterEqual(response.status_code, 400)
+        self.assertEqual(1, len(self.logs.calls))
+        self.assertEqual("error", self.logs.calls[0]["outcome"])
+        self.assertEqual("unknown", self.logs.calls[0]["usage_status"])
+
+    def test_stream_error_and_disconnect_are_recorded_once(self):
+        for fail in (False, True):
+            with self.subTest(fail=fail):
+                self.logs.calls.clear()
+                chunks = iter(
+                    [
+                        b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n',
+                        b'data: {"error":{"message":"failed"}}\n\n' if fail else b"data: [DONE]\n\n",
+                    ]
+                )
+                upstream = Response(chunks, content_type="text/event-stream")
+                with patch.object(self.service, "proxy_request", return_value=(upstream, 200, None)):
+                    response = self.client.post(
+                        "/v1/chat/completions",
+                        json={
+                            "model": "demo/gpt-4.1",
+                            "messages": [],
+                            "stream": True,
+                        },
+                        buffered=False,
+                    )
+                    if fail:
+                        self.assertIn(b"failed", response.get_data())
+                    response.close()
+                self.assertEqual(1, len(self.logs.calls))
+                self.assertEqual("error" if fail else "cancelled", self.logs.calls[0]["outcome"])
 
 
 class ProxyServiceRetryHookContextTests(unittest.TestCase):
