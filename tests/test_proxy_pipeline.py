@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import requests
 from flask import Flask
@@ -5018,6 +5019,93 @@ class ProxyServicePipelineTests(unittest.TestCase):
         self.assertEqual(2, captured_meta["completion_tokens"])
         self.assertEqual(5, captured_meta["total_tokens"])
         self.assertTrue(fake_response.closed)
+
+    def test_trace_masks_credentials_without_changing_upstream_headers(self) -> None:
+        auth_headers = {"Authorization": "Bearer group-secret", "X-Vendor-Credential": "vendor-secret"}
+        for stream in (False, True):
+            for use_auth_group in (False, True):
+                with self.subTest(stream=stream, use_auth_group=use_auth_group):
+                    manager = Mock()
+                    manager.acquire.return_value = SelectedAuthEntry("pool", "entry", tuple(auth_headers.items()))
+                    app, service = self._build_service(
+                        llm_request_debug_enabled=True,
+                        auth_group_manager=manager if use_auth_group else None,
+                    )
+                    service._config_manager.get = Mock(
+                        return_value=[{"name": "pool", "entries": [{"headers": auth_headers}]}]
+                    )
+                    trace_logger = Mock()
+                    service._trace._trace_logger = trace_logger
+                    provider = LLMProvider(
+                        name="demo",
+                        api="https://example.com/v1/chat/completions",
+                        source_format="openai_chat",
+                        target_formats=("openai_chat",),
+                        model_list=("gpt-4.1",),
+                        api_key="provider-secret",
+                        auth_group="pool" if use_auth_group else None,
+                        max_retries=1,
+                    )
+                    content_type = "text/event-stream" if stream else "application/json"
+                    chunks = (
+                        [
+                            b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n',
+                            b"data: [DONE]\n\n",
+                        ]
+                        if stream
+                        else [b'{"model":"gpt-4.1","choices":[{"message":{"role":"assistant","content":"ok"}}]}']
+                    )
+                    upstream = FakeStreamResponse(chunks, content_type=content_type)
+                    upstream.headers.update({"Set-Cookie": "session=cookie-secret", "X-Request-Id": "request-123"})
+                    open_request = Mock(
+                        return_value=OpenedUpstreamResponse(
+                            response=upstream,
+                            status_code=200,
+                            content_type=content_type,
+                            is_stream=stream,
+                            stream_format="sse_json" if stream else "nonstream",
+                        )
+                    )
+                    service._open_upstream_response = open_request
+                    request_headers = {"Authorization": "Bearer client-secret", "Cookie": "client=cookie-secret"}
+                    request_body = {
+                        "model": "demo/gpt-4.1",
+                        "messages": [{"role": "user", "content": "Hello"}],
+                        "stream": stream,
+                    }
+                    with app.test_request_context("/v1/chat/completions"):
+                        service.log_downstream_request_trace(
+                            trace_id="trace-redaction",
+                            start_line="POST /v1/chat/completions HTTP/1.1",
+                            headers=request_headers,
+                            payload=request_body,
+                        )
+                        response, status, failure = service.proxy_request(
+                            provider, request_body, request_headers, trace_id="trace-redaction"
+                        )
+                        response_body = self._collect_response_body(response)
+
+                    self.assertIsNone(failure)
+                    self.assertEqual(200, status)
+                    self.assertIn(b"ok", response_body)
+                    forwarded = {name.lower(): value for name, value in open_request.call_args.args[1].items()}
+                    expected_auth = "Bearer group-secret" if use_auth_group else "Bearer provider-secret"
+                    self.assertEqual(expected_auth, forwarded["authorization"])
+                    self.assertEqual("client=cookie-secret", forwarded["cookie"])
+                    if use_auth_group:
+                        self.assertEqual("vendor-secret", forwarded["x-vendor-credential"])
+                    self.assertEqual("session=cookie-secret", upstream.headers["Set-Cookie"])
+                    self.assertEqual("Bearer client-secret", request_headers["Authorization"])
+                    output = "\n".join(call.args[0] for call in trace_logger.info.call_args_list)
+                    self.assertNotIn("secret", output)
+                    self.assertIn("Authorization: [REDACTED]", output)
+                    self.assertIn("Cookie: [REDACTED]", output)
+                    self.assertIn("Set-Cookie: [REDACTED]", output)
+                    self.assertIn("X-Request-Id: request-123", output)
+                    if use_auth_group:
+                        self.assertIn("X-Vendor-Credential: [REDACTED]", output)
+                    for stage in ("downstream_request", "upstream_request", "upstream_response", "downstream_response"):
+                        self.assertIn(f"stage={stage}", output)
 
     def test_proxy_service_skips_trace_buffering_when_debug_logging_disabled(
         self,

@@ -769,6 +769,8 @@ Codex / Claude OAuth 流分别以 `response.completed` / `response.done` 和 `me
 
 - 应用会写入 `logs/llm_request_trace.log`
 - 与 `app.log`、`access.log` 分离
+- `ProxyTraceLogger` 在格式化下游请求、上游请求、上游响应和下游响应时，忽略头名大小写，将认证、API Key、Cookie、Token 类 HTTP 头的完整值替换为 `[REDACTED]`。当前 `auth_groups` 配置中全部条目的头名也纳入屏蔽范围，包含停用条目；每次写入读取当前配置，无额外运行时缓存。
+- 屏蔽作用于日志副本，实际转发报文与普通诊断头保留原值。URL 查询参数和正文仍可能包含敏感信息。
 - 采用相同的滚动策略：
   - `RotatingLogHandler`，继承 `RotatingFileHandler`，使用 UTF-8 和 LF
   - `maxBytes = 10 MiB`

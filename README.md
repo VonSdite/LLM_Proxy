@@ -208,7 +208,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `database.path`：SQLite 数据库路径，默认 `data/requests.db`
 - `logging.path`：日志目录，默认 `logs`
 - `logging.level`：日志级别，例如 `INFO`、`DEBUG`
-- `logging.llm_request_debug_enabled`：是否把下游/上游请求与响应写入 `logs/llm_request_trace.log`
+- `logging.llm_request_debug_enabled`：是否把下游/上游请求与响应写入 `logs/llm_request_trace.log`；四个阶段的认证、API Key、Cookie、Token 请求头和响应头，以及当前所有 Auth Group 条目配置的自定义头，均忽略头名大小写并将完整值记录为 `[REDACTED]`。普通头与实际转发报文保留原值，URL 查询参数及正文仍可能包含敏感信息
 - `oauth.enabled`：是否允许 OAuth 模型参与新请求；管理页面与网络设置始终可用
 - `oauth.proxy`：OAuth 登录、Codex 配额查询和 OAuth 上游请求使用的代理地址，留空表示不使用代理
 - `oauth.verify_ssl`：OAuth 网络请求是否校验证书，默认 `false`
@@ -736,7 +736,7 @@ Provider 路径开启后，同时不再向上游转发凭据类客户端请求�
 
 - 面向不完全可信的上游、或需要满足"敏感信息不出内网"的合规要求时开启；对精度敏感的代码与数据处理任务（涉及版本号、订单号、示例 IP、邮箱）先评估误伤面再决定。
 - 需要模型真实处理敏感内容本身的任务（例如"核对这个手机号的归属地"）会失败：内容不会到达上游。
-- LLM Trace 的 `upstream_request` 阶段记录的是脱敏后的请求；`downstream_request` 阶段仍记录原始请求与请求头，日志文件本身包含敏感信息，注意访问控制。
+- LLM Trace 的 `upstream_request` 阶段记录的是出站脱敏后的请求体；`downstream_request` 阶段记录原始请求体。四个阶段的敏感 HTTP 头均显示为 `[REDACTED]`，包括 Auth Group 自定义认证头。URL 查询参数和正文仍可能包含敏感信息，日志文件需要访问控制。
 
 ## 数据与目录
 

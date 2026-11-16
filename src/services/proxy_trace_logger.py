@@ -8,6 +8,23 @@ import json
 from http import HTTPStatus
 from typing import Any
 
+_SENSITIVE_TRACE_HEADERS = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "x-api-key",
+        "api-key",
+        "x-goog-api-key",
+        "ocp-apim-subscription-key",
+        "cookie",
+        "set-cookie",
+        "x-auth-token",
+        "x-access-token",
+        "x-csrf-token",
+        "x-xsrf-token",
+    }
+)
+
 
 class ProxyTraceLogger:
     """负责格式化并输出代理请求 Trace 日志。"""
@@ -71,7 +88,9 @@ class ProxyTraceLogger:
 
         message_parts = [
             f"[LLM TRACE] {' | '.join(metadata_parts)}",
-            self._format_trace_http_block(start_line, headers, payload),
+            self._format_trace_http_block(
+                start_line, headers, payload, sensitive_headers=self._auth_group_header_names()
+            ),
         ]
         self._trace_logger.info("\n".join(message_parts))
 
@@ -112,8 +131,10 @@ class ProxyTraceLogger:
         start_line: str,
         headers: dict[str, Any],
         payload: Any,
+        *,
+        sensitive_headers: set[str] | None = None,
     ) -> str:
-        normalized_headers = cls._normalize_trace_headers(headers)
+        normalized_headers = cls._normalize_trace_headers(headers, sensitive_headers=sensitive_headers)
         lines = [str(start_line or "").strip() or "<empty start-line>"]
         for key, value in normalized_headers.items():
             lines.append(f"{cls._format_trace_header_name(key)}: {value}")
@@ -131,11 +152,35 @@ class ProxyTraceLogger:
         return "-".join(part.capitalize() for part in normalized_name.split("-"))
 
     @staticmethod
-    def _normalize_trace_headers(headers: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_trace_headers(
+        headers: dict[str, Any], *, sensitive_headers: set[str] | None = None
+    ) -> dict[str, Any]:
+        redacted_names = _SENSITIVE_TRACE_HEADERS | (sensitive_headers or set())
         normalized: dict[str, Any] = {}
         for key, value in dict(headers or {}).items():
-            normalized[str(key)] = ProxyTraceLogger._normalize_trace_scalar(value)
+            name = str(key)
+            normalized[name] = (
+                "[REDACTED]"
+                if name.strip().lower() in redacted_names
+                else ProxyTraceLogger._normalize_trace_scalar(value)
+            )
         return normalized
+
+    def _auth_group_header_names(self) -> set[str]:
+        """读取当前认证组的全部头名，停用条目的凭据同样受到保护。"""
+        read_config = getattr(self._config_manager, "get", None)
+        groups = read_config("auth_groups", []) if callable(read_config) else []
+        names: set[str] = set()
+        for group in groups or []:
+            if not isinstance(group, dict):
+                continue
+            for entry in group.get("entries") or []:
+                if not isinstance(entry, dict):
+                    continue
+                headers = entry.get("headers")
+                if isinstance(headers, dict):
+                    names.update(str(name).strip().lower() for name in headers)
+        return names
 
     @classmethod
     def _normalize_trace_payload(cls, payload: Any) -> Any:
