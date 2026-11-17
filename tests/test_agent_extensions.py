@@ -124,8 +124,8 @@ class AgentExtensionTests(unittest.TestCase):
         ticket = self.save("opencode_v2", values)
         path = self.directory / "home/.config/opencode/opencode.json"
         data = json.loads(path.read_text())
-        self.assertEqual("llm-proxy/main/org/model.v1", data["model"])
-        provider = data["providers"]["llm-proxy"]
+        self.assertEqual("proxy/main/org/model.v1", data["model"])
+        provider = data["providers"]["proxy"]
         self.assertEqual("secret-v2", provider["settings"]["apiKey"])
         model = provider["models"]["main/org/model.v1"]
         self.assertEqual("main/org/model.v1", model["modelID"])
@@ -145,7 +145,7 @@ class AgentExtensionTests(unittest.TestCase):
         self.assertFalse(self.save("opencode_v2", {"buffer": "20000"})["hasChanges"])
         self.save("opencode_v2", {"api-key": None, "buffer": None, "permission": None})
         data = json.loads(path.read_text())
-        self.assertNotIn("apiKey", data["providers"]["llm-proxy"]["settings"])
+        self.assertNotIn("apiKey", data["providers"]["proxy"]["settings"])
         self.assertNotIn("buffer", data["compaction"])
         self.assertNotIn("permissions", data)
 
@@ -179,13 +179,13 @@ class AgentExtensionTests(unittest.TestCase):
             "// 保留注释\n"
             + json.dumps(
                 {
-                    "model": "company/alias",
+                    "model": "proxy/alias",
                     "provider": {"v1": {"options": {"apiKey": "v1-key"}}},
                     "permission": "ask",
                     "compaction": {"reserved": 12345, "buffer": 12000, "keep": {"tokens": 5000}},
                     "permissions": [{"action": "shell", "resource": "git *", "effect": "allow"}],
                     "providers": {
-                        "company": {
+                        "proxy": {
                             "package": "@opencode/ai/providers/openai/responses",
                             "settings": {"baseURL": "https://provider.example/v1", "apiKey": "provider-key"},
                             "models": {
@@ -212,22 +212,23 @@ class AgentExtensionTests(unittest.TestCase):
         self.assertEqual({"custom": True}, managed["permission"])
         self.save("opencode_v2", {"effort": "low"})
         original = parse_document("json", path.read_text(encoding="utf-8"))
-        self.assertEqual("company/alias", original["model"])
+        self.assertEqual("proxy/alias", original["model"])
+        self.assertIn("proxy", original["providers"])
         self.save("opencode_v2", {"model": "main/new", "api-key": "new-key"})
         data = parse_document("json", path.read_text(encoding="utf-8"))
         self.assertIn("// 保留注释", path.read_text(encoding="utf-8"))
-        self.assertEqual("company/main/new", data["model"])
+        self.assertEqual("proxy/main/new", data["model"])
         self.assertEqual(
-            original["providers"]["company"]["models"]["alias"], data["providers"]["company"]["models"]["alias"]
+            original["providers"]["proxy"]["models"]["alias"], data["providers"]["proxy"]["models"]["alias"]
         )
-        model = data["providers"]["company"]["models"]["main/new"]
+        model = data["providers"]["proxy"]["models"]["main/new"]
         self.assertEqual("low", model["settings"]["reasoningEffort"])
         self.assertEqual("new-key", model["settings"]["apiKey"])
         self.assertEqual("https://model.example/v1", model["settings"]["baseURL"])
         self.assertEqual(32000, model["limit"]["output"])
         for key in ("provider", "permission", "compaction", "permissions"):
             self.assertEqual(original[key], data[key])
-        self.assertEqual("provider-key", data["providers"]["company"]["settings"]["apiKey"])
+        self.assertEqual("provider-key", data["providers"]["proxy"]["settings"]["apiKey"])
 
     def test_opencode_v2_validation_and_independent_path(self):
         for value in ("0", "0%", "100%", "150%", "-2", "NaN", "20k"):
@@ -283,7 +284,7 @@ class AgentExtensionTests(unittest.TestCase):
         path = self.directory / "home/.dsh/cordis.patch.yml"
         path.parent.mkdir(parents=True)
         path.write_text(
-            "# 插件注释\n- id: other-plugin\n  config: {enabled: true}\n- id: llm-pi-ai\n  config:\n    providers:\n      external: {baseURL: https://other.example/v1}\n      llm-proxy:\n        models:\n          - {id: old, contextWindow: 1234, custom: keep}\n",
+            "# 插件注释\n- id: other-plugin\n  config: {enabled: true}\n- id: llm-pi-ai\n  config:\n    providers:\n      external: {baseURL: https://other.example/v1}\n      proxy:\n        models:\n          - {id: old, contextWindow: 1234, custom: keep}\n",
             encoding="utf-8",
         )
         values = {
@@ -301,8 +302,8 @@ class AgentExtensionTests(unittest.TestCase):
         self.assertEqual("other-plugin", patches[0]["id"])
         providers = patches[1]["config"]["providers"]
         self.assertEqual("https://other.example/v1", providers["external"]["baseURL"])
-        self.assertEqual("keep", providers["llm-proxy"]["models"][0]["custom"])
-        self.assertEqual("main/gpt-5", providers["llm-proxy"]["models"][1]["id"])
+        self.assertEqual("keep", providers["proxy"]["models"][0]["custom"])
+        self.assertEqual("main/gpt-5", providers["proxy"]["models"][1]["id"])
         credentials = self.directory / "home/.dsh/.credentials.yaml"
         self.assertEqual("secret-dsh", yaml_load(credentials.read_text())["refs"]["LLM_PROXY_API_KEY"])
         self.assertNotIn("secret-dsh", text)
@@ -311,7 +312,7 @@ class AgentExtensionTests(unittest.TestCase):
         snapshot = self.service.snapshot("browser", "local")
         self.assertEqual(200000, snapshot["files"]["dsh"]["managed"]["context"])
         self.save("dsh", {"api-key": None})
-        self.assertNotIn("apiKeyEnv", yaml_load(path.read_text())[1]["config"]["providers"]["llm-proxy"])
+        self.assertNotIn("apiKeyEnv", yaml_load(path.read_text())[1]["config"]["providers"]["proxy"])
 
     def test_dsh_global_permissions_round_trip_and_clear(self):
         values = {"base-url": "http://localhost:8080/v1", "model": "main/test", "protocol": "openai-completions"}

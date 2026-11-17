@@ -9,6 +9,7 @@ import type {
   ModelPreset,
 } from '@/api/agents'
 
+export const PROXY_PROVIDER = 'proxy'
 export const CLAUDE_MODEL_KEYS = [
   'ANTHROPIC_MODEL',
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
@@ -128,8 +129,10 @@ export function defaultBaseUrl(machine: AgentMachine, agent: AgentId, bootstrap:
   )
 }
 function defaultModel(agent: AgentId, bootstrap: AgentBootstrap) {
-  const main = bootstrap.models.find((id) => id.startsWith('main/')) || bootstrap.models[0] || ''
-  return agent === 'claude' ? bootstrap.models.find((id) => /claude-sonnet/.test(id)) || main : main
+  const bare = bootstrap.models.filter((id) => !id.includes('/'))
+  const candidates = bare.length ? bare : bootstrap.models
+  const main = candidates.find((id) => id.startsWith('main/')) || candidates[0] || ''
+  return agent === 'claude' ? candidates.find((id) => /claude-sonnet/.test(id)) || main : main
 }
 
 export function createDraft(
@@ -268,12 +271,12 @@ export function createDraft(
   }
   const storedModel = textValue(m.model)
   const storedProvider = storedModel.split('/')[0] || ''
-  const candidate = storedModel.slice(storedProvider.length + 1)
-  let model = m[`provider.${storedProvider}.models.${candidate}`] ? candidate : storedModel
-  model ||= defaultModel(agent, bootstrap)
-  const provider = providerKey(model)
+  const candidate =
+    storedProvider === PROXY_PROVIDER ? storedModel.slice(storedProvider.length + 1) : ''
+  let model = candidate || defaultModel(agent, bootstrap)
+  const provider = PROXY_PROVIDER
   const baseUrl = textValue(m[`provider.${provider}.options.baseURL`]) || baseDefault
-  if (!storedModel && !isOwnServiceUrl(baseUrl, bootstrap, machines)) model = ''
+  if (!candidate && !isOwnServiceUrl(baseUrl, bootstrap, machines)) model = ''
   const entry = object(m[`provider.${provider}.models.${model}`])
   const limits = object(entry.limit)
   const context = positiveInt(limits.context)

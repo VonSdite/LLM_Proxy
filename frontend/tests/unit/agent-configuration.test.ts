@@ -103,6 +103,18 @@ describe('Agent 配置语义', () => {
     expect(draft('claude', source).models?.ANTHROPIC_MODEL).toBe('')
     expect(draft('codex', source).model).toBe('')
   })
+  it('默认模型优先使用无 Provider 前缀的候选', () => {
+    const source = snapshot()
+    const context: AgentBootstrap = {
+      ...bootstrap,
+      models: ['main/claude-sonnet-4-6', 'glm-5.3', 'other/claude-sonnet-4-6', 'gpt-5.6-luna'],
+    }
+    expect(createDraft('codex', source, context, [source.machine]).model).toBe('glm-5.3')
+    source.files.claude!.exists = false
+    expect(createDraft('claude', source, context, [source.machine]).models?.ANTHROPIC_MODEL).toBe(
+      'glm-5.3',
+    )
+  })
   it('Provider 候选优先展示，所有模型表候选保留且不覆盖编辑或清空的参数', () => {
     const context = {
       ...bootstrap,
@@ -291,11 +303,13 @@ describe('Agent 配置语义', () => {
     expect(derivedCompact('codex', value).value).toBe(334800)
   })
 
-  it('opencode 完整路由模型和零预留值往返保留', () => {
+  it('opencode 固定 Provider 保留完整路由模型和零预留值', () => {
     const source = snapshot()
+    const provider = 'proxy'
     source.files.opencode!.managed = {
-      model: 'main/main/org/model.v1',
-      'provider.main.models.main/org/model.v1': {
+      model: `${provider}/main/org/model.v1`,
+      [`provider.${provider}.options.baseURL`]: 'http://127.0.0.1:8080/v1',
+      [`provider.${provider}.models.main/org/model.v1`]: {
         limit: { context: 200000, output: 32000 },
         options: { reasoningEffort: 'high' },
       },
@@ -303,6 +317,7 @@ describe('Agent 配置语义', () => {
     }
     const value = draft('opencode', source)
     expect(value.model).toBe('main/org/model.v1')
+    expect(value.baseUrl).toBe('http://127.0.0.1:8080/v1')
     expect(value.limits.reserved).toBe(0)
     expect(derivedCompact('opencode', value).value).toBe(0)
     expect(value.runtime.reasoningEffort).toBe('high')

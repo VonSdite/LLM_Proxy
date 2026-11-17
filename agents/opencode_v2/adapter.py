@@ -3,7 +3,14 @@
 import re
 from copy import deepcopy
 
-from src.services.agent_config_documents import MISSING, at_path, edit_document, parse_document, provider_ids
+from src.services.agent_config_documents import (
+    MISSING,
+    PROXY_PROVIDER,
+    at_path,
+    edit_document,
+    parse_document,
+    provider_ids,
+)
 
 COMPATIBLE = "@opencode/ai/providers/openai-compatible"
 
@@ -13,7 +20,7 @@ def _location(data):
     if not isinstance(reference, str):
         raise ValueError("Opencode V2 model must be a string")
     provider, separator, model = reference.partition("/")
-    return (provider, model) if separator and provider and model else ("llm-proxy", "")
+    return (PROXY_PROVIDER, model) if separator and provider == PROXY_PROVIDER and model else (PROXY_PROVIDER, "")
 
 
 def _paths(data):
@@ -114,11 +121,11 @@ def display_path(target, path):
     if path == ("buffer",):
         return "compaction.buffer"
     if path == ("connection", "package"):
-        return "providers.<当前服务>.package（或模型级覆盖）"
+        return "providers.proxy.package（或模型级覆盖）"
     prefixes = {
-        "connection": "providers.<当前服务>.settings",
-        "modelSettings": "providers.<当前服务>.models.<当前模型>.settings",
-        "limits": "providers.<当前服务>.models.<当前模型>.limit",
+        "connection": "providers.proxy.settings",
+        "modelSettings": "providers.proxy.models.<当前模型>.settings",
+        "limits": "providers.proxy.models.<当前模型>.limit",
     }
     return ".".join((prefixes.get(path[0], path[0]), *path[1:]))
 
@@ -162,7 +169,7 @@ def edit(target, text, edits):
         else:
             translated[paths.get(path, path)] = value
     if (
-        provider == "llm-proxy"
+        provider == PROXY_PROVIDER
         and any(path[0] == "providers" for path in translated)
         and at_path(data, ("providers", provider)) is MISSING
     ):

@@ -170,6 +170,8 @@ Opus / Sonnet 默认模型变量在 `1.0.88` 新增；Haiku 变量在 `2.0.17` �
 
 API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值、服务处理档位、沙箱范围、确认策略和 `features.memories` 的最低版本均未确认。官方字段列表不提供首次支持版本表，不能仅依据字段存在推断旧版兼容。
 
+表单固定写入 `model_provider: proxy` 和 `model_providers.proxy`，模型 ID 保持完整的 Proxy 路由格式。
+
 依据：[官方配置参考](https://developers.openai.com/codex/config-reference)、[官方发布记录](https://developers.openai.com/codex/changelog)。
 
 ### 3.2 Opencode v1
@@ -184,12 +186,15 @@ API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值
 | 会话分享 | `share`：manual / auto / disabled |
 | 更新检查 | `autoupdate`：false / true / notify；true 与 notify 均只检查并通知 |
 
+表单固定写入 `provider.proxy`，顶层模型引用使用 `proxy/<完整 Proxy 模型 ID>`。
+
 表单仅管理 V1 字段，原文件中的 V2 字段原样保留，历史登记的 V2 `permissions` 不参与自动清理。依据：[V1 模型](https://opencode.ai/v1/docs/models/)、[V1 配置](https://opencode.ai/v1/docs/config/)、[V1 权限](https://opencode.ai/v1/docs/permissions/)。
 
 ### 3.3 Opencode v2
 
 - 默认配置为 `~/.config/opencode/opencode.json`，支持自定义 JSON / JSONC 路径。V1 与 V2 默认编辑同一文件，各自的自定义路径独立保存，页签不负责版本迁移。
-- 按顶层 `model` 定位当前服务与模型，读取 `providers.<id>.settings`、模型 `settings` 与 `limit`；`modelID` 别名在未切换模型时保留。
+- 表单固定使用 `providers.proxy` 和 `proxy/<模型别名>`；目标不存在时创建，已存在时写入本次表单字段。
+- 按顶层 `model` 定位 `proxy` 中的当前模型，读取 `providers.proxy.settings`、模型 `settings` 与 `limit`；`modelID` 别名在未切换模型时保留。
 - 权限写入 `permissions: [{action: "*", resource: "*", effect: "allow|ask|deny"}]`。细分规则默认保留，主动选择策略时替换顶层数组，不设置删除该数组。
 - 压缩预留对应 `compaction.buffer`，支持百分比字符串和正整数 Token 数，表示空余预算；`compaction.keep` 等字段保持原样。
 - 文件快照使用 `snapshots`，更新策略使用全局 `update`，会话分享使用 `share`。
@@ -202,7 +207,7 @@ API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值
 ### 4.1 DSH
 
 - 默认全局补丁为 `~/.dsh/cordis.patch.yml`，凭据文件为 `~/.dsh/.credentials.yaml`，本机尊重 `DSH_HOME`。全局补丁在 Web、Desktop、headless、SDK、ACP 的 profile 补丁之后加载。
-- 页面管理 `llm-pi-ai` 插件中的 `llm-proxy` 路由、模型容量及 `agent-default-model` 默认选择，其他模型和插件保持原样。
+- 页面管理 `llm-pi-ai` 插件中的 `proxy` 路由、模型容量及 `agent-default-model` 默认选择，其他模型和插件保持原样。
 - API Key 保存为凭据文件的 `refs.LLM_PROXY_API_KEY`，补丁仅保存 `apiKeyEnv` 引用；主动清空 Key 同时删除引用。
 - 目标 Profile 需包含 `llm-pi-ai`、`agent-default-model` 及权限插件。sdk-minimal 的插件组合独立，启动参数、既有设置和会话选择可能覆盖默认值。
 - 默认权限写入 `permission.config.defaultPreset`，支持 `read-only`、`workspace-write`、`danger-full-access`。never 表示拒绝仍需审批的请求，不自动批准；默认值仅作用于新会话。

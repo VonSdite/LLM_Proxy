@@ -36,7 +36,7 @@ fields:
     required: true
     help:
       - 填写发给上游的完整模型 ID；本服务的 Provider 前缀保持不变。
-      - 保留现有模型别名；选择新模型时添加对应条目，保留旧条目。新文件使用 llm-proxy 服务名。
+      - 保留现有模型别名；选择新模型时添加对应条目，保留旧条目。新文件使用 proxy 服务名。
   - id: protocol
     label: API 协议
     group: models

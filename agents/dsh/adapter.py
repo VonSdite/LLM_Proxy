@@ -2,10 +2,10 @@
 
 from copy import deepcopy
 
-from src.services.agent_config_documents import MISSING
+from src.services.agent_config_documents import MISSING, PROXY_PROVIDER
 from src.services.agent_extensions import apply_edits, yaml_dump, yaml_load
 
-ROUTE = "llm-proxy"
+ROUTE = PROXY_PROVIDER
 PERMISSION_PRESETS = {
     "read-only": {"sandbox": "read-only", "approval": "ask"},
     "workspace-write": {"sandbox": "workspace-write", "approval": "ask"},
@@ -96,9 +96,9 @@ def display_path(target, path):
     if target != "dsh":
         return ".".join(path)
     prefixes = {
-        "connection": "llm-pi-ai.config.providers.llm-proxy",
+        "connection": "llm-pi-ai.config.providers.proxy",
         "selection": "agent-default-model.config",
-        "limits": "llm-pi-ai.config.providers.llm-proxy.models[]",
+        "limits": "llm-pi-ai.config.providers.proxy.models[]",
         "permission": "permission.config",
     }
     return ".".join((prefixes[path[0]], *path[1:]))

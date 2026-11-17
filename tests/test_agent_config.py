@@ -112,6 +112,42 @@ class ConfigDocumentTests(unittest.TestCase):
                     )
         self.assertEqual({}, parse_document("claude", edit_document("claude", '{"a":1}', {("a",): MISSING})))
 
+    def test_jsonc_delete_prunes_empty_parents(self):
+        source = json.dumps(
+            {
+                "provider": {
+                    "main": {
+                        "options": {"baseURL": "http://localhost:8080/v1"},
+                        "models": {
+                            "main/model": {
+                                "name": "main/model",
+                                "limit": {"context": 200000, "output": 32000},
+                                "options": {"reasoningEffort": "high"},
+                            }
+                        },
+                    },
+                    "other": {"models": {"other/model": {"name": "other/model"}}},
+                }
+            }
+        )
+        model = ("provider", "main", "models", "main/model")
+        updated = edit_document(
+            "opencode",
+            source,
+            {
+                ("provider", "main", "options", "baseURL"): MISSING,
+                model + ("limit", "context"): MISSING,
+                model + ("limit", "output"): MISSING,
+                model + ("options", "reasoningEffort"): MISSING,
+            },
+        )
+        data = parse_document("opencode", updated)
+        self.assertEqual({"models": {"main/model": {"name": "main/model"}}}, data["provider"]["main"])
+        self.assertEqual(
+            {"models": {"other/model": {"name": "other/model"}}},
+            data["provider"]["other"],
+        )
+
     def test_jsonc_rejects_duplicate_keys_invalid_shapes_and_syntax(self):
         for text in ('{"x":1,"x":2}', "[1]", '{"x":}', '{"x":1 "y":2}', "{} true", '{"x":/* unclosed}'):
             with self.subTest(text=text), self.assertRaises(ValueError):
@@ -138,12 +174,16 @@ class ConfigDocumentTests(unittest.TestCase):
     def test_authoritative_fields_preserve_full_proxy_ids(self):
         fields = desired_fields("codex", draft("codex"), [])
         self.assertEqual("main/org/model.v1", fields["codex"][("model",)])
-        self.assertEqual("responses", fields["codex"][("model_providers", "main", "wire_api")])
+        self.assertEqual("proxy", fields["codex"][("model_provider",)])
+        self.assertEqual("responses", fields["codex"][("model_providers", "proxy", "wire_api")])
         fields = desired_fields("opencode", draft("opencode"), ["main/gpt-5.4", "other/model"])["opencode"]
-        self.assertEqual("main/main/org/model.v1", fields[("model",)])
-        self.assertEqual("main/org/model.v1", fields[("provider", "main", "models", "main/org/model.v1", "name")])
-        self.assertEqual(372000, fields[("provider", "main", "models", "main/gpt-5.4", "limit", "context")])
-        self.assertNotIn(("provider", "main", "models", "other/model", "name"), fields)
+        self.assertEqual("proxy/main/org/model.v1", fields[("model",)])
+        self.assertEqual(
+            "main/org/model.v1",
+            fields[("provider", "proxy", "models", "main/org/model.v1", "name")],
+        )
+        self.assertEqual(372000, fields[("provider", "proxy", "models", "main/gpt-5.4", "limit", "context")])
+        self.assertNotIn(("provider", "proxy", "models", "other/model", "name"), fields)
 
     def test_claude_output_budget_and_compaction_window_are_independent(self):
         data = draft()
@@ -923,13 +963,35 @@ class AgentConfigServiceTests(AgentConfigFixture):
         self.addCleanup(restarted.close)
         self.assertEqual(self.service.state["paths"], restarted.state["paths"])
 
+    def test_codex_switching_model_reuses_fixed_provider(self):
+        self.save("codex")
+        changed = deepcopy(draft("codex"))
+        changed["model"] = "other/model"
+        result = self.save("codex", changed)
+        path = Path(result["files"]["codex"]["path"])
+        configured = parse_document("codex", path.read_text(encoding="utf-8"))
+        self.assertEqual("proxy", configured["model_provider"])
+        self.assertEqual({"proxy"}, set(configured["model_providers"]))
+        self.assertEqual("other/model", configured["model"])
+
+    def test_opencode_switching_model_reuses_fixed_provider(self):
+        self.save("opencode")
+        changed = deepcopy(draft("opencode"))
+        changed["model"] = "other/model"
+        result = self.save("opencode", changed)
+        path = Path(result["files"]["opencode"]["path"])
+        configured = parse_document("opencode", path.read_text(encoding="utf-8"))
+        self.assertEqual({"proxy"}, set(configured["provider"]))
+        self.assertEqual({"other/model"}, set(configured["provider"]["proxy"]["models"]))
+        self.assertEqual("proxy/other/model", configured["model"])
+
     def test_external_opencode_only_writes_the_selected_external_model(self):
         changed = {**draft("opencode"), "baseUrl": "https://external.example/v1", "model": "main/external-model"}
         result = self.save("opencode", changed)
         path = Path(result["files"]["opencode"]["path"])
         configured = parse_document("opencode", path.read_text(encoding="utf-8"))
-        self.assertEqual({"main/external-model"}, set(configured["provider"]["main"]["models"]))
-        self.assertEqual("https://external.example/v1", configured["provider"]["main"]["options"]["baseURL"])
+        self.assertEqual({"main/external-model"}, set(configured["provider"]["proxy"]["models"]))
+        self.assertEqual("https://external.example/v1", configured["provider"]["proxy"]["options"]["baseURL"])
 
     def test_own_opencode_endpoint_includes_catalog_models_through_reverse_proxy(self):
         snapshot = self.snapshot()
@@ -946,8 +1008,8 @@ class AgentConfigServiceTests(AgentConfigFixture):
         result = self.service.apply(self.owner, "local", preview["token"])
         path = Path(result["files"]["opencode"]["path"])
         configured = parse_document("opencode", path.read_text(encoding="utf-8"))
-        self.assertIn("main/gpt-5.4", configured["provider"]["main"]["models"])
-        self.assertIn("main/org/model.v1", configured["provider"]["main"]["models"])
+        self.assertIn("main/gpt-5.4", configured["provider"]["proxy"]["models"])
+        self.assertIn("main/org/model.v1", configured["provider"]["proxy"]["models"])
 
     def test_external_opencode_cannot_match_catalog_by_host_prefix_or_service_port(self):
         for url in (

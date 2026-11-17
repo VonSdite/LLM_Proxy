@@ -32,6 +32,7 @@ CLAUDE_MODES = {
     "sandbox": ("IS_SANDBOX", "1", "0"),
 }
 EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+PROXY_PROVIDER = "proxy"
 MISSING = object()
 _TOKEN = re.compile(
     r'\s+|//[^\n]*|/\*[\s\S]*?\*/|"(?:[^"\\]|\\.)*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\],:]'
@@ -131,6 +132,13 @@ class JsoncDocument:
             raise ValueError(f"JSON value expected at offset {start}") from exc
 
     def edit(self, path: tuple[str, ...], value: Any = MISSING) -> str:
+        if value is MISSING and at_path(self.data, path) is not MISSING:
+            # 删除字段后逐级裁剪空对象，保留仍有其他字段的最近父对象。
+            for index in range(len(path) - 1, 0, -1):
+                parent = at_path(self.data, path[:index])
+                if not isinstance(parent, dict) or len(parent) != 1:
+                    break
+                path = path[:index]
         node = self.root
         for index, key in enumerate(path):
             if not isinstance(node.value, dict):
@@ -293,7 +301,7 @@ def _explicit_clears(agent: str, draft: dict, result: dict) -> dict:
         )
     else:
         model = str(draft.get("model") or "").strip()
-        prefix = ("provider", provider_key(model))
+        prefix = ("provider", PROXY_PROVIDER)
         selected = prefix + ("models", model)
         allowed = {
             "apiKey": (agent, prefix + ("options", "apiKey")),
@@ -405,7 +413,8 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
         return _explicit_clears(agent, draft, {agent: fields})
     if not model or len(model) > 512 or any(ord(char) < 32 for char in model):
         raise ValueError("Select a valid model")
-    provider = provider_key(model)
+    upstream_provider = provider_key(model)
+    provider = PROXY_PROVIDER
     if agent == "codex":
         prefix = ("model_providers", provider)
         fields.update(
@@ -474,7 +483,7 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
     update = _choice(runtime.get("autoupdate"), ("true", "false", "notify", "custom"), "OpenCode autoupdate")
     if update and update != "custom":
         fields[("autoupdate",)] = {"true": True, "false": False, "notify": "notify"}[update]
-    for configured in dict.fromkeys([*(entry for entry in catalog if provider_key(entry) == provider), model]):
+    for configured in dict.fromkeys([*(entry for entry in catalog if provider_key(entry) == upstream_provider), model]):
         model_prefix = prefix + ("models", configured)
         fields[model_prefix + ("name",)] = configured
         if configured != model:

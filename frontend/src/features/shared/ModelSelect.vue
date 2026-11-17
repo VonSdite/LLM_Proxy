@@ -19,6 +19,8 @@ const options = computed<SelectOption[]>(() => {
       })
     : props.models
   const values = [...new Set(ids)]
+  // 无前缀模型优先，稳定排序保持原有顺序和 [1M] 变体相邻。
+  values.sort((left, right) => Number(left.includes('/')) - Number(right.includes('/')))
   const result = values.map((value) => ({
     value,
     label: value.replace(/\[1m\]$/i, ' [1M]'),

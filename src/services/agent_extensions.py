@@ -231,7 +231,7 @@ class AgentExtensions:
             locations = [(agent, item) for item in paths]
         else:
             model = str(draft.get("model") or "").strip()
-            provider = documents.provider_key(model)
+            provider = documents.PROXY_PROVIDER
             if agent == "codex":
                 locations = [
                     (agent, ("model_providers", provider, "base_url")),
