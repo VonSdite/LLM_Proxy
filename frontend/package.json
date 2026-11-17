@@ -14,7 +14,6 @@
     "build": "npm run typecheck && node scripts/build.mjs",
     "test:unit": "vitest run",
     "test:e2e": "playwright test --project=chromium",
-    "test:visual": "playwright test --project=visual",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

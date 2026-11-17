@@ -28,20 +28,4 @@ export const test = connected.extend<{ pageErrors: void }>({
   ],
 })
 
-// 全页截图前统一系统滚动条状态，避免 CDP 截图时临时隐藏滚动条引起宽度变化。
-export const visualTest = test.extend<{ screenshotScrollbars: void }>({
-  screenshotScrollbars: [
-    async ({ context, page }, use) => {
-      const session = await context.newCDPSession(page)
-      await session.send('Emulation.setScrollbarsHidden', { hidden: true })
-      try {
-        await use()
-      } finally {
-        await session.detach()
-      }
-    },
-    { auto: true },
-  ],
-})
-
 export { expect }

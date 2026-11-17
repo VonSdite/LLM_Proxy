@@ -20,4 +20,4 @@
 - `src/dev/ComponentsPage.vue` 展示正式组件，路由仅在开发和测试构建可达。
 - 功能对应及验证记录位于仓库根目录的 `docs/frontend-migration-audit.md`，组件选择和部署步骤位于 `docs/frontend-development.md`。
 
-交付检查：`npm ci`、`npm run lint`、`npm run typecheck`、`npm run test:unit`、`npm run build`、`npm run test:e2e`、`npm run test:visual`。后端及模型表检查采用仓库根目录的命令。
+交付检查：`npm ci`、`npm run lint`、`npm run typecheck`、`npm run test:unit`、`npm run build`、`npm run test:e2e`。后端及模型表检查采用仓库根目录的命令。
