@@ -40,7 +40,7 @@
 | --- | --- |
 | **🔀 Multi-protocol gateway** | Serve OpenAI Chat Completions, OpenAI Responses, Claude Messages, and image APIs from one service, with built-in request, response, and streaming event translation. |
 | **🧭 Flexible model routing** | Use `provider/model` routes, custom model mappings, prioritized or sticky multi-target failover, target cooldowns, and per-model visibility controls. |
-| **🔑 Credential pools and OAuth** | Schedule multiple keys with concurrency and request quotas, 429 cooldowns, and Auth Groups. Manage Codex / Claude OAuth files, account failover, and runtime status. |
+| **🔑 Credential pools and OAuth** | Schedule multiple keys with concurrency and request quotas, 429 cooldowns, and Auth Groups. Manage Codex OAuth files, account failover, and runtime status. |
 | **🛡️ Access control and redaction** | Configure downstream API keys, model permissions, token quotas, concurrency and per-minute/daily limits, IP allowlists, and optional request-scoped sensitive-data redaction. |
 | **📊 Usage observability** | Inspect request trends, tokens, cache hits, upstream success rates, first-token latency, TPS, and costs. Filter across dimensions and export request details, Excel files, or migration data. |
 | **🧩 Extensions and Agent integration** | Customize headers, requests, responses, and model discovery with Hooks. Manage local or SSH-based Claude, Codex, opencode, DSH, and Hermes configurations. |
@@ -141,7 +141,7 @@ Model IDs use three forms depending on their source:
 | Source | Examples |
 | --- | --- |
 | Standard Provider | `openai/gpt-4.1` |
-| Codex / Claude OAuth | `gpt-5.4`, `claude-sonnet-4-5` |
+| Codex OAuth | `gpt-5.4` |
 | Custom model mapping | `smart`, `coding-fast` |
 
 When downstream API key management is enabled, requests must include `Authorization: Bearer <your-downstream-api-key>` and satisfy the key's model permissions and quotas.

@@ -4,7 +4,7 @@
 
 > 一个面向多上游、多协议、多认证形态的统一 LLM 接入层。
 
-LLM_Proxy 把模型服务、鉴权方式、协议转换和后台运维收敛到同一个 Flask + gevent 服务中，对下游提供 OpenAI Chat Completions、OpenAI Responses 和 Claude Messages 兼容接口。它既支持常规 Provider 代理，也支持 Codex / Claude OAuth 账号文件代理，并内置 Provider 管理、Auth Group 凭据池、白名单控制、日志统计、请求调试和 Hook 扩展能力。
+LLM_Proxy 把模型服务、鉴权方式、协议转换和后台运维收敛到同一个 Flask + gevent 服务中，对下游提供 OpenAI Chat Completions、OpenAI Responses 和 Claude Messages 兼容接口。它既支持常规 Provider 代理，也支持 Codex OAuth 账号文件代理，并内置 Provider 管理、Auth Group 凭据池、白名单控制、日志统计、请求调试和 Hook 扩展能力。
 
 它的定位不是“再做一个 API 转发器”，而是把代理、协议适配、认证管理和运维入口放到同一层统一处理。客户端只需要记住一个地址；服务端可以集中维护模型路由、Key 池、OAuth 账号、访问控制和统计信息。
 
@@ -12,7 +12,7 @@ LLM_Proxy 把模型服务、鉴权方式、协议转换和后台运维收敛到�
 
 - 统一接入多种上游协议：同一个代理服务可同时对接 OpenAI Chat Completions、OpenAI Responses、Claude Messages 和 Codex 风格接口
 - 多下游兼容内建：同一个 Provider 不需要额外配置下游格式，默认即可同时服务 `/v1/chat/completions`、`/v1/responses` 和 `/v1/messages`
-- OAuth 账号文件代理：支持 Codex / Claude 认证文件代理、账号状态记录和账号候选切换；后台提供 Codex 登录、认证文件管理、模型目录维护和配额查看
+- OAuth 账号文件代理：支持 Codex 认证文件代理、账号状态记录和账号候选切换；后台提供 Codex 登录、认证文件管理、模型目录维护和配额查看
 - Hook 扩展机制：用于补充 Header、请求护栏和成功响应清洗
 - 多 Key 池化调度：`auth_group` 支持并发限制、429 冷却、分钟/日请求配额
 - 控制平面模型测试：Provider 编辑页可按当前表单快照直接测试模型可用性、首字延迟和 TPS
@@ -183,10 +183,10 @@ SSH 支持密码或服务进程可用的 SSH Agent / 默认密钥，首次未知
 
 | 路由 | 说明 | 下游协议 | 支持模型来源 |
 | --- | --- | --- | --- |
-| `POST /v1/chat/completions` | OpenAI Chat Completions 兼容接口 | `openai_chat` | Provider、Codex / Claude OAuth |
-| `POST /v1/responses` | OpenAI Responses / Codex 风格接口 | `openai_responses` | Provider、Codex / Claude OAuth |
-| `POST /v1/messages` | Claude Messages 兼容接口 | `claude_chat` | Provider、Codex / Claude OAuth |
-| `GET /v1/models` | 返回当前已注册模型列表 | 不适用 | Provider、Codex / Claude OAuth |
+| `POST /v1/chat/completions` | OpenAI Chat Completions 兼容接口 | `openai_chat` | Provider、Codex OAuth |
+| `POST /v1/responses` | OpenAI Responses / Codex 风格接口 | `openai_responses` | Provider、Codex OAuth |
+| `POST /v1/messages` | Claude Messages 兼容接口 | `claude_chat` | Provider、Codex OAuth |
+| `GET /v1/models` | 返回当前已注册模型列表 | 不适用 | Provider、Codex OAuth |
 
 ### 模型命名规则
 
@@ -198,7 +198,7 @@ SSH 支持密码或服务进程可用的 SSH Agent / 默认密钥，首次未知
 
 也就是说，Provider 模型需要使用 `provider/model` 格式。代理转发给上游前只移除最前面的 `provider/` 前缀，真实模型名剩余部分会原样保留。
 
-OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸模型名，例如 `gpt-5.4` 或 `claude-sonnet-4-5`。只有在存在对应类型的认证文件，并且该模型已添加到 `/oauth` 页面模型目录后，它才会出现在 `GET /v1/models` 中。
+OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸模型名，例如 `gpt-5.4`。只有在存在 Codex 认证文件，并且该模型已添加到 `/oauth` 页面模型目录后，它才会出现在 `GET /v1/models` 中。
 
 ## 配置介绍
 
@@ -217,7 +217,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `oauth.enabled`：是否允许 OAuth 模型参与新请求；管理页面与网络设置始终可用
 - `oauth.proxy`：OAuth 登录、Codex 配额查询和 OAuth 上游请求使用的代理地址，留空表示不使用代理
 - `oauth.verify_ssl`：OAuth 网络请求是否校验证书，默认 `false`
-- `oauth.safe_desensitization_enabled`：是否对 OAuth 上游（Codex / Claude）请求启用安全脱敏，默认 `false`；效果与 Provider 的 `safe_desensitization_enabled` 一致
+- `oauth.safe_desensitization_enabled`：是否对 OAuth 上游（Codex）请求启用安全脱敏，默认 `false`；效果与 Provider 的 `safe_desensitization_enabled` 一致
 
 内置服务支持在系统设置中热切换监听地址和端口，离开这组输入区域或按 Enter 自动保存。格式错误显示在对应字段下，无变化不提交。保存成功后弹窗展示新入口，确认后跳转；已有请求继续完成，登录会话保留。绑定失败时继续使用原监听。同端口地址冲突时可使用空闲端口切换。反向代理、容器端口映射和外部 WSGI 宿主的监听由部署方维护。
 
@@ -371,9 +371,9 @@ providers:
 - [config.sample.yaml](../config.sample.yaml)
 - [hooks/example_hook.py](../hooks/example_hook.py)
 
-## OAuth 代理（Codex / Claude）
+## OAuth 代理（Codex）
 
-OAuth 代理是独立于常规 Provider 的运行时能力。它不需要在 `providers[]` 中配置 API Key，而是通过 OAuth 登录生成本地认证文件，再把下游 OpenAI/Claude 兼容请求转换后转发到 Codex Responses 或 Claude Messages 上游。管理页面提供 Codex 登录与配置；Claude OAuth 的认证与模型管理通过 `/api/oauth/claude/*` 接口提供。
+OAuth 代理是独立于常规 Provider 的运行时能力。它不需要在 `providers[]` 中配置 API Key，而是通过 OAuth 登录生成本地认证文件，再把下游 OpenAI/Claude 兼容请求转换后转发到 Codex Responses 上游。管理页面提供 Codex 登录与配置。
 
 ### 1. 开启 OAuth 管理入口
 
@@ -397,15 +397,12 @@ oauth:
 - `data/oauth/codex/*.json`：Codex 认证文件
 - `data/oauth/codex/models.json`：手动维护的 Codex 模型目录
 - `data/oauth/codex/.state/auth_files.json`：认证文件启停状态、最近状态、配额快照和错误信息
-- `data/oauth/claude/*.json`：Claude 认证文件
-- `data/oauth/claude/models.json`：手动维护的 Claude 模型目录
-- `data/oauth/claude/.state/auth_files.json`：Claude 认证文件启停状态、最近状态和错误信息
 
 这些文件包含账号认证信息，请不要提交到版本库，也不要暴露给不可信用户。
 
 ### 3. 维护模型目录
 
-Codex OAuth 模型在 `/oauth` 页面维护，Claude OAuth 模型通过 `/api/oauth/claude/models` 接口维护。添加后，如果至少有一个对应类型的认证文件，`GET /v1/models` 会返回这些模型。Codex 模型示例：
+Codex OAuth 模型在 `/oauth` 页面维护。添加后，如果至少有一个 Codex 认证文件，`GET /v1/models` 会返回这些模型。模型示例：
 
 ```json
 {
@@ -427,8 +424,6 @@ curl http://127.0.0.1:8080/v1/responses \
     "stream": false
   }'
 ```
-
-Claude OAuth 模型同样使用裸模型名，例如 `claude-sonnet-4-5`，并会以 `provider_name=claude`、`source_format=claude_chat` 暴露。
 
 ### 4. Codex 运行时行为
 
@@ -465,17 +460,6 @@ Claude OAuth 模型同样使用裸模型名，例如 `claude-sonnet-4-5`，并�
 
 Codex 额度刷新包含后台每小时整轮查询、额度窗口到期查询、活跃账号成功请求后的限频查询，以及页面手动查询。页面每分钟读取认证文件快照，对到期窗口查询额度和重置卡。认证文件列表、额度和重置卡读取请求的前端超时为 60 秒；筛选按钮原位更新状态与数量；远期重置卡过期时间使用有上限的分段定时器。完整频率、触发条件、账号范围和请求边界见 [4+1 架构](architecture-4plus1.md)。
 
-### 5. Claude 运行时行为
-
-Claude OAuth 的账号候选和错误记录逻辑与 Codex 类似：每次请求重新构建候选列表，默认按认证文件修改时间倒序排列，但最近一次真实请求成功的认证文件会被提升到候选首位；人工禁用、认证失败、token 刷新失败或缺少 `access_token` 的文件会被跳过；选到候选后直接请求 Anthropic Messages 上游，失败时记录当前认证文件状态并尝试下一个候选。
-
-Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照和配额冷却机制。因此 Claude 的“可不可用”主要来自 token 刷新结果和真实上游请求结果，而不是调用 usage 接口预判。
-
-- Claude 流式响应以首个非空目标协议编码字节为提交边界；提交前的 transport 失败会尝试下一个可用认证文件
-- Claude 流提交后的 transport 失败会记录当前认证文件失败，按下游协议发送错误事件并结束当前流
-- Claude 流只有收到 `message_stop` 才记录成功；缺少该终止事件的 EOF 按未完成流处理
-- Claude 流被客户端取消时会关闭上游响应，不触发成功完成统计，也不更新认证文件成功或失败状态
-
 ## 功能介绍
 
 ### 1. 代理与协议转换
@@ -486,7 +470,7 @@ Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照�
 - 自动识别 SSE、NDJSON 等 HTTP 上游返回形态
 - 流式响应以首个非空、已经完成目标协议编码的下游字节为提交边界
 - 普通 Provider 提交前的 transport 异常会在 `max_retries` 定义的最大尝试次数范围内重新执行上游请求；尝试次数耗尽后返回结构化 `502` 错误响应
-- Codex / Claude OAuth 提交前的 transport 异常会记录当前认证文件失败并尝试下一个候选认证文件
+- Codex OAuth 提交前的 transport 异常会记录当前认证文件失败并尝试下一个候选认证文件
 - 提交后的 transport 异常会按当前下游协议发送错误事件并结束流，当前请求不执行透明重试
 - OpenAI Chat 使用 error JSON data block 和 `[DONE]`，OpenAI Responses 使用 `response.failed`，Claude Messages 使用 `event: error`
 - 目标协议终止事件已经发出时，后续 HTTP framing 异常保持当前流的逻辑完成状态
@@ -494,7 +478,7 @@ Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照�
 - 内置 translator 会在 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 和 Claude `thinking` 之间转换思考意图；无法精确映射的档位会使用 `xhigh`
 - OpenAI Chat 上游响应里的 `reasoning_content` 和 `reasoning_details` 会按下游协议转换为 Claude thinking 或 OpenAI Responses reasoning 输出
 - Chat、Responses 与 Claude 跨协议请求中的工具图片、PDF 和文本文件使用目标协议内容块；发往 Chat 的工具媒体补传到 user 消息，保留工具调用关联。来源支持范围见 [4+1 架构](architecture-4plus1.md)
-- `GET /v1/models` 会返回当前已启用 Provider 中允许公开的模型和 Codex / Claude OAuth 模型列表，以及 `provider_name`、`source_format` 等元信息
+- `GET /v1/models` 会返回当前已启用 Provider 中允许公开的模型和 Codex OAuth 模型列表，以及 `provider_name`、`source_format` 等元信息
 
 ### 2. Provider 与 Auth Group 管理
 
@@ -702,7 +686,7 @@ providers:
 开启后，代理会在请求发往上游前把请求体中的敏感内容替换为请求级占位符（形如 `__LLM_PROXY_REDACTED_SECRET_0001_<随机串>__`），上游响应回到下游前再按占位符逐字精确恢复；上游全程只看到占位符。三个开关任一生效即对该请求启用：
 
 - Provider 级：`providers[].safe_desensitization_enabled`
-- OAuth 级：`oauth.safe_desensitization_enabled`，覆盖 Codex（含图片生成 prompt）与 Claude 路径
+- OAuth 级：`oauth.safe_desensitization_enabled`，覆盖 Codex 路径（含图片生成 prompt）
 - 模型映射级：映射编辑页的脱敏开关，即使目标 Provider 或 OAuth 未开启，该映射的请求也会强制脱敏
 
 Provider 路径开启后，同时不再向上游转发凭据类客户端请求头（`cookie`、`set-cookie`、`api-key`、`x-api-key`、`x-goog-api-key`、`x-auth-token`、`x-session-token`、`x-csrf-token`、`x-amz-security-token`）。
@@ -716,7 +700,7 @@ Provider 路径开启后，同时不再向上游转发凭据类客户端请求�
 - 裸密钥：既不带已知前缀、也不在敏感字段名下的随机字符串不会被识别。
 - 密钥前缀清单有限：当前识别 `sk-`、`sk-ant-`、`AIza`、`AKIA`/`ASIA`、`ghp_`/`github_pat_`、`sk_live_`/`pk_live_`/`rk_live_`（含 `_test_`）、`glpat-`、`hf_`、`npm_`、`xox*`、`SG.`、`ya29.` 和 Telegram Bot Token 等格式；Azure、阿里云（`LTAI`）、腾讯云、DeepSeek、智谱等厂商的密钥前缀不在清单内，只能依赖字段名或赋值样式命中。
 - 个人信息识别范围：手机号仅中国大陆 `1[3-9]` 号段（支持 `+86` 与分隔符）；身份证仅 18 位；银行卡需 15-19 位且通过 Luhn 校验；IP 仅合法 IPv4/IPv6 字面量。座机、港澳台与国际号码、15 位旧身份证、域名、中文姓名、住址等均不覆盖。
-- 请求头剔除按路径不同：Provider 路径只剔除固定清单，自定义命名的凭据头（如 `x-my-token`）仍会转发；Codex 路径的上游请求头按白名单重建，客户端头基本不透传；Claude 路径会合并转发客户端头（固定剔除 `authorization` 与 `x-api-key`），`Cookie` 等头仍会发往 Anthropic 上游。
+- 请求头剔除按路径不同：Provider 路径只剔除固定清单，自定义命名的凭据头（如 `x-my-token`）仍会转发；Codex 路径的上游请求头按白名单重建，客户端头基本不透传。
 - Hook `request_guard` 拿到的已是脱敏后的上游请求体，Hook 内部重新写入的敏感内容不会二次脱敏。
 
 **会误伤的场景（正常内容被替换）：**
@@ -749,7 +733,6 @@ Provider 路径开启后，同时不再向上游转发凭据类客户端请求�
 - 配置样例：`config.sample.yaml`
 - Hook 目录：`hooks/`
 - Codex OAuth 认证目录：`data/oauth/codex/`
-- Claude OAuth 认证目录：`data/oauth/claude/`
 - SQLite 默认库：`data/requests.db`
 - 日志目录：`logs/`
 - 请求调试日志：`logs/llm_request_trace.log`

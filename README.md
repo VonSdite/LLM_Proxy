@@ -40,7 +40,7 @@
 | --- | --- |
 | **🔀 多协议网关** | 同时提供 OpenAI Chat Completions、OpenAI Responses、Claude Messages 与图片接口；内置跨协议请求、响应和流式事件转换。 |
 | **🧭 灵活模型路由** | 支持 `provider/model` 路由、自定义模型映射、多目标优先级与粘滞故障切换、目标冷却和模型可见性管理。 |
-| **🔑 凭据池与 OAuth** | Auth Group 提供多 Key 调度、并发与请求配额、429 冷却；Codex / Claude OAuth 支持认证文件管理、账号切换与状态跟踪。 |
+| **🔑 凭据池与 OAuth** | Auth Group 提供多 Key 调度、并发与请求配额、429 冷却；Codex OAuth 支持认证文件管理、账号切换与状态跟踪。 |
 | **🛡️ 访问控制与脱敏** | 提供下游 API Key、模型权限、Token 配额、并发与分钟/每日限制、IP 白名单，以及可选的请求级安全脱敏。 |
 | **📊 用量可观测** | 查看请求趋势、Token、缓存命中、上游成功率、首字延迟、TPS 与费用；支持多维筛选、请求明细、Excel 和数据迁移导出。 |
 | **🧩 扩展与 Agent 集成** | 通过 Hook 定制 Header、请求、响应和模型发现；集中维护 Claude、Codex、opencode、DSH、Hermes 的本机或 SSH 配置。 |
@@ -141,7 +141,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 | 来源 | 示例 |
 | --- | --- |
 | 常规 Provider | `openai/gpt-4.1` |
-| Codex / Claude OAuth | `gpt-5.4`、`claude-sonnet-4-5` |
+| Codex OAuth | `gpt-5.4` |
 | 自定义模型映射 | `smart`、`coding-fast` |
 
 开启下游 API Key 管理后，请求需携带 `Authorization: Bearer <your-downstream-api-key>`，并满足 Key 的模型权限与配额限制。
