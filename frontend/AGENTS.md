@@ -18,6 +18,6 @@
 - Agent 数值输入使用 commit 事件。原文件精确 Token 数值与百分比显示分开存储。
 - 注释使用中文，日志使用英文；文本为 UTF-8 无 BOM、LF。
 - `src/dev/ComponentsPage.vue` 展示正式组件，路由仅在开发和测试构建可达。
-- 功能对应及验证记录位于仓库根目录的 `docs/frontend-migration-audit.md`，组件选择和部署步骤位于 `docs/frontend-development.md`。
+- 组件选择和部署步骤位于 `docs/frontend-development.md`。
 
 交付检查：`npm ci`、`npm run lint`、`npm run typecheck`、`npm run test:unit`、`npm run build`、`npm run test:e2e`。后端及模型表检查采用仓库根目录的命令。

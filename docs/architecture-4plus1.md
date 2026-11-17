@@ -37,7 +37,7 @@
 
 `UiController` 提供 `/api/ui/bootstrap`，返回版本、认证状态、当前用户、功能开关和 Agent 页面能力。该响应不包含配置内容或凭据，采用 `no-store`；Agent 能力按已认证会话或本机回环 Host 与连接对端判定，文件 API 继续执行原有完整保护链路。
 
-`render_ui` 从 `static/app/manifest.json` 解析内容哈希资源。HTML 使用 `no-store`，manifest 使用 `no-cache`，内容哈希资源使用长期不可变缓存。Vue 生产资源由 Flask 同源提供，Node.js 属于开发与构建工具。实现与验证状态记录在 [前端迁移验收记录](frontend-migration-audit.md)。
+`render_ui` 从 `static/app/manifest.json` 解析内容哈希资源。HTML 使用 `no-store`，manifest 使用 `no-cache`，内容哈希资源使用长期不可变缓存。Vue 生产资源由 Flask 同源提供，Node.js 属于开发与构建工具。
 
 `/login`、`/`、`/providers`、`/users`、`/api-keys`、`/model-mappings`、`/oauth`、`/agents`、`/statistics`、`/settings` 使用同一 Vue 入口。Flask 保留页面认证与 Agent 访问保护；Vue Router 处理站内导航和登录校验，OAuth、API Key 和模型映射管理页始终可进入。API、数据平面与未知路径使用各自 Flask 路由，不进入页面兜底。旧业务模板、页面脚本、Bootstrap 资源不参与生产装配；Ace 由本地 vendor 按需加载。
 
@@ -366,6 +366,15 @@ decoder
   - 为原生响应聚合后的完整 source payload 提供 source-to-target response translation
   - 维护 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 与 Claude `thinking` 的请求语义映射
   - 将 OpenAI Chat 上游 reasoning 内容转换为下游协议对应的 thinking / reasoning 输出
+  - 工具结果媒体转换遵循以下契约：
+    - Chat → Responses 将文本、图片、文件映射为 `input_text`、`input_image`、`input_file`，放入对应 `function_call_output.output` 或 `custom_tool_call_output.output`
+    - Chat → Claude 将文本、图片、内联文件映射为 `text`、`image`、`document`，放入对应 `tool_result.content`
+    - Responses → Chat 与 Claude → Chat 保留工具消息文本，将全部并行工具消息之后的媒体补入 user 消息，并用文字标记关联工具调用 ID
+    - Responses ↔ Claude 在对应 `tool_result.content`、`function_call_output.output` 或 `custom_tool_call_output.output` 中传递原生文本、图片和文件内容块
+    - 同协议请求保留原有工具内容；只有媒体的工具结果使用简短文本占位，未知的非媒体内容块保留为 JSON 文本
+    - Claude `source.type=text` 映射为目标协议文本，`base64` 使用文件字段，`url` 使用 Responses 或 Claude 的 URL 文件来源；缺少文件名的内联 PDF 使用 `document.pdf`
+    - Chat 不兼容的 URL 文件、目标协议不兼容的文件 ID、缺失媒体来源和不支持的内联文档类型返回 HTTP 400，错误码为 `unsupported_tool_result_content`
+    - Claude 工具内容块的 `cache_control` 提升到外层 `tool_result`；共享实现位于 `src/translators/tool_result_utils.py`
 - `UsageNormalizer`
   - 位于 `src/proxy_core/usage.py`
   - 统一 OpenAI Chat、OpenAI Responses、Claude Messages 和 Gemini 风格 usage 的输入、输出、total、缓存与推理字段
@@ -619,7 +628,7 @@ OAuth 模型是数据平面的例外路由：
   - 普通 Codex 数据面请求按模型、账号计划、responses-lite 标记和默认图片模型决定是否携带 `image_generation` 工具
   - OpenAI Images 数据面请求固定使用 Codex OAuth 文本模型作为主请求模型，并用图片模型作为 `image_generation` 工具模型
   - 使用内置日期化价格快照按响应模型优先估算单次 API 美元等价费用；未知模型或不完整 Token 用量不产生费用值
-  - 当前价格快照日期为 `2026-09-14`，数据源为 `Wei-Shaw/model-price-repo` 的 `model_prices_and_context_window.json`
+  - 当前价格快照日期为 `2026-11-09`，数据源为 OpenAI 官方 API 价格表，内置数据位于 `src/config/openai_model_catalog.json`
 - `ClaudeProxyService`
   - 每次 Claude 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
 
@@ -693,6 +702,7 @@ Provider、模型映射、API Key、用户、Auth Group 运行态和统计表使
 Provider 公共配置字段只有：
 
 - `name`
+- `enabled`
 - `api`
 - `source_format`
 - `api_key`
@@ -985,7 +995,6 @@ Codex OAuth management page
   -> optional reset local quota snapshot and cooldown state
 ```
 
-Codex 配额刷新频率、触发条件、认证文件范围和请求边界见 [Codex 额度刷新规则](codex-quota-refresh.md)。
 
 Claude OAuth 管理接口的登录链路如下：
 
@@ -1064,6 +1073,12 @@ Claude OAuth management API
 - 认证类错误会持久显示为认证失败并参与候选过滤；重新 OAuth 登录、token 刷新成功或后续真实请求成功后会清除该状态
 - OAuth 顶层导航项常驻，页面开关使用 `oauth.enabled` 控制数据面目录与新请求路由
 - token 交换、token 刷新与 OAuth 数据面代理使用 OAuth 网络设置弹窗维护的 `oauth.proxy_mode`、`oauth.proxy` 和 `oauth.verify_ssl`；Codex 配额查询在认证文件没有 `proxy_url` 时使用该网络设置
+- Codex 额度相关默认值维护位置：
+  - `src/services/codex_oauth_service.py`：`CODEX_QUOTA_AUTO_REFRESH_INTERVAL_SECONDS=3600`、`CODEX_QUOTA_AUTO_REFRESH_FILE_DELAY_SECONDS=10`、`CODEX_USAGE_ACTIVE_REFRESH_INTERVAL_SECONDS=600`、`CODEX_USAGE_ACTIVE_REFRESH_DELAY_SECONDS=60`
+  - `frontend/src/features/oauth/quota.ts`：`OAUTH_SYNC_INTERVAL_MS=60000`、`MAX_TIMER_DELAY_MS=2**31-1`；远期重置卡过期时间按该单段上限分段等待
+  - `frontend/src/api/oauth.ts`：`OAUTH_READ_TIMEOUT_MS=60000`，覆盖认证文件列表、额度和重置卡读取；单账号刷新的两个串行读取分别适用该超时
+- OAuth 批量手动刷新在启动时固定认证文件列表，并按所选顺序串行处理；后续筛选变化只影响展示与选择，不改变本轮范围。页面隐藏、当前为 Claude 页签或存在互斥操作时跳过自动同步
+- Codex 后台任务的下一次唤醒取周期刷新与已知窗口 `reset_at` 中较早的时间；后台查询跳过无效 JSON、类型错误、缺少 access token 和已标记认证失败的文件
 - Codex 数据面请求在下游流提交前遇到上游错误或请求失败时，会记录当前认证文件信息并尝试下一个候选认证文件，直到成功或候选耗尽
 - Codex 数据面请求在下游流提交后遇到 transport 失败时，会记录当前认证文件失败并发送下游协议错误事件，当前流不切换认证文件
 - Codex 数据面请求被客户端取消时会关闭上游响应，不更新当前认证文件成功或失败状态

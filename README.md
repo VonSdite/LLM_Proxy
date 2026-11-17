@@ -133,13 +133,13 @@ npm --prefix frontend run dev
 
 开发地址为 `http://127.0.0.1:5173`，API 默认代理到 `http://127.0.0.1:8080`，后端地址可通过 `LLM_PROXY_DEV_URL` 环境变量指定。生产构建使用 `npm --prefix frontend run build`，源码、锁文件与 `src/presentation/static/app/` 产物一同交付。
 
-组件选择、测试、截图和部署步骤见 [前端开发指南](docs/frontend-development.md)，本次迁移的验证结果和覆盖范围见 [迁移验收记录](docs/frontend-migration-audit.md)。
+组件选择、测试和部署步骤见 [前端开发指南](docs/frontend-development.md)。
 
 ### Agent 配置
 
-Agent 定义集中在根目录 `agents/`。新增 `agents/<id>/agent.yaml` 并重启 Python 服务即可加载自定义表单，复杂格式可增加同目录 `adapter.py`；声明式扩展无需重新构建前端。格式、示例和官方配置依据见 [Agent 配置扩展](docs/agent-extension-design.md)。
+Agent 定义集中在根目录 `agents/`。新增 `agents/<id>/agent.yaml` 并重启 Python 服务即可加载自定义表单，复杂格式可增加同目录 `adapter.py`；声明式扩展无需重新构建前端。格式、示例、兼容边界和模型参数维护见 [Agent 配置与兼容性](docs/agent-configuration.md)。
 
-Claude 支持权限模式（含 `bypassPermissions`）、命令沙箱和运行参数。字段含义、平台限制及版本依据见 [Claude 配置兼容性](docs/claude-config-compatibility.md)。
+Claude 支持权限模式（含 `bypassPermissions`）、命令沙箱和运行参数。字段含义、平台限制及版本依据见 [Agent 配置与兼容性](docs/agent-configuration.md)。
 
 `/agents` 左侧管理机器，右侧按 Claude、Codex、Opencode v1 / v2、DSH、Hermes 编辑模型、API 地址、下游 API Key 和运行设置。API 地址可自由填写，指向本服务时，模型下拉来自当前启用的 Provider、OAuth 与模型映射；指向外部服务时，模型 ID 使用手动输入，切换地址时保留当前模型值。保存预览展示逐字段变化，已有文件保留最近五份 `.bak.1` 至 `.bak.5` 备份。点击已存在文件的路径可在网页内编辑和载入备份，编辑器提供 JSON / JSONC / TOML / YAML 语法高亮；点击保存自动校验并写入当前打开的文件。关闭有未保存修改的编辑器时，可选择保存并关闭、不保存或继续编辑。
 
@@ -149,7 +149,7 @@ Claude 支持权限模式（含 `bypassPermissions`）、命令沙箱和运行�
 
 Codex 记忆设置对应 `features.memories`，支持启用、禁用和不设置；未配置时显示不设置，主动选择不设置时移除该字段。
 
-模型参数表位于 [`src/config/agent_model_limits.json`](src/config/agent_model_limits.json)，新增模型、别名和候选值的格式见 [Agent 模型参数表维护](docs/agent-model-limits.md)。执行 `uv run python scripts/check_agent_model_limits.py` 可检查表内命名、数值与候选一致性。
+模型参数表位于 [`src/config/agent_model_limits.json`](src/config/agent_model_limits.json)，新增模型、别名和候选值的格式见 [Agent 模型参数表维护](docs/agent-configuration.md)。执行 `uv run python scripts/check_agent_model_limits.py` 可检查表内命名、数值与候选一致性。
 
 SSH 支持密码或服务进程可用的 SSH Agent / 默认密钥，首次未知主机显示指纹确认。代理模式包括直连、服务进程的系统代理及自定义 `http://`、`https://`、`socks5://`、`socks5h://`，HTTP(S) 使用 CONNECT 隧道，HTTPS 校验证书。密码及代理认证信息在当前浏览器会话中暂存，闲置三十分钟清理，服务重启后重新填写。机器和路径登记保存在数据库同级的 `agent-config/state.json`。
 
@@ -461,7 +461,7 @@ Claude OAuth 模型同样使用裸模型名，例如 `claude-sonnet-4-5`，并�
 - 最近一次成功获取的重置卡列表保存在 `data/oauth/codex/.state/auth_files.json`；页面刷新读取该快照，下一次额度刷新才覆盖卡片信息
 - 认证文件进入认证失败状态后，重置卡仍可保留在快照中供查看，但选择和消费操作会被禁用；重新认证成功后恢复使用
 
-Codex 额度刷新包含后台每小时整轮查询、额度窗口到期查询、活跃账号成功请求后的限频查询，以及页面手动查询。页面每分钟读取认证文件快照，对到期窗口查询额度和重置卡。认证文件列表、额度和重置卡读取请求的前端超时为 60 秒；筛选按钮原位更新状态与数量；远期重置卡过期时间使用有上限的分段定时器。完整频率、触发条件、账号范围和请求边界见 [Codex 额度刷新规则](docs/codex-quota-refresh.md)。
+Codex 额度刷新包含后台每小时整轮查询、额度窗口到期查询、活跃账号成功请求后的限频查询，以及页面手动查询。页面每分钟读取认证文件快照，对到期窗口查询额度和重置卡。认证文件列表、额度和重置卡读取请求的前端超时为 60 秒；筛选按钮原位更新状态与数量；远期重置卡过期时间使用有上限的分段定时器。完整频率、触发条件、账号范围和请求边界见 [4+1 架构](docs/architecture-4plus1.md)。
 
 ### 5. Claude 运行时行为
 
@@ -491,7 +491,7 @@ Claude OAuth 当前没有 Codex 这套 usage 配额查询、前端配额快照�
 - 客户端取消会关闭上游响应，不触发成功完成统计
 - 内置 translator 会在 OpenAI Chat `reasoning_effort`、OpenAI Responses `reasoning.effort` 和 Claude `thinking` 之间转换思考意图；无法精确映射的档位会使用 `xhigh`
 - OpenAI Chat 上游响应里的 `reasoning_content` 和 `reasoning_details` 会按下游协议转换为 Claude thinking 或 OpenAI Responses reasoning 输出
-- Chat、Responses 与 Claude 跨协议请求中的工具图片、PDF 和文本文件使用目标协议内容块；发往 Chat 的工具媒体补传到 user 消息，保留工具调用关联。来源支持范围见 [工具结果媒体转换](docs/tool-result-media.md)
+- Chat、Responses 与 Claude 跨协议请求中的工具图片、PDF 和文本文件使用目标协议内容块；发往 Chat 的工具媒体补传到 user 消息，保留工具调用关联。来源支持范围见 [4+1 架构](docs/architecture-4plus1.md)
 - `GET /v1/models` 会返回当前已启用 Provider 中允许公开的模型和 Codex / Claude OAuth 模型列表，以及 `provider_name`、`source_format` 等元信息
 
 ### 2. Provider 与 Auth Group 管理

@@ -1,6 +1,6 @@
 import type { AgentId } from '@/api/agents'
 
-// 版本依据及未确认项见 docs/agent-config-versions.md；功能发布不等于字段首次支持。
+// 版本依据及未确认项见 docs/agent-configuration.md；功能发布不等于字段首次支持。
 const claude: Record<string, string> = {
   ANTHROPIC_DEFAULT_HAIKU_MODEL: '已确认支持：Claude Code 2.0.17。',
   ANTHROPIC_DEFAULT_OPUS_MODEL: '最低支持版本：Claude Code 1.0.88。',
