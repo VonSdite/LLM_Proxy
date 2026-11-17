@@ -420,11 +420,14 @@ test('日期快捷范围立即跟随输入，自定义日期不保留旧选中�
   const fixture = await mockAdmin(page)
   await page.goto('/statistics')
   const presets = page.getByRole('tablist', { name: '日期快捷范围' })
-  await expect(presets.getByRole('tab', { name: '今天' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByLabel('开始日期', { exact: true })).toHaveValue('2026-11-14')
+  await expect(presets.getByRole('tab', { name: '近 7 天' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(page.getByLabel('开始日期', { exact: true })).toHaveValue('2026-11-08')
   await expect(page.getByLabel('结束日期', { exact: true })).toHaveValue('2026-11-14')
   const initialQuery = fixture.calls.find((call) => call.path === '/api/statistics/overview')!.url
-  expect(initialQuery).toContain('start_date=2026-11-14')
+  expect(initialQuery).toContain('start_date=2026-11-08')
   expect(initialQuery).toContain('end_date=2026-11-14')
   await presets.getByRole('tab', { name: '近 30 天' }).click()
   await expect(page.getByLabel('开始日期', { exact: true })).toHaveValue('2026-10-16')

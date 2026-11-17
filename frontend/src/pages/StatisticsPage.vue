@@ -31,8 +31,8 @@ const dimension = ref<StatisticsView>('stats')
 const view = computed<StatisticsView>(() =>
   section.value === 'logs' ? 'logs' : section.value === 'overview' ? 'models' : dimension.value,
 )
-const draft = reactive(datePreset(1))
-const applied = ref(datePreset(1))
+const draft = reactive(datePreset(7))
+const applied = ref(datePreset(7))
 const presets = [
   { value: '1', label: '今天' },
   { value: '7', label: '近 7 天' },
