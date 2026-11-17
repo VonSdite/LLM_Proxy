@@ -69,6 +69,15 @@ class ConfigManager:
     def is_llm_request_debug_enabled(self) -> bool:
         return self._read_bool("logging.llm_request_debug_enabled", default=False)
 
+    def is_llm_recording_enabled(self) -> bool:
+        return self._read_bool("llm_recording.enabled", default=False)
+
+    def get_llm_recording_directory(self) -> str:
+        directory = str(self.get("llm_recording.directory", "") or "").strip()
+        if directory:
+            return directory
+        return str((self._root_path / "data/llm-records").resolve())
+
     def get_oauth_proxy(self) -> str | None:
         if self.get_oauth_proxy_mode() != PROXY_MODE_CUSTOM:
             return None

@@ -9,6 +9,7 @@ from .claude_oauth_service import ClaudeOAuthService
 from .claude_proxy_service import ClaudeProxyService
 from .codex_oauth_service import CodexOAuthAuthenticationError, CodexOAuthService
 from .codex_proxy_service import CodexProxyService
+from .llm_recording import LLMRecordingService
 from .log_service import LogService
 from .model_catalog_service import ModelCatalogService
 from .model_discovery_service import ModelDiscoveryService
@@ -28,6 +29,7 @@ __all__ = [
     "CodexOAuthService",
     "CodexOAuthAuthenticationError",
     "CodexProxyService",
+    "LLMRecordingService",
     "UserService",
     "LogService",
     "ModelCatalogService",

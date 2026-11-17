@@ -16,6 +16,7 @@ LLM_Proxy 把模型服务、鉴权方式、协议转换和后台运维收敛到�
 - 控制平面模型测试：Provider 编辑页可按当前表单快照直接测试模型可用性、首字延迟和 TPS
 - 后台可直接运维：内置 Provider 管理、Auth Group 管理、OAuth 管理、系统设置、白名单管理、日志和统计面板
 - 请求调试可开关：支持将下游请求、上游请求、上游响应和下游响应写入独立 trace 日志
+- LLM 数据记录可开关：按客户端请求保存输入、最终输出、实际模型与上游协议，支持提示词去重和 JSONL 分片
 - 对下游保持稳定接口：支持 `POST /v1/chat/completions`、`POST /v1/responses`、`POST /v1/messages`、`GET /v1/models`
 
 ## 3 分钟快速开始
@@ -116,6 +117,8 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 - `/agents`：本机与 SSH 机器上的 Claude、Codex、Opencode v1 / v2、DSH、Hermes 配置管理
 - `/oauth`：Codex OAuth 认证文件与模型管理，页面提供总开关与网络设置弹窗
 - `/settings`：系统、登录、日志和 OAuth 网络设置
+
+LLM 数据记录位于 `/settings` 的“LLM 数据记录”区域，默认关闭，目录仅接受服务器绝对路径。字段、协议表示、提示词去重、采集状态和存储边界见 [LLM 数据记录](docs/llm-recording.md)。
 
 API Key 的最大并发数、请求/分钟、请求/天均可独立设置，留空表示不限制。周期按服务本地时间的自然分钟、自然日计算，计数保存在 SQLite，重启或调整限制保留当前周期计数。通过鉴权、模型与权限检查后接收的推理请求计一次，上游失败计入，内部重试不重复计数；被拒绝的请求和 `/v1/models` 查询不计入。并发名额在请求完成、异常或流式断开时释放；达到限制返回 `429` 与 `Retry-After`。累计 Token 配额独立生效。
 

@@ -69,6 +69,7 @@ class WebController:
         self._app.route("/api/settings/system/basic", methods=["PUT"])(auth(self.update_basic_settings))
         self._app.route("/api/settings/system/client-ip", methods=["PUT"])(auth(self.update_client_ip_settings))
         self._app.route("/api/settings/system/debug", methods=["PUT"])(auth(self.update_debug_settings))
+        self._app.route("/api/settings/system/llm-recording", methods=["PUT"])(auth(self.update_llm_recording_settings))
         self._app.route("/api/settings/system/oauth", methods=["PUT"])(auth(self.update_oauth_settings))
         self._app.route("/api/settings/system/api-keys", methods=["PUT"])(auth(self.update_api_key_settings))
         self._app.route("/api/settings/system/model-mapping", methods=["PUT"])(auth(self.update_model_mapping_settings))
@@ -921,6 +922,16 @@ class WebController:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             self._logger.error("Error updating debug settings: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    def update_llm_recording_settings(self) -> ResponseReturnValue:
+        try:
+            payload = require_json_object()
+            return jsonify(self._settings_service.update_llm_recording_settings(payload))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            self._logger.error("Error updating LLM recording settings: %s", exc)
             return jsonify({"error": str(exc)}), 500
 
     def update_oauth_settings(self) -> ResponseReturnValue:

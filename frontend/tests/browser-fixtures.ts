@@ -29,6 +29,7 @@ export async function mockAdmin(page: Page, authenticated = true) {
     admin: { username: 'admin', password: 'fixture-password' },
     client_ip: { real_ip_enabled: false, real_ip_header: 'X-Real-IP' },
     logging: { path: 'logs', level: 'INFO', llm_request_debug_enabled: false },
+    llm_recording: { enabled: false, directory: '/var/lib/llm-proxy/llm-records' },
     oauth: {
       enabled: true,
       proxy_mode: 'direct',

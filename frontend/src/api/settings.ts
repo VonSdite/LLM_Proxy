@@ -5,6 +5,7 @@ export interface SystemSettings {
   admin: { username: string; password: string }
   client_ip: { real_ip_enabled: boolean; real_ip_header: string }
   logging: { path: string; level: string; llm_request_debug_enabled: boolean }
+  llm_recording: { enabled: boolean; directory: string }
   oauth: {
     enabled: boolean
     proxy_mode: 'system' | 'direct' | 'custom'
@@ -16,7 +17,8 @@ export interface SystemSettings {
   model_mapping: { enabled: boolean }
   auth_enabled: boolean
 }
-export type SettingsGroup = 'basic' | 'client-ip' | 'debug' | 'oauth' | 'api-keys' | 'model-mapping'
+export type SettingsGroup =
+  'basic' | 'client-ip' | 'debug' | 'llm-recording' | 'oauth' | 'api-keys' | 'model-mapping'
 export interface SettingsResult {
   settings: SystemSettings
   auth_config_changed?: boolean

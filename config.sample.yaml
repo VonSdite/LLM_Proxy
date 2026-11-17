@@ -16,6 +16,12 @@ logging:
   # logs/llm_request_trace.log，内容按 HTTP 报文风格换行记录。
   llm_request_debug_enabled: false
 
+llm_recording:
+  # 默认关闭；开启后按客户端请求保存输入、最终下游输出和采集状态。
+  enabled: false
+  # 保存时必须填写绝对路径。留空时系统设置显示项目根目录下 data/llm-records 的绝对路径。
+  directory: ""
+
 chat:
   # 开启后会按 IP 白名单控制 chat 请求与 /v1/models 返回结果。
   whitelist_enabled: false

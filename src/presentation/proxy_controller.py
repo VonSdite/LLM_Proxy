@@ -194,6 +194,7 @@ class ProxyController:
         claude_proxy_service: ClaudeProxyServiceLike | None = None,
         api_key_service: ApiKeyServiceLike | None = None,
         model_mapping_service: ModelMappingServiceLike | None = None,
+        llm_recording_service: Any = None,
     ):
         self._app = ctx.flask_app
         self._logger = ctx.logger
@@ -206,6 +207,7 @@ class ProxyController:
         self._provider_manager = provider_manager
         self._api_key_service = api_key_service
         self._model_mapping_service = model_mapping_service
+        self._llm_recording_service = llm_recording_service
         self._register_routes()
 
     def _log_downstream_request_trace_safe(
@@ -1018,11 +1020,23 @@ class ProxyController:
 
             replay_identity = f"api_key:{api_key_id}" if api_key_id is not None else f"ip:{client_ip}"
 
+            capture = None
+            if self._llm_recording_service is not None and route_name in {
+                "chat_completions",
+                "responses",
+                "messages",
+            }:
+                try:
+                    capture = self._llm_recording_service.start_request(request_data, resolved_target_format)
+                except Exception as exc:
+                    self._logger.warning("LLM recording capture could not start: %s", exc)
+
             observation = RequestObservation(
                 self._log_request,
                 started_at=request_started_at,
                 start_time=request_start_time,
                 is_model_mapping=is_model_mapping,
+                capture=capture,
                 request_model=model_name,
                 ip_address=client_ip,
                 api_key_id=api_key_id,

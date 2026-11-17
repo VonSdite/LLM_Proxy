@@ -177,7 +177,7 @@ test('设置分组保留无效草稿，局部保存与重新读取具有明确�
   const fixture = await mockAdmin(page)
   await page.goto('/settings')
   await expect(page.getByRole('tab')).toHaveCount(0)
-  for (const title of ['服务监听', '管理登录', '客户端 IP', '日志与调试']) {
+  for (const title of ['服务监听', '管理登录', '客户端 IP', '日志与调试', 'LLM 数据记录']) {
     await expect(page.getByRole('form', { name: title, exact: true })).toBeVisible()
   }
   const basic = page.getByRole('form', { name: '服务监听', exact: true })

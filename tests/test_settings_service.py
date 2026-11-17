@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.application.app_context import AppContext
 from src.config.config_manager import ConfigManager
+from src.presentation.web_controller import WebController
+from src.services.authentication_service import AuthenticationService
 from src.services.claude_proxy_service import ClaudeProxyService
 from src.services.codex_proxy_service import CodexProxyService
 from src.services.settings_service import SettingsService
@@ -67,6 +69,87 @@ class SettingsServiceTests(unittest.TestCase):
     def _write_config(self, payload: dict) -> None:
         with self.config_path.open("w", encoding="utf-8") as handle:
             yaml.safe_dump(payload, handle, allow_unicode=True, sort_keys=False)
+
+    def test_llm_recording_defaults_are_disabled_without_creating_directory(self) -> None:
+        settings = self.service.get_system_settings()
+        default_directory = str((self.root_path / "data/llm-records").resolve())
+
+        self.assertEqual(
+            {"enabled": False, "directory": default_directory},
+            settings["llm_recording"],
+        )
+        self.assertFalse(self.config_manager.is_llm_recording_enabled())
+        self.assertEqual(default_directory, self.config_manager.get_llm_recording_directory())
+        self.assertFalse((self.root_path / "data/llm-records").exists())
+
+    def test_update_llm_recording_settings_validates_absolute_directory_and_persists(self) -> None:
+        directory = str(self.root_path / "training-records")
+        result = self.service.update_llm_recording_settings(
+            {
+                "llm_recording": {
+                    "enabled": True,
+                    "directory": f" {directory} ",
+                }
+            }
+        )
+
+        self.assertEqual(
+            {"enabled": True, "directory": directory},
+            result["settings"]["llm_recording"],
+        )
+        self.assertTrue((self.root_path / "training-records").is_dir())
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            persisted = yaml.safe_load(handle)
+        self.assertEqual(
+            {"enabled": True, "directory": directory},
+            persisted["llm_recording"],
+        )
+
+    def test_llm_recording_settings_route_requires_authentication(self) -> None:
+        config = self.config_manager.get_raw_config()
+        config["admin"] = {"username": "admin", "password": "secret"}
+        self.config_manager.write_raw_config(config)
+        auth = AuthenticationService(self.ctx)
+        token = auth.create_session("admin")
+        WebController(self.ctx, Mock(), self.service, auth)
+        client = self.ctx.flask_app.test_client()
+        directory = str(self.root_path / "secure-records")
+        payload = {"llm_recording": {"enabled": True, "directory": directory}}
+
+        denied = client.put("/api/settings/system/llm-recording", json=payload)
+        self.assertEqual(401, denied.status_code)
+
+        client.set_cookie("session_token", token)
+        saved = client.put("/api/settings/system/llm-recording", json=payload)
+        self.assertEqual(200, saved.status_code)
+        self.assertEqual(
+            {"enabled": True, "directory": directory},
+            saved.get_json()["settings"]["llm_recording"],
+        )
+        current = client.get("/api/settings/system")
+        self.assertEqual(200, current.status_code)
+        self.assertEqual(directory, current.get_json()["llm_recording"]["directory"])
+
+    def test_update_llm_recording_settings_rejects_invalid_values_without_partial_write(self) -> None:
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            before = yaml.safe_load(handle)
+        file_path = self.root_path / "not-a-directory"
+        file_path.write_text("occupied", encoding="utf-8")
+        cases = (
+            ({"enabled": "sometimes", "directory": "data/records"}, "Expected a boolean value"),
+            ({"enabled": True, "directory": ""}, "LLM recording directory is required"),
+            (
+                {"enabled": True, "directory": "data/records"},
+                "LLM recording directory must be an absolute path",
+            ),
+            ({"enabled": True, "directory": str(file_path)}, "LLM recording directory is not writable"),
+        )
+        for recording, message in cases:
+            with self.subTest(recording=recording), self.assertRaisesRegex(ValueError, message):
+                self.service.update_llm_recording_settings({"llm_recording": recording})
+            self.assertEqual(before, self.config_manager.get_raw_config())
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            self.assertEqual(before, yaml.safe_load(handle))
 
     def test_oauth_settings_default_to_direct_connection_without_ssl_verify(self) -> None:
         settings = self.service.get_system_settings()

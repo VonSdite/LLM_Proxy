@@ -28,7 +28,7 @@ const reloadOpen = ref(false)
 const changedLogin = ref<{ username: string; password: string; enabled: boolean }>()
 const changedListener = ref<{ address: string; url: string | null; restart: boolean }>()
 const portValid = ref(true)
-type SectionGroup = 'basic' | 'admin' | 'client-ip' | 'debug'
+type SectionGroup = 'basic' | 'admin' | 'client-ip' | 'debug' | 'llm-recording'
 const saving = reactive<Partial<Record<SectionGroup, boolean>>>({})
 const busy = computed(() => Object.values(saving).some(Boolean))
 const pending = new Map<SectionGroup, Partial<SystemSettings>>()
@@ -50,6 +50,7 @@ const groupKeys = {
   admin: ['admin'],
   'client-ip': ['client_ip'],
   debug: ['logging'],
+  'llm-recording': ['llm_recording'],
 } as const
 function payload(settings: SystemSettings, group: SectionGroup): Partial<SystemSettings> {
   return Object.fromEntries(groupKeys[group].map((key) => [key, settings[key]]))
@@ -81,6 +82,7 @@ function validate(group: SectionGroup) {
     basic: ['host', 'port'],
     'client-ip': ['header'],
     debug: ['logPath'],
+    'llm-recording': ['recordingDirectory'],
   }
   for (const key of fields[group] || []) delete errors[key]
   const s = settings.value!
@@ -98,6 +100,12 @@ function validate(group: SectionGroup) {
   if (group === 'client-ip' && !/^[!#$%&'*+.^_`|~\w-]+$/.test(s.client_ip.real_ip_header))
     errors.header = '请输入合法的 HTTP 请求头名称'
   if (group === 'debug' && !s.logging.path.trim()) errors.logPath = '请输入日志目录'
+  if (group === 'llm-recording') {
+    const directory = s.llm_recording.directory.trim()
+    if (!directory) errors.recordingDirectory = '请输入保存目录'
+    else if (!/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(directory))
+      errors.recordingDirectory = '请输入绝对路径'
+  }
   return !(fields[group] || []).some((key) => errors[key])
 }
 async function save(group: SectionGroup) {
@@ -368,6 +376,43 @@ function leaveGroup(event: FocusEvent, group: 'basic' | 'admin') {
             </UiField>
           </div>
         </SettingSection>
+        <SettingSection
+          id="llm-recording"
+          class="settings-half"
+          title="LLM 数据记录"
+          :saving="saving['llm-recording']"
+          :error="saveErrors['llm-recording']"
+          @save="save('llm-recording')"
+          @retry="save('llm-recording')"
+        >
+          <div class="form-grid settings-recording-grid">
+            <UiField inline class="settings-toggle" label="开启 LLM 数据记录">
+              <template #help>
+                <p>将对话请求的输入和最终输出保存为本地 JSONL，供后续清洗、筛选和模型训练使用。</p>
+                <p>关闭后，已开始记录的请求继续完成写入，历史文件保留。</p>
+              </template>
+              <UiSwitch
+                v-model="settings.llm_recording.enabled"
+                label="开启 LLM 数据记录"
+                @update:model-value="save('llm-recording')"
+              />
+            </UiField>
+            <UiField
+              v-if="settings.llm_recording.enabled"
+              label="保存目录"
+              :error="errors.recordingDirectory"
+              help="目录位于运行 LLM Proxy 的服务器，仅支持绝对路径。保存后新请求使用新目录，已有文件不会自动搬迁。"
+            >
+              <UiInput
+                v-model="settings.llm_recording.directory"
+                mono
+                placeholder="/absolute/path/to/llm-records"
+                @update:model-value="delete errors.recordingDirectory"
+                @change="save('llm-recording')"
+              />
+            </UiField>
+          </div>
+        </SettingSection>
       </div>
     </template>
     <UiDialog
@@ -462,7 +507,8 @@ function leaveGroup(event: FocusEvent, group: 'basic' | 'admin') {
   column-gap: var(--space-3);
 }
 
-.settings-access-grid {
+.settings-access-grid,
+.settings-recording-grid {
   grid-template-columns: max-content minmax(0, 1fr);
   align-items: end;
   column-gap: var(--space-3);
@@ -496,7 +542,8 @@ function leaveGroup(event: FocusEvent, group: 'basic' | 'admin') {
 
 @container (width <= 360px) {
   .settings-debug-grid,
-  .settings-access-grid {
+  .settings-access-grid,
+  .settings-recording-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

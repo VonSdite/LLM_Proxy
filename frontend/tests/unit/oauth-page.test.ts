@@ -42,6 +42,7 @@ describe('OAuth 页面状态', () => {
       admin: { username: '', password: '' },
       client_ip: { real_ip_enabled: false, real_ip_header: 'X-Forwarded-For' },
       logging: { path: 'logs', level: 'INFO', llm_request_debug_enabled: false },
+      llm_recording: { enabled: false, directory: '/var/lib/llm-proxy/llm-records' },
       oauth: {
         enabled: true,
         proxy_mode: 'direct',

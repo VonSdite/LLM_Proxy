@@ -5,9 +5,10 @@ import time
 import unittest
 from contextvars import copy_context
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
+from flask import Response
 from src.external import LLMProvider
 from src.services.request_observation import RequestObservation
 from src.services.upstream_observation import ObservedResponse, attempt_recorder, observe_response
@@ -29,6 +30,113 @@ class UpstreamObservationTests(unittest.TestCase):
         self.events = []
         token = attempt_recorder.set(self.events.append)
         self.addCleanup(attempt_recorder.reset, token)
+
+    def test_actual_request_model_is_available_without_changing_statistics_fields(self):
+        capture = Mock()
+        logs = []
+        observation = RequestObservation(
+            lambda **row: logs.append(row),
+            started_at=time.perf_counter(),
+            start_time=datetime.now(),
+            request_model="public/model",
+            capture=capture,
+        )
+        observation.record_attempt(
+            {
+                "target_model_id": "public/model",
+                "actual_request_model": "upstream/model",
+                "response_model": "actual-response",
+                "outcome": "success",
+            }
+        )
+        observation.finish("success")
+
+        capture.observe_attempt.assert_called_once_with(
+            {
+                "target_model_id": "public/model",
+                "actual_request_model": "upstream/model",
+                "response_model": "actual-response",
+                "outcome": "success",
+            }
+        )
+        capture.finish.assert_called_once_with("success")
+        self.assertNotIn("actual_request_model", logs[0]["upstream_attempts"][0])
+        self.assertNotIn("upstream_protocol", logs[0]["upstream_attempts"][0])
+
+    def test_nonstream_capture_reads_final_body_and_finishes_once(self):
+        capture = Mock()
+        observation = RequestObservation(
+            Mock(),
+            started_at=time.perf_counter(),
+            start_time=datetime.now(),
+            capture=capture,
+        )
+        response = observation.wrap(
+            Response(
+                '{"model":"downstream-default","choices":[]}',
+                content_type="application/json",
+            ),
+            "openai_chat",
+        )
+        observation.finish("cancelled")
+
+        capture.feed.assert_called_once_with(response.get_data())
+        capture.finish.assert_called_once_with("success")
+
+    def test_observe_response_forwards_actual_upstream_model(self):
+        tracked = observe_response(
+            lambda: response(),
+            "gateway/model",
+            actual_model="upstream/model",
+            upstream_protocol="openai_responses",
+        )
+        tracked.json()
+
+        self.assertEqual("upstream/model", self.events[0]["actual_request_model"])
+        self.assertEqual("openai_responses", self.events[0]["upstream_protocol"])
+        self.assertEqual("actual", self.events[0]["response_model"])
+
+    def test_request_guard_rewrite_is_the_captured_upstream_model(self):
+        app, service = pipeline.ProxyServicePipelineTests()._build_service()
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.test/v1/chat/completions",
+            source_format="openai_chat",
+            target_formats=("openai_chat",),
+            model_list=("original-model", "rewritten-model"),
+            max_retries=1,
+            hook=pipeline.RewriteRequestModelHook("rewritten-model"),
+        )
+        capture = Mock()
+        observation = RequestObservation(
+            Mock(),
+            started_at=time.perf_counter(),
+            start_time=datetime.now(),
+            request_model="demo/original-model",
+            capture=capture,
+        )
+        observation.activate()
+        try:
+            with (
+                app.test_request_context(),
+                patch.object(service, "_open_upstream_response", return_value=(response(), False, 200)),
+            ):
+                result, status, failure = service.proxy_request(
+                    provider,
+                    {"model": "demo/original-model", "messages": [{"role": "user", "content": "hi"}]},
+                    {},
+                    on_complete=observation.complete,
+                )
+                self.assertEqual(200, status)
+                self.assertIsNone(failure)
+                observation.wrap(result, "openai_chat")
+        finally:
+            observation.deactivate()
+
+        attempt = capture.observe_attempt.call_args.args[0]
+        self.assertEqual("rewritten-model", attempt["actual_request_model"])
+        self.assertEqual("openai_chat", attempt["upstream_protocol"])
+        self.assertEqual("actual", attempt["response_model"])
 
     def test_same_name_mapping_keeps_target_while_direct_request_omits_it(self):
         for mapped in (False, True):

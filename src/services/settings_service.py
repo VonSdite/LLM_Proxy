@@ -7,10 +7,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from ipaddress import ip_address
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from ..application.app_context import AppContext
 from ..config.provider_config import parse_optional_bool
+from ..utils.blocking_io import run_blocking
 from ..utils.concurrency import synchronized
 from ..utils.net import (
     DEFAULT_PROXY_MODE,
@@ -75,6 +78,10 @@ class SettingsService:
                 "path": str(self._config_manager.get_log_path()),
                 "level": self._config_manager.get_log_level(),
                 "llm_request_debug_enabled": self._config_manager.is_llm_request_debug_enabled(),
+            },
+            "llm_recording": {
+                "enabled": self._config_manager.is_llm_recording_enabled(),
+                "directory": self._config_manager.get_llm_recording_directory(),
             },
             "oauth": {
                 "enabled": self._config_manager.is_oauth_enabled(),
@@ -214,6 +221,38 @@ class SettingsService:
         if logging_settings_changed and self._reload_logging_callback is not None:
             self._reload_logging_callback()
 
+        return {
+            "settings": self.get_system_settings(),
+        }
+
+    @synchronized("_config_manager.write_lock")
+    def update_llm_recording_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Request payload must be an object")
+
+        recording_payload = payload.get("llm_recording")
+        if not isinstance(recording_payload, dict):
+            raise ValueError("Config field 'llm_recording' must be an object")
+
+        enabled = parse_optional_bool(recording_payload.get("enabled"))
+        if enabled is None:
+            raise ValueError("LLM recording enabled flag is required")
+        directory = str(recording_payload.get("directory") or "").strip()
+        if not directory:
+            raise ValueError("LLM recording directory is required")
+        directory_path = Path(directory)
+        if not directory_path.is_absolute():
+            raise ValueError("LLM recording directory must be an absolute path")
+        try:
+            run_blocking(self._validate_llm_recording_directory, directory_path)
+        except OSError as exc:
+            raise ValueError(f"LLM recording directory is not writable: {directory}") from exc
+
+        config = self._config_manager.get_raw_config()
+        recording_config = self._ensure_mapping(config, "llm_recording")
+        recording_config["enabled"] = enabled
+        recording_config["directory"] = directory
+        self._config_manager.write_raw_config(config)
         return {
             "settings": self.get_system_settings(),
         }
@@ -483,6 +522,14 @@ class SettingsService:
         if not 1 <= port <= 65535:
             raise ValueError("Server port must be between 1 and 65535")
         return port
+
+    @staticmethod
+    def _validate_llm_recording_directory(path: Path) -> None:
+        """在原生 I/O 线程中确认目录可创建并允许新建文件。"""
+        path.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(mode="wb", dir=path, prefix=".write-test-") as probe:
+            probe.write(b"writable")
+            probe.flush()
 
     @staticmethod
     def _parse_log_path(value: Any) -> str:

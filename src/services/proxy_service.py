@@ -310,6 +310,8 @@ class ProxyService:
                             verify_ssl,
                         ),
                         requested_model,
+                        actual_model=translated_upstream_model,
+                        upstream_protocol=provider.source_format,
                     )
                 )
 

@@ -43,7 +43,7 @@
 
 表单草稿与服务器快照分开保存，列表使用稳定业务 ID。`useRequest` 管理替换读取与迟到响应，`useAction` 管理串行操作、错误和操作后刷新，页面与弹窗卸载时取消未完成请求。Agent 预览按当前机器、Agent 和草稿版本关联，原始文件编辑期间暂停表单预览。OAuth 首次读取本地账号快照，每分钟按已到期窗口同步，页面隐藏或操作忙碌时跳过，卸载时移除定时器和监听器。客户端取消不回滚已经完成的服务端事务。
 
-单项开关由 `useToggle` 保存临时目标值和记录锁，已确认数据通过 `useRequest.patch` 写入页面快照；在途读取完成时合并期间已确认的更新，后续新读取接收服务器最新状态。同一模型映射及其目标共享记录锁，不同记录可独立提交。用户与 API Key 的开关调用既有 PUT 接口，携带显式布尔值。OAuth 单项启停期间暂停自动同步，认证组条目操作后读取当前运行快照。系统设置仅展示服务监听、管理登录、客户端 IP 和日志；API Key 与 OAuth 的总开关位于所属页面，OAuth 网络选项位于该页弹窗。监听地址与端口在离开编辑区域或按 Enter 时一起自动保存，组内切换焦点不提交；其他开关、选择与编辑完成的文本自动提交。每组维护已确认值、草稿和串行提交队列，在途修改合并为下一次提交；响应只合并仍与提交值相同的字段，不覆盖后续输入。这些状态均属于当前页面，卸载时取消未完成请求；控制平面 API、数据平面和部署拓扑保持既有职责。
+单项开关由 `useToggle` 保存临时目标值和记录锁，已确认数据通过 `useRequest.patch` 写入页面快照；在途读取完成时合并期间已确认的更新，后续新读取接收服务器最新状态。同一模型映射及其目标共享记录锁，不同记录可独立提交。用户与 API Key 的开关调用既有 PUT 接口，携带显式布尔值。OAuth 单项启停期间暂停自动同步，认证组条目操作后读取当前运行快照。系统设置仅展示服务监听、管理登录、客户端 IP、日志与调试和 LLM 数据记录；API Key 与 OAuth 的总开关位于所属页面，OAuth 网络选项位于该页弹窗。监听地址与端口在离开编辑区域或按 Enter 时一起自动保存，组内切换焦点不提交；其他开关、选择与编辑完成的文本自动提交。每组维护已确认值、草稿和串行提交队列，在途修改合并为下一次提交；响应只合并仍与提交值相同的字段，不覆盖后续输入。LLM 数据记录目录只接受绝对路径，并仅在开启记录后显示。上述状态均属于当前页面，卸载时取消未完成请求；控制平面 API、数据平面和部署拓扑保持既有职责。
 
 浏览器非敏感偏好使用 `localStorage.theme` 和 `table-widths:*`。API Key、SSH 密码和文件内容仅处于当前页面或既有服务器隔离会话中。样式、菜单、帮助和对话框来自共享控件，文件编辑器实例随所属弹窗销毁。
 
@@ -87,9 +87,13 @@ downstream request
   -> encoder
   -> prefetch first non-empty encoded downstream bytes (stream only)
   -> downstream response
+  -> optional bounded LLM record capture on final downstream bytes
   -> response outcome finalization
   -> cooperative wait for native-thread request-log transaction commit
+  -> nonblocking LLM record queue submission when enabled
 ```
+
+`RequestObservation` 同时维持原有请求统计和可选 LLM 数据记录。统计职责与记录存储分离；`actual_request_model` 与 `upstream_protocol` 只传递给记录采集，不进入既有统计字段。图片生成、图片编辑与 Responses compact 不创建采集上下文。
 
 Provider 开启 `force_upstream_stream=true` 且下游请求未开启流式时，链路在 decoder 之后走聚合分支：
 
@@ -194,6 +198,12 @@ decoder
   - 按 Codex 认证文件、账号和七天窗口边界聚合请求数、Token 与请求发生时保存的预计费用
   - 支持按筛选条件导出统计迁移 JSON，迁移包包含请求明细和日聚合统计
   - 导入请求明细时按明细业务字段识别重复行；导入日聚合统计时按日期、IP、请求模型、映射目标模型和响应模型累加数值
+- `LLMRecordingService` / `llm_record_builder`
+  - 在准入后的三种对话路由创建有界输入快照，并随最终下游响应采集输出字节
+  - 从普通 Provider、Codex OAuth 和 Claude OAuth 的实际发送请求体取得真实模型 ID，从原始上游响应取得实际响应模型，并记录最终上游调用的 `upstream_protocol`
+  - 使用独立有界原生队列和单个专用原生线程完成协议聚合、提示词去重、JSON 序列化、原子提示词写入和 JSONL 分片
+  - 以 `capture_status` 和 `capture_issues` 区分完整、失败、中断、解析失败、采集截断与明确部分采集
+  - 配置按请求快照；队列或磁盘失败不影响代理响应，正常退出排空队列
 - `ApiKeyController`
   - 暴露 API Key 列表、创建、编辑、启停、删除、模型权限、Token 上限与三项请求限制更新接口；PUT /api/api-keys/order 接收移动项、目标项及前后位置，经 Service 校验后由 Repository 在单个事务中写入 api_keys.sort_order
 - `ApiKeyService`
@@ -326,8 +336,9 @@ decoder
   - Hook 实现 `fetch_models` 时使用 Hook 返回的模型列表或模型 payload
   - Hook 返回 `None` 时使用 `/v1/models` 与 `/models` 候选端点探测
 - `SettingsService`
-  - 维护 `server`、`admin`、`oauth`、`api_keys`、`model_mapping` 与 `logging`
+  - 维护 `server`、`admin`、`oauth`、`api_keys`、`model_mapping`、`logging` 与 `llm_recording`
   - 在配置写锁内协调监听预绑定、配置落盘与监听启用，启用失败时回写原配置
+  - 在原生 I/O 线程校验 LLM 记录目录可创建、可写；目录仅接受绝对路径，校验通过后才保存配置
 - `ListenerRuntime`
   - 由 Application 装配并管理内置 gevent HTTP 监听，提供候选监听上下文给 SettingsService
   - 应用等待事件独立于单个 WSGIServer；监听切换保留服务实例、登录会话和后台任务
@@ -460,6 +471,7 @@ OAuth 模型是数据平面的例外路由：
   - `PUT /api/settings/system/api-keys`
   - `PUT /api/settings/system/model-mapping`
   - `PUT /api/settings/system/debug`
+  - `PUT /api/settings/system/llm-recording`
   - `PUT /api/settings/system`
 
 当前支持的配置项：
@@ -473,6 +485,8 @@ OAuth 模型是数据平面的例外路由：
 - `logging.path`
 - `logging.level`
 - `logging.llm_request_debug_enabled`
+- `llm_recording.enabled`
+- `llm_recording.directory`
 - `oauth.enabled`
 - `oauth.proxy_mode`
 - `oauth.proxy`
@@ -524,6 +538,14 @@ OAuth 模型是数据平面的例外路由：
     - 上游响应
     - 转换后的下游响应
   - 每条记录包含起始行、header 与 payload
+- `llm_recording.enabled`
+  - 默认 `false`，关闭时不创建记录目录或输入快照
+  - 开启后覆盖 Chat、Responses 和 Messages 的普通 Provider、OAuth、模型映射、流式与非流式请求
+  - 新请求读取当前开关；关闭后已开始采集的请求继续完成
+- `llm_recording.directory`
+  - 仅接受运行 Proxy 的服务器文件系统绝对路径，保存时验证可创建、可写
+  - 未配置或空值在系统设置中显示项目根目录下 `data/llm-records` 的绝对路径
+  - 每条新请求持有目录快照；切换后历史文件不搬迁，在途请求仍写原目录
 - `oauth.enabled`
   - 在 OAuth 页面即时保存，控制文本与图片模型是否参与数据面目录和新请求路由
   - 默认值为 `false`；已在途请求继续完成
@@ -565,6 +587,11 @@ OAuth 模型是数据平面的例外路由：
   - 统计完成回调写日志时会带上 `api_key_id`，用于同步累加 key 级用量
   - Codex 完成回调同时写入最终认证文件名、账号 ID 和请求发生时的预计费用
   - 流式 transport 失败和客户端取消在下游已提交后调用统计完成回调；usage 未知时记录 `unknown`，只采集到部分 token 时记录 `partial`
+- `LLMRecordingService`
+  - 每条启用采集的请求持有独立输入快照、输出字节缓冲和目录快照
+  - 活跃采集总量上限为 64 MiB；单条输入与输出分别上限 8 MiB
+  - 待写队列上限为 256 条及 64 MiB，使用原生锁协调请求侧入队与写入侧出队
+  - 每个目录持有独立分片写入状态和最多 1024 项提示词引用缓存；服务实例标识避免重启覆盖既有文件
 - `ModelCatalogService`
   - 每次用户 / API Key 权限管理读取当前 Provider 配置模型和 Codex / Claude OAuth 可用模型
   - Codex OAuth 图片模型和普通 OAuth 模型使用同一显式权限列表语义
@@ -779,7 +806,35 @@ Codex / Claude OAuth 流分别以 `response.completed` / `response.done` 和 `me
 - 队列上限为 10000 条及约 16 MiB 的消息与记录字典；达到上限时丢弃新运行日志，消费线程记录丢弃数量。数据库请求明细和统计使用独立的事务持久化链路。
 - 日志重载和正常退出会排空已入队记录，再关闭文件句柄。进程被强制终止时，队列中的运行日志可能尚未落盘。
 
-### 3.7 Control-Plane Model Fetching And Testing
+### 3.7 LLM Data Recording
+
+当 `llm_recording.enabled=true` 时，Chat、Responses 和 Messages 路由在鉴权与请求合法性检查后创建采集上下文。图片生成、图片编辑和 Responses compact 不进入该链路。每个客户端请求只生成一条记录，Provider 内部重试、OAuth 候选切换和模型映射回退不会生成重复样本。
+
+```mermaid
+flowchart LR
+    Request[并发客户端请求] --> Snapshot[请求级有界输入与目录快照]
+    Upstream[Provider / Codex / Claude 实际上游调用] --> Models[实际请求与响应模型]
+    Models --> Snapshot
+    Downstream[最终下游字节] --> Capture[请求级有界输出采集]
+    Snapshot --> Queue[256 条及 64 MiB 有界原生队列]
+    Capture --> Queue
+    Queue --> Writer[单个专用原生写入线程]
+    Writer --> Parse[三种下游协议聚合与完整性标记]
+    Parse --> Prompts[prompts 内容哈希与原子落盘]
+    Parse --> Records[records UTF-8 LF JSONL 分片]
+```
+
+- 输入在 Hook 与协议转换前复制，输出在最终下游编码后采集；采集口径不是上游完整原始报文
+- `request_model` 使用最终发送请求体的 `model`；`response_model` 只使用上游实际返回值；`upstream_protocol` 使用同一次最终上游调用的协议族，与下游接口协议独立
+- Chat 多候选、Responses 原生 output items、Claude 原生 content blocks 保持各自结构；媒体正文与隐藏上下文引用明确标记未完整采集
+- system/developer、Responses instructions 和 Claude system 通过内容 SHA-256 去重，提示词先于引用记录落盘
+- 记录目录只接受绝对路径；默认关闭不创建目录。新请求读取开关和目录，在途请求使用开始时快照
+- 队列、磁盘或权限失败只放弃对应记录并输出有节制英文应用日志，不改变客户端响应
+- 正常退出先停止接收请求，再排空记录队列、fsync 并关闭分片，随后关闭应用日志线程；强制终止可能丢失未落盘记录
+
+数据字段、协议表示、内部边界和使用方式见 [LLM 数据记录](llm-recording.md)。
+
+### 3.8 Control-Plane Model Fetching And Testing
 
 Provider 编辑页包含两条控制平面上游探测链路：
 
@@ -858,7 +913,7 @@ provider editor form snapshot
 - 数据平面主代理链路独立于 Provider 编辑页联通性测试链路
 - Provider 编辑页提供控制平面的上游模型拉取与性能测试能力
 
-### 3.8 Control-Plane OAuth Management
+### 3.9 Control-Plane OAuth Management
 
 OAuth 管理页始终提供顶层 `OAuth` 导航项，页面直接展示 Codex 登录、模型目录和认证文件管理。页面初始化只请求 Codex 管理接口，认证文件自动同步按页面可见性和操作状态调度。Claude OAuth 管理能力由 `/api/oauth/claude/*` 接口提供。`oauth.enabled` 默认关闭，因此新配置默认不会展示 OAuth 页签。
 
@@ -1024,7 +1079,7 @@ Claude OAuth management API
 - Codex / Claude 模型代理属于 `/v1/*` 数据平面，但不进入 Provider 路由或 Auth Group 选择流程
 - Codex 图片生成和图片编辑接口属于 `/v1/*` 数据平面，使用 Codex OAuth 认证文件和图片模型目录，不进入 Provider 路由或 Auth Group 选择流程
 
-### 3.9 Control-Plane API Key Management
+### 3.10 Control-Plane API Key Management
 
 API Key 管理页始终提供顶层 `API Key` 导航项。`api_keys.enabled` 默认关闭，新配置不要求下游请求携带 Key；页面总开关启用后即时执行认证。
 
@@ -1159,7 +1214,7 @@ flowchart LR
 
 Excel 导出包含结果与性能列，以及 Token 状态和缓存写入 Token：`known` 展示为“完整”，`partial` 展示为“部分”，`unknown` 展示为“未知”。统计 JSON 迁移包使用版本 6，保留结果、上游调用明细、性能、原始 `usage_status`、映射目标模型、缓存 Token 和 `cache_usage_status`；旧版本缺失的观测字段保持未知，版本 2 的缓存状态按 `unknown` 导入。
 
-### 3.10 Blocking I/O Execution
+### 3.11 Blocking I/O Execution
 
 HTTP 请求协程和 Hub 在服务线程中运行。上游 HTTP、客户端连接和 SSE 网络等待使用 gevent socket；SQLite 与配置文件操作通过 `run_blocking()` 交给 Hub 的原生线程池，调用协程等待任务结果。
 
@@ -1171,6 +1226,8 @@ HTTP 请求协程和 Hub 在服务线程中运行。上游 HTTP、客户端连�
 - 用户 IP 缓存的首次查询和填充共用缓存锁，用户变更后的失效操作与正在执行的填充互斥。
 - YAML 加载、原子写入和 `fsync` 在原生线程执行；Provider、Auth Group 和系统设置共用配置实例的写锁，覆盖读取快照、修改、保存和运行时重载，配置快照在调用线程更新。
 - 运行日志使用独立的 `ThreadPool(1)` 消费原生队列，文件输出和控制台等待占用该专用线程。
+- LLM 数据记录使用另一组独立的 `ThreadPool(1)`、有界原生队列和目录写入状态；请求侧只执行有界快照与入队，协议聚合、哈希、JSON 序列化、提示词原子替换、JSONL 写入和分片 fsync 均在该专用线程执行。
+- LLM 记录目录校验通过 `run_blocking()` 在通用原生 I/O 线程执行，配置写锁覆盖校验与配置提交。
 - 模板首次加载、静态文件访问和自定义 Hook 的文件或第三方库调用仍由对应组件执行；Hook 实现负责使用协作 I/O 或显式的阻塞任务边界。
 
 ```mermaid
@@ -1185,9 +1242,13 @@ flowchart LR
     Queue --> Logger[Dedicated native log worker]
     Logger --> Files[Rotating log files]
     Logger --> Console[Console output]
+    Hub -->|nonblocking enqueue when enabled| RecordQueue[Bounded LLM record queue]
+    RecordQueue --> RecordWriter[Dedicated native record worker]
+    RecordWriter --> PromptFiles[Atomic prompt files]
+    RecordWriter --> RecordFiles[JSONL record shards]
 ```
 
-### 3.11 Control-Plane Agent Configuration
+### 3.12 Control-Plane Agent Configuration
 
 DSH 的默认文件目标为 `$DSH_HOME/cordis.patch.yml`（未设置时使用 `~/.dsh/cordis.patch.yml`），与独立凭据文件共同参与预览及保存事务。全局补丁供加载对应插件的 Web、Desktop、headless、SDK、ACP 共用；自定义路径可定位单个 Profile。默认权限由 DSH 适配器维护 `permission` 的预设和 `defaultPreset`，既有会话权限不由文件编辑流程修改。sdk-minimal 的独立插件组合不在完整支持范围。
 
@@ -1300,6 +1361,10 @@ sequenceDiagram
   - 首块预取、流提交边界、协议错误事件和流终态结算
 - [src/services/settings_service.py](../src/services/settings_service.py)
   - 系统设置保存与生效边界
+- [src/services/llm_recording.py](../src/services/llm_recording.py)、[llm_record_builder.py](../src/services/llm_record_builder.py)
+  - 有界请求采集、独立原生写入线程、三种协议记录构建、提示词去重与 JSONL 分片
+- [LLM 数据记录说明](llm-recording.md)
+  - 设置、字段、协议表示、采集状态、存储格式与资源边界
 - [src/services/provider_service.py](../src/services/provider_service.py)
   - Provider 配置管理、复制、排序、迁移 JSON 导入导出和重载触发
 - [src/repositories/auth_group_repository.py](../src/repositories/auth_group_repository.py)
@@ -1379,6 +1444,7 @@ sequenceDiagram
 - 一个 SQLite 数据库，保存用户、请求日志、日聚合统计、API Key、模型映射定义和映射运行状态
 - 一个 gevent Hub 原生线程池，执行仓储事务和配置文件任务
 - 一个运行日志专用原生线程与有界队列
+- 一个 LLM 数据记录专用原生线程与独立有界队列，以及绝对路径目录下的提示词文件和 JSONL 分片
 - 一组 Auth Group、模型映射、配置保存和用户缓存协作锁
 - 一组滚动日志文件
 - 一个 Codex 配额后台刷新 greenlet

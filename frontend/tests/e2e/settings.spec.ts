@@ -139,7 +139,7 @@ test('管理登录无变化不保存，保存失败不弹成功预览', async ({
 test('系统设置仅保留通用分组，启用客户端 IP 不拉高日志卡片', async ({ page }) => {
   await mockAdmin(page)
   await page.goto('/settings')
-  await expect(page.getByRole('form')).toHaveCount(4)
+  await expect(page.getByRole('form')).toHaveCount(5)
   await expect(page.getByRole('switch', { name: '启用 API Key', exact: true })).toHaveCount(0)
   await expect(page.getByRole('switch', { name: '启用模型映射', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '网络设置', exact: true })).toHaveCount(0)

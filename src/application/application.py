@@ -44,6 +44,7 @@ from ..services import (
     ClaudeProxyService,
     CodexOAuthService,
     CodexProxyService,
+    LLMRecordingService,
     LogService,
     ModelCatalogService,
     ModelDiscoveryService,
@@ -341,6 +342,11 @@ class Application:
         model_discovery_service = ModelDiscoveryService(self._ctx, self._provider_runtime_factory)
         codex_proxy_service = CodexProxyService(self._ctx, codex_oauth_service)
         claude_proxy_service = ClaudeProxyService(self._ctx, claude_oauth_service)
+        self._llm_recording_service = LLMRecordingService(
+            self._config_manager,
+            self._root_path,
+            self._logger,
+        )
         settings_service = SettingsService(
             self._ctx,
             reload_logging_callback=self.reload_logging_settings,
@@ -391,6 +397,7 @@ class Application:
             claude_proxy_service=claude_proxy_service,
             api_key_service=api_key_service,
             model_mapping_service=model_mapping_service,
+            llm_recording_service=self._llm_recording_service,
         )
         self._web_controller = WebController(
             self._ctx,
@@ -443,11 +450,13 @@ class Application:
             self.close()
 
     def close(self) -> None:
-        """关闭 Agent 会话并排空应用持有的日志资源。"""
+        """关闭后台服务并排空应用持有的记录与日志资源。"""
         if hasattr(self, "_listener_runtime"):
             self._listener_runtime.close()
         if hasattr(self, "_agent_config_service"):
             self._agent_config_service.close()
+        if hasattr(self, "_llm_recording_service"):
+            self._llm_recording_service.close()
         self._log_listener.close()
 
     def _start_background_workers(self) -> None:

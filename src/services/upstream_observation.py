@@ -17,10 +17,22 @@ attempt_recorder = ContextVar("upstream_attempt_recorder", default=None)
 class ObservedResponse:
     """透传原始响应；读取结束、错误和关闭共用幂等结果提交。"""
 
-    def __init__(self, response, record, target_model, *, stream, stream_format="sse_json"):
+    def __init__(
+        self,
+        response,
+        record,
+        target_model,
+        *,
+        stream,
+        stream_format="sse_json",
+        actual_model=None,
+        upstream_protocol=None,
+    ):
         self.response = response
         self.record = record
         self.target_model = target_model
+        self.actual_model = actual_model
+        self.upstream_protocol = upstream_protocol
         self.stream = stream
         self.stream_format = stream_format
         self.done = False
@@ -42,6 +54,8 @@ class ObservedResponse:
         self.record(
             {
                 "target_model_id": self.target_model,
+                "actual_request_model": self.actual_model,
+                "upstream_protocol": self.upstream_protocol,
                 "response_model": self.model,
                 "outcome": outcome,
                 "http_status": self.response.status_code,
@@ -160,30 +174,64 @@ class ObservedResponse:
             self.finish("cancelled")
 
 
-def _open(call, target_model, *, opened):
+def _open(call, target_model, *, opened, actual_model=None, upstream_protocol=None):
     record = attempt_recorder.get()
     if record is None:
         return call()
     try:
         result = call()
     except (requests.exceptions.RequestException, OSError):
-        record({"target_model_id": target_model, "response_model": None, "outcome": "exception", "http_status": None})
+        record(
+            {
+                "target_model_id": target_model,
+                "actual_request_model": actual_model,
+                "upstream_protocol": upstream_protocol,
+                "response_model": None,
+                "outcome": "exception",
+                "http_status": None,
+            }
+        )
         raise
     if opened:
         result = ProxyTransportGateway.coerce_opened_response(result)
         return replace(
             result,
             response=ObservedResponse(
-                result.response, record, target_model, stream=result.is_stream, stream_format=result.stream_format
+                result.response,
+                record,
+                target_model,
+                stream=result.is_stream,
+                stream_format=result.stream_format,
+                actual_model=actual_model,
+                upstream_protocol=upstream_protocol,
             ),
         )
     stream = "text/event-stream" in str(result.headers.get("Content-Type", "")).lower()
-    return ObservedResponse(result, record, target_model, stream=stream)
+    return ObservedResponse(
+        result,
+        record,
+        target_model,
+        stream=stream,
+        actual_model=actual_model,
+        upstream_protocol=upstream_protocol,
+    )
 
 
-def observe_opened(call, target_model):
-    return _open(call, target_model, opened=True)
+def observe_opened(call, target_model, *, actual_model=None, upstream_protocol=None):
+    return _open(
+        call,
+        target_model,
+        opened=True,
+        actual_model=actual_model,
+        upstream_protocol=upstream_protocol,
+    )
 
 
-def observe_response(call, target_model):
-    return _open(call, target_model, opened=False)
+def observe_response(call, target_model, *, actual_model=None, upstream_protocol=None):
+    return _open(
+        call,
+        target_model,
+        opened=False,
+        actual_model=actual_model,
+        upstream_protocol=upstream_protocol,
+    )

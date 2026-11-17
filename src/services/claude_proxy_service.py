@@ -266,6 +266,8 @@ class ClaudeProxyService:
                     log_context=f"provider=claude model={model_name} auth_file={candidate.name}",
                 ),
                 request_data["model"],
+                actual_model=upstream_body.get("model"),
+                upstream_protocol="claude_chat",
             )
         except ProxyWarningRequired as exc:
             self._logger.warning(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import codecs
 import json
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
@@ -12,6 +13,8 @@ from ..proxy_core.usage import create_usage_meta, merge_usage_meta, public_usage
 from ..utils.local_time import now_local_datetime
 from ..utils.request_metrics import output_tps
 from .upstream_observation import attempt_recorder
+
+LOGGER = logging.getLogger("app")
 
 
 class RequestObservation:
@@ -24,9 +27,11 @@ class RequestObservation:
         started_at: float,
         start_time: Any,
         is_model_mapping: bool = False,
+        capture: Any = None,
         **identity: Any,
     ):
         self.record = record
+        self.capture = capture
         self.started_at = started_at
         self.start_time = start_time
         self.identity = identity
@@ -53,8 +58,21 @@ class RequestObservation:
             attempt_recorder.reset(self.attempt_token)
             self.attempt_token = None
 
+    def _call_capture(self, operation: str, *args: Any) -> None:
+        capture = self.capture
+        if capture is None:
+            return
+        try:
+            getattr(capture, operation)(*args)
+        except Exception as exc:
+            self.capture = None
+            LOGGER.warning("LLM recording capture disabled after %s failure: %s", operation, exc)
+
     def record_attempt(self, item):
         item = dict(item)
+        self._call_capture("observe_attempt", dict(item))
+        item.pop("actual_request_model", None)
+        item.pop("upstream_protocol", None)
         if not self.is_model_mapping and item.get("target_model_id") == self.identity.get("request_model"):
             item["target_model_id"] = None
         self.upstream_attempts.append(item)
@@ -134,6 +152,7 @@ class RequestObservation:
             self.error_type = error_type
         if self.error_type or (self.status_code is not None and self.status_code >= 400):
             outcome = "error"
+        self._call_capture("finish", outcome)
         usage = public_usage_meta(self.meta)
         duration_ms = max(time.perf_counter() - self.started_at, 0) * 1000
         tps, tps_unavailable_reason = output_tps(
@@ -184,6 +203,7 @@ class RequestObservation:
         self.source_format = source_format
         self.stream = "text/event-stream" in response.content_type.lower()
         if not self.stream:
+            self._call_capture("feed", response.get_data())
             payload = response.get_json(silent=True)
             if isinstance(payload, dict) and payload.get("error"):
                 self.error_type = "response_error"
@@ -215,6 +235,7 @@ class RequestObservation:
                         self.feed(chunk)
                     except (TypeError, ValueError, AttributeError):
                         self.measurable = False
+                    self._call_capture("feed", chunk)
                     yield chunk
                 exhausted = True
             except GeneratorExit:

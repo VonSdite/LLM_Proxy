@@ -555,6 +555,8 @@ class CodexProxyService:
                     log_context=f"provider=codex model={model_name} auth_file={candidate.name}",
                 ),
                 request_data["model"],
+                actual_model=upstream_body.get("model"),
+                upstream_protocol="openai_responses",
             )
         except ProxyWarningRequired as exc:
             self._logger.warning(
