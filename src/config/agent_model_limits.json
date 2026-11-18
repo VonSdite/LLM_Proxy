@@ -1712,6 +1712,78 @@
   },
   {
     "ids": [
+      "gpt-6.2-astra"
+    ],
+    "label": "GPT-6.2 Astra 官方参数",
+    "context": 1050000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-6.2-astra",
+          "checkedAt": "2026-11-19"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "fallback",
+          "label": "GPT 建议压缩阈值 85"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-6.2-astra",
+          "checkedAt": "2026-11-19"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "gpt-6.2-sol"
+    ],
+    "label": "GPT-6.2 Sol 官方参数",
+    "context": 1050000,
+    "compact": 85,
+    "output": 128000,
+    "candidates": {
+      "context": [
+        {
+          "value": 1050000,
+          "kind": "official",
+          "label": "API 文档上下文 1,050,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-6.2-sol",
+          "checkedAt": "2026-11-19"
+        }
+      ],
+      "compact": [
+        {
+          "value": 85,
+          "kind": "fallback",
+          "label": "GPT 建议压缩阈值 85"
+        }
+      ],
+      "output": [
+        {
+          "value": 128000,
+          "kind": "official",
+          "label": "API 文档最大输出 128,000",
+          "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-6.2-sol",
+          "checkedAt": "2026-11-19"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
       "gpt-6.1-sol"
     ],
     "label": "GPT-6.1 Sol Codex 目录参数和 GPT 系列输出建议",

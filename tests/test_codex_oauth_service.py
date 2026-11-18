@@ -2035,6 +2035,8 @@ class CodexOAuthServiceTests(unittest.TestCase):
 
         model_ids = [model["id"] for model in result["models"]]
         self.assertEqual(list(DEFAULT_CODEX_MODEL_IDS), model_ids)
+        self.assertIn("gpt-6.2-astra", model_ids)
+        self.assertIn("gpt-6.2-sol", model_ids)
         self.assertIn("gpt-6.1-sol", model_ids)
         self.assertNotIn("gpt-5.6-sol", model_ids)
         self.assertNotIn("gpt-6.1-terra", model_ids)
@@ -2080,6 +2082,26 @@ class CodexOAuthServiceTests(unittest.TestCase):
         model_ids = [model["id"] for model in restored["models"]]
         self.assertIn("gpt-custom", model_ids)
         self.assertTrue(set(DEFAULT_CODEX_MODEL_IDS).issubset(set(model_ids)))
+
+    def test_saved_catalog_restores_new_models_and_preserves_custom_models(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            models_file = root / "data" / "oauth" / "codex" / "models.json"
+            models_file.parent.mkdir(parents=True)
+            saved_ids = ["gpt-6-astra", "gpt-custom"]
+            models_file.write_text(json.dumps(saved_ids), encoding="utf-8", newline="\n")
+            service = self._build_service(root)
+
+            initial = service.list_models()
+            self.assertEqual(saved_ids, [model["id"] for model in initial["models"]])
+            restored = service.restore_builtin_models()
+            restored_ids = [model["id"] for model in restored["models"]]
+
+            self.assertEqual(saved_ids, restored_ids[:2])
+            self.assertIn("gpt-6.2-astra", restored_ids)
+            self.assertIn("gpt-6.2-sol", restored_ids)
+            self.assertEqual(len(restored_ids), len(set(restored_ids)))
+            self.assertEqual(restored_ids, json.loads(models_file.read_text(encoding="utf-8")))
 
     def test_codex_image_models_manage_default_and_reserved_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -141,7 +141,7 @@ class OpenAIModelPricingTests(unittest.TestCase):
 
         self.assertAlmostEqual(5.05, cost or 0)
 
-    def test_gpt_6_1_cache_prices_at_long_context_boundary(self) -> None:
+    def test_gpt_cache_prices_at_long_context_boundary(self) -> None:
         usage = {
             "usage_status": "known",
             "completion_tokens": 10_000,
@@ -151,6 +151,10 @@ class OpenAIModelPricingTests(unittest.TestCase):
 
         for service_tier, multiplier in (("standard", 1), ("fast", 2), ("priority", 2)):
             for model_name, prompt_tokens, standard_cost in (
+                ("gpt-6.2-astra", 272_000, 1.856),
+                ("gpt-6.2-astra", 272_001, 3.512016),
+                ("gpt-6.2-sol", 272_000, 0.464),
+                ("gpt-6.2-sol", 272_001, 0.878004),
                 ("gpt-6.1-sol", 272_000, 0.464),
                 ("gpt-6.1-sol", 272_001, 0.878004),
                 ("gpt-6.1-terra", 272_000, 0.232),
