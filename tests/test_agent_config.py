@@ -19,7 +19,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.external.agent_config_transport import AgentConfigError
 from src.presentation.agent_config_controller import AgentConfigController
 from src.presentation.app_factory import create_flask_app
-from src.services.agent_config_documents import MISSING, JsoncDocument, desired_fields, edit_document, parse_document
+from src.services.agent_config_documents import (
+    MISSING,
+    JsoncDocument,
+    desired_fields,
+    edit_document,
+    edit_dotenv,
+    parse_document,
+    parse_dotenv,
+)
 from src.services.agent_config_service import AgentConfigService, value_hash
 
 
@@ -170,6 +178,73 @@ class ConfigDocumentTests(unittest.TestCase):
         data = parse_document("codex", result)
         self.assertEqual("uvx", data["mcp_servers"]["test"]["command"])
         self.assertEqual("http://localhost:8080/v1", data["model_providers"]["name.with.dot"]["base_url"])
+
+    def test_dotenv_preserves_comments_quotes_and_unmanaged_lines(self):
+        source = (
+            "# 代理设置\n"
+            "export HTTP_PROXY=http://127.0.0.1:7890\n"
+            "\n"
+            "NO_PROXY=localhost,127.0.0.1 # 内网直连\n"
+            'QUOTED="a b#c"\n'
+            "SINGLE='keep $raw'\n"
+            "not a setting line\n"
+        )
+        data = parse_dotenv(source)
+        self.assertEqual("localhost,127.0.0.1", data["NO_PROXY"])
+        self.assertEqual("a b#c", data["QUOTED"])
+        self.assertEqual("keep $raw", data["SINGLE"])
+        self.assertEqual("http://127.0.0.1:7890", data["HTTP_PROXY"])
+        updated = edit_dotenv(
+            source,
+            {("NO_PROXY",): "localhost,127.0.0.1,::1", ("NEW_VAR",): "x y", ("HTTP_PROXY",): MISSING},
+        )
+        self.assertIn("# 代理设置", updated)
+        self.assertIn("NO_PROXY=localhost,127.0.0.1,::1\n", updated)
+        self.assertIn('NEW_VAR="x y"\n', updated)
+        self.assertNotIn("HTTP_PROXY", updated)
+        self.assertIn("not a setting line", updated)
+        self.assertEqual("x y", parse_dotenv(updated)["NEW_VAR"])
+        self.assertEqual(updated, edit_dotenv(updated, {("NO_PROXY",): "localhost,127.0.0.1,::1", ("NEW_VAR",): "x y"}))
+
+    def test_dotenv_duplicate_keys_empty_file_and_invalid_edits(self):
+        self.assertEqual("NO_PROXY=new\n", edit_dotenv("NO_PROXY=old\nNO_PROXY=older\n", {("NO_PROXY",): "new"}))
+        self.assertEqual("NO_PROXY=new\n", edit_dotenv("", {("NO_PROXY",): "new"}))
+        self.assertEqual("", edit_dotenv("", {("NO_PROXY",): MISSING}))
+        self.assertEqual("NO_PROXY=new\n", edit_dotenv("NO_PROXY=old", {("NO_PROXY",): "new"}))
+        for edits in ({("BAD-KEY",): "x"}, {("A", "B"): "x"}, {("OK",): "line\nbreak"}, {("OK",): 1}):
+            with self.subTest(edits=edits), self.assertRaises(ValueError):
+                edit_dotenv("", edits)
+
+    def test_proxy_bypass_fields_for_claude_and_codex(self):
+        data = draft()
+        data["runtime"].update(noProxy="127.0.0.1,localhost", nodeTlsRejectUnauthorized="0")
+        fields = desired_fields("claude", data, [])["claude"]
+        self.assertEqual("127.0.0.1,localhost", fields[("env", "NO_PROXY")])
+        self.assertEqual("0", fields[("env", "NODE_TLS_REJECT_UNAUTHORIZED")])
+        data["runtime"]["nodeTlsRejectUnauthorized"] = "custom"
+        self.assertNotIn(("env", "NODE_TLS_REJECT_UNAUTHORIZED"), desired_fields("claude", data, [])["claude"])
+        data["runtime"].update(noProxy="", nodeTlsRejectUnauthorized="unset")
+        data["clearFields"] = ["runtime.noProxy", "runtime.nodeTlsRejectUnauthorized"]
+        fields = desired_fields("claude", data, [])["claude"]
+        self.assertIs(MISSING, fields[("env", "NO_PROXY")])
+        self.assertIs(MISSING, fields[("env", "NODE_TLS_REJECT_UNAUTHORIZED")])
+        self.assertEqual({}, desired_fields("codex", draft("codex"), [])["codexEnv"])
+        codex_data = draft("codex")
+        codex_data["runtime"]["noProxy"] = "127.0.0.1,localhost"
+        result = desired_fields("codex", codex_data, [])
+        self.assertEqual({("NO_PROXY",): "127.0.0.1,localhost"}, result["codexEnv"])
+        codex_data["runtime"]["noProxy"] = ""
+        codex_data["clearFields"] = ["runtime.noProxy"]
+        self.assertIs(MISSING, desired_fields("codex", codex_data, [])["codexEnv"][("NO_PROXY",)])
+        for agent, value in (("claude", True), ("codex", True), ("claude", "a\nb"), ("codex", "x" * 5000)):
+            bad = draft(agent)
+            bad["runtime"]["noProxy"] = value
+            with self.subTest(agent=agent, value=value), self.assertRaises(ValueError):
+                desired_fields(agent, bad, [])
+        bad = draft()
+        bad["runtime"]["nodeTlsRejectUnauthorized"] = "yes"
+        with self.assertRaises(ValueError):
+            desired_fields("claude", bad, [])
 
     def test_authoritative_fields_preserve_full_proxy_ids(self):
         fields = desired_fields("codex", draft("codex"), [])
@@ -759,6 +834,52 @@ class AgentConfigServiceTests(AgentConfigFixture):
         ):
             self.service.apply(self.owner, "local", preview["token"])
         self.assertFalse(Path(self.snapshot()["files"]["codex"]["path"]).exists())
+
+    def test_codex_env_file_round_trip_and_clear(self):
+        data = draft("codex")
+        data["runtime"]["noProxy"] = "127.0.0.1,localhost"
+        result = self.save("codex", data)
+        env_path = Path(result["files"]["codexEnv"]["path"])
+        self.assertEqual("NO_PROXY=127.0.0.1,localhost\n", env_path.read_text(encoding="utf-8"))
+        self.assertEqual("127.0.0.1,localhost", result["files"]["codexEnv"]["managed"]["NO_PROXY"])
+        self.assertNotIn("\r", env_path.read_text(encoding="utf-8"))
+        env_path.write_text("# 系统代理绕过\nOTHER=keep\nNO_PROXY=127.0.0.1\n", encoding="utf-8")
+        data["runtime"]["noProxy"] = "127.0.0.1,localhost,::1"
+        self.save("codex", data)
+        text = env_path.read_text(encoding="utf-8")
+        self.assertIn("# 系统代理绕过", text)
+        self.assertIn("OTHER=keep", text)
+        self.assertIn("NO_PROXY=127.0.0.1,localhost,::1\n", text)
+        data["runtime"]["noProxy"] = ""
+        data["clearFields"] = ["runtime.noProxy"]
+        result = self.save("codex", data)
+        text = env_path.read_text(encoding="utf-8")
+        self.assertNotIn("NO_PROXY", text)
+        self.assertIn("OTHER=keep", text)
+        self.assertNotIn("NO_PROXY", result["files"]["codexEnv"]["managed"])
+
+    def test_claude_proxy_bypass_saved_and_cleared(self):
+        data = draft()
+        data["runtime"].update(noProxy="127.0.0.1", nodeTlsRejectUnauthorized="0")
+        result = self.save(data=data)
+        path = Path(result["files"]["claude"]["path"])
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual("127.0.0.1", saved["env"]["NO_PROXY"])
+        self.assertEqual("0", saved["env"]["NODE_TLS_REJECT_UNAUTHORIZED"])
+        self.assertEqual("0", result["files"]["claude"]["managed"]["env.NODE_TLS_REJECT_UNAUTHORIZED"])
+        data["runtime"].update(noProxy="", nodeTlsRejectUnauthorized="unset")
+        data["clearFields"] = ["runtime.noProxy", "runtime.nodeTlsRejectUnauthorized"]
+        self.save(data=data)
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("NO_PROXY", saved["env"])
+        self.assertNotIn("NODE_TLS_REJECT_UNAUTHORIZED", saved["env"])
+
+    def test_codex_env_custom_path_requires_dotenv_file(self):
+        for path in ("~/custom/proxy.env", "~/custom/.env"):
+            result = self.service.set_path(self.owner, "local", {"target": "codexEnv", "path": path})
+            self.assertEqual(path, result["files"]["codexEnv"]["customPath"])
+        with self.assertRaises(AgentConfigError):
+            self.service.set_path(self.owner, "local", {"target": "codexEnv", "path": "~/custom/env.txt"})
 
     def test_parse_error_can_be_corrected_in_raw_editor(self):
         path = Path(self.snapshot()["files"]["claude"]["path"])

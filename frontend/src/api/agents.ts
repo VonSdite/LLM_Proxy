@@ -28,7 +28,7 @@ export interface AgentDefinition {
   fields?: AgentField[]
   legacy?: boolean
   help?: string[]
-  fileFormats?: Record<string, 'json' | 'jsonc' | 'toml' | 'yaml'>
+  fileFormats?: Record<string, 'json' | 'jsonc' | 'toml' | 'yaml' | 'dotenv'>
   groups?: Record<string, number>
 }
 export interface AgentMachine {

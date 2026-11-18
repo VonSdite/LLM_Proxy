@@ -88,6 +88,7 @@ export async function mockAdmin(page: Page, authenticated = true) {
     claude: 'D:/Users/demo/.claude/settings.json',
     codex: 'D:/Users/demo/.codex/config.toml',
     codexAuth: 'D:/Users/demo/.codex/auth.json',
+    codexEnv: 'D:/Users/demo/.codex/.env',
     opencode: 'D:/Users/demo/.config/opencode/opencode.json',
   }
   const snapshot: AgentSnapshot = {
@@ -468,7 +469,8 @@ export async function mockAdmin(page: Page, authenticated = true) {
         })
       if (path.endsWith('/files')) {
         const agentId = path.split('/').at(-2) as FileTarget
-        const targets: FileTarget[] = agentId === 'codex' ? ['codex', 'codexAuth'] : [agentId]
+        const targets: FileTarget[] =
+          agentId === 'codex' ? ['codex', 'codexAuth', 'codexEnv'] : [agentId]
         return send({
           files: targets.map((target) => ({
             target,
@@ -476,7 +478,9 @@ export async function mockAdmin(page: Page, authenticated = true) {
             text:
               target === 'codex'
                 ? 'model = "fixture-model"\n'
-                : JSON.stringify({ model: 'fixture-model' }, null, 2),
+                : target === 'codexEnv'
+                  ? 'NO_PROXY=127.0.0.1\n'
+                  : JSON.stringify({ model: 'fixture-model' }, null, 2),
             exists: true,
             version: 'fixture-version',
           })),

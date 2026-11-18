@@ -1,1 +1,0 @@
-import{$ as e}from"./index-CcmKZD9w.js";function t(t){let n=JSON.stringify(t());return e(()=>JSON.stringify(t())!==n)}export{t};

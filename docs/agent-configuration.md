@@ -50,14 +50,14 @@ fields:
     help: [本服务使用模型下拉，其他地址手动输入模型 ID。]
 ```
 
-只有 JSON、JSONC、TOML 或 YAML 映射文件，且字段可直接定位时，单个声明文件即可完成接入。字段路径由目标 Agent 的实际格式决定。
+只有 JSON、JSONC、TOML、YAML 映射文件或 dotenv 键值文件，且字段可直接定位时，单个声明文件即可完成接入。字段路径由目标 Agent 的实际格式决定。
 
 ### 1.2 字段定义
 
 | 字段 | 含义 |
 | --- | --- |
 | `files.<target>.path` | 默认文件路径；`~/` 使用目标机器的用户目录 |
-| `format` | `json`、`jsonc`、`toml`、`yaml` |
+| `format` | `json`、`jsonc`、`toml`、`yaml`、`dotenv` |
 | `homeEnv` / `homeRelative` | 本机环境变量指定目录时，相对该目录的文件路径段；SSH 使用远程默认路径或用户自定义路径 |
 | `groups` | 分组 ID 与宽屏列数（1–4），窄屏自动收为两列或一列 |
 | `fields` | 有序配置项；保存预览按表单顺序跨文件排列 |
@@ -76,6 +76,8 @@ fields:
 | `constants` | 按文件声明固定写入项，格式为 `{path: [...], value: ...}` 的数组 |
 
 原文件已有值优先回显；缺失的可选字段显示“不设置”。不支持的复杂对象显示“保留自定义配置”，未操作时保持原值。主动清空可选项表示删除字段。只修改声明路径，不清理未声明字段。缺失的 API 地址与必填模型使用本服务候选；外部地址的模型 ID 保留手动输入能力。
+
+dotenv 文件的字段路径是单个环境变量名，解析支持可选 `export` 前缀、成对单双引号和未加引号值的行尾注释。编辑保留注释、空行和未声明行；写入值包含空白或特殊字符时使用双引号，同名变量的后续行随写入或删除一并移除，避免旧值覆盖本次写入。
 
 声明式扩展的 `default` 不用于存放真实密钥，定义会返回给已登录的管理页面。
 
@@ -119,6 +121,8 @@ fields:
 | `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | 范围 `100000`–`1000000`，同时受模型实际窗口限制；`2.1.304` 记录 k / M 后缀，本页保存整数 |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | 接受 `1`–`100`，只能提前压缩，高于默认阈值时忽略 |
 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | 默认值和上限随模型变化；无法识别的模型默认 32000、上限 128000 |
+| `NO_PROXY` | 官方列出的绕过代理地址列表；页面管理 `env.NO_PROXY` 单行文本，支持“填入本服务地址”合并 API 地址主机名，清空后显式移除 |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | Node.js 运行时变量，官方环境变量文档未列出；跳过证书校验写 `0`，强制校验写 `1`，其他写法显示为文件自定义 |
 
 Opus / Sonnet 默认模型变量在 `1.0.88` 新增；Haiku 变量在 `2.0.17` 发布记录中出现。命令沙箱在 `2.0.24` 发布 Linux / macOS 版本。对象形式的署名配置在 `2.0.62` 引入，禁用值 `false` 在 `2.1.281` 引入。工具自动搜索在 `2.1.7` 默认开启，`2.1.9` 引入 `auto:N`，`2.1.72` 修复自定义 API 地址下显式启用失效。
 
@@ -138,7 +142,7 @@ Opus / Sonnet 默认模型变量在 `1.0.88` 新增；Haiku 变量在 `2.0.17` �
 | 实验性 Agent Teams | 启用 | `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"` |
 | Tool Search | 启用 | `env.ENABLE_TOOL_SEARCH: "true"` |
 | 隔离环境标记 | 启用 | `env.IS_SANDBOX: "1"` |
-| 跳过网页抓取预检 | 禁用 | 顶层 `skipWebFetchPreflight: false` |
+| 跳过网页抓取预检 | 启用 | 顶层 `skipWebFetchPreflight: true` |
 
 默认目标为用户级 `~/.claude/settings.json`。本机提供 `CLAUDE_CONFIG_DIR` 时使用该目录下的 `settings.json`；SSH 目标位于远程用户主目录。自定义路径对应的作用域由 Claude Code 决定。
 
@@ -171,6 +175,8 @@ Opus / Sonnet 默认模型变量在 `1.0.88` 新增；Haiku 变量在 `2.0.17` �
 API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值、服务处理档位、沙箱范围、确认策略和 `features.memories` 的最低版本均未确认。官方字段列表不提供首次支持版本表，不能仅依据字段存在推断旧版兼容。
 
 表单固定写入 `model_provider: proxy` 和 `model_providers.proxy`，模型 ID 保持完整的 Proxy 路由格式。
+
+页面同时管理 `~/.codex/.env`（本机尊重 `CODEX_HOME`），写入 `NO_PROXY` 代理绕过列表。Codex 启动时加载该文件并覆盖同名进程环境变量，`CODEX_` 前缀的变量不能通过此文件设置。Codex 由 Rust 实现，`NODE_TLS_REJECT_UNAUTHORIZED` 对它无效；自定义 CA 证书使用 `SSL_CERT_FILE` 等进程环境机制，不在本页管理范围。依据：[`.env` 加载实现](https://github.com/openai/codex/blob/main/codex-rs/arg0/src/lib.rs)，核对日期 2026-11-18。
 
 依据：[官方配置参考](https://developers.openai.com/codex/config-reference)、[官方发布记录](https://developers.openai.com/codex/changelog)。
 

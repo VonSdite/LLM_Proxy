@@ -34,6 +34,9 @@ CLAUDE_MODES = {
 EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 PROXY_PROVIDER = "proxy"
 MISSING = object()
+_DOTENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_DOTENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
+_DOTENV_ESCAPES = {"n": "\n", "r": "\r", "t": "\t"}
 _TOKEN = re.compile(
     r'\s+|//[^\n]*|/\*[\s\S]*?\*/|"(?:[^"\\]|\\.)*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\],:]'
 )
@@ -189,6 +192,63 @@ def parse_document(target: str, text: str) -> dict:
         raise ValueError(f"Invalid {'TOML' if target == 'codex' else 'JSON'} configuration") from exc
 
 
+def _dotenv_value(raw: str) -> str:
+    """去掉成对引号；未加引号的值按空白加 # 截断行尾注释。"""
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+        body = raw[1:-1]
+        if raw[0] == "'":
+            return body
+        return re.sub(r"\\(.)", lambda match: _DOTENV_ESCAPES.get(match.group(1), match.group(1)), body)
+    return re.split(r"\s+#", raw, maxsplit=1)[0].strip()
+
+
+def _dotenv_encode(value: str) -> str:
+    """包含空白或特殊字符的值使用双引号，普通值保持无引号写法。"""
+    if value and not re.search(r"[\s#\"'`$\\]", value):
+        return value
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def parse_dotenv(text: str) -> dict:
+    """读取 KEY=VALUE 行；注释、空行和无法识别的内容不进入字段结构。"""
+    result = {}
+    for line in text.splitlines():
+        match = _DOTENV_LINE.match(line)
+        if match:
+            result[match.group(1)] = _dotenv_value(match.group(2).strip())
+    return result
+
+
+def edit_dotenv(text: str, edits: dict[tuple[str, ...], Any]) -> str:
+    """逐行替换或删除受管变量，保留注释、空行和未声明内容。
+
+    同名变量的后续行一并移除，避免后出现的旧值覆盖本次写入。
+    """
+    for path, value in edits.items():
+        if len(path) != 1 or not _DOTENV_KEY.fullmatch(path[0]):
+            raise ValueError("Invalid dotenv variable name")
+        if value is not MISSING and (not isinstance(value, str) or any(char in value for char in "\r\n\x00")):
+            raise ValueError("dotenv values must be single-line strings")
+    output = []
+    seen = set()
+    for line in text.splitlines(keepends=True):
+        match = _DOTENV_LINE.match(line.rstrip("\n"))
+        key = (match.group(1),) if match else None
+        if key in edits:
+            if key not in seen and edits[key] is not MISSING:
+                output.append(f"{key[0]}={_dotenv_encode(edits[key])}\n")
+            seen.add(key)
+        else:
+            output.append(line)
+    for path, value in edits.items():
+        if path in seen or value is MISSING:
+            continue
+        if output and not output[-1].endswith("\n"):
+            output[-1] += "\n"
+        output.append(f"{path[0]}={_dotenv_encode(value)}\n")
+    return "".join(output)
+
+
 def edit_document(target: str, text: str, edits: dict[tuple[str, ...], Any]) -> str:
     if target != "codex":
         if not text.strip():
@@ -239,6 +299,17 @@ def _choice(value: Any, choices: tuple[str, ...], label: str) -> str:
     return value
 
 
+def _no_proxy(runtime: dict) -> str:
+    """代理绕过列表是单行文本，多个条目由调用方按逗号或空白分隔。"""
+    value = runtime.get("noProxy", "")
+    if not isinstance(value, str):
+        raise ValueError("NO_PROXY 需为字符串")
+    value = value.strip()
+    if len(value) > 4096 or any(ord(char) < 32 for char in value):
+        raise ValueError("NO_PROXY 过长或包含无效字符")
+    return value
+
+
 def provider_key(model: str) -> str:
     return model.partition("/")[0] if "/" in model else "main"
 
@@ -283,8 +354,10 @@ def _explicit_clears(agent: str, draft: dict, result: dict) -> dict:
         allowed["runtime.autoMemoryEnabled"] = (agent, ("autoMemoryEnabled",))
         allowed["runtime.attribution"] = (agent, ("attribution",))
         allowed["runtime.skipWebFetchPreflight"] = (agent, ("skipWebFetchPreflight",))
+        allowed["runtime.noProxy"] = (agent, ("env", "NO_PROXY"))
+        allowed["runtime.nodeTlsRejectUnauthorized"] = (agent, ("env", "NODE_TLS_REJECT_UNAUTHORIZED"))
     elif agent == "codex":
-        allowed = {"apiKey": ("codexAuth", ("OPENAI_API_KEY",))}
+        allowed = {"apiKey": ("codexAuth", ("OPENAI_API_KEY",)), "runtime.noProxy": ("codexEnv", ("NO_PROXY",))}
         for name, field_name in {
             "serviceTier": "service_tier",
             "modelReasoningEffort": "model_reasoning_effort",
@@ -410,6 +483,15 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
             mode = _choice(runtime.get(name, "unset"), ("unset", "enabled", "disabled"), name)
             if mode in ("enabled", "disabled"):
                 fields[("env", env)] = enabled if mode == "enabled" else disabled if disabled is not None else MISSING
+        no_proxy = _no_proxy(runtime)
+        if no_proxy:
+            fields[("env", "NO_PROXY")] = no_proxy
+        # Node.js 仅在值为 0 时跳过证书校验；custom 表示保留文件中的其他写法。
+        tls = _choice(
+            runtime.get("nodeTlsRejectUnauthorized", "unset"), ("unset", "0", "1", "custom"), "TLS certificate check"
+        )
+        if tls in ("0", "1"):
+            fields[("env", "NODE_TLS_REJECT_UNAUTHORIZED")] = tls
         return _explicit_clears(agent, draft, {agent: fields})
     if not model or len(model) > 512 or any(ord(char) < 32 for char in model):
         raise ValueError("Select a valid model")
@@ -452,8 +534,15 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
         memories = _choice(runtime.get("memories", "unset"), ("unset", "enabled", "disabled"), "Codex memories")
         if memories in ("enabled", "disabled"):
             fields[("features", "memories")] = memories == "enabled"
+        no_proxy = _no_proxy(runtime)
         return _explicit_clears(
-            agent, draft, {agent: fields, "codexAuth": {("OPENAI_API_KEY",): api_key} if api_key else {}}
+            agent,
+            draft,
+            {
+                agent: fields,
+                "codexAuth": {("OPENAI_API_KEY",): api_key} if api_key else {},
+                "codexEnv": {("NO_PROXY",): no_proxy} if no_proxy else {},
+            },
         )
     prefix = ("provider", provider)
     fields.update(
@@ -542,11 +631,15 @@ def visible_fields(target: str, data: dict) -> dict[str, Any]:
             "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
             "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
             "CLAUDE_CODE_EFFORT_LEVEL",
+            "NO_PROXY",
+            "NODE_TLS_REJECT_UNAUTHORIZED",
             *(entry[0] for entry in CLAUDE_MODES.values()),
         ):
             include(("env", name))
     elif target == "codexAuth":
         include(("OPENAI_API_KEY",))
+    elif target == "codexEnv":
+        include(("NO_PROXY",))
     elif target == "codex":
         for key in (
             "model",

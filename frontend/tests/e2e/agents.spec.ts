@@ -254,7 +254,7 @@ test('已有 Claude 缺失项显示不设置，新建文件使用约定默认值
     ['多智能体协作（实验性）', '启用'],
     ['工具按需加载', '启用'],
     ['隔离环境标记', '启用'],
-    ['跳过网页抓取预检', '禁用'],
+    ['跳过网页抓取预检', '启用'],
   ])
     await expect(page.getByRole('combobox', { name, exact: true })).toHaveText(value!)
   for (const [label, state] of [
@@ -273,6 +273,30 @@ test('已有 Claude 缺失项显示不设置，新建文件使用约定默认值
       )
       .toBe(state)
   }
+})
+
+test('代理绕过合并本服务地址，TLS 校验选择与 Codex .env 路径随表单工作', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  await page.goto('/agents')
+  const noProxy = page.getByRole('textbox', { name: 'NO_PROXY 代理绕过列表', exact: true })
+  const preview = () =>
+    (fixture.calls.filter((c) => c.path.endsWith('/preview')).at(-1)?.body as PreviewInput)?.draft
+  await noProxy.fill('localhost')
+  await page.getByRole('button', { name: '填入本服务地址', exact: true }).click()
+  await expect(noProxy).toHaveValue('localhost,127.0.0.1')
+  await expect.poll(() => preview()?.runtime.noProxy).toBe('localhost,127.0.0.1')
+  const tls = page.getByRole('combobox', { name: 'TLS 证书校验', exact: true })
+  await expect(tls).toHaveText('不设置')
+  await tls.click()
+  await page.getByRole('option', { name: '跳过证书校验', exact: true }).click()
+  await expect.poll(() => preview()?.runtime.nodeTlsRejectUnauthorized).toBe('0')
+  await tls.click()
+  await page.getByRole('option', { name: '不设置', exact: true }).click()
+  await expect.poll(() => preview()?.clearFields).toContain('runtime.nodeTlsRejectUnauthorized')
+  await page.getByRole('tab', { name: 'Codex', exact: true }).click()
+  await expect(page.locator('.agent-paths')).toContainText('.env')
+  await page.getByRole('button', { name: '填入本服务地址', exact: true }).click()
+  await expect.poll(() => preview()?.runtime.noProxy).toBe('127.0.0.1')
 })
 
 test('Attribution 保留文件自定义，支持禁用和清空，并解释署名与 Header 的区别', async ({ page }) => {

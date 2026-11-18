@@ -116,8 +116,8 @@ class AgentExtensions:
                 or target in self.files
             ):
                 raise ValueError("File target must be unique")
-            if not isinstance(file, dict) or file.get("format") not in ("json", "jsonc", "toml", "yaml"):
-                raise ValueError("Supported formats: json, jsonc, toml, yaml")
+            if not isinstance(file, dict) or file.get("format") not in ("json", "jsonc", "toml", "yaml", "dotenv"):
+                raise ValueError("Supported formats: json, jsonc, toml, yaml, dotenv")
             if not isinstance(file.get("path"), str) or not file["path"].strip():
                 raise ValueError("Default file path is required")
         fields = definition.get("fields", [])
@@ -249,6 +249,7 @@ class AgentExtensions:
                         )
                     ],
                     (agent, ("features", "memories")),
+                    ("codexEnv", ("NO_PROXY",)),
                 ]
             else:
                 prefix = ("provider", provider)
@@ -314,6 +315,8 @@ class AgentExtensions:
                 return data
             except Exception as exc:
                 raise ValueError("Invalid YAML configuration") from exc
+        if file["format"] == "dotenv":
+            return documents.parse_dotenv(text)
         return documents.parse_document("codex" if file["format"] == "toml" else "json", text)
 
     def edit(self, target, text, edits):
@@ -323,6 +326,8 @@ class AgentExtensions:
             return adapter.edit(target, text, edits)
         if file["format"] == "yaml":
             return yaml_dump(apply_edits(self.parse(target, text), edits))
+        if file["format"] == "dotenv":
+            return documents.edit_dotenv(text, edits)
         return documents.edit_document("codex" if file["format"] == "toml" else "json", text, edits)
 
     def visible(self, target, data):

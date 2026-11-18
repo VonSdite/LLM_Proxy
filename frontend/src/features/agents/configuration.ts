@@ -202,6 +202,8 @@ export function createDraft(
       attribution:
         m.attribution === undefined ? 'unset' : m.attribution === false ? 'disabled' : 'custom',
       skipWebFetchPreflight: triState(m.skipWebFetchPreflight),
+      noProxy: textValue(m['env.NO_PROXY']),
+      nodeTlsRejectUnauthorized: textValue(m['env.NODE_TLS_REJECT_UNAUTHORIZED']),
     }
     for (const setting of CLAUDE_MODES) {
       const value = m[`env.${setting.env}`]
@@ -226,7 +228,7 @@ export function createDraft(
         experimentalAgentTeams: 'enabled',
         enableToolSearch: 'enabled',
         sandbox: 'enabled',
-        skipWebFetchPreflight: 'disabled',
+        skipWebFetchPreflight: 'enabled',
       })
       if (!Object.values(models).some((model) => model.trim()))
         models.ANTHROPIC_MODEL = defaultModel(agent, bootstrap)
@@ -260,6 +262,7 @@ export function createDraft(
         sandboxMode: textValue(m.sandbox_mode),
         approvalPolicy: textValue(m.approval_policy),
         memories: triState(m['features.memories']),
+        noProxy: textValue(files.codexEnv!.managed.NO_PROXY),
       },
       limits: {
         context,
@@ -352,6 +355,19 @@ export function setAllClaudeModels(draft: AgentDraft, value: string) {
 export function setRuntime(draft: AgentDraft, key: string, value: string) {
   draft.runtime[key] = value
   markClear(draft, `runtime.${key}`, !value || value === 'unset')
+}
+export function addOwnServiceToNoProxy(draft: AgentDraft) {
+  // 保留已有绕过列表，把 API 地址的主机名去重后追加到末尾。
+  let host: string
+  try {
+    host = new URL(draft.baseUrl).hostname
+  } catch {
+    return false
+  }
+  const entries = (draft.runtime.noProxy || '').split(/[\s,，;；]+/).filter(Boolean)
+  if (!entries.includes(host)) entries.push(host)
+  setRuntime(draft, 'noProxy', entries.join(','))
+  return true
 }
 export function setLimit(draft: AgentDraft, key: LimitKind, value: number | null) {
   if (draft.limits[key] === value) return

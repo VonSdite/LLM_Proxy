@@ -159,7 +159,7 @@ decoder
   - 受管字段按路径数组及值摘要登记，自动清理仅作用于本页面管理且未被手动修改的旧值；用户主动清空的表单字段列入删除预览，其他配置和 JSONC / TOML 注释保留
 - `AgentConfigRepository` / `agent_config_documents` / `agent_config_transport`
   - 状态文件位于数据库同级目录的 `agent-config/state.json`，保存机器、已确认主机指纹、自定义路径及受管字段摘要
-  - JSONC 与 TOML 局部编辑、本机原子替换、SSH 主机验证及 SFTP 文件访问分别承担格式与传输职责
+  - JSONC、TOML 与 dotenv 局部编辑、本机原子替换、SSH 主机验证及 SFTP 文件访问分别承担格式与传输职责
   - SSH 支持直连、进程系统代理及 HTTP / HTTPS CONNECT、SOCKS5、SOCKS5h 自定义代理；HTTPS 代理校验证书
   - SSH 密码与代理凭据按浏览器在内存中暂存，登记文件中的代理地址移除认证信息；机器保存请求的 `proxy.clearCredentials=true` 表示显式移除当前会话的代理认证，SSH 密码仍按原规则保留
 - `ProxyController`
@@ -1275,7 +1275,7 @@ Agent 页签每次切入时请求最新文件快照，无修改的表单使用�
 
 表单保存成功后，浏览器以已应用票据的目标值原位更新预览行，状态为“无修改”；缓存关联保存返回的文件版本和回填后的草稿。相同草稿不重复发起保存后预览，后续字段修改或重新读取恢复正常校验。失败保存保留现有草稿和预览。
 
-Agent 定义由 `AgentExtensions` 在服务启动时从根目录 `agents/*/agent.yaml` 加载，同目录 `adapter.py` 提供可选的受信任格式转换。bootstrap 返回声明式字段、文件格式和加载错误。前端登记表接收服务定义，Opencode v2 / DSH / Hermes / 用户扩展共用 `AgentExtensionForm`；已有三个 Agent 保留专用表单。JSONC、TOML 和 YAML 字段编辑均通过同一文件事务、本机或 SSH 传输完成。自定义文件路径按动态文件目标 ID 持久化；扩展加载失败不影响其他 Agent。
+Agent 定义由 `AgentExtensions` 在服务启动时从根目录 `agents/*/agent.yaml` 加载，同目录 `adapter.py` 提供可选的受信任格式转换。bootstrap 返回声明式字段、文件格式和加载错误。前端登记表接收服务定义，Opencode v2 / DSH / Hermes / 用户扩展共用 `AgentExtensionForm`；已有三个 Agent 保留专用表单。JSONC、TOML、YAML 和 dotenv 字段编辑均通过同一文件事务、本机或 SSH 传输完成。自定义文件路径按动态文件目标 ID 持久化；扩展加载失败不影响其他 Agent。
 
 ```mermaid
 flowchart LR
@@ -1284,7 +1284,7 @@ flowchart LR
     Bootstrap --> UI["Vue 通用表单 / 专用表单"]
     UI --> Service["AgentConfigService 预览与保存事务"]
     Registry --> Service
-    Service --> Adapter["字段校验 / JSONC / TOML / YAML 编辑"]
+    Service --> Adapter["字段校验 / JSONC / TOML / YAML / dotenv 编辑"]
     Adapter --> Service
     Service --> Transport["LocalConfigFiles / SSH SFTP"]
     Transport --> Files["Agent 配置 / 凭据 / 备份"]
@@ -1301,11 +1301,11 @@ Opencode v2 适配器管理 providers/settings、permissions 数组与 compactio
 - `agent-config/state.json` 使用版本 3，路径按机器 ID 与文件目标保存；读取版本 1 时将 opencode 路径字符串转换为对应的路径记录，读取版本 1 / 2 时将 Codex 目录展开为 config.toml 与 auth.json 两个独立路径。清空路径仅恢复当前文件的默认位置。候选路径成功读取且登记文件写入成功后更新内存状态；配置内容格式错误通过快照的 `parseError` 展示。
 - 浏览器使用模型台账中的完整参数候选，配置输入与推荐独立。Claude 优先参考主模型或唯一已配置模型；多个模型且没有主模型时，菜单直接展示各模型的候选值与名称。切换模型和手填模型 ID 更新候选，选择候选时即时修改参数草稿，手填数值在失焦且值变化时提交草稿。Codex 压缩上限和 opencode 压缩预留显示在压缩阈值标题旁；每个模型的悬停说明显示上下文和最大输出参考值。
 - `/machines/<id>/<agent>/preview` 接受表单或文件编辑内容与读取版本，生成有效期五分钟的预览票据；进程内最多保留四十份票据。原文编辑的票据仅包含 `raw` 中提交的文件及其读取版本。
-- `/machines/<id>/apply` 核对浏览器、SSH 会话、路径、文件版本与受管字段摘要，轮转五份备份后原子替换票据中的文件。Codex 表单将配置与认证文件作为一组写入，文件路径入口单独编辑对应文件。写入失败时回滚已写文件；回滚遇到外部修改时返回需要人工恢复的文件。
+- `/machines/<id>/apply` 核对浏览器、SSH 会话、路径、文件版本与受管字段摘要，轮转五份备份后原子替换票据中的文件。Codex 表单将配置、认证与 .env 文件作为一组写入，文件路径入口单独编辑对应文件。写入失败时回滚已写文件；回滚遇到外部修改时返回需要人工恢复的文件。
 - `/machines/<id>/<agent>/files?backup=0..5` 提供文件编辑器和备份内容。浏览器复用本地 Ace 资源提供 JSON / JSONC / TOML / YAML 高亮，以当前文件文本为修改基线；关闭未保存的编辑器时提供保存、放弃和继续编辑选项。
 - 文件编辑器的保存动作依次请求 `/preview` 和 `/apply`，以最新校验票据写入当前文件。校验或写入失败时，浏览器保留编辑内容；保存期间编辑器只读，关闭后释放编辑器实例及主题观察器。
 - SSH 连接和密码按浏览器与机器隔离，闲置三十分钟释放；每分钟运行清理任务，应用退出关闭全部会话。管理操作使用独立协作锁，本机磁盘与状态文件操作使用原生 I/O 线程池，Paramiko 的协作网络连接保留在服务线程的 Hub 中。
-- Claude 默认路径为 `~/.claude/settings.json`；Codex 为 `~/.codex/config.toml` 和 `auth.json`；opencode 为 `~/.config/opencode/opencode.json`。本机支持 `CLAUDE_CONFIG_DIR` 和 `CODEX_HOME`；远程主目录由 SFTP 查询。每个文件上限为 2 MiB。
+- Claude 默认路径为 `~/.claude/settings.json`；Codex 为 `~/.codex/config.toml`、`auth.json` 和 `.env`；opencode 为 `~/.config/opencode/opencode.json`。本机支持 `CLAUDE_CONFIG_DIR` 和 `CODEX_HOME`；远程主目录由 SFTP 查询。每个文件上限为 2 MiB。
 
 ```mermaid
 sequenceDiagram

@@ -113,6 +113,19 @@ const unreachable = computed(
     ownService.value &&
     ['', '127.0.0.1', '::1', 'localhost'].includes(bootstrap.value?.serverHost || ''),
 )
+const editorLanguage = computed(() => {
+  if (!raw.value) return 'json'
+  const format = definition.value?.fileFormats?.[raw.value.source.target]
+  if (format === 'dotenv') return 'text'
+  return (
+    format ||
+    (raw.value.source.target === 'codex'
+      ? 'toml'
+      : /\.jsonc$/i.test(raw.value.source.path)
+        ? 'jsonc'
+        : 'json')
+  )
+})
 onMounted(workspace.start)
 function editMachine(value?: AgentMachine) {
   editingMachine.value = value
@@ -457,14 +470,7 @@ function trustHost() {
       :key="`${raw.id}:${raw.source.target}`"
       :open="editorOpen"
       :source="raw.source"
-      :language="
-        definition?.fileFormats?.[raw.source.target] ||
-        (raw.source.target === 'codex'
-          ? 'toml'
-          : /\.jsonc$/i.test(raw.source.path)
-            ? 'jsonc'
-            : 'json')
-      "
+      :language="editorLanguage"
       :save="saveFile"
       :load-backup="loadBackup"
       @update:open="closeFile"

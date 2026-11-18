@@ -33,7 +33,7 @@ function fixture(): AgentSnapshot {
       proxy: { mode: 'direct', url: '' },
     },
     files: Object.fromEntries(
-      (['claude', 'codex', 'codexAuth', 'opencode'] as FileTarget[]).map((target) => [
+      (['claude', 'codex', 'codexAuth', 'codexEnv', 'opencode'] as FileTarget[]).map((target) => [
         target,
         {
           path: `/srv/${target}`,

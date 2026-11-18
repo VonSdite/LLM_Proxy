@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parse } from 'yaml'
 import {
+  addOwnServiceToNoProxy,
   createDraft,
   derivedCompact,
   isOwnServiceUrl,
@@ -51,7 +52,7 @@ function snapshot(): AgentSnapshot {
       proxy: { mode: 'direct', url: '' },
     },
     files: Object.fromEntries(
-      (['claude', 'codex', 'codexAuth', 'opencode'] as FileTarget[]).map((target) => [
+      (['claude', 'codex', 'codexAuth', 'codexEnv', 'opencode'] as FileTarget[]).map((target) => [
         target,
         {
           path: `/srv/${target}`,
@@ -167,7 +168,7 @@ describe('Agent 配置语义', () => {
       experimentalAgentTeams: 'enabled',
       enableToolSearch: 'enabled',
       sandbox: 'enabled',
-      skipWebFetchPreflight: 'disabled',
+      skipWebFetchPreflight: 'enabled',
     })
   })
 
@@ -273,6 +274,43 @@ describe('Agent 配置语义', () => {
       effortLevel: 'auto',
     })
     expect(draft('codex', source).runtime.memories).toBe('disabled')
+  })
+
+  it('代理绕过与 TLS 字段按文件内容读取，清空有显式移除标记', () => {
+    const source = snapshot()
+    source.files.claude!.managed['env.NO_PROXY'] = '127.0.0.1,localhost'
+    source.files.claude!.managed['env.NODE_TLS_REJECT_UNAUTHORIZED'] = '0'
+    source.files.codexEnv!.managed.NO_PROXY = '192.168.1.10'
+    const claudeDraft = draft('claude', source)
+    expect(claudeDraft.runtime.noProxy).toBe('127.0.0.1,localhost')
+    expect(claudeDraft.runtime.nodeTlsRejectUnauthorized).toBe('0')
+    const codexDraft = draft('codex', source)
+    expect(codexDraft.runtime.noProxy).toBe('192.168.1.10')
+    setRuntime(codexDraft, 'noProxy', '')
+    expect(codexDraft.clearFields).toContain('runtime.noProxy')
+    setRuntime(claudeDraft, 'nodeTlsRejectUnauthorized', '1')
+    expect(claudeDraft.clearFields).toBeUndefined()
+    expect(draft('claude').runtime.noProxy).toBe('')
+    expect(draft('claude').runtime.nodeTlsRejectUnauthorized).toBe('')
+    expect(draft('codex').runtime.noProxy).toBe('')
+  })
+
+  it('填入本服务地址保留已有列表并去重追加，无效地址不修改草稿', () => {
+    const value = draft('claude')
+    value.baseUrl = 'http://192.168.1.10:9090'
+    value.runtime.noProxy = 'localhost, 127.0.0.1'
+    expect(addOwnServiceToNoProxy(value)).toBe(true)
+    expect(value.runtime.noProxy).toBe('localhost,127.0.0.1,192.168.1.10')
+    expect(value.clearFields).toBeUndefined()
+    expect(addOwnServiceToNoProxy(value)).toBe(true)
+    expect(value.runtime.noProxy).toBe('localhost,127.0.0.1,192.168.1.10')
+    value.baseUrl = 'not a url'
+    expect(addOwnServiceToNoProxy(value)).toBe(false)
+    expect(value.runtime.noProxy).toBe('localhost,127.0.0.1,192.168.1.10')
+    value.baseUrl = 'http://[::1]:9090'
+    value.runtime.noProxy = ''
+    expect(addOwnServiceToNoProxy(value)).toBe(true)
+    expect(value.runtime.noProxy).toBe('[::1]')
   })
 
   it('一键模型立即同步，单个模型不同时显示空值，清空有显式移除标记', () => {

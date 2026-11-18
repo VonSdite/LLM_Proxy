@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { AgentDraft, AgentId } from '@/api/agents'
-import { UiField, UiSelect, type SelectOption } from '@/components/ui'
+import { UiField, UiInput, UiSelect, notify, type SelectOption } from '@/components/ui'
 import DisabledProvidersField from './DisabledProvidersField.vue'
-import { CLAUDE_MODES, setRuntime } from './configuration'
+import { CLAUDE_MODES, addOwnServiceToNoProxy, setRuntime } from './configuration'
 import { agentVersionHelp } from './versionHelp'
 const props = defineProps<{ agent: AgentId; draft: AgentDraft; disabled?: boolean }>()
 const choices = (entries: [string, string][]) => [
@@ -15,6 +15,23 @@ const tri = [
   { value: 'enabled', label: '启用' },
   { value: 'disabled', label: '禁用' },
 ]
+const noProxyField = computed(() => ({
+  key: 'noProxy',
+  label: '代理绕过',
+  help: [
+    '系统代理导致 Agent 无法访问本服务时，把服务地址加入此列表可绕过代理直连。多个地址用英文逗号分隔，支持域名和 IP；“填入本服务地址”保留已有内容，把上方 API 地址的主机名去重后追加到末尾。',
+    props.agent === 'claude'
+      ? '写入 settings.json 的 env.NO_PROXY。进程环境中已有的 NO_PROXY / no_proxy 仍可能影响实际行为。'
+      : '写入 ~/.codex/.env 的 NO_PROXY，Codex 启动时加载该文件；CODEX_ 前缀的变量不能通过此文件设置。',
+  ],
+  options: [],
+}))
+const tlsCustom = computed(
+  () => !['', '0', '1'].includes(props.draft.runtime.nodeTlsRejectUnauthorized || ''),
+)
+function fillNoProxy() {
+  if (!addOwnServiceToNoProxy(props.draft)) notify('请先填写有效的 API 地址', 'danger')
+}
 const fields = computed<
   { key: string; label: string; help: string | readonly string[]; options: SelectOption[] }[]
 >(() =>
@@ -97,6 +114,22 @@ const fields = computed<
           ],
           options: tri,
         },
+        noProxyField.value,
+        {
+          key: 'nodeTlsRejectUnauthorized',
+          label: 'TLS 证书校验',
+          help: [
+            '跳过证书校验写入 env.NODE_TLS_REJECT_UNAUTHORIZED 为 0，适用于本服务或网关使用自签名证书的场景；Node.js 仅在值为 0 时跳过校验。',
+            '跳过证书校验会使中间人攻击成为可能，仅在可信内网或调试时使用。强制证书校验写入 1，可覆盖进程环境中的 0。',
+            '不设置时移除当前文件的变量，遵循进程环境。文件中的其他写法显示为文件自定义，未选择时保持原值。',
+          ],
+          options: [
+            { value: '', label: '不设置' },
+            { value: '0', label: '跳过证书校验' },
+            { value: '1', label: '强制证书校验' },
+            ...(tlsCustom.value ? [{ value: 'custom', label: '文件自定义', disabled: true }] : []),
+          ],
+        },
       ]
     : props.agent === 'codex'
       ? [
@@ -134,6 +167,7 @@ const fields = computed<
             help: '允许 Codex 生成和使用跨会话记忆，写入 features.memories。不设置时移除该字段并遵循 Codex 默认行为，当前默认关闭。',
             options: tri,
           },
+          noProxyField.value,
         ]
       : [
           {
@@ -215,8 +249,22 @@ const fields = computed<
         ...agentVersionHelp(agent, field.key),
       ]"
     >
+      <template v-if="field.key === 'noProxy'" #label>
+        <button type="button" class="no-proxy-action" :disabled="disabled" @click="fillNoProxy">
+          填入本服务地址
+        </button>
+      </template>
+      <UiInput
+        v-if="field.key === 'noProxy'"
+        :model-value="draft.runtime.noProxy || ''"
+        placeholder="不设置"
+        autocomplete="off"
+        aria-label="NO_PROXY 代理绕过列表"
+        :disabled="disabled"
+        @update:model-value="setRuntime(draft, 'noProxy', $event)"
+      />
       <DisabledProvidersField
-        v-if="field.key === 'disabledProviders'"
+        v-else-if="field.key === 'disabledProviders'"
         :model-value="draft.runtime[field.key] || ''"
         :disabled="disabled"
         @update:model-value="setRuntime(draft, field.key, $event)"
@@ -231,3 +279,23 @@ const fields = computed<
     </UiField>
   </div>
 </template>
+<style scoped>
+.no-proxy-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.no-proxy-action:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.no-proxy-action:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+</style>

@@ -13,3 +13,8 @@ files:
     format: json
     homeEnv: CODEX_HOME
     homeRelative: [auth.json]
+  codexEnv:
+    path: ~/.codex/.env
+    format: dotenv
+    homeEnv: CODEX_HOME
+    homeRelative: [.env]

@@ -448,8 +448,18 @@ class AgentConfigService:
             if path and target == "codexAuth" and Path(path).suffix.lower() != ".json":
                 raise AgentConfigError("Codex 认证路径需指向 .json 文件")
             file_format = self.extensions.files[target]["format"]
-            suffixes = {"yaml": (".yaml", ".yml"), "toml": (".toml",), "json": (".json",), "jsonc": (".json", ".jsonc")}
-            if path and Path(path).suffix.lower() not in suffixes[file_format]:
+            suffixes = {
+                "yaml": (".yaml", ".yml"),
+                "toml": (".toml",),
+                "json": (".json",),
+                "jsonc": (".json", ".jsonc"),
+                "dotenv": (".env",),
+            }
+            # 隐藏文件 .env 没有扩展名，按文件名或 .env 后缀识别。
+            if path and file_format == "dotenv":
+                if Path(path).name != ".env" and Path(path).suffix.lower() != ".env":
+                    raise AgentConfigError("配置路径需指向 .env 文件")
+            elif path and Path(path).suffix.lower() not in suffixes[file_format]:
                 raise AgentConfigError("配置路径需指向 " + " / ".join(suffixes[file_format]) + " 文件")
             next_state = deepcopy(self.state)
             overrides = next_state["paths"].setdefault(machine_id, {})
