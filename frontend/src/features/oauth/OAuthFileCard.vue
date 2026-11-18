@@ -217,10 +217,6 @@ function resetLabel(window: QuotaWindow) {
           <span class="muted">{{ row.label }}</span>
           <UiHelpPopover :label="`${row.label}费用说明`">
             <p>
-              {{ windowName(row.value?.limit_window_seconds) }}整窗预估
-              {{ cost(row.value?.estimated_full_cost_usd) }}。
-            </p>
-            <p>
               本期 / 上期对应本地记录的额度窗口。次数、Token
               和累计金额只统计经过本代理的调用，金额按模型 API 价格折算，不是账号账单或实际扣费。
             </p>

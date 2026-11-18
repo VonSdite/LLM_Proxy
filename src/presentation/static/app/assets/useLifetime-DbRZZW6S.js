@@ -1,1 +1,0 @@
-import{ut as e}from"./index-D9ltB6iB.js";function t(){let t=new AbortController;return e(()=>t.abort()),t.signal}export{t};

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """创建 Flask 应用实例。"""
 
+import mimetypes
 from pathlib import Path
 
 from flask import Flask, request
@@ -11,6 +12,9 @@ from .cors import register_data_plane_cors
 
 def create_flask_app() -> Flask:
     """初始化模板目录与静态目录。"""
+    # 显式覆盖系统映射，避免 Windows 注册表将模块脚本识别为纯文本。
+    mimetypes.add_type("text/javascript", ".js")
+    mimetypes.add_type("text/javascript", ".mjs")
     templates_dir = Path(__file__).resolve().parent / "templates"
     static_dir = Path(__file__).resolve().parent / "static"
 

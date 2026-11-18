@@ -1,11 +1,12 @@
 """Vue 入口、会话上下文与静态资源装配契约。"""
 
 import json
+import mimetypes
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from src.presentation.app_factory import create_flask_app
 from src.presentation.auth_controller import AuthenticationController
@@ -119,6 +120,32 @@ class UiEntryTests(unittest.TestCase):
         self.assertIn(b'id="app"', login.data)
         self.assertEqual(self.client.get("/api/unknown").status_code, 404)
         self.assertEqual(self.client.get("/v1/unknown").status_code, 404)
+
+    def test_javascript_assets_override_incorrect_system_mime_types(self):
+        mimetypes.init()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(mimetypes.types_map, {".js": "text/plain", ".mjs": "text/plain"}),
+        ):
+            app = create_flask_app()
+            app.config["TESTING"] = True
+            app.static_folder = directory
+            assets = Path(directory) / "app/assets"
+            assets.mkdir(parents=True)
+            client = app.test_client()
+
+            for extension in (".js", ".mjs"):
+                with self.subTest(extension=extension):
+                    filename = f"main-123{extension}"
+                    (assets / filename).write_text("export const ready = true;", encoding="utf-8", newline="\n")
+                    response = client.get(f"/static/app/assets/{filename}")
+                    try:
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(response.mimetype, "text/javascript")
+                        self.assertIn(b"export const ready = true;", response.data)
+                        self.assertIn("immutable", response.headers["Cache-Control"])
+                    finally:
+                        response.close()
 
     def test_manifest_rejects_paths_outside_build_directory(self):
         with tempfile.TemporaryDirectory() as directory:
