@@ -75,6 +75,44 @@ describe('OAuth 页面状态', () => {
     ).toBe(node)
     wrapper.unmount()
   })
+  it('本期和上期都显示累计费用及对应窗口的预估上限费用', () => {
+    const wrapper = mount(OAuthFileCard, {
+      props: {
+        file: {
+          ...file('usage'),
+          current_usage: {
+            request_count: 12,
+            total_tokens: 1200,
+            estimated_cost_usd: 3.42,
+            estimated_full_cost_usd: 12.21,
+            limit_window_seconds: 18000,
+          },
+          previous_usage: {
+            request_count: 8,
+            total_tokens: 800,
+            estimated_cost_usd: 2.34,
+            estimated_full_cost_usd: 34.56,
+            limit_window_seconds: 604800,
+          },
+        },
+        selected: false,
+        disabled: false,
+        loading: false,
+        now: Date.now(),
+      },
+    })
+    const rows = wrapper.findAll('.oauth-usage-row')
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.findAll('.oauth-usage-values > div').at(-2)!.text())).toEqual([
+      '预估费用$3.42',
+      '预估费用$2.34',
+    ])
+    expect(rows.map((row) => row.findAll('.oauth-usage-values > div').at(-1)!.text())).toEqual([
+      '5 小时预估$12.21',
+      '7 天预估$34.56',
+    ])
+    wrapper.unmount()
+  })
   it('未知额度不显示零，默认选择首张重置卡并保留仍可用的选择', async () => {
     const source = file('a')
     const wrapper = mount(OAuthFileCard, {

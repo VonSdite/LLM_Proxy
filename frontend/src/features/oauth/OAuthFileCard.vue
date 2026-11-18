@@ -249,6 +249,10 @@ function resetLabel(window: QuotaWindow) {
             <dt>预估费用</dt>
             <dd>{{ cost(row.value?.estimated_cost_usd) }}</dd>
           </div>
+          <div>
+            <dt>{{ windowName(row.value?.limit_window_seconds) }}预估</dt>
+            <dd>{{ cost(row.value?.estimated_full_cost_usd) }}</dd>
+          </div>
         </dl>
       </div>
     </div>
@@ -446,7 +450,7 @@ function resetLabel(window: QuotaWindow) {
 
 .oauth-usage-values {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
   margin: 0;
 }

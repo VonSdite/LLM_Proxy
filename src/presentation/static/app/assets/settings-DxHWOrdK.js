@@ -1,0 +1,1 @@
+import{W as e}from"./index-D9ltB6iB.js";var t={get:t=>e(`/api/settings/system`,{signal:t}),save:(t,n,r)=>e(`/api/settings/system/${t}`,{method:`PUT`,body:n,signal:r})};export{t};
