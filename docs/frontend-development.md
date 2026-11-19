@@ -34,32 +34,38 @@ npm --prefix frontend run dev
 ```text
 frontend/
   src/
-    app/                 应用外壳、路由和导航
+    app/                 应用外壳、页面注册表、路由和导航
     api/                 API 客户端、请求类型和错误处理
     components/ui/       无业务依赖的共享控件
     features/            领域组件、状态和组合函数
     pages/               路由页面
-    stores/              会话、功能开关和主题
+    stores/              会话、页面注册表、功能开关和主题
     styles/              设计变量与全局样式
     dev/                 开发及测试模式的组件展示页
   tests/
     unit/                Vitest 单元与组件测试
     e2e/                 Playwright 浏览器交互测试
+extensions/              本地管理端扩展包（前端页面与后端 Python）
 src/presentation/
   templates/app.html     Flask 页面入口
   static/app/            生产构建资源与 manifest
 ```
 
-- 页面组合 `features` 的业务组件，业务请求通过 `api` 层处理。
-- 基础组件通过 `@/components/ui` 导入；Reka UI、TanStack Table 和 Lucide 的直接导入限定在基础组件目录。
-- 页面样式负责布局，颜色、阴影、焦点和浮层层级使用 `styles/tokens.css` 的语义变量。
-- Pinia 保存会话、功能开关和主题；表单草稿、分页和测试结果属于对应页面。
-- 凭据不写入 localStorage。主题与表格列宽等非敏感偏好分别使用 `localStorage.theme` 和 `table-widths:*`。
-- `/dev/components` 使用正式组件，仅在开发和测试模式可达，生产构建不包含该页面。
+- 业务请求统一经过 `api` 层，基础组件通过 `@/components/ui` 导入。
+- 页面注册表位于 `app/page-contract.ts`、`app/builtin-pages.ts` 和 `app/page-registry.ts`，内置与扩展页面共用路由、标题和侧边栏描述。
+- 凭据不写入 localStorage；`/dev/components` 仅在开发和测试模式可达。
 
-具体组件和交互约定以 `frontend/AGENTS.md`、共享组件实现及 4+1 架构为准。
+组件、状态、主题和交互约束以 `frontend/AGENTS.md` 及共享组件实现为准。
 
-## 3. 检查与测试
+## 3. 管理端页面扩展
+
+`extensions/<id>/frontend/index.ts` 默认导出扩展页面定义。扩展宿主自动生成 `/extensions/<id>` 路由和侧边栏入口，页面组件通过异步加载函数进入独立构建分块。扩展目录名与页面声明 ID 一致，Vite 开发服务和构建清单读取同一扩展根目录。
+
+后端动作入口为 `extensions/<id>/extension.py`，宿主将其 Blueprint 挂载到 `/api/extensions/<id>/` 并应用管理端登录校验。页面与后端位于同一个扩展包内。
+
+页面协议、上下文、生命周期、动作接口、长任务和安全边界见 [管理端扩展开发](extension-development.md)。
+
+## 4. 检查与测试
 
 ```text
 npm --prefix frontend run lint
@@ -91,7 +97,7 @@ npm --prefix frontend run test:e2e
 
 组件和 jsdom 测试覆盖状态逻辑，浏览器测试覆盖实际交互，人工检查覆盖视觉质量。
 
-## 4. 构建与部署
+## 5. 构建与部署
 
 ```text
 npm --prefix frontend ci

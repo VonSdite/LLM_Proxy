@@ -137,6 +137,14 @@ npm --prefix frontend run dev
 
 组件选择、测试和部署步骤见 [前端开发指南](frontend-development.md)。
 
+### 管理端扩展
+
+管理端支持本地页面扩展和可选 Python 动作扩展。每个扩展使用根目录 `extensions/<id>/` 下的独立包，页面入口为 `frontend/index.ts`，Python 入口为 `extension.py`。页面入口自动获得 `/extensions/<id>` 路由和侧边栏注册能力；Python 动作统一挂载到 `/api/extensions/<id>/` 并使用管理端登录校验。
+
+新增页面扩展后执行 `npm --prefix frontend run build`，刷新页面即可使用。Python 扩展在服务启动时加载，修改后重启 Python 服务。扩展属于受信任本地代码，与主程序同进程、同权限运行。
+
+页面协议、动作示例、生命周期、长任务和安全边界见 [管理端扩展开发](extension-development.md)。
+
 ### Agent 配置
 
 Agent 定义集中在根目录 `agents/`。新增 `agents/<id>/agent.yaml` 并重启 Python 服务即可加载自定义表单，复杂格式可增加同目录 `adapter.py`；声明式扩展无需重新构建前端。格式、示例、兼容边界和模型参数维护见 [Agent 配置与兼容性](agent-configuration.md)。
@@ -514,6 +522,10 @@ Provider 编辑页的模型测试基于当前表单快照执行，不要求先�
 - 如果上游支持 usage 返回，测试链路会主动请求 usage，用于计算 TPS
 - 批量测试时会先锁定本次选中的目标行，再按顺序逐条请求
 - 每个模型一拿到结果就会立即回填到表格，不需要等待整批结束
+- 基准请求使用 `stream=true`、`max_tokens=192`，省略 `temperature` 和 `top_p`；GLM Claude 测试使用低档思考预算并保留正文额度
+- 首字延迟从发起上游请求到首个非空正文或推理增量到达；非流式响应不计算首字延迟
+- TPS = 输出 Token ÷ 本次成功上游尝试总秒数，包含首字等待、思考和末尾用量等待；输出用量缺失、输出为零或测试失败时为空
+- OpenAI Chat 明确指出 `max_tokens` 不兼容时，测试可在总尝试次数内切换为 `max_completion_tokens` 一次
 
 当前行为边界：
 
@@ -732,11 +744,13 @@ Provider 路径开启后，同时不再向上游转发凭据类客户端请求�
 - 配置文件：`config.yaml`
 - 配置样例：`config.sample.yaml`
 - Hook 目录：`hooks/`
+- 管理端扩展目录：`extensions/`
 - Codex OAuth 认证目录：`data/oauth/codex/`
 - SQLite 默认库：`data/requests.db`
 - 日志目录：`logs/`
 - 请求调试日志：`logs/llm_request_trace.log`
 - 架构文档：[docs/architecture-4plus1.md](architecture-4plus1.md)
+- 管理端扩展开发：[docs/extension-development.md](extension-development.md)
 
 ## 使用建议
 

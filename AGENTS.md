@@ -46,12 +46,14 @@
   - 初始化 SQLite 连接工厂和仓储
   - 初始化 `ProviderManager` 并加载 Provider
   - 组装 Service 和 Controller 并注册路由
+  - 初始化 `AdminExtensionManager` 并加载 `extensions/*/extension.py`
 
 ## 当前分层
 - `src/application`
   - 组合根与运行时上下文
 - `src/presentation`
   - HTTP 路由、鉴权入口、页面渲染、请求和响应适配
+  - `AdminExtensionManager` 负责管理端 Python 扩展发现、Blueprint 挂载和生命周期
 - `src/services`
   - 用例编排和业务逻辑
   - 当前已拆分为：
@@ -72,6 +74,10 @@
   - Hook 协议和动态扩展点
 - `src/utils`
   - 数据库、网络、IP 处理等通用工具
+- `frontend/src/app`
+  - 页面协议、页面注册表、内置页面描述、路由、导航和扩展页宿主
+- `extensions`
+  - 本地受信任管理端扩展包；前端页面入口为 `frontend/index.ts`，Python 入口为 `extension.py`
 
 ## 架构关键点
 - 当前是单进程分层单体。
@@ -147,6 +153,22 @@
   - `response_guard(ctx, body) -> body`
 - `ProviderManager` 负责 Hook 动态加载和缓存
 
+## 管理端扩展机制
+- 扩展根目录：`extensions/<id>/`
+- 页面扩展入口：`extensions/<id>/frontend/index.ts`
+- 页面模块默认导出 `defineExtensionPage(...)` 结果
+- 扩展路径固定为 `/extensions/<id>`，页面由 `ExtensionPageHost` 异步加载
+- 内置页面和扩展页面共用 `frontend/src/stores/pages.ts` 注册表，路由与侧边导航消费同一份页面描述
+- 后端扩展入口：`extensions/<id>/extension.py`
+- 后端模块导出 `Extension` 类，同包辅助模块使用相对导入
+- 可选方法：
+  - `register_routes(blueprint)`
+  - `start()`
+  - `close()`
+- 后端动作统一挂载到 `/api/extensions/<id>/`，使用管理端登录校验
+- 后端扩展与主程序同进程、同权限，属于受信任本地代码
+- Python 扩展在服务启动时加载；修改后需要重启服务
+
 ## 认证与会话
 - 是否开启认证取决于 `admin.username` 和 `admin.password` 是否都存在
 - `AuthenticationService` 当前使用进程内内存 Session
@@ -213,6 +235,9 @@
   - `GET /`
   - `GET /users`
   - `GET /providers`
+  - `GET /extensions/<id>`
+- 管理端扩展动作：
+  - `/api/extensions/<id>/*`
 
 ## 数据库结构
 - 默认路径：`data/requests.db`

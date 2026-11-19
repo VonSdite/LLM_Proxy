@@ -3,12 +3,20 @@ import tseslint from 'typescript-eslint'
 import vue from 'eslint-plugin-vue'
 
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'coverage/**', 'test-results/**', 'playwright-report/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'frontend/coverage/**',
+      'frontend/test-results/**',
+      'frontend/playwright-report/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...vue.configs['flat/recommended'],
   {
-    files: ['tests/**/*.ts'],
+    files: ['frontend/tests/**/*.ts'],
     rules: { 'vue/one-component-per-file': 'off' },
   },
   {
@@ -26,8 +34,8 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/**/*.{ts,vue}'],
-    ignores: ['src/components/ui/**'],
+    files: ['frontend/src/**/*.{ts,vue}', 'extensions/*/frontend/**/*.{ts,vue}'],
+    ignores: ['frontend/src/components/ui/**'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -41,7 +49,10 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/{features,pages,stores}/**/*.{ts,vue}'],
+    files: [
+      'frontend/src/{features,pages,stores}/**/*.{ts,vue}',
+      'extensions/*/frontend/**/*.{ts,vue}',
+    ],
     rules: {
       'no-restricted-globals': ['error', { name: 'fetch', message: '请求由 api 层处理。' }],
     },

@@ -1,0 +1,6 @@
+**/node_modules
+**/coverage
+**/test-results
+**/playwright-report
+**/dist
+frontend/package-lock.json

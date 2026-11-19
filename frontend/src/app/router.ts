@@ -1,52 +1,34 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import type { Pinia } from 'pinia'
+import { usePageRegistry } from '@/stores/pages'
 import { useSession } from '@/stores/session'
+import { adminPageRouteName, EXTENSION_ROUTE_NAME } from './page-contract'
 
 export function createAppRouter(pinia: Pinia) {
+  const pages = usePageRegistry(pinia)
+  const builtinRoutes: RouteRecordRaw[] = pages.pages
+    .filter((page) => page.kind === 'builtin')
+    .map((page) => ({
+      path: page.path,
+      ...(page.aliases.length ? { alias: [...page.aliases] } : {}),
+      name: adminPageRouteName(page),
+      component: page.component,
+      meta: { title: page.title },
+    }))
   const router = createRouter({
     history: createWebHistory(),
     routes: [
+      ...builtinRoutes,
       {
-        path: '/statistics',
-        component: () => import('@/pages/StatisticsPage.vue'),
-        meta: { title: '统计与日志' },
-      },
-      {
-        path: '/oauth',
-        component: () => import('@/pages/OAuthPage.vue'),
-        meta: { title: 'Codex OAuth' },
-      },
-      {
-        path: '/',
-        alias: '/providers',
-        component: () => import('@/pages/ProvidersPage.vue'),
-        meta: { title: 'Provider' },
-      },
-      {
-        path: '/model-mappings',
-        component: () => import('@/pages/ModelMappingsPage.vue'),
-        meta: { title: '模型映射' },
-      },
-      { path: '/users', component: () => import('@/pages/UsersPage.vue'), meta: { title: '用户' } },
-      {
-        path: '/api-keys',
-        component: () => import('@/pages/ApiKeysPage.vue'),
-        meta: { title: 'API Key' },
-      },
-      {
-        path: '/agents',
-        component: () => import('@/pages/AgentsPage.vue'),
-        meta: { title: 'Agent 配置' },
+        path: '/extensions/:pageId',
+        name: EXTENSION_ROUTE_NAME,
+        component: () => import('@/app/ExtensionPageHost.vue'),
+        meta: { title: '扩展页面' },
       },
       {
         path: '/login',
         component: () => import('@/pages/LoginPage.vue'),
         meta: { title: '登录', public: true },
-      },
-      {
-        path: '/settings',
-        component: () => import('@/pages/SettingsPage.vue'),
-        meta: { title: '系统设置' },
       },
       ...(import.meta.env.DEV || import.meta.env.MODE === 'test'
         ? [
@@ -73,6 +55,10 @@ export function createAppRouter(pinia: Pinia) {
     if (!context?.authenticated && !to.meta.public) return '/login'
     if (to.path === '/login' && context?.authenticated) {
       return '/'
+    }
+    if (to.name === EXTENSION_ROUTE_NAME) {
+      const extensionId = typeof to.params.pageId === 'string' ? to.params.pageId : ''
+      to.meta.title = pages.extensionPage(extensionId)?.title || '扩展页面'
     }
     return true
   })

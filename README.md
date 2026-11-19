@@ -43,7 +43,7 @@
 | **🔑 凭据池与 OAuth** | Auth Group 提供多 Key 调度、并发与请求配额、429 冷却；Codex OAuth 支持认证文件管理、账号切换与状态跟踪。 |
 | **🛡️ 访问控制与脱敏** | 提供下游 API Key、模型权限、Token 配额、并发与分钟/每日限制、IP 白名单，以及可选的请求级安全脱敏。 |
 | **📊 用量可观测** | 查看请求趋势、Token、缓存命中、上游成功率、首字延迟、TPS 与费用；支持多维筛选、请求明细、Excel 和数据迁移导出。 |
-| **🧩 扩展与 Agent 集成** | 通过 Hook 定制 Header、请求、响应和模型发现；集中维护 Claude、Codex、opencode、DSH、Hermes 的本机或 SSH 配置。 |
+| **🧩 扩展与 Agent 集成** | 通过 Hook 定制 Header、请求、响应和模型发现；使用页面注册表和受控 Python 动作扩展管理端；集中维护 Claude、Codex、opencode、DSH、Hermes 的本机或 SSH 配置。 |
 
 Provider 编辑页还支持模型发现、可用性测试、首字延迟与 TPS 测量，配置可直接在管理后台维护。
 
@@ -152,8 +152,8 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 | --- | --- |
 | [完整使用手册](docs/user-guide.md) | Provider、Auth Group、OAuth、Hook、安全脱敏与配置参考 |
 | [Agent 配置与兼容性](docs/agent-configuration.md) | Agent 声明式扩展、文件格式、路径、SSH 与参数说明 |
-| [Provider 模型测试](docs/provider-model-testing.md) | 模型测试链路、指标口径与行为边界 |
-| [统计设计](docs/statistics-design.md) | 请求观测、统计口径、缓存与性能指标 |
+| [管理端扩展开发](docs/extension-development.md) | 页面注册表、扩展页宿主、Python 动作接口与安全边界 |
+| [统计口径](docs/statistics-design.md) | 请求结果、Token、缓存与性能指标定义 |
 | [LLM 数据记录](docs/llm-recording.md) | 请求输入输出归档、去重、分片与存储边界 |
 | [前端开发指南](docs/frontend-development.md) | Vue 组件、开发、测试与生产构建 |
 | [4+1 架构](docs/architecture-4plus1.md) | 分层职责、运行时状态与主请求链路 |

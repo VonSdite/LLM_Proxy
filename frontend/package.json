@@ -9,8 +9,9 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.node.json",
-    "lint": "eslint . && stylelint \"src/**/*.{css,vue}\" && prettier --check .",
-    "format": "prettier --write .",
+    "lint:eslint": "cd .. && eslint --config frontend/eslint.config.js --no-error-on-unmatched-pattern frontend extensions",
+    "lint": "npm run lint:eslint && stylelint \"src/**/*.{css,vue}\" \"../extensions/*/frontend/**/*.{css,vue}\" --allow-empty-input && prettier --check . ../extensions --ignore-path ../.prettierignore",
+    "format": "prettier --write . ../extensions --ignore-path ../.prettierignore",
     "build": "npm run typecheck && node scripts/build.mjs",
     "test:unit": "vitest run",
     "test:e2e": "playwright test --project=chromium",

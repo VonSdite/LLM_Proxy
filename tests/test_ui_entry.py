@@ -97,7 +97,17 @@ class UiEntryTests(unittest.TestCase):
         context = SimpleNamespace(flask_app=self.app, config_manager=self.config, logger=Mock())
         WebController(context, Mock(), Mock(), self.auth)
         AuthenticationController(context, self.auth)
-        pages = ["/", "/providers", "/users", "/oauth", "/model-mappings", "/api-keys", "/statistics", "/settings"]
+        pages = [
+            "/",
+            "/providers",
+            "/users",
+            "/oauth",
+            "/model-mappings",
+            "/api-keys",
+            "/statistics",
+            "/settings",
+            "/extensions/sample-tools",
+        ]
         for path in pages:
             with self.subTest(path=path):
                 response = self.client.get(path)
@@ -120,6 +130,7 @@ class UiEntryTests(unittest.TestCase):
         self.assertIn(b'id="app"', login.data)
         self.assertEqual(self.client.get("/api/unknown").status_code, 404)
         self.assertEqual(self.client.get("/v1/unknown").status_code, 404)
+        self.assertEqual(self.client.get("/extensions/sample-tools/nested").status_code, 404)
 
     def test_javascript_assets_override_incorrect_system_mime_types(self):
         mimetypes.init()

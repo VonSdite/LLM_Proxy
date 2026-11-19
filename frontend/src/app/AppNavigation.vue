@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { usePageRegistry } from '@/stores/pages'
 import { useSession } from '@/stores/session'
 import { useTheme } from '@/stores/theme'
 import { sessionApi } from '@/api/session'
 import { errorMessage } from '@/api/client'
-import { UiButton, UiDropdownMenu, UiIcon, UiTooltip, notify, type IconName } from '@/components/ui'
+import { UiButton, UiDropdownMenu, UiIcon, UiTooltip, notify } from '@/components/ui'
+import { adminPageRouteName } from './page-contract'
+import type { NavigationPage } from './page-registry'
 
 defineProps<{ collapsed?: boolean }>()
+const pages = usePageRegistry()
 const session = useSession()
 const theme = useTheme()
 const router = useRouter()
@@ -16,24 +20,15 @@ const initial = computed(() =>
   Array.from(session.context?.username.trim() || 'A')[0]!.toUpperCase(),
 )
 const navigation = computed(() =>
-  [
-    { path: '/', label: 'Provider', icon: 'server', show: true },
-    { path: '/oauth', label: 'OAuth', icon: 'shield', show: true },
-    {
-      path: '/model-mappings',
-      label: '模型映射',
-      icon: 'network',
-      show: true,
-    },
-    { path: '/api-keys', label: 'API Key', icon: 'key', show: true },
-    { path: '/agents', label: 'Agent 配置', icon: 'terminal', show: true },
-    { path: '/users', label: '用户', icon: 'users', show: true },
-    { path: '/statistics', label: '统计', icon: 'chart', show: true },
-    { path: '/settings', label: '设置', icon: 'settings', show: true },
-  ].filter((item) => item.show),
+  pages.navigationPages.filter(
+    (page) => !page.visible || (!!session.context && page.visible(session.context)),
+  ),
 )
-function isActive(path: string) {
-  return route.path === path || (path === '/' && route.path === '/providers')
+function isActive(page: NavigationPage) {
+  if (page.kind === 'extension') {
+    return route.name === adminPageRouteName(page) && route.params.pageId === page.id
+  }
+  return route.name === adminPageRouteName(page)
 }
 async function logout() {
   try {
@@ -50,16 +45,16 @@ async function logout() {
     <nav class="app-nav" aria-label="主导航">
       <RouterLink
         v-for="item in navigation"
-        :key="item.path"
+        :key="item.id"
         :to="item.path"
         class="app-nav-link"
-        :class="{ 'is-active': isActive(item.path) }"
-        :aria-label="item.label"
-        :aria-current="isActive(item.path) ? 'page' : undefined"
-        :title="collapsed ? item.label : undefined"
+        :class="{ 'is-active': isActive(item) }"
+        :aria-label="item.navigation.label"
+        :aria-current="isActive(item) ? 'page' : undefined"
+        :title="collapsed ? item.navigation.label : undefined"
       >
-        <UiIcon :name="item.icon as IconName" :size="19" />
-        <span v-if="!collapsed">{{ item.label }}</span>
+        <UiIcon :name="item.navigation.icon" :size="19" />
+        <span v-if="!collapsed">{{ item.navigation.label }}</span>
       </RouterLink>
     </nav>
     <footer class="app-nav-footer">

@@ -3,6 +3,7 @@
 本目录使用 Vue 3 Composition API、TypeScript strict 和 Vite。运行环境为 Node.js 24，依赖版本由 package-lock.json 固定。
 
 - 页面组合业务组件；features 管理业务状态；api 处理请求；components/ui 提供无业务依赖的基础控件。
+- 页面路径、标题和侧边栏入口统一注册到 `src/app/page-contract.ts` 与 `src/app/builtin-pages.ts`，路由和 `AppNavigation` 消费同一份注册表；管理端扩展写入根目录 `extensions/<id>/`，页面入口为 `frontend/index.ts`。
 - 基础组件通过 `@/components/ui` 导入；Reka UI、TanStack Table 和 Lucide 的直接导入限定在基础组件目录。
 - 排序统一使用 `UiTable` 或 `UiSortableList`，内部共用 `UiDragHandle`。界面只显示拖动把手，顺序列表头视觉留空；支持首尾落点、触屏拖动及键盘移动。
 - 批量操作统一使用 `UiSelectionBar` 和标准尺寸按钮，删除入口使用 `danger-outline`，最终确认使用 `danger-solid`。启停入口按所选记录的已确认状态显示，请求只包含需要改变状态的记录。
@@ -18,6 +19,6 @@
 - Agent 数值输入使用 commit 事件。原文件精确 Token 数值与百分比显示分开存储。
 - 注释使用中文，日志使用英文；文本为 UTF-8 无 BOM、LF。
 - `src/dev/ComponentsPage.vue` 展示正式组件，路由仅在开发和测试构建可达。
-- 组件选择和部署步骤位于 `docs/frontend-development.md`。
+- 组件选择和部署步骤位于 `../docs/frontend-development.md`，管理端扩展协议位于 `../docs/extension-development.md`。
 
 交付检查：`npm ci`、`npm run lint`、`npm run typecheck`、`npm run test:unit`、`npm run build`、`npm run test:e2e`。后端及模型表检查采用仓库根目录的命令。

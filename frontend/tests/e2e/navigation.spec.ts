@@ -204,3 +204,15 @@ test('账户菜单支持键盘操作、点击外部关闭和退出失败后重�
   expect(attempts).toBe(2)
   expect(fixture.unexpected).toEqual([])
 })
+
+test('未知扩展页面显示稳定空状态，侧栏和核心页面保持可用', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  await page.goto('/extensions/missing-extension')
+  await expect(page.getByText('扩展页面不存在', { exact: true })).toBeVisible()
+  await expect(page).toHaveTitle('扩展页面 · LLM Proxy')
+  const sidebar = page.getByRole('complementary', { name: '侧边栏' })
+  await sidebar.getByRole('link', { name: '设置', exact: true }).click()
+  await expect(page).toHaveURL(/\/settings$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('系统设置')
+  expect(fixture.unexpected).toEqual([])
+})

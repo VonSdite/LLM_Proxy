@@ -1,1 +1,0 @@
-import{ut as e}from"./index-DRwYe-Ge.js";function t(){let t=new AbortController;return e(()=>t.abort()),t.signal}export{t};

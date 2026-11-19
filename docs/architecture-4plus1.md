@@ -28,6 +28,7 @@
 - 提供常驻 API Key 管理入口，用于创建下游访问 key、设置模型权限、设置总 token 上限并查看 key 级用量
 - 提供常驻模型映射入口，用于维护独立对外模型 ID，以及跨 Provider / OAuth 模型的最高优先级或粘滞故障切换目标
 - 在 `/agents` 提供本机和 SSH 机器上的 Claude、Codex、opencode 配置编辑、逐字段预览、文件编辑和备份恢复
+- 通过统一页面注册表提供管理端页面扩展，并通过受信任的本地 Python 扩展挂载 `/api/extensions/<id>/` 动作接口
 
 ## 2. Logical View
 
@@ -39,7 +40,9 @@
 
 `render_ui` 从 `static/app/manifest.json` 解析内容哈希资源。HTML 使用 `no-store`，manifest 使用 `no-cache`，内容哈希资源使用长期不可变缓存。Vue 生产资源由 Flask 同源提供，Node.js 属于开发与构建工具。
 
-`/login`、`/`、`/providers`、`/users`、`/api-keys`、`/model-mappings`、`/oauth`、`/agents`、`/statistics`、`/settings` 使用同一 Vue 入口。Flask 保留页面认证与 Agent 访问保护；Vue Router 处理站内导航和登录校验，OAuth、API Key 和模型映射管理页始终可进入。API、数据平面与未知路径使用各自 Flask 路由，不进入页面兜底。旧业务模板、页面脚本、Bootstrap 资源不参与生产装配；Ace 由本地 vendor 按需加载。
+`/login`、`/`、`/providers`、`/users`、`/api-keys`、`/model-mappings`、`/oauth`、`/agents`、`/statistics`、`/settings` 和 `/extensions/<id>` 使用同一 Vue 入口。Flask 保留页面认证与 Agent 访问保护；Vue Router 处理站内导航和登录校验，OAuth、API Key 和模型映射管理页始终可进入。API、数据平面与未知路径使用各自 Flask 路由，不进入页面兜底。旧业务模板、页面脚本、Bootstrap 资源不参与生产装配；Ace 由本地 vendor 按需加载。
+
+管理页面通过统一注册表装配。内置页面在 `frontend/src/app/builtin-pages.ts` 声明路径、标题、组件和导航信息；本地扩展包在 `extensions/<id>/frontend/index.ts` 默认导出页面描述。Vite 在构建期发现扩展，Pinia 注册表合并内置与扩展页面，路由和 `AppNavigation` 消费同一份描述。扩展页统一访问 `/extensions/<id>`，由 `ExtensionPageHost` 异步加载组件并处理加载、失败重试和未知页面状态。注册表校验 ID、路径、别名和导航排序，核心路径和扩展路径命名空间互斥。页面与可选 Python 后端共用 `extensions/<id>/` 包边界。
 
 表单草稿与服务器快照分开保存，列表使用稳定业务 ID。`useRequest` 管理替换读取与迟到响应，`useAction` 管理串行操作、错误和操作后刷新，页面与弹窗卸载时取消未完成请求。Agent 预览按当前机器、Agent 和草稿版本关联，原始文件编辑期间暂停表单预览。OAuth 首次读取本地账号快照，每分钟按已到期窗口同步，页面隐藏或操作忙碌时跳过，卸载时移除定时器和监听器。客户端取消不回滚已经完成的服务端事务。
 
@@ -53,8 +56,17 @@
 flowchart LR
     Vue[Vue 页面与领域组件] --> UI[共享 UI 与主题]
     Vue --> API[类型化 API 客户端]
+    Builtin[内置页面描述] --> Registry[Pinia 页面注册表]
+    Local["extensions/*/frontend/index.ts"] --> Registry
+    Registry --> Router[Vue Router]
+    Registry --> Navigation[AppNavigation]
+    Router --> Host[ExtensionPageHost]
+    Host --> LocalPage[扩展页面组件]
     API --> Bootstrap[UiController /api/ui/bootstrap]
     API --> Control[现有管理控制器与服务]
+    API --> ExtensionAPI["/api/extensions/<id>/*"]
+    Backend["extensions/*/extension.py"] --> Manager[AdminExtensionManager]
+    Manager --> ExtensionAPI
     Vite[Vite 构建] --> Assets[static/app 内容哈希资源]
     Assets --> Flask[Flask 同源页面与静态资源]
     DataClient[模型调用客户端] --> Data[现有 /v1/* 数据平面]
@@ -176,9 +188,16 @@ decoder
   - 直接处理 `OPTIONS /v1/*` 预检请求
 - `WebController`
   - 提供 Provider、用户、API Key、统计与系统设置页面
+  - 为 `/extensions/<id>` 返回统一 Vue 入口，复用管理页面登录校验和 `no-store`；嵌套扩展路径返回 404
   - 暴露统计汇总、用户用量汇总、请求明细、当前页签 Excel 导出与统计迁移 JSON 导入导出接口
   - OAuth、API Key 管理和模型映射顶层导航入口常驻
   - 暴露系统设置读取与保存接口
+- `AdminExtensionManager`
+  - 在服务启动时扫描根目录 `extensions/*/extension.py`，导入受信任模块并实例化 `Extension`
+  - 构造 `/api/extensions/<id>/` Blueprint，注入 `AdminExtensionContext`，挂载现有管理端认证和统一错误响应
+  - 调用可选 `register_routes()`、`start()` 和 `close()`，单个扩展失败不阻止其他扩展或主程序
+  - 保存已加载扩展实例和加载错误，业务服务通过只读映射传入
+  - 扩展修改后在下一次服务启动时生效
 - `ProviderService`
   - 维护 Provider 配置的创建、复制、编辑、删除、启停、排序和批量删除
   - 在配置写入和管理 API 输出时校验本机 hook 文件；不存在、绝对路径或跳出 `hooks/` 的 hook 字段为空
@@ -588,6 +607,11 @@ OAuth 模型是数据平面的例外路由：
   - 每次访问日志写入前读取当前 `client_ip.*` 配置解析客户端 IP
 - `WebController`
   - 管理页面统一执行登录校验，功能总开关不影响页面可达性
+  - `/extensions/<id>` 复用同一页面入口和认证规则，嵌套路径不进入页面兜底
+- `AdminExtensionManager`
+  - 持有已加载 Python 扩展实例、Blueprint 和加载错误
+  - 扩展上下文中的服务映射使用只读视图；扩展自有后台任务由扩展在 `close()` 中释放
+  - 后端扩展代码、模块实例和动作任务属于当前单进程，不跨进程共享
 - `ProxyController`
   - 每次数据面请求读取当前 `client_ip.*` 配置解析客户端 IP
   - 解析结果用于白名单、模型权限、请求统计、访问日志关联和 LLM trace
@@ -901,13 +925,13 @@ provider editor form snapshot
   - 两者都不经过 `AuthGroupManager.acquire()`
   - 两者都不写运行态冷却、并发、配额
 - 首字延迟从 executor 发起上游请求开始，到首个非空正文或推理增量完整到达时记录；请求构建与代理参数准备不计入
-- TPS 通过 `utils.request_metrics.output_tps` 计算 `completion_tokens × 1000 / duration_ms`，采用 Sub2API 的全程平均输出速度口径，包含首字等待、思考、末尾 usage 和终止事件等待
+- TPS 通过 `utils.request_metrics.output_tps` 计算 `completion_tokens × 1000 / duration_ms`，表示全程平均输出速度，包含首字等待、思考、末尾 usage 和终止事件等待
 - 首字接收时间在读取网络数据块时记录，同一数据块的事件共享时间；TPS 从调用上游到完成响应计时，缺少输出用量、输出为零或总时长无效时为空
 - 隐藏思考、Responses 思考摘要、Claude redacted thinking 和单数据块使用相同 TPS 公式；输出用量已包含的推理 Token 不重复相加
 - 每个成功模型测试写入一条请求历史，包含成功状态、HTTP 状态、流式标记、首字延迟、TPS、总耗时及缓存明细；失败结果不写请求明细和日聚合统计
 - 模型测试通过统一 usage 合并器保留缓存读取、缓存写入与已知零值，每次尝试独立收集；日志计时包含模型测试准备与重试，弹窗性能使用本次成功上游尝试
 - 上游重试属于同一次模型测试；最终成功时记录一次，最终失败时不记录
-- 测试基准请求省略 `temperature` 和 `top_p`；GLM Claude 兼容请求使用低档思考预算，并额外保留 192 Token 正文额度
+- 测试基准请求使用 `stream=true`、`max_tokens=192`，省略 `temperature` 和 `top_p`；GLM Claude 兼容请求使用 `reasoning_effort=low`，对应 `thinking.budget_tokens=2048`，总输出上限包含思考预算和 192 Token 正文额度
 - OpenAI Chat 明确返回输出上限字段不兼容的 400/422 时，可在 `max_retries` 总尝试次数内将 `max_tokens` 切换为 `max_completion_tokens` 一次；兼容状态仅存在于当前模型测试的调用内，不跨模型缓存
 - 请求历史中的请求模型使用 `{provider_name}/{upstream_model_id}`；未填写 Provider 名称时使用上游模型 ID
 - 请求历史使用当前管理请求按 `client_ip` 设置解析出的客户端 IP，并记录上游返回的 usage
@@ -1335,6 +1359,53 @@ sequenceDiagram
     Service-->>Browser: 最新文件快照
 ```
 
+### 3.13 Control-Plane Extensions
+
+页面扩展在 Vite 构建阶段进入 `import.meta.glob`，页面描述从 `extensions/<id>/frontend/index.ts` 合并到 Pinia 注册表。路由生成、侧边栏排序和 `/extensions/<id>` 页面请求都读取当前注册表。扩展组件按需加载；加载异常由宿主转换为页面级错误状态，主外壳继续可用。
+
+后端扩展在 `Application` 完成服务和控制器装配后加载：
+
+```text
+Application
+  -> AdminExtensionManager.scan(extensions/*/extension.py)
+  -> import module
+  -> Extension(AdminExtensionContext)
+  -> Blueprint(/api/extensions/<id>)
+  -> register_routes(blueprint)
+  -> snapshot Flask routing and registration state
+  -> Flask register_blueprint (once; restore snapshot on failure)
+  -> start()
+```
+
+动作请求链路：
+
+```text
+browser extension page
+  -> POST /api/extensions/<id>/actions/<action>
+  -> management authentication
+  -> extension Blueprint handler
+  -> optional extension background greenlet
+  -> JSON response
+```
+
+扩展接口属于控制平面。Provider 路由、模型映射、下游准入和 `/v1/*` 数据平面链路不调用管理端扩展。
+
+```mermaid
+flowchart LR
+    Page["/extensions/<id>"] --> WebController
+    WebController --> Auth[管理端认证]
+    Auth --> Vue[统一 Vue 入口]
+    Vue --> Registry[Pinia 页面注册表]
+    Registry --> Host[ExtensionPageHost]
+    Host --> Component[扩展页面组件]
+    Component --> Action["/api/extensions/<id>/actions/*"]
+    Action --> Blueprint[AdminExtensionManager Blueprint]
+    Blueprint --> Auth
+    Blueprint --> Handler[Extension 路由处理函数]
+```
+
+单个扩展加载、注册、启动或请求失败时记录英文日志；Blueprint 在主 Flask 应用上注册一次，注册回调的 `state.app` 指向主应用。注册失败时恢复路由、视图、Blueprint、请求回调、错误处理器、模板注册项及 CLI 命令，随后关闭失败扩展。应用配置、业务状态、文件、数据库及其他外部副作用由扩展管理，后台任务在 `start()` 中启动，已分配资源在 `close()` 中释放。扩展模块名和 Blueprint 名按原始 ID 唯一编码，连字符与下划线不会混用同一运行时名称。请求异常返回标准 `{"error": "Extension action failed"}`。HTTP Listener 停止并结束后，`Application.close()` 逆序调用扩展 `close()`。后端扩展目录和模块修改在服务重启后生效，Python 代码不做热加载。
+
 ## 4. Development View
 
 ### 4.1 Directory Responsibilities
@@ -1353,13 +1424,19 @@ sequenceDiagram
   - 请求与回包协议转换、共享 reasoning 语义和工具多模态内容处理
 - `src/hooks/`
   - hook contracts
+- `frontend/src/app/`
+  - 页面协议、页面注册表、内置页面描述、Vue Router、应用外壳和扩展页宿主
+- `extensions/`
+  - 本地受信任管理端扩展包；页面入口位于 `frontend/index.ts`，Python 入口位于 `extension.py`
 
 ### 4.2 Key Files
 
 - [src/presentation/ui.py](../src/presentation/ui.py)、[app.html](../src/presentation/templates/app.html)
   - Vue 页面入口、内容哈希资源装配与启动上下文
 - [frontend/src/app](../frontend/src/app)、[components/ui](../frontend/src/components/ui)、[styles](../frontend/src/styles)
-  - 路由外壳、共享控件、主题与设计变量
+  - 路由外壳、页面注册表、扩展页宿主、共享控件、主题与设计变量
+- [src/presentation/admin_extension_manager.py](../src/presentation/admin_extension_manager.py)、[extension-development.md](extension-development.md)
+  - Python 扩展发现、上下文、动作路由、生命周期、页面协议和使用边界
 - [Agent 配置控制器](../src/presentation/agent_config_controller.py)、[AgentsPage.vue](../frontend/src/pages/AgentsPage.vue)、[features/agents](../frontend/src/features/agents)
   - Agent 路由、机器侧边栏、连接弹窗、参数表单与预览状态
 - [ConfigFileEditor.vue](../frontend/src/features/shared/ConfigFileEditor.vue)
@@ -1455,8 +1532,10 @@ sequenceDiagram
 
 - 一个 Flask 应用
 - 一套预构建 Vue 静态资源，Node.js 仅在开发、测试和构建环境使用
+- 一个 Pinia 页面注册表和一组内置或本地源码页面扩展
 - 一个配置文件
 - 一个 SQLite 数据库，保存用户、请求日志、日聚合统计、API Key、模型映射定义和映射运行状态
+- 一组受信任的本地 Python 扩展实例及其 `/api/extensions/<id>/` Blueprint
 - 一个 gevent Hub 原生线程池，执行仓储事务和配置文件任务
 - 一个运行日志专用原生线程与有界队列
 - 一个 LLM 数据记录专用原生线程与独立有界队列，以及绝对路径目录下的提示词文件和 JSONL 分片

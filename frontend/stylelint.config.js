@@ -13,5 +13,5 @@ export default {
       { ignorePseudoClasses: ['deep', 'global', 'slotted'] },
     ],
   },
-  ignoreFiles: ['src/styles/tokens.css', 'node_modules/**'],
+  ignoreFiles: ['src/styles/tokens.css', '../**/node_modules/**', '../**/dist/**'],
 }

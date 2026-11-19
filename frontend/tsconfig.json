@@ -14,7 +14,21 @@
     "skipLibCheck": true,
     "types": ["vite/client"],
     "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] }
+    "paths": { "@/*": ["src/*"], "*": ["node_modules/*"] }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.vue",
+    "../extensions/*/frontend/**/*.ts",
+    "../extensions/*/frontend/**/*.vue"
+  ],
+  "exclude": [
+    "../extensions/**/dist/**",
+    "../extensions/**/node_modules/**",
+    "../extensions/**/test/**",
+    "../extensions/**/tests/**",
+    "../extensions/**/__tests__/**",
+    "../extensions/**/*.test.ts",
+    "../extensions/**/*.spec.ts"
+  ]
 }

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """表现层导出。"""
 
+from .admin_extension_manager import AdminExtensionContext, AdminExtensionManager
 from .agent_config_controller import AgentConfigController
 from .api_key_controller import ApiKeyController
 from .app_factory import create_flask_app
@@ -16,6 +17,8 @@ from .web_controller import WebController
 
 __all__ = [
     "create_flask_app",
+    "AdminExtensionContext",
+    "AdminExtensionManager",
     "AgentConfigController",
     "ApiKeyController",
     "AuthenticationController",

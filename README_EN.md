@@ -43,7 +43,7 @@
 | **🔑 Credential pools and OAuth** | Schedule multiple keys with concurrency and request quotas, 429 cooldowns, and Auth Groups. Manage Codex OAuth files, account failover, and runtime status. |
 | **🛡️ Access control and redaction** | Configure downstream API keys, model permissions, token quotas, concurrency and per-minute/daily limits, IP allowlists, and optional request-scoped sensitive-data redaction. |
 | **📊 Usage observability** | Inspect request trends, tokens, cache hits, upstream success rates, first-token latency, TPS, and costs. Filter across dimensions and export request details, Excel files, or migration data. |
-| **🧩 Extensions and Agent integration** | Customize headers, requests, responses, and model discovery with Hooks. Manage local or SSH-based Claude, Codex, opencode, DSH, and Hermes configurations. |
+| **🧩 Extensions and Agent integration** | Customize headers, requests, responses, and model discovery with Hooks. Extend the admin interface with registered pages and controlled Python actions. Manage local or SSH-based Claude, Codex, opencode, DSH, and Hermes configurations. |
 
 The Provider editor also includes model discovery, availability checks, first-token latency measurements, and TPS tests.
 
@@ -152,8 +152,8 @@ When downstream API key management is enabled, requests must include `Authorizat
 | --- | --- |
 | [Full User Guide (Chinese)](docs/user-guide.md) | Providers, Auth Groups, OAuth, Hooks, redaction, and configuration reference |
 | [Agent Configuration](docs/agent-configuration.md) | Declarative Agent extensions, file formats, paths, SSH, and parameters |
-| [Provider Model Testing](docs/provider-model-testing.md) | Test workflow, metric definitions, and behavior boundaries |
-| [Statistics Design](docs/statistics-design.md) | Request observations, aggregation, cache, and performance metrics |
+| [Admin Extension Development](docs/extension-development.md) | Page registry, extension page host, Python action APIs, and security boundaries |
+| [Statistics Metrics](docs/statistics-design.md) | Request outcomes, tokens, cache, and performance metric definitions |
 | [LLM Data Recording](docs/llm-recording.md) | Input/output archiving, deduplication, sharding, and storage boundaries |
 | [Frontend Development](docs/frontend-development.md) | Vue components, development, testing, and production builds |
 | [4+1 Architecture](docs/architecture-4plus1.md) | Layer responsibilities, runtime state, and primary request flows |

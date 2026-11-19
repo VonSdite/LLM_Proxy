@@ -17,6 +17,7 @@ from ..config import (
     build_provider_schemas,
 )
 from ..presentation import (
+    AdminExtensionManager,
     AgentConfigController,
     ApiKeyController,
     AuthenticationController,
@@ -405,6 +406,21 @@ class Application:
             settings_service,
             auth_service,
         )
+        self._admin_extension_manager = AdminExtensionManager(
+            self._ctx,
+            auth_service,
+            self._db_connection_factory,
+            services={
+                "authentication": auth_service,
+                "model_catalog": model_catalog_service,
+                "users": user_service,
+                "api_keys": api_key_service,
+                "providers": provider_service,
+                "settings": settings_service,
+                "logs": log_service,
+                "provider_manager": self._provider_manager,
+            },
+        )
 
         self._logger.info("All controllers initialized successfully")
 
@@ -453,6 +469,8 @@ class Application:
         """关闭后台服务并排空应用持有的记录与日志资源。"""
         if hasattr(self, "_listener_runtime"):
             self._listener_runtime.close()
+        if hasattr(self, "_admin_extension_manager"):
+            self._admin_extension_manager.close()
         if hasattr(self, "_agent_config_service"):
             self._agent_config_service.close()
         if hasattr(self, "_llm_recording_service"):
@@ -461,6 +479,8 @@ class Application:
 
     def _start_background_workers(self) -> None:
         """启动应用后台任务。"""
+        if hasattr(self, "_admin_extension_manager"):
+            self._admin_extension_manager.start()
         if hasattr(self, "_agent_config_service"):
             self._agent_config_service.start_cleanup()
         if hasattr(self, "_codex_oauth_service"):

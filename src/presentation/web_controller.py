@@ -52,6 +52,7 @@ class WebController:
         self._app.route("/users")(auth(self.users_page))
         self._app.route("/statistics")(auth(self.statistics_page))
         self._app.route("/settings")(auth(self.settings_page))
+        self._app.route("/extensions/<page_id>")(auth(self.extension_page))
 
         self._app.route("/api/statistics", methods=["GET"])(auth(self.get_statistics))
         self._app.route("/api/statistics/overview", methods=["GET"])(auth(self.get_statistics_overview))
@@ -96,6 +97,11 @@ class WebController:
         return render_ui()
 
     def settings_page(self) -> ResponseReturnValue:
+        return render_ui()
+
+    def extension_page(self, page_id: str) -> ResponseReturnValue:
+        """扩展页面复用统一 Vue 入口，路径由前端注册表解析。"""
+        del page_id
         return render_ui()
 
     @staticmethod
