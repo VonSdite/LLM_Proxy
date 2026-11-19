@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { AgentId, AgentPreview } from '@/api/agents'
-import { UiBadge, UiButton, UiIcon } from '@/components/ui'
+import { UiBadge, UiButton, UiIcon, UiIconButton } from '@/components/ui'
 const props = defineProps<{
   agent: AgentId
-  preview?: Partial<AgentPreview> & { pending: boolean; error: string }
+  preview?: Partial<AgentPreview> & { pending: boolean; error: string; conflict?: boolean }
+  dirty?: boolean
   saving?: boolean
   disabled?: boolean
 }>()
 const rows = computed(() => props.preview?.rows || [])
-const emit = defineEmits<{ save: [] }>()
+const emit = defineEmits<{ save: []; refresh: [] }>()
 function display(value: unknown) {
   return value == null || value === ''
     ? '—'
@@ -30,12 +31,26 @@ function display(value: unknown) {
             (preview?.pending ? '正在检查…' : preview?.hasChanges ? '有待保存的修改' : '无修改')
           }}
         </span>
+        <UiIconButton
+          v-if="preview?.error"
+          icon="refresh"
+          label="刷新"
+          size="xs"
+          :disabled="disabled || saving"
+          @click="emit('refresh')"
+        />
       </div>
       <UiButton
         variant="primary"
         icon="save"
         :loading="saving"
-        :disabled="disabled || !preview?.hasChanges || preview?.pending || !!preview?.error"
+        :disabled="
+          disabled ||
+          preview?.pending ||
+          (preview?.conflict
+            ? !(dirty || preview.hasChanges)
+            : !preview?.hasChanges || !!preview?.error)
+        "
         @click="emit('save')"
       >
         保存

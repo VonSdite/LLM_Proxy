@@ -27,6 +27,9 @@ const efforts = computed(() => [
   ).map((value) => ({ value, label: value === 'auto' ? 'auto（API 默认）' : value })),
 ])
 const derived = computed(() => derivedCompact(props.agent, props.draft))
+const modelDisabled = computed(
+  () => props.disabled || (props.agent === 'opencode' && !props.draft.model),
+)
 function candidates(kind: LimitKind) {
   return limitCandidates(props.agent, props.draft, kind, props.bootstrap).map((item) => ({
     value: item.value,
@@ -53,7 +56,7 @@ function candidates(kind: LimitKind) {
       <UiSelect
         :model-value="draft.runtime[effortKey] || ''"
         :options="efforts"
-        :disabled="disabled"
+        :disabled="modelDisabled"
         @update:model-value="setRuntime(draft, effortKey, $event)"
       />
     </UiField>
@@ -67,7 +70,7 @@ function candidates(kind: LimitKind) {
         ...agentVersionHelp(agent, 'context'),
         ...(agent === 'claude'
           ? [
-              '优先参考 ANTHROPIC_MODEL；未设置主模型时，列出已设置别名模型的候选。此窗口是全局覆盖，不会按四个模型分别保存。',
+              '优先参考 ANTHROPIC_MODEL；未设置主模型时，列出已设置别名模型的候选。此窗口是全局覆盖，不会按模型分别保存。',
             ]
           : []),
       ]"
@@ -77,7 +80,7 @@ function candidates(kind: LimitKind) {
         :step="1"
         :suggestions="candidates('context')"
         :min="1"
-        :disabled="disabled"
+        :disabled="modelDisabled"
         placeholder="不设置"
         @commit="setLimit(draft, 'context', $event)"
       />
@@ -154,7 +157,7 @@ function candidates(kind: LimitKind) {
         :step="1"
         :suggestions="candidates('output')"
         :min="1"
-        :disabled="disabled"
+        :disabled="modelDisabled"
         placeholder="不设置"
         @commit="setLimit(draft, 'output', $event)"
       />

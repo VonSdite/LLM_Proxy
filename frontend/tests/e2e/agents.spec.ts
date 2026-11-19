@@ -2,6 +2,95 @@ import { expect, test } from '../browser-test'
 import { mockAdmin } from '../browser-fixtures'
 import type { AgentMachine, PreviewInput } from '../../src/api/agents'
 
+for (const agent of ['claude', 'codex'] as const) {
+  test(`${agent} 模型可选择不设置，保存并重新打开后保持为空`, async ({ page }) => {
+    const fixture = await mockAdmin(page)
+    const keys = [
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+      'ANTHROPIC_DEFAULT_OPUS_MODEL',
+      'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      'ANTHROPIC_DEFAULT_FABLE_MODEL',
+      'ANTHROPIC_MODEL',
+    ]
+    const file = fixture.snapshot.files[agent]!
+    const model = fixture.agent.models[0]!
+    const paths = agent === 'claude' ? keys.map((key) => `env.${key}`) : ['model']
+    for (const path of paths) file.managed[path] = model
+    await page.route('**/api/agent-config/machines/local/apply', async (route) => {
+      for (const path of paths) delete file.managed[path]
+      await route.fulfill({ json: fixture.snapshot })
+    })
+    await page.goto('/agents')
+    if (agent === 'codex') await page.getByRole('tab', { name: 'Codex', exact: true }).click()
+    const selector = page.getByRole('combobox', {
+      name: agent === 'claude' ? '一键设置模型' : '模型',
+      exact: true,
+    })
+    await expect(selector).toHaveValue(model)
+    // Claude 的单项与一键清空都需实际可选。
+    if (agent === 'claude') {
+      const main = page.getByRole('combobox', { name: '默认主模型', exact: true })
+      await main.click()
+      await page.getByRole('option', { name: '不设置', exact: true }).click()
+      await expect(main).toHaveValue('不设置')
+      await expect(selector).toHaveValue('')
+    }
+    await selector.click()
+    await page.getByRole('option', { name: '不设置', exact: true }).click()
+    const latestDraft = () =>
+      (
+        fixture.calls.filter((call) => call.path.endsWith(`/${agent}/preview`)).at(-1)?.body as
+          PreviewInput | undefined
+      )?.draft
+    await expect
+      .poll(() => latestDraft()?.clearFields)
+      .toEqual(
+        expect.arrayContaining(agent === 'claude' ? keys.map((key) => `models.${key}`) : ['model']),
+      )
+    if (agent === 'claude')
+      expect(Object.values(latestDraft()!.models!)).toEqual(['', '', '', '', ''])
+    else expect(latestDraft()!.model).toBe('')
+    await page.locator('.agent-preview').getByRole('button', { name: '保存', exact: true }).click()
+    await expect(page.locator('.agent-preview').getByRole('status')).toHaveText('无修改')
+    await page.reload()
+    if (agent === 'codex') await page.getByRole('tab', { name: 'Codex', exact: true }).click()
+    await expect(selector).toHaveValue(agent === 'claude' ? '' : '不设置')
+    if (agent === 'claude')
+      await expect(page.getByRole('combobox', { name: '默认主模型', exact: true })).toHaveValue(
+        '不设置',
+      )
+  })
+}
+
+test('Claude Fable 独立回显与选择，并参与一键模型设置', async ({ page }, testInfo) => {
+  const fixture = await mockAdmin(page)
+  const key = 'ANTHROPIC_DEFAULT_FABLE_MODEL'
+  const model = fixture.agent.models[0]!
+  fixture.snapshot.files.claude!.managed[`env.${key}`] = model
+  await page.goto('/agents')
+  const fable = page.getByRole('combobox', { name: 'Fable 模型（高难度任务）', exact: true })
+  await expect(fable).toHaveValue(model)
+  await fable.click()
+  await page.getByRole('option', { name: '不设置', exact: true }).click()
+  await expect(fable).toHaveValue('不设置')
+  await expect(page.getByRole('combobox', { name: '默认主模型', exact: true })).toHaveValue(model)
+  await page.getByRole('combobox', { name: '一键设置模型', exact: true }).click()
+  await page.getByRole('option', { name: model, exact: true }).click()
+  await expect(fable).toHaveValue(model)
+  await expect
+    .poll(
+      () =>
+        (
+          fixture.calls.filter((call) => call.path.endsWith('/claude/preview')).at(-1)
+            ?.body as PreviewInput
+        )?.draft?.models?.[key],
+    )
+    .toBe(model)
+  await page
+    .locator('.agent-model-group')
+    .screenshot({ path: testInfo.outputPath('claude-fable.png') })
+})
+
 test('SSH 必填字段标红，代理、主机指纹、连接与断开使用当前机器', async ({ page }) => {
   const fixture = await mockAdmin(page)
   const machine: AgentMachine = {
@@ -373,8 +462,8 @@ for (const agent of ['codex', 'opencode'] as const) {
       model_auto_compact_token_limit: 123457,
     }
     fixture.snapshot.files.opencode!.managed = {
-      model: 'main/main/claude-sonnet-4-6',
-      'provider.main.models.main/claude-sonnet-4-6': { limit: { context: 200000, output: 64000 } },
+      model: 'proxy/main/claude-sonnet-4-6',
+      'provider.proxy.models.main/claude-sonnet-4-6': { limit: { context: 200000, output: 64000 } },
       'compaction.reserved': 76543,
     }
     await page.goto('/agents')

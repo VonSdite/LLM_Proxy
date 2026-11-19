@@ -86,6 +86,13 @@ function suggestions(field: AgentField) {
     description: `${value(model)} · ${item.label}`,
   }))
 }
+function needsModel(field: AgentField) {
+  return (
+    ['dsh', 'opencode_v2'].includes(props.definition.id) &&
+    !props.draft.values?.model &&
+    ['context', 'output', 'effort'].includes(field.id)
+  )
+}
 </script>
 <template>
   <div class="stack">
@@ -132,6 +139,7 @@ function suggestions(field: AgentField) {
           v-else-if="field.component === 'select' || field.component === 'boolean'"
           :model-value="draft.customFields?.includes(field.id) ? '__custom__' : value(field)"
           :options="options(field)"
+          :disabled="needsModel(field)"
           @update:model-value="update(field, $event)"
         />
         <DisabledProvidersField
@@ -143,7 +151,8 @@ function suggestions(field: AgentField) {
         <UiCombobox
           v-else-if="field.component === 'text' && field.options?.length"
           :model-value="value(field)"
-          :options="field.options"
+          :options="options(field)"
+          :disabled="needsModel(field)"
           allow-custom
           display-label
           :placeholder="draft.customFields?.includes(field.id) ? '保留自定义配置' : '选择或输入'"
@@ -154,6 +163,7 @@ function suggestions(field: AgentField) {
           :model-value="value(field)"
           :required="field.required"
           :placeholder="draft.customFields?.includes(field.id) ? '保留自定义配置' : '不设置'"
+          :disabled="needsModel(field)"
           autocomplete="off"
           @update:model-value="update(field, $event)"
         />
@@ -165,6 +175,7 @@ function suggestions(field: AgentField) {
           :step="field.step || 1"
           :required="field.required"
           :suggestions="suggestions(field)"
+          :disabled="needsModel(field)"
           placeholder="不设置"
           @commit="update(field, $event == null ? '' : String($event))"
         />

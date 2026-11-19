@@ -34,8 +34,7 @@ fields:
     component: model
     file: hermes
     path: [model, default]
-    required: true
-    help: [新会话使用的模型 ID；完整保留 Provider 前缀，外部 API 地址支持手动输入。]
+    help: [新会话使用的模型 ID；不设置时移除 model.default，保留连接配置。模型由启动参数或 Hermes 的默认选择决定，自定义服务需提供可用模型。]
   - id: protocol
     group: models
     label: API 协议
@@ -92,7 +91,11 @@ fields:
       - {value: medium, label: 中}
       - {value: high, label: 高}
       - {value: xhigh, label: 极高}
-    help: [控制模型的推理预算；实际支持的档位取决于模型和服务。已有自定义对象在未修改时保留。]
+      - {value: max, label: 最高（max）}
+      - {value: ultra, label: 超强（ultra）}
+    help:
+      - 控制模型的推理预算；实际支持的档位取决于模型和服务。已有自定义对象在未修改时保留。
+      - ultra 是 Hermes 内部档位，由 Hermes 按路由转换为支持的强度，例如 max 或 xhigh；不表示上游接受 ultra 参数。
   - id: context
     limit: context
     group: parameters

@@ -1325,10 +1325,12 @@ Opencode v2 适配器管理 providers/settings、permissions 数组与 compactio
 - `agent-config/state.json` 使用版本 3，路径按机器 ID 与文件目标保存；读取版本 1 时将 opencode 路径字符串转换为对应的路径记录，读取版本 1 / 2 时将 Codex 目录展开为 config.toml 与 auth.json 两个独立路径。清空路径仅恢复当前文件的默认位置。候选路径成功读取且登记文件写入成功后更新内存状态；配置内容格式错误通过快照的 `parseError` 展示。
 - 浏览器使用模型台账中的完整参数候选，配置输入与推荐独立。Claude 优先参考主模型或唯一已配置模型；多个模型且没有主模型时，菜单直接展示各模型的候选值与名称。切换模型和手填模型 ID 更新候选，选择候选时即时修改参数草稿，手填数值在失焦且值变化时提交草稿。Codex 压缩上限和 opencode 压缩预留显示在压缩阈值标题旁；每个模型的悬停说明显示上下文和最大输出参考值。
 - `/machines/<id>/<agent>/preview` 接受表单或文件编辑内容与读取版本，生成有效期五分钟的预览票据；进程内最多保留四十份票据。原文编辑的票据仅包含 `raw` 中提交的文件及其读取版本。
+- Agent 表单收到 `file_conflict` 时保留草稿并允许有修改的表单继续保存。前端读取最新快照、使用原草稿重新预览，将票据与机器、Agent、草稿版本绑定并展示覆盖确认；确认后提交该票据，服务端继续执行版本检查。取消保留草稿，切换目标或修改草稿使确认票据失效。预览错误旁的刷新入口复用当前 Agent 的读取流程，放弃未保存草稿需要确认。
 - `/machines/<id>/apply` 核对浏览器、SSH 会话、路径、文件版本与受管字段摘要，轮转五份备份后原子替换票据中的文件。Codex 表单将配置、认证与 .env 文件作为一组写入，文件路径入口单独编辑对应文件。写入失败时回滚已写文件；回滚遇到外部修改时返回需要人工恢复的文件。
 - `/machines/<id>/<agent>/files?backup=0..5` 提供文件编辑器和备份内容。浏览器复用本地 Ace 资源提供 JSON / JSONC / TOML / YAML 高亮，以当前文件文本为修改基线；关闭未保存的编辑器时提供保存、放弃和继续编辑选项。
 - 文件编辑器的保存动作依次请求 `/preview` 和 `/apply`，以最新校验票据写入当前文件。校验或写入失败时，浏览器保留编辑内容；保存期间编辑器只读，关闭后释放编辑器实例及主题观察器。
-- SSH 连接和密码按浏览器与机器隔离，闲置三十分钟释放；每分钟运行清理任务，应用退出关闭全部会话。管理操作使用独立协作锁，本机磁盘与状态文件操作使用原生 I/O 线程池，Paramiko 的协作网络连接保留在服务线程的 Hub 中。
+- SSH 连接和密码按浏览器与机器隔离，闲置三十分钟释放；单个清理 greenlet 每秒扫描会话、预览及 Claude 环境变量待清理记录，应用退出关闭全部会话。管理操作使用独立协作锁，本机磁盘与状态文件操作使用原生 I/O 线程池，Paramiko 的协作网络连接保留在服务线程的 Hub 中。
+- Claude 删除允许列表中的非空环境变量时先写空字符串，同一机器身份与路径只登记一条清理记录，实际保存合并字段并将到期时间设为约 10 秒后，无变化的保存保持到期时间。`state.json` 的可选 `claudeEnvCleanup` 字段保存机器、路径、字段名和到期时间，不保存变量值；服务重启继续扫描，SSH 离线等待有效连接，机器身份变化放弃原记录，访问或解析失败约 60 秒后重试。清理仅删除仍为空的登记字段，写入前复读文件检查外部变更。快照、原文编辑器、预览版本与备份使用最终逻辑内容，物理文件暂存空字符串；保存失败按物理原文回滚。此流程属于 Agent 配置控制平面，代理模型映射与正在运行的 Claude 会话选择分别由数据面和客户端管理。
 - Claude 默认路径为 `~/.claude/settings.json`；Codex 为 `~/.codex/config.toml`、`auth.json` 和 `.env`；opencode 为 `~/.config/opencode/opencode.json`。本机支持 `CLAUDE_CONFIG_DIR` 和 `CODEX_HOME`；远程主目录由 SFTP 查询。每个文件上限为 2 MiB。
 
 ```mermaid
@@ -1354,9 +1356,17 @@ sequenceDiagram
     Service->>Files: 复核当前版本
     Service-->>Browser: 字段预览 + 票据
     Browser->>Service: 保存票据
+    opt Claude 环境变量删除
+        Service->>Service: 允许列表字段暂写空串，合并该文件清理记录
+    end
     Service->>Files: 复核、备份、原子写入
-    Service->>State: 原子保存受管字段摘要
-    Service-->>Browser: 最新文件快照
+    Service->>State: 原子保存受管字段摘要与待清理记录
+    Service-->>Browser: 最新逻辑文件快照
+    opt 单个后台任务扫描到期记录且文件可访问
+        Service->>Files: 读取当前文件，仅移除仍为空的登记字段
+        Service->>Files: 复读校验后原子写入
+        Service->>State: 移除已完成记录
+    end
 ```
 
 ### 3.13 Control-Plane Extensions
@@ -1443,6 +1453,8 @@ flowchart LR
   - 原始文件编辑、备份、保存和未保存关闭确认
 - `src/services/agent_config_service.py`、`agent_config_documents.py`
   - 机器会话、预览写入事务、格式保留与允许管理的字段
+- `src/services/claude_env_cleanup.py`
+  - Claude 环境变量清除允许列表、临时空值生成与按当前值删除
 - `src/external/agent_config_transport.py`、`src/repositories/agent_config_repository.py`
   - 本机与 SSH 文件访问、代理隧道和目标状态持久化
 - `src/config/agent_model_limits.json`
@@ -1542,8 +1554,8 @@ flowchart LR
 - 一组 Auth Group、模型映射、配置保存和用户缓存协作锁
 - 一组滚动日志文件
 - 一个 Codex 配额后台刷新 greenlet
-- 一个 Agent 会话与预览清理 greenlet，一组按浏览器隔离的 SSH/SFTP 连接和临时凭据
-- 一个 Agent 配置登记文件，以及本机或远程用户目录内的 Agent 配置和最多五份备份
+- 一个 Agent 会话、预览与 Claude 环境变量清理 greenlet，一组按浏览器隔离的 SSH/SFTP 连接和临时凭据
+- 一个 Agent 配置登记文件，包含可恢复的按机器身份与文件路径合并的 Claude 待清理记录，以及本机或远程用户目录内的 Agent 配置和最多五份备份
 - 一组本地 OAuth 认证文件
 - 一组 Codex 单账号 token 刷新锁与一组独立的额度查询锁
 - 一组本地 OAuth 模型目录缓存

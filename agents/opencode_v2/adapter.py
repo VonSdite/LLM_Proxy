@@ -29,13 +29,18 @@ def _paths(data):
     entry = (*root, "models", model)
     result = {
         ("connection", "package"): (*root, "package"),
-        ("modelSettings", "reasoningEffort"): (*entry, "settings", "reasoningEffort"),
-        ("limits", "context"): (*entry, "limit", "context"),
-        ("limits", "output"): (*entry, "limit", "output"),
     }
+    if model:
+        result.update(
+            {
+                ("modelSettings", "reasoningEffort"): (*entry, "settings", "reasoningEffort"),
+                ("limits", "context"): (*entry, "limit", "context"),
+                ("limits", "output"): (*entry, "limit", "output"),
+            }
+        )
     for key in ("baseURL", "apiKey", "package"):
         override = (*entry, key) if key == "package" else (*entry, "settings", key)
-        if at_path(data, override) is not MISSING:
+        if model and at_path(data, override) is not MISSING:
             result[("connection", key)] = override
         elif key != "package":
             result[("connection", key)] = (*root, "settings", key)
@@ -137,9 +142,12 @@ def edit(target, text, edits):
     model = edits.get(("selection", "model"), at_path(original, ("selection", "model")))
     translated = {}
     paths = _paths(data)
-    if ("selection", "model") in edits:
+    if edits.get(("selection", "model")) is MISSING:
+        translated[("model",)] = MISSING
+        alias = ""
+    elif ("selection", "model") in edits:
         if not isinstance(model, str) or not model.strip():
-            raise ValueError("请选择 Opencode V2 默认模型")
+            raise ValueError("Opencode V2 模型 ID 无效")
         alias = model
         translated[("model",)] = f"{provider}/{alias}"
         translated[("providers", provider, "models", alias, "modelID")] = model
@@ -163,6 +171,8 @@ def edit(target, text, edits):
                 paths[path] = ("providers", provider, "models", alias, *suffix)
     for path, value in edits.items():
         if path == ("selection", "model"):
+            continue
+        if path[0] in ("limits", "modelSettings") and not alias:
             continue
         if path == ("buffer",):
             translated[("compaction", "buffer")] = int(value) if isinstance(value, str) and value.isdigit() else value

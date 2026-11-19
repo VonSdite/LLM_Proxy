@@ -240,7 +240,7 @@ describe('Agent 工作区', () => {
     wrapper.unmount()
   })
 
-  it('保存冲突保留当前草稿并显示错误', async () => {
+  it('保存冲突保留当前草稿，准备最新预览并等待覆盖确认', async () => {
     const { workspace, wrapper } = await harness()
     workspace.draft.value!.apiKey = 'unsaved-key'
     vi.mocked(agentsApi.apply).mockRejectedValueOnce(
@@ -248,8 +248,13 @@ describe('Agent 工作区', () => {
     )
     await workspace.save()
     expect(workspace.draft.value!.apiKey).toBe('unsaved-key')
-    expect(workspace.error.value).toBe('文件已修改')
+    expect(workspace.error.value).toBe('')
+    expect(workspace.overwrite.value?.ticket).toEqual(ticket)
+    expect(agentsApi.apply).toHaveBeenCalledTimes(1)
     expect(workspace.saving.value).toBe(false)
+    await workspace.confirmOverwrite()
+    expect(agentsApi.apply).toHaveBeenCalledTimes(2)
+    expect(workspace.overwrite.value).toBeUndefined()
     wrapper.unmount()
   })
 

@@ -5,6 +5,7 @@ const claude: Record<string, string> = {
   ANTHROPIC_DEFAULT_HAIKU_MODEL: '已确认支持：Claude Code 2.0.17。',
   ANTHROPIC_DEFAULT_OPUS_MODEL: '最低支持版本：Claude Code 1.0.88。',
   ANTHROPIC_DEFAULT_SONNET_MODEL: '最低支持版本：Claude Code 1.0.88。',
+  ANTHROPIC_DEFAULT_FABLE_MODEL: '当前官方文档支持自定义 Fable 别名，字段首次支持版本未确认。',
   effort: '版本：xhigh 档位从 Claude Code 2.1.111 引入，档位是否有效还取决于模型。',
   context: '已确认支持：Claude Code 2.1.304。',
   permissionMode:

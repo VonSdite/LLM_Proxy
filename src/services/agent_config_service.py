@@ -33,6 +33,7 @@ from .agent_config_documents import (
     value_hash,
 )
 from .agent_extensions import AgentExtensions
+from .claude_env_cleanup import UNSET_DELAY, remove_pending, stage_unset
 
 SESSION_TTL = 30 * 60
 PREVIEW_TTL = 5 * 60
@@ -78,6 +79,7 @@ class AgentConfigService:
             Path(ctx.config_manager.get_database_path()).resolve().parent / "agent-config"
         )
         self.state = self.repository.load()
+        self.state.setdefault("claudeEnvCleanup", {})
         self.lock = RLock()
         self.sessions = {}
         self.credentials = {}
@@ -90,9 +92,69 @@ class AgentConfigService:
 
     def _cleanup_loop(self):
         while True:
-            gevent.sleep(60)
+            gevent.sleep(1)
             with self.lock:
                 self._expire()
+                try:
+                    self._cleanup_claude_env()
+                except Exception:
+                    self.ctx.logger.exception("Claude environment cleanup failed")
+
+    def _logical_file(self, target, key, raw):
+        """表单、原文编辑和版本校验使用最终内容，临时空值不影响编辑基线。"""
+        if target != "claude":
+            return raw
+        pending = self.state["claudeEnvCleanup"].get(key, {})
+        try:
+            return remove_pending(raw, pending.get("keys", []))
+        except ValueError:
+            # 外部损坏的文件仍可在原文编辑器中修复；后台清理等待有效内容。
+            return raw
+
+    def _cleanup_claude_env(self):
+        """单个后台任务扫描每份文件的一条清理记录，SSH 离线时保留记录。"""
+        with self.lock:
+            now = time.time()
+            next_state = None
+            for key, entry in list(self.state["claudeEnvCleanup"].items()):
+                if entry["due"] > now:
+                    continue
+                machine_id, path = entry["machine"], entry["path"]
+                try:
+                    valid = machine_id == "local" or machine_id in self.state["machines"]
+                    valid = valid and self._ownership_key(machine_id, path) == key
+                    if valid:
+                        files = (
+                            self.local
+                            if machine_id == "local"
+                            else next(
+                                (
+                                    session["files"]
+                                    for (_, target), session in self.sessions.items()
+                                    if target == machine_id and session["files"].alive()
+                                ),
+                                None,
+                            )
+                        )
+                        if files is None:
+                            continue
+                        before = files.read(path)
+                        after = remove_pending(before, entry["keys"])
+                        if before != after:
+                            mode = files.mode(path)
+                            if files.read(path) != before:
+                                continue
+                            files.write(path, after, mode)
+                    next_state = next_state or deepcopy(self.state)
+                    next_state["claudeEnvCleanup"].pop(key)
+                except Exception as exc:
+                    # 失败重试复用同一条记录，不建立额外任务，也不记录配置内容。
+                    self.ctx.logger.warning("Claude environment cleanup deferred: %s", type(exc).__name__)
+                    next_state = next_state or deepcopy(self.state)
+                    next_state["claudeEnvCleanup"][key]["due"] = now + 60
+            if next_state is not None:
+                self.repository.save(next_state)
+                self.state = next_state
 
     def _expire(self):
         now = time.monotonic()
@@ -405,6 +467,7 @@ class AgentConfigService:
                 raw = files.read(info["path"])
                 error = ""
                 try:
+                    raw = self._logical_file(target, self._ownership_key(machine_id, info["path"]), raw)
                     managed = self.extensions.visible(target, self.extensions.parse(target, _text(raw)))
                 except ValueError as exc:
                     managed, error = {}, str(exc)
@@ -553,10 +616,10 @@ class AgentConfigService:
             planned, rows = [], []
             for target in targets:
                 path = paths[target]["path"]
-                before = files.read(path)
+                ownership_key = self._ownership_key(machine_id, path)
+                before = self._logical_file(target, ownership_key, files.read(path))
                 if versions.get(target) != _version(before):
                     raise AgentConfigError("配置文件已被其他程序修改，请刷新后重新预览", "file_conflict", 409)
-                ownership_key = self._ownership_key(machine_id, path)
                 ownership = self.state["managed"].get(ownership_key, [])
                 if raw_inputs is not None:
                     content = raw_inputs.get(target, _text(before))
@@ -585,6 +648,13 @@ class AgentConfigService:
                         old_path = tuple(old["path"])
                         # V1 表单不清理历史版本登记过的 V2 权限字段。
                         if target == "opencode" and old_path and old_path[0] == "permissions":
+                            continue
+                        # 未选择默认模型时保留已登记的模型目录和参数，供客户端自行选用。
+                        if (
+                            target == "opencode"
+                            and not draft.get("model")
+                            and old_path[:3] == ("provider", "proxy", "models")
+                        ):
                             continue
                         current = at_path(data, old_path)
                         if old_path not in fields and current is not MISSING and value_hash(current) == old["hash"]:
@@ -676,15 +746,18 @@ class AgentConfigService:
                 raise AgentConfigError("保存预览已失效，请重新预览", "preview_expired", 409)
             paths = self._paths(machine_id, files)
             for entry in plan["files"]:
+                disk_before = files.read(entry["path"])
                 if (
                     paths[entry["target"]]["path"] != entry["path"]
-                    or files.read(entry["path"]) != entry["before"]
+                    or self._logical_file(entry["target"], entry["ownershipKey"], disk_before) != entry["before"]
                     or value_hash(self.state["managed"].get(entry["ownershipKey"], [])) != entry["ownershipBefore"]
                 ):
                     raise AgentConfigError("配置文件或管理状态已变化，请刷新后重新预览", "file_conflict", 409)
+                entry["diskBefore"] = disk_before
             changed = [entry for entry in plan["files"] if entry["before"] != entry["after"]]
             completed = []
             try:
+                next_state = deepcopy(self.state)
                 for entry in changed:
                     if entry["before"] is not None:
                         for index in range(5, 1, -1):
@@ -693,11 +766,27 @@ class AgentConfigService:
                                 files.write(f"{entry['path']}.bak.{index}", previous, entry["mode"])
                         files.write(f"{entry['path']}.bak.1", entry["before"], entry["mode"])
                 for entry in changed:
-                    if files.read(entry["path"]) != entry["before"]:
+                    if files.read(entry["path"]) != entry["diskBefore"]:
                         raise AgentConfigError("配置文件已在保存期间变化，请刷新", "file_conflict", 409)
-                    files.write(entry["path"], entry["after"] or b"", entry["mode"])
+                    written = entry["after"] or b""
+                    if entry["target"] == "claude":
+                        key = entry["ownershipKey"]
+                        pending = self.state["claudeEnvCleanup"].get(key, {})
+                        written, keys = stage_unset(entry["diskBefore"], written, pending.get("keys", []))
+                        if len(written) > 2 * 1024 * 1024:
+                            raise AgentConfigError("生成的配置文件超过 2 MiB 限制")
+                        if keys:
+                            next_state["claudeEnvCleanup"][key] = {
+                                "machine": machine_id,
+                                "path": entry["path"],
+                                "keys": keys,
+                                "due": time.time() + UNSET_DELAY,
+                            }
+                        else:
+                            next_state["claudeEnvCleanup"].pop(key, None)
+                    entry["written"] = written
+                    files.write(entry["path"], written, entry["mode"])
                     completed.append(entry)
-                next_state = deepcopy(self.state)
                 for entry in plan["files"]:
                     next_state["managed"][entry["ownershipKey"]] = entry["ownershipAfter"]
                 self.repository.save(next_state)
@@ -706,12 +795,12 @@ class AgentConfigService:
                 failed = []
                 for entry in reversed(completed):
                     try:
-                        if files.read(entry["path"]) != entry["after"]:
+                        if files.read(entry["path"]) != entry["written"]:
                             raise AgentConfigError("回滚期间配置被其他程序修改")
-                        if entry["before"] is None:
+                        if entry["diskBefore"] is None:
                             files.remove(entry["path"])
                         else:
-                            files.write(entry["path"], entry["before"], entry["mode"])
+                            files.write(entry["path"], entry["diskBefore"], entry["mode"])
                     except Exception:
                         failed.append(entry["target"])
                 if failed:
@@ -737,13 +826,17 @@ class AgentConfigService:
             for target in self.extensions.agents[agent]["files"]:
                 path = paths[target]["path"]
                 raw = files.read(path + (f".bak.{backup}" if backup else ""))
+                key = self._ownership_key(machine_id, path)
+                current = self._logical_file(target, key, files.read(path) if backup else raw)
+                if not backup:
+                    raw = current
                 result.append(
                     {
                         "target": target,
                         "path": path,
                         "exists": raw is not None,
                         "text": _text(raw),
-                        "version": _version(files.read(path)) if backup else _version(raw),
+                        "version": _version(current),
                     }
                 )
             return {"files": result}

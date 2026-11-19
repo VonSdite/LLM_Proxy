@@ -14,6 +14,8 @@ import { createDraft, fileVersions } from './configuration'
 import { notify } from '@/components/ui'
 import { AGENT_DEFINITIONS, agentDefinition, installAgentDefinitions } from './registry'
 
+const FILE_CONFLICT_MESSAGE = '配置文件已被其他程序修改，可保存并确认覆盖，或刷新配置'
+
 interface MachineState {
   snapshot: AgentSnapshot
   drafts: Record<AgentId, AgentDraft>
@@ -23,6 +25,7 @@ interface PreviewState extends Partial<AgentPreview> {
   key: string
   pending: boolean
   error: string
+  conflict?: boolean
   saved?: boolean
 }
 export function useAgentWorkspace() {
@@ -36,6 +39,12 @@ export function useAgentWorkspace() {
   const error = ref('')
   const saving = ref(false)
   const editorOpen = ref(false)
+  const overwrite = shallowRef<{
+    id: string
+    agent: AgentId
+    key: string
+    ticket: AgentPreview
+  }>()
   const fingerprint = ref<{ machineId: string; fingerprint: string; keyType: string }>()
   const machine = computed(() => machines.value.find((item) => item.id === selectedId.value))
   const state = computed(() => states[selectedId.value])
@@ -234,7 +243,7 @@ export function useAgentWorkspace() {
             current.snapshot.files[target]?.version !== snapshot.files[target]?.version ||
             current.snapshot.files[target]?.path !== snapshot.files[target]?.path,
         )
-        if (changed) notify('配置文件已变化，已保留未保存的修改；请重新读取后编辑')
+        if (changed) notify('配置文件已变化，已保留未保存的修改；可保存并确认覆盖，或刷新配置')
       }
     } catch (reason) {
       if (!disposed && !controller.signal.aborted && !isAbort(reason)) fail(reason, id)
@@ -250,11 +259,21 @@ export function useAgentWorkspace() {
       ? JSON.stringify({ draft: draft.value, versions: fileVersions(state.value.snapshot) })
       : '',
   )
+  watch([formKey, previewId], () => {
+    overwrite.value = undefined
+  })
   watch(
-    [formKey, previewId, saving, editorOpen, loading],
+    [formKey, previewId, saving, editorOpen, loading, overwrite],
     async () => {
       previewController?.abort()
-      if (!formKey.value || saving.value || loading.value || editorOpen.value || !state.value)
+      if (
+        !formKey.value ||
+        saving.value ||
+        loading.value ||
+        editorOpen.value ||
+        overwrite.value ||
+        !state.value
+      )
         return
       const key = formKey.value
       const id = selectedId.value
@@ -263,7 +282,14 @@ export function useAgentWorkspace() {
       const previous = previews[cache]
       // 保存已确认当前文件与草稿；后续编辑或重新读取时再生成预览。
       if (previous?.saved && previous.key === key) return
-      previews[cache] = { ...previous, key, pending: true, error: '', saved: false }
+      previews[cache] = {
+        ...previous,
+        key,
+        pending: true,
+        error: '',
+        conflict: false,
+        saved: false,
+      }
       const body = JSON.parse(key) as { draft: AgentDraft; versions: Record<string, string> }
       const controller = new AbortController()
       previewController = controller
@@ -282,7 +308,8 @@ export function useAgentWorkspace() {
             ...previews[cache],
             key,
             pending: false,
-            error: errorMessage(reason),
+            error: isConflict(reason) ? FILE_CONFLICT_MESSAGE : errorMessage(reason),
+            conflict: isConflict(reason),
           }
           if (reason instanceof ApiError && reason.details.code === 'disconnected') fail(reason, id)
         }
@@ -290,6 +317,21 @@ export function useAgentWorkspace() {
     },
     { immediate: true },
   )
+  function isConflict(reason: unknown) {
+    return reason instanceof ApiError && reason.details.code === 'file_conflict'
+  }
+  function saveFailed(reason: unknown, id: string, agent: AgentId, key: string) {
+    if (disposed || isAbort(reason)) return
+    if (isConflict(reason)) {
+      previews[`${id}:${agent}`] = {
+        ...previews[`${id}:${agent}`],
+        key,
+        pending: false,
+        error: FILE_CONFLICT_MESSAGE,
+        conflict: true,
+      }
+    } else fail(reason, id)
+  }
   function settleSavedPreview(id: string, agent: AgentId, ticket: AgentPreview) {
     const current = states[id]!
     previews[`${id}:${agent}`] = {
@@ -308,6 +350,7 @@ export function useAgentWorkspace() {
     if (saving.value || loading.value || !state.value || !draft.value || !ready.value) return
     const id = selectedId.value
     const agent = activeAgent.value
+    const key = formKey.value
     const payload = JSON.parse(formKey.value) as {
       draft: AgentDraft
       versions: Record<string, string>
@@ -329,8 +372,63 @@ export function useAgentWorkspace() {
         notify('配置已保存，已有文件保留最近 5 份备份')
       }
     } catch (reason) {
-      fail(reason, id)
+      if (!isConflict(reason)) saveFailed(reason, id, agent, key)
+      else {
+        try {
+          // 基于最新文件生成待确认票据，草稿和编辑基线在确认前保持不变。
+          const snapshot = await agentsApi.snapshot(id, loadController.signal)
+          if (disposed) return
+          const ticket = await agentsApi.preview(
+            id,
+            agent,
+            { ...payload, versions: fileVersions(snapshot) },
+            loadController.signal,
+          )
+          if (
+            disposed ||
+            key !== formKey.value ||
+            id !== selectedId.value ||
+            agent !== activeAgent.value
+          )
+            return
+          if (ticket.hasChanges) overwrite.value = { id, agent, key, ticket }
+          else {
+            install(snapshot, agent)
+            settleSavedPreview(id, agent, ticket)
+            notify('配置已是最新')
+          }
+        } catch (retryReason) {
+          saveFailed(retryReason, id, agent, key)
+        }
+      }
     } finally {
+      saving.value = false
+    }
+  }
+  async function confirmOverwrite() {
+    const plan = overwrite.value
+    if (
+      !plan ||
+      saving.value ||
+      loading.value ||
+      plan.key !== formKey.value ||
+      plan.id !== selectedId.value ||
+      plan.agent !== activeAgent.value
+    )
+      return
+    saving.value = true
+    error.value = ''
+    try {
+      // 使用用户确认的票据，文件再次变化时仍由服务端拒绝写入。
+      const result = await agentsApi.apply(plan.id, plan.ticket.token, loadController.signal)
+      if (disposed) return
+      install(result, plan.agent)
+      settleSavedPreview(plan.id, plan.agent, plan.ticket)
+      notify('配置已保存，已有文件保留最近 5 份备份')
+    } catch (reason) {
+      saveFailed(reason, plan.id, plan.agent, plan.key)
+    } finally {
+      overwrite.value = undefined
       saving.value = false
     }
   }
@@ -357,6 +455,8 @@ export function useAgentWorkspace() {
     saving,
     preview,
     editorOpen,
+    overwrite,
+    confirmOverwrite,
     fingerprint,
     start,
     select,

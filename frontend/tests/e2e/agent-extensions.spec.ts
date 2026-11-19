@@ -3,7 +3,9 @@ import { mockAdmin } from '../browser-fixtures'
 import { addExtensionFixtures } from '../agent-extension-fixtures'
 import type { PreviewInput } from '@/api/agents'
 
-test('DSH 与 Hermes 从目录定义生成表单、数值失焦提交、布尔值和草稿保留', async ({ page }) => {
+test('DSH 与 Hermes 从目录定义生成表单、数值失焦提交、布尔值和草稿保留', async ({
+  page,
+}, testInfo) => {
   const fixture = await mockAdmin(page)
   addExtensionFixtures(fixture)
   await page.goto('/agents')
@@ -28,6 +30,25 @@ test('DSH 与 Hermes 从目录定义生成表单、数值失焦提交、布尔�
   await expect.poll(() => draft('dsh')?.values?.context).toBeUndefined()
   await context.press('Tab')
   await expect.poll(() => draft('dsh')?.values?.context).toBe(131072)
+  const effort = page.getByRole('combobox', { name: '思考强度', exact: true })
+  await effort.click()
+  await page.screenshot({ path: testInfo.outputPath('dsh-effort-options.png') })
+  await page.getByRole('option', { name: '高（high）', exact: true }).click()
+  await expect(effort).toHaveText('高（high）')
+  await expect.poll(() => draft('dsh')?.values?.effort).toBe('high')
+  for (const [value, label] of [
+    ['minimal', '极低（minimal）'],
+    ['xhigh', '极高（xhigh）'],
+    ['max', '最高（max）'],
+  ]) {
+    await effort.click()
+    await page.getByRole('option', { name: label, exact: true }).click()
+    await expect.poll(() => draft('dsh')?.values?.effort).toBe(value)
+  }
+  await effort.click()
+  await page.getByRole('option', { name: '不设置', exact: true }).click()
+  await expect(effort).toHaveText('不设置')
+  await expect.poll(() => draft('dsh')?.values?.effort).toBeNull()
   await page.getByRole('tab', { name: 'Hermes', exact: true }).click()
   const memory = page.getByRole('combobox', { name: '长期记忆', exact: true })
   await expect(memory).toHaveText('启用')
@@ -45,6 +66,9 @@ test('DSH 与 Hermes 从目录定义生成表单、数值失焦提交、布尔�
   await permission.click()
   await page.getByRole('option', { name: '不设置', exact: true }).click()
   await expect.poll(() => draft('dsh')?.values?.permission).toBeNull()
+  await page.getByRole('combobox', { name: '默认主模型', exact: true }).click()
+  await page.getByRole('option', { name: '不设置', exact: true }).click()
+  await expect(effort).toBeDisabled()
   expect(fixture.unexpected).toEqual([])
 })
 

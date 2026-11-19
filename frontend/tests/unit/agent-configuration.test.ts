@@ -106,6 +106,7 @@ describe('Agent 配置语义', () => {
   })
   it('默认模型优先使用无 Provider 前缀的候选', () => {
     const source = snapshot()
+    source.files.codex!.exists = false
     const context: AgentBootstrap = {
       ...bootstrap,
       models: ['main/claude-sonnet-4-6', 'glm-5.3', 'other/claude-sonnet-4-6', 'gpt-5.6-luna'],
@@ -115,6 +116,28 @@ describe('Agent 配置语义', () => {
     expect(createDraft('claude', source, context, [source.machine]).models?.ANTHROPIC_MODEL).toBe(
       'glm-5.3',
     )
+  })
+  it('已有 Codex 文件未配置模型时保持不设置，显式清空可保存并重新选择', () => {
+    const source = snapshot()
+    expect(draft('codex', source).model).toBe('')
+    source.files.codex!.managed.model = 'main/gpt-5'
+    const form = draft('codex', source)
+    setModel(form, '')
+    expect(form.model).toBe('')
+    expect(form.clearFields).toContain('model')
+    delete source.files.codex!.managed.model
+    expect(draft('codex', source).model).toBe('')
+    setModel(form, 'main/gpt-5')
+    expect(form.clearFields).toBeUndefined()
+  })
+  it('已有 Opencode v1 文件缺少默认模型时保留不设置', () => {
+    const source = snapshot()
+    source.files.opencode!.managed = {
+      'provider.proxy.options.baseURL': 'https://proxy.example/v1',
+      'provider.proxy.models.main/org/model.v1': { limit: { context: 200000 } },
+    }
+    expect(draft('opencode', source).model).toBe('')
+    expect(draft('opencode', source).limits.context).toBeNull()
   })
   it('Provider 候选优先展示，所有模型表候选保留且不覆盖编辑或清空的参数', () => {
     const context = {
@@ -316,14 +339,26 @@ describe('Agent 配置语义', () => {
   it('一键模型立即同步，单个模型不同时显示空值，清空有显式移除标记', () => {
     const value = draft('claude')
     setAllClaudeModels(value, 'external/new-model')
+    expect(value.models?.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe('external/new-model')
     expect(new Set(Object.values(value.models!))).toEqual(new Set(['external/new-model']))
     expect(uniformClaudeModel(value)).toBe('external/new-model')
     setModel(value, 'other', 'ANTHROPIC_MODEL')
     expect(uniformClaudeModel(value)).toBe('')
     setAllClaudeModels(value, '')
-    expect(value.clearFields).toHaveLength(4)
+    expect(value.clearFields).toHaveLength(5)
+    expect(value.clearFields).toContain('models.ANTHROPIC_DEFAULT_FABLE_MODEL')
     setRuntime(value, 'sandboxEnabled', 'unset')
     expect(value.clearFields).toContain('runtime.sandboxEnabled')
+  })
+
+  it('Fable 已有模型回显，并作为别名模型提供参数参考', () => {
+    const source = snapshot()
+    source.files.claude!.managed = { 'env.ANTHROPIC_DEFAULT_FABLE_MODEL': 'main/claude-sonnet-4-6' }
+    const value = draft('claude', source)
+    expect(value.models?.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe('main/claude-sonnet-4-6')
+    expect(
+      limitCandidates('claude', value, 'context', bootstrap).map((item) => item.referenceModel),
+    ).toContain('main/claude-sonnet-4-6')
   })
 
   it('显示相同百分比时保留原始精确压缩 Token，真正修改才重新计算', () => {

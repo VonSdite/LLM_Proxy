@@ -151,15 +151,25 @@ Agent 定义集中在根目录 `agents/`。新增 `agents/<id>/agent.yaml` 并�
 
 Claude 支持权限模式（含 `bypassPermissions`）、命令沙箱和运行参数。字段含义、平台限制及版本依据见 [Agent 配置与兼容性](agent-configuration.md)。
 
+清除 Claude 模型、API 地址或凭据等允许列表内的环境变量时，保存先写空字符串，最后一次实际保存约 10 秒后移除仍为空的字段。每个文件合并为一条待清理记录，频繁保存不会创建多个定时任务，重新填写的值会保留；页面和原文编辑器展示最终删除后的内容。服务重启后继续清理，SSH 离线时等待连接恢复。`ANTHROPIC_MODEL` 参与启动时的主模型选择，修改环境变量不保证切换运行中会话；终端可使用 `/model`，VS Code 可使用 **Switch model…** 切换当前会话。详见 [环境变量清除与当前会话](agent-configuration.md#24-环境变量清除与当前会话)。
+
 `/agents` 左侧管理机器，右侧按 Claude、Codex、Opencode v1 / v2、DSH、Hermes 编辑模型、API 地址、下游 API Key 和运行设置。API 地址可自由填写，指向本服务时，模型下拉来自当前启用的 Provider、OAuth 与模型映射；指向外部服务时，模型 ID 使用手动输入，切换地址时保留当前模型值。保存预览展示逐字段变化，已有文件保留最近五份 `.bak.1` 至 `.bak.5` 备份。点击已存在文件的路径可在网页内编辑和载入备份，编辑器提供 JSON / JSONC / TOML / YAML 语法高亮；点击保存自动校验并写入当前打开的文件。关闭有未保存修改的编辑器时，可选择保存并关闭、不保存或继续编辑。
 
 “本机”指运行 LLM_Proxy 的机器与用户。Windows 与 Linux 均可编辑本机文件，SSH 机器使用远程用户的真实主目录。文件路径旁的设置按钮支持各 Agent 配置文件的独立路径；Codex 的 `config.toml` 与 `auth.json`、DSH 的 profile 补丁与凭据文件分别设置。路径按机器和 Agent 持久保存，重新访问和服务重启后继续使用，清空或恢复默认后使用默认位置。本机默认路径支持 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`DSH_HOME` 与 `HERMES_HOME`。原有其他配置及 JSONC、TOML、YAML 注释保留，单文件上限为 2 MiB，保存遇到文件版本变化时提示刷新。
+
+各 Agent 表单遇到外部文件修改时保留当前草稿，有待保存修改时仍可点击“保存”。覆盖确认展示相对于最新文件的字段变化，确认后写入并保留备份；确认期间文件再次变化时需要重新确认。红色提示旁的小号刷新图标按钮可直接加载当前 Agent 的最新配置，有未保存修改时先确认是否放弃草稿。字段校验错误仍需修正后保存。
 
 模型参数输入显示当前文件值，推荐菜单保留模型对应的全部候选值、模型名称及来源说明；切换模型和手填外部模型 ID 更新候选，选择候选后填入参数。Claude 优先参考主模型或唯一已配置模型；主模型为空且其他模型不一致时，菜单直接列出各模型的候选值。各模型旁的问号提供上下文和最大输出参考值，未识别模型显示通用候选。Codex 的压缩上限与 opencode 的压缩预留显示在压缩阈值标题旁，数值输入失焦且内容变化时更新，选择候选值时即时更新。
 
 Codex 记忆设置对应 `features.memories`，支持启用、禁用和不设置；未配置时显示不设置，主动选择不设置时移除该字段。
 
+Claude 的五项模型设置（主模型、Haiku、Opus、Sonnet、Fable）、顶部“一键设置模型”以及 Codex、Opencode v1 / v2、DSH、Hermes 的默认模型均支持“不设置”；外部服务地址下可直接清空模型输入。Claude 一键选择“不设置”同时清空五项。保存时删除当前文件的对应模型覆盖，重新打开保持“不设置”，连接与已注册模型列表保留。DSH 移除整组默认选择覆盖，下层 profile 需提供有效默认模型；全局默认覆盖存在时会阻止 DSH 保存不同的 profile 默认选择。Hermes 仅删除 `model.default`。客户端最终使用的模型由其他配置或默认规则决定，并需在目标服务可用。
+
 模型参数表位于 [`src/config/agent_model_limits.json`](../src/config/agent_model_limits.json)，新增模型、别名和候选值的格式见 [Agent 模型参数表维护](agent-configuration.md)。执行 `uv run python scripts/check_agent_model_limits.py` 可检查表内命名、数值与候选一致性。
+
+DSH 的思考强度支持“不设置”和 off、minimal、low、medium、high、xhigh、max；当前 llm-pi-ai 路由不支持 ultra 档位。可用档位以该模型在 DSH 中的声明为准，未声明时使用“不设置”。
+
+Hermes 的思考强度包含 max 与 ultra；ultra 是 Hermes 内部档位，实际请求强度由 Hermes 按模型及路由能力转换。
 
 SSH 支持密码或服务进程可用的 SSH Agent / 默认密钥，首次未知主机显示指纹确认。代理模式包括直连、服务进程的系统代理及自定义 `http://`、`https://`、`socks5://`、`socks5h://`，HTTP(S) 使用 CONNECT 隧道，HTTPS 校验证书。密码及代理认证信息在当前浏览器会话中暂存，闲置三十分钟清理，服务重启后重新填写。机器和路径登记保存在数据库同级的 `agent-config/state.json`。
 

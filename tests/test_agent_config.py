@@ -76,6 +76,17 @@ def draft(agent="claude"):
 
 
 class ConfigDocumentTests(unittest.TestCase):
+    def test_codex_and_opencode_accept_an_unset_default_model(self):
+        data = draft("codex")
+        data["model"] = ""
+        self.assertNotIn(("model",), desired_fields("codex", data, [])["codex"])
+        fields = desired_fields("opencode", data, ["main/model"])["opencode"]
+        self.assertNotIn(("model",), fields)
+        self.assertFalse(any("models" in path for path in fields))
+        for invalid in ("x" * 513, "bad\nmodel"):
+            with self.subTest(model=invalid), self.assertRaises(ValueError):
+                desired_fields("codex", {**data, "model": invalid}, [])
+
     def test_opencode_sharing_updates_and_disabled_providers(self):
         data = draft("opencode")
         data["runtime"].update(disabledProviders="openai, anthropic，openai", share="disabled", autoupdate="false")
@@ -367,6 +378,51 @@ class AgentConfigFixture(unittest.TestCase):
 
 
 class AgentConfigServiceTests(AgentConfigFixture):
+    def test_opencode_unset_default_preserves_registered_models(self):
+        result = self.save("opencode")
+        path = Path(result["files"]["opencode"]["path"])
+        original = parse_document("opencode", path.read_text(encoding="utf-8"))
+        data = draft("opencode")
+        data.update(model="", clearFields=["model"])
+        preview = self.preview("opencode", data)
+        self.assertTrue(any(row["path"] == "model" and row["kind"] == "remove" for row in preview["rows"]))
+        result = self.service.apply(self.owner, "local", preview["token"])
+        self.assertNotIn("model", result["files"]["opencode"]["managed"])
+        saved = parse_document("opencode", path.read_text(encoding="utf-8"))
+        self.assertEqual(original["provider"], saved["provider"])
+        self.assertNotIn("", saved["provider"]["proxy"]["models"])
+        self.assertFalse(self.preview("opencode", data)["hasChanges"])
+        data.pop("clearFields")
+        self.assertFalse(self.preview("opencode", data)["hasChanges"])
+        data["model"] = "main/new"
+        self.assertEqual("proxy/main/new", self.save("opencode", data)["files"]["opencode"]["managed"]["model"])
+
+    def test_codex_model_clear_round_trip_preserves_other_configuration(self):
+        path = Path(self.snapshot()["files"]["codex"]["path"])
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            '# 用户配置\nmodel = "existing-model"\n\n[mcp_servers.test]\ncommand = "uvx"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        data = draft("codex")
+        data["model"] = ""
+        data["clearFields"] = ["model"]
+        preview = self.preview("codex", data)
+        self.assertTrue(any(row["path"] == "model" and row["kind"] == "remove" for row in preview["rows"]))
+        result = self.service.apply(self.owner, "local", preview["token"])
+        self.assertNotIn("model", result["files"]["codex"]["managed"])
+        text = path.read_text(encoding="utf-8")
+        saved = parse_document("codex", text)
+        self.assertNotIn("model", saved)
+        self.assertEqual("uvx", saved["mcp_servers"]["test"]["command"])
+        self.assertIn("# 用户配置", text)
+        self.assertFalse(self.preview("codex", data)["hasChanges"])
+        data.pop("clearFields")
+        self.assertFalse(self.preview("codex", data)["hasChanges"])
+        data["model"] = "main/org/model.v1"
+        self.assertEqual(data["model"], self.save("codex", data)["files"]["codex"]["managed"]["model"])
+
     def test_opencode_permissions_round_trip_clear_and_preserve_custom_rules(self):
         path = Path(self.snapshot()["files"]["opencode"]["path"])
         path.parent.mkdir(parents=True)
@@ -764,7 +820,7 @@ class AgentConfigServiceTests(AgentConfigFixture):
         )
         self.service.apply(self.owner, "local", preview["token"])
         env = json.loads(path.read_text(encoding="utf-8"))["env"]
-        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
+        self.assertEqual("", env["ANTHROPIC_AUTH_TOKEN"])
         self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)
         self.assertEqual("keep", env["OTHER_SETTING"])
         with self.assertRaises(ValueError):
@@ -785,6 +841,32 @@ class AgentConfigServiceTests(AgentConfigFixture):
         changed["clearFields"] = ["models.ANTHROPIC_MODEL"]
         saved = self.save(data=changed)
         self.assertNotIn("env.ANTHROPIC_MODEL", saved["files"]["claude"]["managed"])
+
+    def test_claude_fable_roundtrip_and_unset_preserve_other_settings(self):
+        key = "ANTHROPIC_DEFAULT_FABLE_MODEL"
+        path = Path(self.snapshot()["files"]["claude"]["path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"env": {key: "external/fable", key + "_NAME": "My model", "OTHER": "keep"}}),
+            encoding="utf-8",
+            newline="\n",
+        )
+        self.assertEqual("external/fable", self.snapshot()["files"]["claude"]["managed"]["env." + key])
+        data = draft()
+        data["models"][key] = "main/custom-model[1m]"
+        saved = self.save(data=data)
+        self.assertEqual("main/custom-model[1m]", saved["files"]["claude"]["managed"]["env." + key])
+        data["models"][key] = ""
+        data["clearFields"] = ["models." + key]
+        saved = self.save(data=data)
+        self.assertNotIn("env." + key, saved["files"]["claude"]["managed"])
+        self.assertEqual("", json.loads(path.read_text(encoding="utf-8"))["env"][key])
+        with patch("src.services.agent_config_service.time.time", return_value=time.time() + 20):
+            self.service._cleanup_claude_env()
+        env = json.loads(path.read_text(encoding="utf-8"))["env"]
+        self.assertNotIn(key, env)
+        self.assertEqual("My model", env[key + "_NAME"])
+        self.assertEqual("keep", env["OTHER"])
 
     def test_backup_rotation_and_raw_restore(self):
         for index in range(7):

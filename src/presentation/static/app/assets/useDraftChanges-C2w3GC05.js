@@ -1,1 +1,0 @@
-import{tt as e}from"./index-OjlU2IvK.js";function t(t){let n=JSON.stringify(t());return e(()=>JSON.stringify(t())!==n)}export{t};

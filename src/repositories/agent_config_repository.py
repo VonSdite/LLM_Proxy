@@ -1,6 +1,7 @@
 """Agent 目标机器、配置路径与受管字段摘要的持久化。"""
 
 import json
+import math
 import os
 import posixpath
 from copy import deepcopy
@@ -26,6 +27,20 @@ class AgentConfigRepository:
                 not isinstance(data.get(key), dict) for key in ("machines", "paths", "managed")
             ):
                 raise ValueError
+            pending = data.get("claudeEnvCleanup", {})
+            if not isinstance(pending, dict):
+                raise ValueError
+            for key, entry in pending.items():
+                if (
+                    not isinstance(key, str)
+                    or not isinstance(entry, dict)
+                    or not all(isinstance(entry.get(name), str) for name in ("machine", "path"))
+                    or not isinstance(entry.get("keys"), list)
+                    or not all(isinstance(name, str) for name in entry["keys"])
+                    or type(entry.get("due")) not in (int, float)
+                    or not math.isfinite(entry["due"])
+                ):
+                    raise ValueError
             for machine_id, paths in data["paths"].items():
                 if isinstance(paths, str) and data["version"] == 1:
                     paths = {"opencode": paths} if paths else {}

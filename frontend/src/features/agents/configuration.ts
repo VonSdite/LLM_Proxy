@@ -15,6 +15,7 @@ export const CLAUDE_MODEL_KEYS = [
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_FABLE_MODEL',
 ] as const
 export const CLAUDE_MODES = [
   {
@@ -162,7 +163,7 @@ export function createDraft(
       } else if (!file.exists && field.default !== undefined) values[field.id] = field.default
       else if (field.role === 'baseUrl')
         values[field.id] = defaultBaseUrl(snapshot.machine, agent, bootstrap)
-      else if (field.component === 'model' && field.required) {
+      else if (field.component === 'model' && (field.required || !file.exists)) {
         const address = definition.fields?.find((item) => item.role === 'baseUrl')
         const base = address
           ? String(
@@ -255,7 +256,9 @@ export function createDraft(
       apiKey: textValue(files.codexAuth!.managed.OPENAI_API_KEY),
       model:
         textValue(m.model) ||
-        (isOwnServiceUrl(baseUrl, bootstrap, machines) ? defaultModel(agent, bootstrap) : ''),
+        (!files.codex!.exists && isOwnServiceUrl(baseUrl, bootstrap, machines)
+          ? defaultModel(agent, bootstrap)
+          : ''),
       runtime: {
         serviceTier: textValue(m.service_tier),
         modelReasoningEffort: textValue(m.model_reasoning_effort),
@@ -276,7 +279,7 @@ export function createDraft(
   const storedProvider = storedModel.split('/')[0] || ''
   const candidate =
     storedProvider === PROXY_PROVIDER ? storedModel.slice(storedProvider.length + 1) : ''
-  let model = candidate || defaultModel(agent, bootstrap)
+  let model = candidate || (!files.opencode!.exists ? defaultModel(agent, bootstrap) : '')
   const provider = PROXY_PROVIDER
   const baseUrl = textValue(m[`provider.${provider}.options.baseURL`]) || baseDefault
   if (!candidate && !isOwnServiceUrl(baseUrl, bootstrap, machines)) model = ''

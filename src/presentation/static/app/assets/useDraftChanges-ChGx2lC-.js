@@ -1,0 +1,1 @@
+import{tt as e}from"./index-BKQF7NX_.js";function t(t){let n=JSON.stringify(t());return e(()=>JSON.stringify(t())!==n)}export{t};

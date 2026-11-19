@@ -4,7 +4,7 @@ order: 40
 help:
   - DeepSeek Harness；默认编辑全局 cordis.patch.yml，Web、Desktop、headless、SDK、ACP 共用，无需重复配置。自定义路径可单独指定某个 profile。
   - 本页管理 proxy 模型路由，并将其设为新会话的默认模型；保留其他路由和插件配置。
-  - 全局补丁优先于 profile 补丁；启动参数和 DSH 内已保存的设置可能覆盖默认值。profile 需加载对应模型与权限插件，sdk-minimal 不包含完整插件组合。
+  - 全局补丁优先于 profile 补丁，会阻止 DSH 保存不同的默认模型；选择不设置可撤销此文件的默认模型覆盖。会话内仍可切换模型。profile 需加载对应模型与权限插件，sdk-minimal 不包含完整插件组合。
 files:
   dsh:
     path: ~/.dsh/cordis.patch.yml
@@ -40,8 +40,7 @@ fields:
     component: model
     file: dsh
     path: [selection, model]
-    required: true
-    help: [将模型加入 proxy 路由并设为新 Agent 的默认模型；已有会话可以保留自身的模型选择。]
+    help: [将模型加入 proxy 路由并设为新 Agent 的默认模型；不设置时移除整组默认选择覆盖（包括服务与思考强度），保留模型列表和连接。下层 profile 需提供有效的默认模型。]
   - id: protocol
     group: models
     label: API 协议
@@ -73,10 +72,20 @@ fields:
   - id: effort
     group: parameters
     label: 思考强度
-    component: text
+    component: select
     file: dsh
     path: [selection, reasoningEffort]
-    help: [填写该模型声明的推理档位，例如 low、medium、high；未声明档位的模型应留空。]
+    options:
+      - {value: 'off', label: 关闭（off）}
+      - {value: minimal, label: 极低（minimal）}
+      - {value: low, label: 低（low）}
+      - {value: medium, label: 中（medium）}
+      - {value: high, label: 高（high）}
+      - {value: xhigh, label: 极高（xhigh）}
+      - {value: max, label: 最高（max）}
+    help:
+      - 当前 llm-pi-ai 路由支持 off、minimal、low、medium、high、xhigh、max；候选不代表当前模型全部支持，ultra 不是该适配器的档位。
+      - 模型需先在 DSH 中声明推理档位；未声明时请选择不设置。不设置沿用默认行为，off 的实际效果取决于适配器及模型兼容配置。
   - id: context
     limit: context
     group: parameters

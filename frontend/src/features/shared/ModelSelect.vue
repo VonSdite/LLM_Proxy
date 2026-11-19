@@ -42,6 +42,7 @@ const options = computed<SelectOption[]>(() => {
     :options="options"
     :disabled="disabled"
     :placeholder="placeholder || (allowUnset ? '不设置' : '选择模型')"
+    :show-placeholder-when-empty="!!placeholder"
     @update:model-value="emit('update:modelValue', $event)"
   />
   <UiInput

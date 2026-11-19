@@ -20,6 +20,7 @@ const props = withDefaults(
     modelValue?: string
     options: SelectOption[]
     placeholder?: string
+    showPlaceholderWhenEmpty?: boolean
     disabled?: boolean
     allowCustom?: boolean
     displayLabel?: boolean
@@ -32,6 +33,13 @@ const field = useField()
 const open = ref(false)
 const search = ref('')
 const visible = ref(false)
+// Reka 禁止空字符串选项；使用内部对象表示空值，避免与用户输入的字符串冲突。
+const empty = { unset: true }
+const value = computed(() =>
+  props.modelValue === '' && props.options.some((option) => option.value === '')
+    ? empty
+    : props.modelValue,
+)
 const filtered = computed(() => {
   const query = search.value.toLowerCase()
   return props.options.filter((option) =>
@@ -42,8 +50,9 @@ watch(open, (value) => {
   if (!value) search.value = ''
 })
 function select(value: unknown) {
-  emit('update:modelValue', String(value ?? ''))
-  emit('select', String(value ?? ''))
+  const next = typeof value === 'object' ? '' : String(value ?? '')
+  emit('update:modelValue', next)
+  emit('select', next)
   search.value = ''
 }
 function input(value: string | number) {
@@ -52,6 +61,8 @@ function input(value: string | number) {
   open.value = true
 }
 function display(value: unknown) {
+  if (typeof value === 'object') value = ''
+  if (value === '' && props.showPlaceholderWhenEmpty) return ''
   if ((props.allowCustom && !props.displayLabel) || props.secret) return String(value ?? '')
   return props.options.find((o) => o.value === value)?.label || String(value ?? '')
 }
@@ -59,7 +70,7 @@ function display(value: unknown) {
 <template>
   <ComboboxRoot
     v-model:open="open"
-    :model-value="modelValue"
+    :model-value="value"
     :disabled="disabled"
     :ignore-filter="true"
     :reset-search-term-on-blur="!allowCustom"
@@ -115,7 +126,7 @@ function display(value: unknown) {
           <ComboboxItem
             v-for="option in filtered"
             :key="option.value"
-            :value="option.value"
+            :value="option.value === '' ? empty : option.value"
             :disabled="option.disabled"
             class="ui-combobox-item"
           >

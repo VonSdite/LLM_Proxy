@@ -244,6 +244,70 @@ class AgentExtensionTests(unittest.TestCase):
         self.assertTrue(Path(target).is_file())
         self.assertFalse((self.directory / "home/.config/opencode/opencode.json").exists())
 
+    def test_optional_default_models_clear_and_round_trip(self):
+        for agent, target in (("opencode_v2", "opencodeV2"), ("dsh", "dsh"), ("hermes", "hermes")):
+            with self.subTest(agent=agent):
+                values = {
+                    "base-url": "http://localhost:8080/v1",
+                    "api-key": "test-key",
+                    "model": "main/model",
+                    "effort": "high",
+                    "context": 200000,
+                    "output": 32000,
+                }
+                if agent == "hermes":
+                    values.pop("output")
+                    values["provider"] = "custom"
+                self.save(agent, values)
+                path = Path(self.service.snapshot("browser", "local")["files"][target]["path"])
+                load = lambda: (
+                    parse_document("json", path.read_text(encoding="utf-8"))
+                    if agent == "opencode_v2"
+                    else yaml_load(path.read_text(encoding="utf-8"))
+                )
+                original = load()
+                values["model"] = None
+                ticket = self.save(agent, values)
+                self.assertTrue(ticket["hasChanges"])
+                saved = load()
+                if agent == "opencode_v2":
+                    self.assertNotIn("model", saved)
+                    self.assertEqual(original["providers"], saved["providers"])
+                    self.assertNotIn("", saved["providers"]["proxy"]["models"])
+                elif agent == "dsh":
+                    self.assertFalse(any(row["id"] == "agent-default-model" for row in saved))
+                    self.assertEqual([row for row in original if row["id"] != "agent-default-model"], saved)
+                else:
+                    self.assertNotIn("default", saved["model"])
+                    expected = original["model"].copy()
+                    expected.pop("default")
+                    self.assertEqual(expected, saved["model"])
+                managed = self.service.snapshot("browser", "local")["files"][target]["managed"]
+                self.assertNotIn("model", managed)
+                self.assertFalse(self.save(agent, values)["hasChanges"])
+                values.pop("model")
+                self.assertFalse(self.save(agent, values)["hasChanges"])
+                values["model"] = "main/new"
+                self.save(agent, values)
+                self.assertEqual(
+                    "main/new", self.service.snapshot("browser", "local")["files"][target]["managed"]["model"]
+                )
+
+    def test_new_connections_without_default_do_not_create_empty_model_entries(self):
+        for agent, target in (("opencode_v2", "opencodeV2"), ("dsh", "dsh"), ("hermes", "hermes")):
+            with self.subTest(agent=agent):
+                values = {"base-url": "https://example.com/v1", "model": None}
+                self.save(agent, values)
+                snapshot = self.service.snapshot("browser", "local")["files"][target]
+                self.assertNotIn("model", snapshot["managed"])
+                text = Path(snapshot["path"]).read_text(encoding="utf-8")
+                if agent == "opencode_v2":
+                    data = parse_document("json", text)
+                    self.assertNotIn("models", data["providers"]["proxy"])
+                elif agent == "dsh":
+                    self.assertEqual(["llm-pi-ai"], [row["id"] for row in yaml_load(text)])
+                self.assertFalse(self.save(agent, values)["hasChanges"])
+
     def test_hermes_preserves_comments_and_unmanaged_values_and_clears_explicitly(self):
         path = self.directory / "home/.hermes/config.yaml"
         path.parent.mkdir(parents=True)

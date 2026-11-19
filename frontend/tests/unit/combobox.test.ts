@@ -10,6 +10,30 @@ const options = [
   { value: 'another', label: '另一个 Key' },
 ]
 describe('可输入候选', () => {
+  it('空选项可打开和选中，显示名称并向外提交空字符串', async () => {
+    const wrapper = mount(UiCombobox, {
+      props: { modelValue: 'key-value', options: [{ value: '', label: '不设置' }, ...options] },
+      attachTo: document.body,
+    })
+    await wrapper.get('input').trigger('focus')
+    await flushPromises()
+    const unset = document.querySelector<HTMLElement>('[role="option"]')!
+    expect(unset.textContent).toContain('不设置')
+    unset.click()
+    await flushPromises()
+    expect(wrapper.emitted('select')?.at(-1)).toEqual([''])
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([''])
+    await wrapper.setProps({ modelValue: '' })
+    await flushPromises()
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('不设置')
+    await wrapper.get('input').trigger('focus')
+    await flushPromises()
+    expect(document.querySelector('[role="option"][data-state="checked"]')?.textContent).toContain(
+      '不设置',
+    )
+    wrapper.unmount()
+  })
+
   it('候选名称只用于显示，自定义标识可继续输入且不被名称覆盖', async () => {
     const wrapper = mount(UiCombobox, {
       props: { modelValue: 'key-value', options, allowCustom: true, displayLabel: true },

@@ -60,6 +60,7 @@ const {
   preview,
   editorOpen,
   fingerprint,
+  overwrite,
 } = workspace
 const search = ref('')
 const machineDialog = ref(false)
@@ -444,8 +445,10 @@ function trustHost() {
             :agent="activeAgent"
             :preview="preview"
             :saving="saving"
+            :dirty="workspace.dirty.value"
             :disabled="!ready || loading"
             @save="save"
+            @refresh="refresh"
           />
         </template>
       </section>
@@ -495,6 +498,29 @@ function trustHost() {
       </template>
     </UiDialog>
     <UiDialog
+      :open="!!overwrite"
+      title="覆盖外部修改？"
+      description="配置文件已被其他程序修改。确认后将按当前表单保存，下方展示相对于最新文件的变化；未由表单管理的字段保留。"
+      :busy="saving"
+      size="lg"
+      @update:open="!$event && (overwrite = undefined)"
+    >
+      <div
+        v-for="row in overwrite?.ticket.rows.filter((item) => item.kind !== 'same')"
+        :key="`${row.file}:${row.path}`"
+        class="overwrite-change"
+      >
+        <code>{{ row.path }}</code>
+        <span>{{ row.current ?? '—' }} → {{ row.next ?? '—' }}</span>
+      </div>
+      <template #footer>
+        <UiButton :disabled="saving" @click="overwrite = undefined">取消</UiButton>
+        <UiButton variant="primary" :loading="saving" @click="workspace.confirmOverwrite">
+          确认覆盖
+        </UiButton>
+      </template>
+    </UiDialog>
+    <UiDialog
       v-model:open="refreshConfirm"
       title="重新读取配置？"
       description="当前页签有未保存的修改，重新读取后恢复文件中的值。"
@@ -508,6 +534,13 @@ function trustHost() {
   </div>
 </template>
 <style scoped>
+.overwrite-change {
+  display: grid;
+  gap: var(--space-1);
+  padding-block: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
 .agent-page {
   container: agent-page / inline-size;
 }

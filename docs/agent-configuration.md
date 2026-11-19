@@ -96,6 +96,8 @@ dotenv 文件的字段路径是单个环境变量名，解析支持可选 `expor
 
 `fields` 的结构为 `{target: {tuple(path): value}}`，删除使用 `src.services.agent_config_documents.MISSING`。文件读写、SSH、版本冲突、预览票据、5 份备份和失败回滚由 `AgentConfigService` 统一管理。
 
+各 Agent 表单支持文件冲突后的覆盖确认：保留草稿，读取最新文件版本生成字段预览，用户确认后使用该预览票据保存；未管理字段保留，确认期间的外部修改仍受版本校验保护。预览错误旁提供小号刷新图标按钮，加载当前 Agent 的最新文件内容；有未保存草稿时先确认放弃。字段校验错误不进入覆盖流程。
+
 适配器是以服务权限运行的受信任 Python 代码。可从 `src.services.agent_extensions` 导入 `yaml_load`、`yaml_dump`、`apply_edits`，复用保留注释的 YAML 读写。普通声明式扩展无需 Python 文件。
 
 ## 2. Claude Code 兼容性
@@ -108,7 +110,7 @@ dotenv 文件的字段路径是单个环境变量名，解析支持可选 `expor
 
 | 配置项 | 当前行为与页面管理 |
 | --- | --- |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL`、`ANTHROPIC_MODEL` | 四项独立编辑；“一键设置模型”即时同步，单项不一致时顶部留空 |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL`、`ANTHROPIC_DEFAULT_FABLE_MODEL`、`ANTHROPIC_MODEL` | 五项独立编辑；“一键设置模型”即时同步，单项不一致时顶部留空；各项支持“不设置”，“一键设置模型”选择“不设置”同时清空五项，保存时按 [环境变量清除流程](#24-环境变量清除与当前会话) 删除覆盖 |
 | `ANTHROPIC_REASONING_MODEL` | 官方环境变量文档与本机 `2.1.310` 均未确认当前支持，常规模型表单不管理该字段 |
 | `IS_SANDBOX` | 识别运行环境，本身不创建沙箱；页面独立管理 `env.IS_SANDBOX`，启用写 `1`、禁用写 `0` |
 | `CLAUDE_CODE_ATTRIBUTION_HEADER` | 控制客户端标识；启用写 `1`，禁用写 `0` |
@@ -125,6 +127,8 @@ dotenv 文件的字段路径是单个环境变量名，解析支持可选 `expor
 | `NODE_TLS_REJECT_UNAUTHORIZED` | Node.js 运行时变量，官方环境变量文档未列出；跳过证书校验写 `0`，强制校验写 `1`，其他写法显示为文件自定义 |
 
 Opus / Sonnet 默认模型变量在 `1.0.88` 新增；Haiku 变量在 `2.0.17` 发布记录中出现。命令沙箱在 `2.0.24` 发布 Linux / macOS 版本。对象形式的署名配置在 `2.0.62` 引入，禁用值 `false` 在 `2.1.281` 引入。工具自动搜索在 `2.1.7` 默认开启，`2.1.9` 引入 `auto:N`，`2.1.72` 修复自定义 API 地址下显式启用失效。
+
+Fable 支持独立选择模型 ID、手填外部模型和“不设置”，参与一键设置及参数参考。`ANTHROPIC_DEFAULT_FABLE_MODEL` 控制 `fable` 别名，未设置时使用 Claude 的默认解析规则；字段首次支持版本未确认。配套的 `_NAME`、`_DESCRIPTION` 和 `_SUPPORTED_CAPABILITIES` 可通过原文编辑器配置，表单保留这些字段。依据：[官方模型配置](https://code.claude.com/docs/en/model-config#environment-variables)，核对日期 2026-11-20。
 
 模型 ID 的 `[1m]` 和配置文件数值不能扩展上游真实能力。第三方模型的上下文、思考强度和工具搜索仍取决于上游兼容性。
 
@@ -168,6 +172,20 @@ Opus / Sonnet 默认模型变量在 `1.0.88` 新增；Haiku 变量在 `2.0.17` �
 
 官方依据：[发布记录](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)、[环境变量](https://code.claude.com/docs/en/env-vars)、[设置字段](https://code.claude.com/docs/en/settings-reference)、[权限模式](https://code.claude.com/docs/en/permission-modes)、[命令沙箱](https://code.claude.com/docs/en/sandboxing)、[Git 与 PR 署名](https://code.claude.com/docs/en/settings-reference#attribution)。
 
+### 2.4 环境变量清除与当前会话
+
+表单和原文编辑保存均写入目标 settings 文件。清除允许列表中的非空环境变量时，先写入空字符串 `""`，在该文件最后一次实际保存约 10 秒后移除仍为空字符串的对应字段。允许列表包含 API 地址与凭据、主模型与默认模型、子 Agent 模型、输出和上下文限制及部分协议开关，完整列表见 [`claude_env_cleanup.py`](../src/services/claude_env_cleanup.py)。其他字段直接按编辑结果保存；空字符串处理不适用于任意环境变量。
+
+每个机器身份与文件路径只有一条待清理记录，由单个后台任务扫描。同一文件的连续实际保存合并字段并更新到期时间；无内容变化的保存保持原到期时间。重新设置的非空值退出清理范围，清理时保留外部新增的字段、注释与已修改的值。表单、原文编辑器、预览版本及备份使用删除后的逻辑内容，磁盘文件在等待期间包含临时空字符串。
+
+待清理的路径、字段名与到期时间保存在 `agent-config/state.json`，不包含变量值。服务重启后继续扫描；SSH 文件需要对应机器的有效连接，离线时保留记录，连接恢复后继续处理。文件访问或解析失败时约 60 秒后重试。机器身份变化时放弃原身份的清理记录。
+
+Claude Code 监听 settings 的变化。cc-switch 对 Claude Code `2.1.318` 的核对表明，`env` 热加载使用增量合并，直接删除文件字段可能让运行中进程保留旧值；允许列表中的空字符串用于撤销这些旧值。具体字段是否即时生效仍取决于 Claude 版本、配置作用域和会话状态，部分设置需要新会话。实现依据：[cc-switch 字段清单](https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/live/project/claude.rs)、[直接模式写入](https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/services/provider/claude_direct.rs)，核对日期 2026-11-20。
+
+本页五项模型设置写入 `env`。`ANTHROPIC_MODEL` 参与启动时的主模型选择，运行中会话的模型选择优先于此变量；settings 的环境变量重载不保证切换当前主模型。顶层 `model` 同样在启动时读取。Haiku、Sonnet、Opus、Fable 变量指定别名对应的模型 ID，使用显式模型 ID 的会话不通过这些别名解析。终端使用 `/model`、VS Code 使用 **Switch model…** 切换当前会话；保存文件不调用这些会话操作，也不切换已发出的请求。依据：[设置生效时机](https://code.claude.com/docs/en/settings#when-edits-take-effect)。
+
+本页属于配置控制平面。模型映射属于代理数据面：客户端发送稳定映射 ID 时，代理可根据当前映射选择不同上游，客户端显示的模型 ID 可以保持原值。
+
 ## 3. Codex 与 Opencode
 
 ### 3.1 Codex
@@ -175,6 +193,8 @@ Opus / Sonnet 默认模型变量在 `1.0.88` 新增；Haiku 变量在 `2.0.17` �
 API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值、服务处理档位、沙箱范围、确认策略和 `features.memories` 的最低版本均未确认。官方字段列表不提供首次支持版本表，不能仅依据字段存在推断旧版兼容。
 
 表单固定写入 `model_provider: proxy` 和 `model_providers.proxy`，模型 ID 保持完整的 Proxy 路由格式。
+
+模型下拉支持“不设置”；外部服务地址下可清空模型输入。主动清空并保存时删除当前文件的 `model`，已有文件缺少该字段时保持“不设置”。新建文件且地址指向本服务时，初始草稿提供候选模型，支持手动选择“不设置”。未指定模型时由 Codex 的其他配置层或客户端默认值决定，实际请求使用的模型 ID 需要在目标服务可用。
 
 页面同时管理 `~/.codex/.env`（本机尊重 `CODEX_HOME`），写入 `NO_PROXY` 代理绕过列表。Codex 启动时加载该文件并覆盖同名进程环境变量，`CODEX_` 前缀的变量不能通过此文件设置。Codex 由 Rust 实现，`NODE_TLS_REJECT_UNAUTHORIZED` 对它无效；自定义 CA 证书使用 `SSL_CERT_FILE` 等进程环境机制，不在本页管理范围。依据：[`.env` 加载实现](https://github.com/openai/codex/blob/main/codex-rs/arg0/src/lib.rs)，核对日期 2026-11-18。
 
@@ -194,6 +214,8 @@ API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值
 
 表单固定写入 `provider.proxy`，顶层模型引用使用 `proxy/<完整 Proxy 模型 ID>`。
 
+默认模型支持“不设置”，保存时删除顶层 `model`，保留连接、模型列表及模型级参数；已有文件缺少 `model` 时保持“不设置”。未选择默认模型时，本页不编辑模型级上下文、最大输出和思考强度；Opencode 根据启动参数、其他配置、最近使用或可用模型选择实际模型。
+
 表单仅管理 V1 字段，原文件中的 V2 字段原样保留，历史登记的 V2 `permissions` 不参与自动清理。依据：[V1 模型](https://opencode.ai/v1/docs/models/)、[V1 配置](https://opencode.ai/v1/docs/config/)、[V1 权限](https://opencode.ai/v1/docs/permissions/)。
 
 ### 3.3 Opencode v2
@@ -201,6 +223,7 @@ API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值
 - 默认配置为 `~/.config/opencode/opencode.json`，支持自定义 JSON / JSONC 路径。V1 与 V2 默认编辑同一文件，各自的自定义路径独立保存，页签不负责版本迁移。
 - 表单固定使用 `providers.proxy` 和 `proxy/<模型别名>`；目标不存在时创建，已存在时写入本次表单字段。
 - 按顶层 `model` 定位 `proxy` 中的当前模型，读取 `providers.proxy.settings`、模型 `settings` 与 `limit`；`modelID` 别名在未切换模型时保留。
+- 默认模型支持“不设置”，仅移除顶层 `model`，保留模型别名、连接、模型列表和模型参数。未选择默认模型时，本页不编辑模型级容量和思考强度；实际模型由会话选择及客户端默认规则决定。
 - 权限写入 `permissions: [{action: "*", resource: "*", effect: "allow|ask|deny"}]`。细分规则默认保留，主动选择策略时替换顶层数组，不设置删除该数组。
 - 压缩预留对应 `compaction.buffer`，支持百分比字符串和正整数 Token 数，表示空余预算；`compaction.keep` 等字段保持原样。
 - 文件快照使用 `snapshots`，更新策略使用全局 `update`，会话分享使用 `share`。
@@ -214,6 +237,9 @@ API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值
 
 - 默认全局补丁为 `~/.dsh/cordis.patch.yml`，凭据文件为 `~/.dsh/.credentials.yaml`，本机尊重 `DSH_HOME`。全局补丁在 Web、Desktop、headless、SDK、ACP 的 profile 补丁之后加载。
 - 页面管理 `llm-pi-ai` 插件中的 `proxy` 路由、模型容量及 `agent-default-model` 默认选择，其他模型和插件保持原样。
+- 默认模型支持“不设置”：移除当前补丁中 `agent-default-model` 的整组 `config` 覆盖（provider、model、reasoningEffort），保留连接、凭据及模型列表。下层 profile 或插件配置需提供有效的默认选择；未选默认模型时，本页不编辑模型容量与默认思考强度。
+- 全局默认模型覆盖会阻止 DSH 将不同的默认选择保存到 profile，当前会话仍可切换模型。不设置全局默认模型后，默认选择可由 profile 管理。
+- 思考强度提供“不设置”和 llm-pi-ai 支持的 off、minimal、low、medium、high、xhigh、max 档位；ultra 不属于该适配器的档位。候选不代表当前模型支持的档位；模型需在 DSH 中声明推理档位，未声明时使用“不设置”。reasoningEfforts 可映射各档位对应的 API 参数值，off 的实际效果由适配器与模型兼容配置决定。
 - API Key 保存为凭据文件的 `refs.LLM_PROXY_API_KEY`，补丁仅保存 `apiKeyEnv` 引用；主动清空 Key 同时删除引用。
 - 目标 Profile 需包含 `llm-pi-ai`、`agent-default-model` 及权限插件。sdk-minimal 的插件组合独立，启动参数、既有设置和会话选择可能覆盖默认值。
 - 默认权限写入 `permission.config.defaultPreset`，支持 `read-only`、`workspace-write`、`danger-full-access`。never 表示拒绝仍需审批的请求，不自动批准；默认值仅作用于新会话。
@@ -226,8 +252,10 @@ API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值
 
 - 默认路径为 `~/.hermes/config.yaml`，本机尊重 `HERMES_HOME`；其他 profile 使用自定义文件路径。
 - 支持 API 地址、Key、默认模型、API 协议、服务类型、思考强度、上下文、压缩阈值、最大迭代次数、命令确认、长期记忆、用户画像及自动压缩。
+- 默认模型支持“不设置”，仅删除 `model.default`，保留服务类型、地址、凭据及其他配置。模型可由启动参数或 Hermes 的默认规则提供；自定义服务需要可用的模型选择，留空不保证自动发现任意端点的模型。
 - 新建配置的服务类型为 `custom`，协议为 `chat_completions`；Responses 写入 `codex_responses`，Anthropic Messages 写入 `anthropic_messages`。
 - 服务类型支持自动选择、常用内置服务和手动输入；已有 `custom:<name>` 等命名服务原样保留。
+- 思考强度支持“不设置”及 none、minimal、low、medium、high、xhigh、max、ultra。ultra 是 Hermes 内部档位，按模型与路由转换为支持的强度，不直接代表上游协议档位。
 - 压缩阈值使用小数比例，`0.5` 表示 50%。命令确认使用 `smart`、`manual`、`off`。
 - `model: ""` 或字符串模型简写可转换为可编辑映射；其他配置与 YAML 注释保留。
 

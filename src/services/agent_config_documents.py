@@ -21,6 +21,7 @@ CLAUDE_MODELS = (
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
     "ANTHROPIC_MODEL",
 )
 CLAUDE_PERMISSION_MODES = ("default", "manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
@@ -367,6 +368,7 @@ def _explicit_clears(agent: str, draft: dict, result: dict) -> dict:
             allowed["runtime." + name] = (agent, (field_name,))
         allowed.update(
             {
+                "model": (agent, ("model",)),
                 "limits.context": (agent, ("model_context_window",)),
                 "limits.compact": (agent, ("model_auto_compact_token_limit",)),
                 "runtime.memories": (agent, ("features", "memories")),
@@ -377,6 +379,7 @@ def _explicit_clears(agent: str, draft: dict, result: dict) -> dict:
         prefix = ("provider", PROXY_PROVIDER)
         selected = prefix + ("models", model)
         allowed = {
+            "model": (agent, ("model",)),
             "apiKey": (agent, prefix + ("options", "apiKey")),
             "limits.context": (agent, selected + ("limit", "context")),
             "limits.output": (agent, selected + ("limit", "output")),
@@ -391,6 +394,8 @@ def _explicit_clears(agent: str, draft: dict, result: dict) -> dict:
         if name not in allowed:
             raise ValueError("清空字段不在当前表单范围内")
         target, path = allowed[name]
+        if agent == "opencode" and not draft.get("model") and "models" in path:
+            continue
         if path not in result[target]:
             result[target][path] = MISSING
     return result
@@ -493,7 +498,7 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
         if tls in ("0", "1"):
             fields[("env", "NODE_TLS_REJECT_UNAUTHORIZED")] = tls
         return _explicit_clears(agent, draft, {agent: fields})
-    if not model or len(model) > 512 or any(ord(char) < 32 for char in model):
+    if len(model) > 512 or any(ord(char) < 32 for char in model):
         raise ValueError("Select a valid model")
     upstream_provider = provider_key(model)
     provider = PROXY_PROVIDER
@@ -502,13 +507,14 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
         fields.update(
             {
                 ("model_provider",): provider,
-                ("model",): model,
                 prefix + ("name",): provider,
                 prefix + ("base_url",): base_url,
                 prefix + ("wire_api",): "responses",
                 prefix + ("requires_openai_auth",): bool(api_key),
             }
         )
+        if model:
+            fields[("model",)] = model
         # 显式空值表示保持未设置；旧调用未提供参数时继续使用创建默认值。
         context = context or (372000 if "context" not in limits else None)
         if context:
@@ -547,12 +553,13 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
     prefix = ("provider", provider)
     fields.update(
         {
-            ("model",): provider + "/" + model,
             prefix + ("npm",): "@ai-sdk/openai-compatible",
             prefix + ("name",): provider,
             prefix + ("options", "baseURL"): base_url,
         }
     )
+    if model:
+        fields[("model",)] = provider + "/" + model
     if api_key:
         fields[prefix + ("options", "apiKey")] = api_key
     effort = _choice(runtime.get("reasoningEffort"), ("none",) + EFFORTS, "opencode effort")
@@ -572,7 +579,8 @@ def desired_fields(agent: str, draft: dict, catalog: list[str]) -> dict[str, dic
     update = _choice(runtime.get("autoupdate"), ("true", "false", "notify", "custom"), "OpenCode autoupdate")
     if update and update != "custom":
         fields[("autoupdate",)] = {"true": True, "false": False, "notify": "notify"}[update]
-    for configured in dict.fromkeys([*(entry for entry in catalog if provider_key(entry) == upstream_provider), model]):
+    models = [*(entry for entry in catalog if provider_key(entry) == upstream_provider), model] if model else []
+    for configured in dict.fromkeys(models):
         model_prefix = prefix + ("models", configured)
         fields[model_prefix + ("name",)] = configured
         if configured != model:

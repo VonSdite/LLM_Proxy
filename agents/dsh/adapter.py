@@ -84,7 +84,11 @@ def parse(target, text):
 def prepare(draft, fields):
     """空凭据允许无认证端点，已有环境凭据引用在未清空时保留。"""
     values = draft["values"]
-    fields["dsh"][("selection", "provider")] = ROUTE
+    if "model" in values:
+        selected = fields["dsh"][("selection", "model")]
+        fields["dsh"][("selection", "provider")] = ROUTE if selected is not MISSING else MISSING
+        if selected is MISSING:
+            fields["dsh"][("selection", "reasoningEffort")] = MISSING
     if values.get("api-key"):
         fields["dsh"][("connection", "apiKeyEnv")] = "LLM_PROXY_API_KEY"
     elif "api-key" in values:
@@ -126,20 +130,25 @@ def edit(target, text, edits):
             permission["defaultPreset"] = mode
     original = parse(target, text)
     view = apply_edits(deepcopy(original), edits)
-    selection = _config(data, "agent-default-model", True)
-    selection.update(view["selection"])
-    for path, value in edits.items():
-        if path[0] == "selection" and value is MISSING:
-            selection.pop(path[-1], None)
-    selection["provider"] = ROUTE
+    model_id = view["selection"].get("model")
+    if edits.get(("selection", "model")) is MISSING:
+        # DSH 补丁替换整组 config；删除 config 才能继承下层完整默认选择。
+        for row in list(data):
+            if row.get("id") == "agent-default-model":
+                row.pop("config", None)
+                if set(row) <= {"id", "name"}:
+                    data.remove(row)
+    elif model_id:
+        selection = _config(data, "agent-default-model", True)
+        apply_edits(selection, {path[1:]: value for path, value in edits.items() if path[0] == "selection"})
+        selection["provider"] = ROUTE
     config = _config(data, "llm-pi-ai", True)
     providers = config.setdefault("providers", {})
     connection = providers.setdefault(ROUTE, {})
     apply_edits(connection, {path[1:]: value for path, value in edits.items() if path[0] == "connection"})
     models = connection.setdefault("models", [])
-    model_id = selection.get("model")
     if not model_id:
-        raise ValueError("请选择 DSH 默认模型")
+        return yaml_dump(data)
     model = next((item for item in models if item.get("id") == model_id), None)
     if model is None:
         model = {"id": model_id}
