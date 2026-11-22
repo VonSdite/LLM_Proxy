@@ -5,13 +5,12 @@ import { UiTable, UiBadge, UiButton, UiTooltip, type TableSort } from '@/compone
 import { number } from '@/features/shared/format'
 import {
   cacheRate,
-  columnsByView,
   duration,
   metric,
-  modelFlowSteps,
   percent,
   requestTime,
   requestError,
+  statisticsColumns,
   rowKey,
   tokenKeys,
   totals,
@@ -25,19 +24,14 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ 'update:sort': [value: TableSort]; model: [value: string] }>()
 const footer = computed(() => totals(props.rows, props.view))
-const tableRows = computed(() =>
-  props.view === 'model_usage'
-    ? props.rows.map((row) => ({
-        ...row,
-        model_flow: [row.request_model, row.target_model_id].filter(Boolean).join(' → '),
-      }))
-    : props.rows,
-)
+const columns = computed(() => statisticsColumns(props.rows, props.view))
 </script>
 <template>
   <UiTable
-    :rows="tableRows"
-    :columns="columnsByView[view]"
+    :rows="rows"
+    :columns="columns"
+    adaptive
+    compact
     :row-key="(row) => rowKey(row, view)"
     :loading="loading"
     :sort="sort"
@@ -48,14 +42,22 @@ const tableRows = computed(() =>
     @update:sort="emit('update:sort', $event)"
   >
     <template #cell-request_model="{ row }">
-      <UiButton variant="link" size="title" @click="emit('model', row.request_model!)">
-        {{ row.request_model }}
-      </UiButton>
+      <UiTooltip v-if="row.request_model" :text="`请求模型：${row.request_model}`">
+        <UiButton variant="link" @click="emit('model', row.request_model)">
+          {{ row.request_model }}
+        </UiButton>
+      </UiTooltip>
+      <span v-else class="muted">—</span>
+    </template>
+    <template #cell-target_model_id="{ row }">
+      <UiTooltip v-if="row.target_model_id" :text="`映射模型：${row.target_model_id}`">
+        <span tabindex="0" class="statistics-model-name">{{ row.target_model_id }}</span>
+      </UiTooltip>
+      <span v-else class="muted">-</span>
     </template>
     <template #cell-start_time="{ row }">
       <time class="statistics-time" :datetime="row.start_time?.replace(' ', 'T')">
-        <span>{{ requestTime(row.start_time).split(' ')[0] }}</span>
-        <span>{{ requestTime(row.start_time).split(' ')[1] }}</span>
+        {{ requestTime(row.start_time) }}
       </time>
     </template>
     <template #cell-response_model="{ row }">
@@ -63,13 +65,10 @@ const tableRows = computed(() =>
         {{ row.response_model || '未知' }}
       </span>
     </template>
-    <template #cell-source="{ row }">
-      <div class="statistics-source">
-        <span v-if="row.username && row.username !== '-'">{{ row.username }}</span>
-        <span class="statistics-address">
-          {{ row.ip_address || '—' }}
-        </span>
-      </div>
+    <template #cell-username="{ row }">
+      <span :class="{ muted: !row.username || row.username === '-' }">
+        {{ row.username || '-' }}
+      </span>
     </template>
     <template #cell-outcome="{ row }">
       <div class="statistics-flow">
@@ -111,12 +110,14 @@ const tableRows = computed(() =>
       </UiTooltip>
     </template>
     <template #cell-first_token_latency_ms="{ row }">
-      <span :class="{ muted: row.first_token_latency_ms == null }">
-        {{
-          row.first_token_latency_ms == null ? '—' : metric(row.first_token_latency_ms / 1000, 2)
-        }}
+      <span class="statistics-measure">
+        <span :class="{ muted: row.first_token_latency_ms == null }">
+          {{
+            row.first_token_latency_ms == null ? '—' : metric(row.first_token_latency_ms / 1000, 2)
+          }}
+        </span>
+        <span v-if="row.first_token_latency_ms != null" class="muted">{{ ' ' }}s</span>
       </span>
-      <span v-if="row.first_token_latency_ms != null" class="muted">{{ ' ' }}s</span>
     </template>
     <template #cell-tps="{ row }">
       <UiTooltip v-if="view === 'logs' && row.tps == null" :text="tpsUnavailableHelp(row)">
@@ -130,32 +131,10 @@ const tableRows = computed(() =>
       </span>
     </template>
     <template #cell-ip_address="{ row }">
-      <span class="mono">{{ row.ip_address }}</span>
-    </template>
-    <template #cell-model_flow="{ row }">
-      <div class="statistics-model-flow">
-        <span
-          v-for="(step, index) in modelFlowSteps(row)"
-          :key="index"
-          class="statistics-model-step"
-        >
-          <span v-if="index" class="muted">→</span>
-          <UiTooltip :text="`${step.stage}模型：${step.model}`">
-            <UiButton
-              v-if="index === 0 && row.request_model"
-              variant="link"
-              @click="emit('model', row.request_model)"
-            >
-              {{ step.model }}
-            </UiButton>
-            <span v-else tabindex="0" class="statistics-model-name">{{ step.model }}</span>
-          </UiTooltip>
-        </span>
-        <span v-if="!modelFlowSteps(row).length" class="muted">—</span>
-      </div>
+      <span class="mono">{{ row.ip_address || '-' }}</span>
     </template>
     <template v-for="key in tokenKeys" :key="key" #[`cell-${key}`]="{ row }">
-      <template v-if="view !== 'logs'">{{ number(row[key]) }}</template>
+      <span v-if="view !== 'logs'" class="statistics-measure">{{ number(row[key]) }}</span>
       <span
         v-else-if="key === 'cache_read_input_tokens'"
         class="statistics-measure"
@@ -169,6 +148,7 @@ const tableRows = computed(() =>
     </template>
     <template #cell-cache_hit_rate="{ row }">
       <span
+        class="statistics-measure"
         :class="{ muted: row.cache_usage_status === 'unknown' || row.cache_hit_rate == null }"
         :title="
           row.cache_usage_status === 'partial'
@@ -181,7 +161,18 @@ const tableRows = computed(() =>
         {{ cacheRate(row.cache_hit_rate, row.cache_usage_status) }}
       </span>
     </template>
-    <template #cell-request_count="{ row }">{{ number(row.request_count) }}</template>
+    <template #cell-request_count="{ row }">
+      <span class="statistics-measure">{{ number(row.request_count) }}</span>
+    </template>
+    <template #cell-ip_count="{ row }">
+      <span class="statistics-measure">{{ number(row.ip_count) }}</span>
+    </template>
+    <template #cell-last_request_date="{ row }">
+      <span class="statistics-measure">{{ row.last_request_date || '—' }}</span>
+    </template>
+    <template v-for="column in columns" :key="column.key" #[`footer-${column.key}`]="{ value }">
+      <span class="statistics-measure">{{ value }}</span>
+    </template>
     <template #cell-key_name="{ row }">
       <div class="statistics-key">
         <span>{{ row.key_name }}</span>
@@ -212,21 +203,6 @@ const tableRows = computed(() =>
   overflow-wrap: anywhere;
 }
 
-.statistics-model-flow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-2);
-}
-
-.statistics-model-step {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-1);
-  min-width: 0;
-  max-width: 100%;
-}
-
 .statistics-model-name {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -234,23 +210,13 @@ const tableRows = computed(() =>
 
 .statistics-rate {
   font-variant-numeric: tabular-nums;
-}
-
-.statistics-time,
-.statistics-source {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-1) var(--space-2);
+  white-space: nowrap;
 }
 
 .statistics-time {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.statistics-address {
-  white-space: nowrap;
+  font-size: var(--text-sm);
 }
 
 .statistics-measure {

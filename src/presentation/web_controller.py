@@ -285,15 +285,6 @@ class WebController:
             "unsuccessful": "请求失败或取消",
         }.get(item.get("tps_unavailable_reason"), "缺少有效输出用量或总耗时")
 
-    @staticmethod
-    def _format_request_model(item: dict[str, Any]) -> str:
-        """请求列展示原始模型及映射目标，响应模型独立成列。"""
-        parts = [
-            str(item.get("request_model") or "").strip(),
-            str(item.get("target_model_id") or "").strip(),
-        ]
-        return " -> ".join(part for part in parts if part)
-
     def get_statistics_overview(self) -> ResponseReturnValue:
         try:
             self._validate_dashboard_date_range(request.args.get("start_date"), request.args.get("end_date"))
@@ -303,8 +294,10 @@ class WebController:
                     request.args.get("end_date"),
                     self._get_multi_filter_values("username") or None,
                     self._get_multi_filter_values("request_model") or None,
+                    target_model_id=self._get_multi_filter_values("target_model_id") or None,
                     response_model=self._get_multi_filter_values("response_model") or None,
                     ip_address=self._get_multi_filter_values("ip_address") or None,
+                    interval=request.args.get("interval", "1d"),
                 )
             )
         except ValueError as exc:
@@ -335,6 +328,7 @@ class WebController:
                 request_models or None,
                 sort_key=request.args.get("sort_key"),
                 sort_direction=request.args.get("sort_direction"),
+                target_model_id=self._get_multi_filter_values("target_model_id") or None,
                 response_model=self._get_multi_filter_values("response_model") or None,
                 ip_address=self._get_multi_filter_values("ip_address") or None,
             )
@@ -367,6 +361,7 @@ class WebController:
                 request_models or None,
                 sort_key=request.args.get("sort_key"),
                 sort_direction=request.args.get("sort_direction"),
+                target_model_id=self._get_multi_filter_values("target_model_id") or None,
                 response_model=self._get_multi_filter_values("response_model") or None,
                 ip_address=self._get_multi_filter_values("ip_address") or None,
             )
@@ -399,6 +394,7 @@ class WebController:
                 request_models or None,
                 sort_key=request.args.get("sort_key"),
                 sort_direction=request.args.get("sort_direction"),
+                target_model_id=self._get_multi_filter_values("target_model_id") or None,
                 response_model=self._get_multi_filter_values("response_model") or None,
                 ip_address=self._get_multi_filter_values("ip_address") or None,
             )
@@ -427,6 +423,7 @@ class WebController:
                     request.args.get("end_date"),
                     usernames or None,
                     request_models or None,
+                    target_model_id=self._get_multi_filter_values("target_model_id") or None,
                     response_model=self._get_multi_filter_values("response_model") or None,
                     ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
@@ -451,13 +448,13 @@ class WebController:
                     ]
                     sheet_name, file_prefix = "模型表现", "model-performance"
                 elif tab in {"model_usage", "response_model_usage"}:
-                    data = (
-                        [{**item, "model_flow": self._format_request_model(item)} for item in overview["model_flows"]]
-                        if tab == "model_usage"
-                        else overview["response_models"]
-                    )
+                    data = overview["model_flows"] if tab == "model_usage" else overview["response_models"]
                     columns = [
-                        *([("model_flow", "请求模型")] if tab == "model_usage" else []),
+                        *(
+                            [("request_model", "请求模型"), ("target_model_id", "映射模型")]
+                            if tab == "model_usage"
+                            else []
+                        ),
                         ("response_model", "响应模型"),
                         ("prompt_tokens", "输入 Token"),
                         ("completion_tokens", "输出 Token"),
@@ -493,6 +490,8 @@ class WebController:
                     [
                         "未知"
                         if key == "response_model" and not item.get(key)
+                        else "-"
+                        if key == "target_model_id" and not item.get(key)
                         else "—"
                         if key == "upstream_success_rate" and item.get(key) is None
                         else self._format_cache_hit_rate(item.get(key))
@@ -510,6 +509,7 @@ class WebController:
                     request_models or None,
                     sort_key=sort_key,
                     sort_direction=sort_direction,
+                    target_model_id=self._get_multi_filter_values("target_model_id") or None,
                     response_model=self._get_multi_filter_values("response_model") or None,
                     ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
@@ -557,6 +557,7 @@ class WebController:
                     request_models or None,
                     sort_key=sort_key,
                     sort_direction=sort_direction,
+                    target_model_id=self._get_multi_filter_values("target_model_id") or None,
                     response_model=self._get_multi_filter_values("response_model") or None,
                     ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
@@ -599,6 +600,7 @@ class WebController:
                     request_models or None,
                     sort_key=sort_key,
                     sort_direction=sort_direction,
+                    target_model_id=self._get_multi_filter_values("target_model_id") or None,
                     response_model=self._get_multi_filter_values("response_model") or None,
                     ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
@@ -606,6 +608,7 @@ class WebController:
                     "IP",
                     "用户名",
                     "请求模型",
+                    "映射模型",
                     "响应模型",
                     "输入token",
                     "输出token",
@@ -628,8 +631,9 @@ class WebController:
                 rows = [
                     [
                         item["ip_address"],
-                        item["username"],
-                        self._format_request_model(item),
+                        item.get("username") or "-",
+                        item["request_model"],
+                        item.get("target_model_id") or "-",
                         item.get("response_model") or "未知",
                         item["prompt_tokens"],
                         item["completion_tokens"],
@@ -663,6 +667,7 @@ class WebController:
                     request_models or None,
                     sort_key=sort_key,
                     sort_direction=sort_direction,
+                    target_model_id=self._get_multi_filter_values("target_model_id") or None,
                     response_model=self._get_multi_filter_values("response_model") or None,
                     ip_address=self._get_multi_filter_values("ip_address") or None,
                 )
@@ -670,6 +675,7 @@ class WebController:
                     "IP",
                     "用户名",
                     "请求模型",
+                    "映射模型",
                     "响应模型",
                     "输入token",
                     "输出token",
@@ -683,8 +689,9 @@ class WebController:
                 rows = [
                     [
                         item["ip_address"],
-                        item["username"],
-                        self._format_request_model(item),
+                        item.get("username") or "-",
+                        item["request_model"],
+                        item.get("target_model_id") or "-",
                         item.get("response_model") or "未知",
                         item["prompt_tokens"],
                         item["completion_tokens"],
@@ -740,6 +747,7 @@ class WebController:
                 end_date,
                 usernames or None,
                 request_models or None,
+                target_model_id=self._get_multi_filter_values("target_model_id") or None,
                 response_model=self._get_multi_filter_values("response_model") or None,
                 ip_address=self._get_multi_filter_values("ip_address") or None,
             )
@@ -800,6 +808,7 @@ class WebController:
                 request_models or None,
                 sort_key=request.args.get("sort_key"),
                 sort_direction=request.args.get("sort_direction"),
+                target_model_id=self._get_multi_filter_values("target_model_id") or None,
                 response_model=self._get_multi_filter_values("response_model") or None,
                 ip_address=self._get_multi_filter_values("ip_address") or None,
             )

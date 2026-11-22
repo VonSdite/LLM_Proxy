@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { StatisticsOverview } from '@/api/statistics'
+import type { StatisticsInterval, StatisticsOverview } from '@/api/statistics'
 import { UiHelpPopover, UiSegmented, UiTrendChart } from '@/components/ui'
 import {
   cacheHelp,
@@ -11,8 +11,24 @@ import {
   successHelp,
   tpsHelp,
 } from './statistics'
-const props = defineProps<{ data?: StatisticsOverview; loading: boolean }>()
-const trend = ref('requests')
+const props = defineProps<{
+  data?: StatisticsOverview
+  loading: boolean
+  interval: StatisticsInterval
+  rangeDays: number
+}>()
+const emit = defineEmits<{ 'update:interval': [value: StatisticsInterval] }>()
+const intervalOptions = computed(() => [
+  ...(props.rangeDays <= 1 ? [{ value: '5m', label: '5分钟' }] : []),
+  ...(props.rangeDays <= 7 ? [{ value: '1h', label: '小时' }] : []),
+  { value: '1d', label: '天' },
+])
+const intervalLabel = computed(() =>
+  props.data?.series_interval
+    ? { '5m': '每5分钟', '1h': '每小时', '1d': '每天' }[props.data.series_interval]
+    : '',
+)
+const trend = ref('tokens')
 const trendOptions = [
   { value: 'requests', label: '请求' },
   { value: 'tokens', label: 'Token' },
@@ -96,13 +112,32 @@ const points = computed(() =>
     </section>
     <section class="surface statistics-chart" aria-label="使用趋势">
       <header>
-        <h2>使用趋势</h2>
-        <UiSegmented v-model="trend" :items="trendOptions" label="趋势指标" />
+        <div class="statistics-chart-title">
+          <h2>使用趋势</h2>
+          <span class="muted">{{ intervalLabel }}</span>
+          <UiHelpPopover
+            label="趋势时间粒度说明"
+            text="单日可选5分钟、小时、天；2至7天可选小时、天；超过7天按天显示。日期范围变化后默认选择最细粒度。分钟和小时按保留的请求明细统计，按天包含历史汇总。"
+          />
+        </div>
+        <div class="statistics-chart-controls">
+          <UiSegmented
+            :model-value="interval"
+            :items="intervalOptions"
+            label="时间粒度"
+            @update:model-value="emit('update:interval', $event as StatisticsInterval)"
+          />
+          <UiSegmented v-model="trend" :items="trendOptions" label="趋势指标" />
+        </div>
       </header>
+      <p v-if="data?.series_partial" class="muted statistics-chart-note">
+        部分历史用量仅支持按天查看，当前趋势仅包含有时间明细的请求；可切换“天”查看完整用量。
+      </p>
       <UiTrendChart
         :label="trendLabel"
         :points="points"
         :format="trend === 'success' || trend === 'cache' ? percent : compact"
+        :format-label="(date) => (date.includes(' ') ? date.slice(5, 16) : date)"
       />
     </section>
   </div>
@@ -166,6 +201,20 @@ const points = computed(() =>
   justify-content: space-between;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
+}
+
+.statistics-chart-title,
+.statistics-chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.statistics-chart-title > span,
+.statistics-chart-note {
+  font-size: var(--text-sm);
 }
 
 h2 {

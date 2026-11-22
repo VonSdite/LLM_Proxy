@@ -105,11 +105,27 @@ class LogService:
             return None
 
     def get_overview(
-        self, start_date, end_date, username=None, request_model=None, *, response_model=None, ip_address=None
+        self,
+        start_date,
+        end_date,
+        username=None,
+        request_model=None,
+        *,
+        response_model=None,
+        ip_address=None,
+        target_model_id=None,
+        interval="1d",
     ):
-        """日聚合用量和明细中的可观测性能分别保留统计口径。"""
+        """保留日聚合总量，按请求明细提供分钟与小时趋势及观测样本。"""
         return self._repository.get_overview(
-            start_date, end_date, username, request_model, response_model=response_model, ip_address=ip_address
+            start_date,
+            end_date,
+            username,
+            request_model,
+            response_model=response_model,
+            ip_address=ip_address,
+            target_model_id=target_model_id,
+            interval=interval,
         )
 
     def get_statistics(
@@ -122,6 +138,7 @@ class LogService:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """获取统计聚合数据。"""
         try:
@@ -132,6 +149,7 @@ class LogService:
                 request_model=request_model,
                 response_model=response_model,
                 ip_address=ip_address,
+                target_model_id=target_model_id,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -193,6 +211,7 @@ class LogService:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """获取用户维度的用量汇总。"""
         try:
@@ -203,6 +222,7 @@ class LogService:
                 request_model=request_model,
                 response_model=response_model,
                 ip_address=ip_address,
+                target_model_id=target_model_id,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -262,6 +282,7 @@ class LogService:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """获取 API Key 维度的时间范围用量汇总。"""
         try:
@@ -272,6 +293,7 @@ class LogService:
                 request_model=request_model,
                 response_model=response_model,
                 ip_address=ip_address,
+                target_model_id=target_model_id,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -304,6 +326,7 @@ class LogService:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """获取请求日志分页数据。"""
         try:
@@ -316,6 +339,7 @@ class LogService:
                 request_model=request_model,
                 response_model=response_model,
                 ip_address=ip_address,
+                target_model_id=target_model_id,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -341,6 +365,7 @@ class LogService:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """获取完整请求日志列表。"""
         try:
@@ -351,6 +376,7 @@ class LogService:
                 request_model=request_model,
                 response_model=response_model,
                 ip_address=ip_address,
+                target_model_id=target_model_id,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
             )
@@ -367,6 +393,7 @@ class LogService:
         request_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
         response_model: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """导出统计迁移包。"""
         request_logs = self._repository.export_request_logs(
@@ -376,6 +403,7 @@ class LogService:
             request_model=request_model,
             response_model=response_model,
             ip_address=ip_address,
+            target_model_id=target_model_id,
         )
         daily_stats = self._repository.export_daily_stats(
             start_date=start_date,
@@ -384,6 +412,7 @@ class LogService:
             request_model=request_model,
             response_model=response_model,
             ip_address=ip_address,
+            target_model_id=target_model_id,
         )
         self._logger.debug(
             "Statistics package exported: start_date=%s end_date=%s username=%s request_model=%s "

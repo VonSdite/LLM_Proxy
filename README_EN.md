@@ -30,7 +30,7 @@
 
 <img src="docs/images/statistics.png" alt="LLM_Proxy statistics and request logs dashboard" width="100%">
 
-<p><sub>Usage overview and request trends · Screenshots contain synthetic demo data only</sub></p>
+<p><sub>Usage overview and token usage trends · Screenshots contain synthetic demo data only</sub></p>
 
 </div>
 
@@ -42,7 +42,7 @@
 | **🧭 Flexible model routing** | Use `provider/model` routes, custom model mappings, prioritized or sticky multi-target failover, target cooldowns, and per-model visibility controls. |
 | **🔑 Credential pools and OAuth** | Schedule multiple keys with concurrency and request quotas, 429 cooldowns, and Auth Groups. Manage Codex OAuth files, account failover, and runtime status. |
 | **🛡️ Access control and redaction** | Configure downstream API keys, model permissions, token quotas, concurrency and per-minute/daily limits, IP allowlists, and optional request-scoped sensitive-data redaction. |
-| **📊 Usage observability** | Inspect request trends, tokens, cache hits, upstream success rates, first-token latency, TPS, and costs. Filter across dimensions and export request details, Excel files, or migration data. |
+| **📊 Usage observability** | Inspect request trends, tokens, cache hits, upstream success rates, first-token latency, TPS, and costs, with 5-minute, hourly, or daily trend intervals available according to the date range. Filter request, mapped, and response models independently, use adaptive column widths in statistics tables, and export Excel files or migration data. |
 | **🧩 Extensions and Agent integration** | Customize headers, requests, responses, and model discovery with Hooks. Extend the admin interface with registered pages and controlled Python actions. Manage local or SSH-based Claude, Codex, opencode, DSH, and Hermes configurations. |
 
 The Provider editor also includes model discovery, availability checks, first-token latency measurements, and TPS tests.

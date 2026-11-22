@@ -1,4 +1,4 @@
-"""统计概览查询：日聚合提供用量，请求明细提供结果与性能样本。"""
+"""统计概览查询：日聚合提供历史用量，请求明细提供细粒度趋势与观测样本。"""
 
 from __future__ import annotations
 
@@ -23,6 +23,29 @@ OUTCOME_COUNTS_SQL = """
 """
 SUCCESS_RATE_SQL = "SUM(l.outcome = 'success') * 1.0 / NULLIF(SUM(l.outcome IN ('success', 'error')), 0)"
 
+TREND_BUCKETS = {
+    "5m": (
+        "SUBSTR(l.start_time, 1, 14) || PRINTF('%02d', CAST(SUBSTR(l.start_time, 15, 2) AS INTEGER) / 5 * 5) || ':00'",
+        timedelta(minutes=5),
+    ),
+    "1h": ("SUBSTR(l.start_time, 1, 13) || ':00:00'", timedelta(hours=1)),
+    "1d": ("SUBSTR(l.start_time, 1, 10)", timedelta(days=1)),
+}
+
+
+def _trend_interval(start_date, end_date, interval):
+    """选择趋势粒度，并限制细粒度查询的时间范围。"""
+    days = (datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")).days + 1
+    if interval == "auto":
+        return "5m" if days == 1 else "1h" if days <= 7 else "1d"
+    if interval not in TREND_BUCKETS:
+        raise ValueError("interval must be auto, 5m, 1h or 1d")
+    if interval == "5m" and days > 1:
+        raise ValueError("5m interval supports a single day")
+    if interval == "1h" and days > 7:
+        raise ValueError("1h interval supports at most 7 days")
+    return interval
+
 
 def _filters(
     start_date,
@@ -34,6 +57,8 @@ def _filters(
     response_model=None,
     ip_address=None,
     response_column="response_model",
+    target_model_id=None,
+    target_column="target_model_id",
 ):
     alias, date = ("d", "d.stat_date") if daily else ("l", "l.start_time")
     clauses, params = [], []
@@ -46,6 +71,7 @@ def _filters(
     for column, values in (
         ("u.username", usernames),
         (f"{alias}.request_model", models),
+        (f"{alias}.{target_column}", target_model_id),
         (f"{alias}.{response_column}", response_model),
         (f"{alias}.ip_address", ip_address),
     ):
@@ -70,6 +96,7 @@ def usage_outcomes(
     sort_direction=None,
     response_model=None,
     ip_address=None,
+    target_model_id=None,
 ):
     """按相同筛选与维度关联结果样本，保留日聚合用量及仅有明细的分组。"""
     flow = {
@@ -85,7 +112,7 @@ def usage_outcomes(
         "user_usage": {"username": "COALESCE(NULLIF(u.username, ''), l.ip_address, '-')"},
     }
     fields = dimensions[dimension]
-    extra_filters = {"response_model": response_model, "ip_address": ip_address}
+    extra_filters = {"response_model": response_model, "ip_address": ip_address, "target_model_id": target_model_id}
     where, params = _filters(start_date, end_date, username, request_model, daily=False, **extra_filters)
     extra = (
         ", COUNT(DISTINCT l.ip_address) AS ip_count, MAX(SUBSTR(l.start_time, 1, 10)) AS last_request_date"
@@ -163,6 +190,8 @@ def upstream_rates(
     sort_direction=None,
     response_model=None,
     ip_address=None,
+    target_model_id=None,
+    series_bucket="SUBSTR(l.start_time, 1, 10)",
 ):
     """展开真实上游调用，重试各计一次；内部处理与传输异常不进入成功率分母。"""
     flow = {
@@ -173,7 +202,7 @@ def upstream_rates(
     dimensions = {
         "totals": {},
         "models": {"request_model": "l.request_model"},
-        "series": {"date": "SUBSTR(l.start_time, 1, 10)"},
+        "series": {"date": series_bucket},
         "stats": {"ip_address": "l.ip_address", "username": "COALESCE(u.username, '-')", **flow},
         "model_usage": flow,
         "response_model_usage": {"response_model": "NULLIF(l.response_model, '')"},
@@ -182,7 +211,7 @@ def upstream_rates(
         "api_key_usage": {"api_key_id": "l.api_key_id"},
     }
     fields = dimensions[dimension]
-    # 筛选客户端请求的最终响应模型，其所有重试仍参与上游结果统计。
+    # 按客户端请求的最终映射目标和响应模型筛选，其所有重试仍参与上游结果统计。
     where, params = _filters(
         start_date,
         end_date,
@@ -192,6 +221,8 @@ def upstream_rates(
         response_model=response_model,
         ip_address=ip_address,
         response_column="request_response_model",
+        target_model_id=target_model_id,
+        target_column="request_target_model_id",
     )
     if dimension == "api_key_usage":
         where += " AND l.api_key_id IS NOT NULL"
@@ -203,6 +234,7 @@ def upstream_rates(
         WITH l AS (
             SELECT r.id, r.start_time, r.ip_address, r.api_key_id, r.request_model,
                 r.response_model AS request_response_model,
+                r.target_model_id AS request_target_model_id,
                 CASE WHEN r.upstream_attempts IS NULL OR r.upstream_attempts = '[]' THEN r.target_model_id
                      ELSE COALESCE(NULLIF(json_extract(a.value, '$.target_model_id'), ''),
                          CASE WHEN NULLIF(r.target_model_id, '') IS NOT NULL THEN r.request_model END)
@@ -296,9 +328,22 @@ def _rates(row):
     return result
 
 
-def overview(conn, start_date, end_date, username=None, request_model=None, *, response_model=None, ip_address=None):
-    """在同一个读取事务中获取总量、日趋势、模型表现和 IP 汇总。"""
-    extra_filters = {"response_model": response_model, "ip_address": ip_address}
+def overview(
+    conn,
+    start_date,
+    end_date,
+    username=None,
+    request_model=None,
+    *,
+    response_model=None,
+    ip_address=None,
+    target_model_id=None,
+    interval="1d",
+):
+    """在同一个读取事务中获取总量、时间趋势、模型表现和 IP 汇总。"""
+    interval = _trend_interval(start_date, end_date, interval)
+    bucket, step = TREND_BUCKETS[interval]
+    extra_filters = {"response_model": response_model, "ip_address": ip_address, "target_model_id": target_model_id}
     daily_where, daily_params = _filters(start_date, end_date, username, request_model, daily=True, **extra_filters)
     log_where, log_params = _filters(start_date, end_date, username, request_model, daily=False, **extra_filters)
     usage = """
@@ -375,22 +420,70 @@ def overview(conn, start_date, end_date, username=None, request_model=None, *, r
             "GROUP BY NULLIF(d.response_model, '') ORDER BY SUM(d.total_tokens) DESC, d.response_model",
         )
     ]
-    series = combine(
-        daily("d.stat_date AS date, ", "GROUP BY d.stat_date"),
-        observed("SUBSTR(l.start_time, 1, 10) AS date, ", "GROUP BY SUBSTR(l.start_time, 1, 10)"),
-        "date",
-    )
+    daily_series = daily("d.stat_date AS date, ", "GROUP BY d.stat_date")
+    partial = False
+    if interval == "1d":
+        series = combine(
+            daily_series,
+            observed(f"{bucket} AS date, ", f"GROUP BY {bucket}"),
+            "date",
+        )
+    else:
+        series = [
+            _rates(dict(row))
+            for row in conn.execute(
+                f"""
+                SELECT {bucket} AS date, COUNT(*) AS request_count,
+                    COALESCE(SUM(l.total_tokens), 0) AS total_tokens,
+                    COALESCE(SUM(l.prompt_tokens), 0) AS prompt_tokens,
+                    COALESCE(SUM(l.completion_tokens), 0) AS completion_tokens,
+                    COALESCE(SUM(l.cache_read_input_tokens), 0) AS cache_read_input_tokens,
+                    COALESCE(SUM(CASE WHEN l.cache_usage_status = 'known' THEN l.prompt_tokens ELSE 0 END), 0)
+                        AS cache_known_prompt_tokens,
+                    CASE WHEN MIN(l.cache_usage_status) = 'known' AND MAX(l.cache_usage_status) = 'known'
+                         THEN 'known' WHEN MIN(l.cache_usage_status) = 'unknown' AND MAX(l.cache_usage_status) = 'unknown'
+                         THEN 'unknown' ELSE 'partial' END AS cache_usage_status,
+                    {performance}
+                FROM request_logs l LEFT JOIN users u ON u.ip_address = l.ip_address
+                WHERE {log_where} GROUP BY {bucket}
+                """,
+                log_params,
+            ).fetchall()
+        ]
+        coverage = {}
+        coverage_fields = (
+            "request_count",
+            "total_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+            "cache_read_input_tokens",
+            "cache_known_prompt_tokens",
+        )
+        for row in series:
+            day = coverage.setdefault(row["date"][:10], {})
+            for field in coverage_fields:
+                day[field] = day.get(field, 0) + row[field]
+        partial = any(
+            row.get(field, 0) > coverage.get(row["date"], {}).get(field, 0)
+            for row in daily_series
+            for field in coverage_fields
+        )
     dates = {row["date"]: row for row in series}
-    current, end = datetime.strptime(start_date, "%Y-%m-%d"), datetime.strptime(end_date, "%Y-%m-%d")
+    current = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+    if interval != "1d":
+        # 当前时间之后尚未发生请求，不把未来时段绘成零用量。
+        end = min(end, datetime.now())
     series = []
-    while current <= end:
-        day = current.strftime("%Y-%m-%d")
+    while current < end:
+        moment = current.strftime("%Y-%m-%d" if interval == "1d" else "%Y-%m-%d %H:%M:%S")
         series.append(
             dates.get(
-                day, {"date": day, "request_count": 0, "total_tokens": 0, "success_rate": None, "cache_hit_rate": None}
+                moment,
+                {"date": moment, "request_count": 0, "total_tokens": 0, "success_rate": None, "cache_hit_rate": None},
             )
         )
-        current += timedelta(days=1)
+        current += step
     ips = [
         _rates(row)
         for row in daily(
@@ -407,10 +500,18 @@ def overview(conn, start_date, end_date, username=None, request_model=None, *, r
     ips = usage_outcomes(conn, ips, "ip_usage", start_date, end_date, username, request_model, **extra_filters)
     totals = upstream_rates(conn, [totals], "totals", start_date, end_date, username, request_model, **extra_filters)[0]
     models = upstream_rates(conn, models, "models", start_date, end_date, username, request_model, **extra_filters)
-    series = upstream_rates(conn, series, "series", start_date, end_date, username, request_model, **extra_filters)
+    series_with_outcomes = {
+        row["date"]: row
+        for row in upstream_rates(
+            conn, series, "series", start_date, end_date, username, request_model, series_bucket=bucket, **extra_filters
+        )
+    }
+    series = [series_with_outcomes[row["date"]] for row in series]
     return {
         "totals": totals,
         "series": series,
+        "series_interval": interval,
+        "series_partial": partial,
         "models": models,
         "model_flows": model_flows,
         "response_models": response_models,

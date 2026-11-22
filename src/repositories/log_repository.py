@@ -108,7 +108,16 @@ class LogRepository:
 
     @database_operation()
     def get_overview(
-        self, start_date, end_date, username=None, request_model=None, *, response_model=None, ip_address=None
+        self,
+        start_date,
+        end_date,
+        username=None,
+        request_model=None,
+        *,
+        response_model=None,
+        ip_address=None,
+        target_model_id=None,
+        interval="1d",
     ):
         with self._get_connection() as conn:
             conn.execute("BEGIN")
@@ -118,8 +127,10 @@ class LogRepository:
                 end_date,
                 username,
                 request_model,
+                target_model_id=target_model_id,
                 response_model=response_model,
                 ip_address=ip_address,
+                interval=interval,
             )
 
     @database_operation(write=True)
@@ -622,6 +633,7 @@ class LogRepository:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """按条件查询聚合统计。"""
         with self._get_connection() as conn:
@@ -640,6 +652,7 @@ class LogRepository:
             self._append_text_filter(conditions, params, "d.request_model", request_model)
             self._append_text_filter(conditions, params, "d.ip_address", ip_address)
             self._append_text_filter(conditions, params, "d.response_model", response_model)
+            self._append_text_filter(conditions, params, "d.target_model_id", target_model_id)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             order_clause = self._build_order_clause(
@@ -699,6 +712,7 @@ class LogRepository:
                 request_model,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
+                target_model_id=target_model_id,
                 response_model=response_model,
                 ip_address=ip_address,
             )
@@ -714,6 +728,7 @@ class LogRepository:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """按用户名查询用量汇总。"""
         with self._get_connection() as conn:
@@ -732,6 +747,7 @@ class LogRepository:
             self._append_text_filter(conditions, params, "d.request_model", request_model)
             self._append_text_filter(conditions, params, "d.ip_address", ip_address)
             self._append_text_filter(conditions, params, "d.response_model", response_model)
+            self._append_text_filter(conditions, params, "d.target_model_id", target_model_id)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             order_clause = self._build_order_clause(
@@ -788,6 +804,7 @@ class LogRepository:
                 request_model,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
+                target_model_id=target_model_id,
                 response_model=response_model,
                 ip_address=ip_address,
             )
@@ -803,6 +820,7 @@ class LogRepository:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """按 API Key 查询指定时间范围内的用量汇总。"""
         with self._get_connection() as conn:
@@ -820,6 +838,7 @@ class LogRepository:
             self._append_text_filter(conditions, params, "l.request_model", request_model)
             self._append_text_filter(conditions, params, "l.ip_address", ip_address)
             self._append_text_filter(conditions, params, "l.response_model", response_model)
+            self._append_text_filter(conditions, params, "l.target_model_id", target_model_id)
 
             where_clause = " AND ".join(conditions)
             order_clause = self._build_order_clause(
@@ -891,6 +910,7 @@ class LogRepository:
                 request_model,
                 sort_key=sort_key,
                 sort_direction=sort_direction,
+                target_model_id=target_model_id,
                 response_model=response_model,
                 ip_address=ip_address,
             )
@@ -908,6 +928,7 @@ class LogRepository:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """按条件分页查询原始请求日志。"""
         offset = (page - 1) * page_size
@@ -927,6 +948,7 @@ class LogRepository:
             self._append_text_filter(conditions, params, "l.request_model", request_model)
             self._append_text_filter(conditions, params, "l.ip_address", ip_address)
             self._append_text_filter(conditions, params, "l.response_model", response_model)
+            self._append_text_filter(conditions, params, "l.target_model_id", target_model_id)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -988,6 +1010,7 @@ class LogRepository:
         sort_direction: str | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[SQLiteRow]:
         """按条件查询完整请求日志列表。"""
         with self._get_connection() as conn:
@@ -1005,6 +1028,7 @@ class LogRepository:
             self._append_text_filter(conditions, params, "l.request_model", request_model)
             self._append_text_filter(conditions, params, "l.ip_address", ip_address)
             self._append_text_filter(conditions, params, "l.response_model", response_model)
+            self._append_text_filter(conditions, params, "l.target_model_id", target_model_id)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             order_clause = self._build_order_clause(
@@ -1046,6 +1070,7 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         response_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """按条件导出请求明细原始行。"""
         with self._get_connection() as conn:
@@ -1063,6 +1088,7 @@ class LogRepository:
             self._append_text_filter(conditions, params, "l.request_model", request_model)
             self._append_text_filter(conditions, params, "l.ip_address", ip_address)
             self._append_text_filter(conditions, params, "l.response_model", response_model)
+            self._append_text_filter(conditions, params, "l.target_model_id", target_model_id)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             cursor.execute(
@@ -1106,6 +1132,7 @@ class LogRepository:
         request_model: str | Sequence[str] | None = None,
         ip_address: str | Sequence[str] | None = None,
         response_model: str | Sequence[str] | None = None,
+        target_model_id: str | Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """按条件导出日聚合统计原始行。"""
         with self._get_connection() as conn:
@@ -1122,6 +1149,7 @@ class LogRepository:
             self._append_text_filter(conditions, params, "u.username", username)
             self._append_text_filter(conditions, params, "d.request_model", request_model)
             self._append_text_filter(conditions, params, "d.response_model", response_model)
+            self._append_text_filter(conditions, params, "d.target_model_id", target_model_id)
             self._append_text_filter(conditions, params, "d.ip_address", ip_address)
 
             where_clause = " AND ".join(conditions) if conditions else "1=1"
@@ -1315,9 +1343,9 @@ class LogRepository:
             rows = conn.execute(
                 """
                 WITH sources AS (
-                    SELECT ip_address, request_model, response_model FROM request_logs
+                    SELECT ip_address, request_model, target_model_id, response_model FROM request_logs
                     UNION
-                    SELECT ip_address, request_model, response_model FROM daily_request_stats
+                    SELECT ip_address, request_model, target_model_id, response_model FROM daily_request_stats
                 )
                 SELECT s.*, u.username FROM sources s
                 LEFT JOIN users u ON u.ip_address = s.ip_address
@@ -1328,6 +1356,7 @@ class LogRepository:
             for key, column in (
                 ("users", "username"),
                 ("models", "request_model"),
+                ("target_models", "target_model_id"),
                 ("response_models", "response_model"),
                 ("ip_addresses", "ip_address"),
             )

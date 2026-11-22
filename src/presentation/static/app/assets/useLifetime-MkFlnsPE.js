@@ -1,1 +1,0 @@
-import{ft as e}from"./index-BKQF7NX_.js";function t(){let t=new AbortController;return e(()=>t.abort()),t.signal}export{t};

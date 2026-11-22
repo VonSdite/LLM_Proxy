@@ -13,6 +13,7 @@ export function datePreset(days: number, end = new Date()): StatisticsFilters {
     end_date: dateInput(end),
     username: [],
     request_model: [],
+    target_model_id: [],
     response_model: [],
     ip_address: [],
   }
@@ -124,55 +125,116 @@ export const tokenKeys = [
   'cache_read_input_tokens',
 ] as const
 const tokens: TableColumn[] = [
-  { key: 'prompt_tokens', label: '输入 Token', width: 132, sortable: true, align: 'right' },
-  { key: 'completion_tokens', label: '输出 Token', width: 132, sortable: true, align: 'right' },
-  { key: 'total_tokens', label: '总 Token', width: 140, sortable: true, align: 'right' },
+  {
+    key: 'prompt_tokens',
+    label: '输入Tok',
+    width: 76,
+    minWidth: 76,
+    grow: 0,
+    sortable: true,
+    align: 'right',
+  },
+  {
+    key: 'completion_tokens',
+    label: '输出Tok',
+    width: 76,
+    minWidth: 76,
+    grow: 0,
+    sortable: true,
+    align: 'right',
+  },
+  {
+    key: 'total_tokens',
+    label: '总Tok',
+    width: 76,
+    minWidth: 76,
+    grow: 0,
+    sortable: true,
+    align: 'right',
+  },
   {
     key: 'cache_read_input_tokens',
-    label: '缓存读取 Token',
+    label: '缓存Tok',
     help: '上游报告的缓存命中输入 Token，是输入 Token 的一部分，不应再加到总 Token。没有缓存明细时，不能把显示的 0 直接理解为没有缓存命中。',
-    width: 180,
+    width: 96,
+    minWidth: 84,
+    grow: 0,
     sortable: true,
     align: 'right',
   },
   {
     key: 'cache_hit_rate',
     label: '缓存命中率',
-    width: 154,
+    width: 112,
+    minWidth: 92,
+    grow: 0,
     sortable: true,
     align: 'right',
     help: '缓存读取 Token ÷ 已提供缓存明细请求的输入 Token。汇总按 Token 加权，不是各行百分比平均值；未知表示上游未提供可计算的明细，部分明细时只统计已知输入。',
   },
 ]
-const user: TableColumn = { key: 'username', label: '用户名', width: 144, sortable: true }
-const ip: TableColumn = { key: 'ip_address', label: 'IP', width: 140, sortable: true }
-const flow: TableColumn = {
-  key: 'model_flow',
-  label: '请求模型',
-  width: 280,
+const user: TableColumn = {
+  key: 'username',
+  label: '用户名',
+  width: 72,
+  minWidth: 72,
+  grow: 0,
   sortable: true,
-  help: '显示客户端请求的模型 ID；请求使用模型映射时，显示映射 ID → 实际目标模型 ID，即使两个 ID 相同也保留。点击请求 ID 可筛选。',
+}
+const ip: TableColumn = {
+  key: 'ip_address',
+  label: 'IP',
+  width: 112,
+  minWidth: 104,
+  maxWidth: 240,
+  grow: 0,
+  sortable: true,
+}
+const requestModel: TableColumn = {
+  key: 'request_model',
+  label: '请求模型',
+  width: 200,
+  minWidth: 120,
+  maxWidth: 640,
+  grow: 2,
+  sortable: true,
+  help: '客户端请求的原始模型 ID，包含模型映射名称。点击请求 ID 可筛选。',
+}
+const targetModel: TableColumn = {
+  key: 'target_model_id',
+  label: '映射模型',
+  width: 220,
+  minWidth: 120,
+  maxWidth: 640,
+  grow: 2,
+  sortable: true,
+  help: '模型映射选中的实际目标模型 ID，与请求 ID 相同时也显示；没有映射目标时显示 -。',
 }
 const responseModel: TableColumn = {
   key: 'response_model',
   label: '响应模型',
-  width: 220,
-  minWidth: 140,
-  maxWidth: 400,
+  width: 200,
+  minWidth: 120,
+  maxWidth: 640,
+  grow: 2,
   sortable: true,
   help: '上游响应实际报告的模型 ID，不从请求模型或映射目标推测；未提供时显示未知。',
 }
 const count: TableColumn = {
   key: 'request_count',
   label: '请求数',
-  width: 110,
+  width: 80,
+  minWidth: 72,
+  grow: 0,
   sortable: true,
   align: 'right',
 }
 const latency: TableColumn = {
   key: 'first_token_latency_ms',
   label: '首字延迟',
-  width: 120,
+  width: 96,
+  minWidth: 80,
+  grow: 0,
   sortable: true,
   align: 'right',
   help: latencyHelp,
@@ -180,7 +242,9 @@ const latency: TableColumn = {
 const tps: TableColumn = {
   key: 'tps',
   label: 'TPS',
-  width: 110,
+  width: 96,
+  minWidth: 96,
+  grow: 0,
   sortable: true,
   align: 'right',
   help: tpsHelp,
@@ -188,14 +252,16 @@ const tps: TableColumn = {
 const success: TableColumn = {
   key: 'upstream_success_rate',
   label: '上游成功率',
-  width: 140,
+  width: 116,
+  minWidth: 100,
+  grow: 0,
   align: 'right',
   sortable: true,
   help: successHelp,
 }
 export const columnsByView: Record<StatisticsView, TableColumn[]> = {
-  model_usage: [{ ...flow, minWidth: 220, grow: 600 }, responseModel, count, success, ...tokens],
-  response_model_usage: [{ ...responseModel, width: 184, grow: 600 }, count, success, ...tokens],
+  model_usage: [requestModel, targetModel, responseModel, count, success, ...tokens],
+  response_model_usage: [{ ...responseModel, maxWidth: undefined }, count, success, ...tokens],
   models: [
     {
       key: 'request_model',
@@ -203,7 +269,7 @@ export const columnsByView: Record<StatisticsView, TableColumn[]> = {
       width: 280,
       minWidth: 180,
       maxWidth: 640,
-      grow: 600,
+      grow: 2,
       sortable: true,
     },
     count,
@@ -211,58 +277,116 @@ export const columnsByView: Record<StatisticsView, TableColumn[]> = {
     {
       key: 'cache_hit_rate',
       label: '缓存命中率',
-      width: 130,
+      width: 112,
+      minWidth: 92,
+      grow: 0,
       align: 'right',
       sortable: true,
       help: cacheHelp,
     },
     latency,
     tps,
-    { key: 'total_tokens', label: '总 Token', width: 130, align: 'right', sortable: true },
+    {
+      key: 'total_tokens',
+      label: '总Tok',
+      width: 76,
+      minWidth: 76,
+      grow: 0,
+      align: 'right',
+      sortable: true,
+    },
   ],
   ip_usage: [ip, user, count, success, ...tokens],
-  stats: [ip, user, flow, responseModel, count, success, ...tokens],
+  stats: [ip, user, requestModel, targetModel, responseModel, count, success, ...tokens],
   user_usage: [
     user,
     count,
     success,
     ...tokens,
-    { key: 'ip_count', label: 'IP 数', width: 100, sortable: true, align: 'right' },
-    { key: 'last_request_date', label: '最近请求日期', width: 160, sortable: true },
+    {
+      key: 'ip_count',
+      label: 'IP 数',
+      width: 72,
+      minWidth: 64,
+      grow: 0,
+      sortable: true,
+      align: 'right',
+    },
+    {
+      key: 'last_request_date',
+      label: '最近请求日期',
+      width: 128,
+      minWidth: 128,
+      fixed: true,
+      sortable: true,
+    },
   ],
   api_key_usage: [
-    { key: 'key_name', label: 'Key 名称', width: 180, sortable: true },
-    { key: 'key_preview', label: 'Key', width: 190, sortable: true },
+    { key: 'key_name', label: 'Key 名称', width: 180, minWidth: 112, grow: 2, sortable: true },
+    {
+      key: 'key_preview',
+      label: 'Key',
+      width: 176,
+      minWidth: 140,
+      maxWidth: 360,
+      grow: 1,
+      sortable: true,
+    },
     count,
     success,
     ...tokens,
   ],
   logs: [
-    { key: 'start_time', label: '请求时间', width: 104, maxWidth: 184, sortable: true },
-    { key: 'source', label: '调用来源', width: 108, maxWidth: 160 },
-    { ...flow, width: 180, maxWidth: 520, grow: 420 },
-    { ...responseModel, width: 160, maxWidth: 360, grow: 220 },
-    { key: 'outcome', label: '结果', width: 92, maxWidth: 140, sortable: true, help: outcomeHelp },
+    {
+      key: 'start_time',
+      label: '请求时间',
+      width: 144,
+      minWidth: 144,
+      maxWidth: 240,
+      fixed: true,
+      sortable: true,
+    },
+    user,
+    ip,
+    { ...requestModel, width: 152, minWidth: 104, maxWidth: 400, grow: 1 },
+    { ...targetModel, width: 184, minWidth: 120, maxWidth: 560, grow: 2 },
+    { ...responseModel, width: 152, minWidth: 104, maxWidth: 400, grow: 1 },
+    {
+      key: 'outcome',
+      label: '结果',
+      width: 80,
+      minWidth: 80,
+      maxWidth: 160,
+      fixed: true,
+      sortable: true,
+      help: outcomeHelp,
+    },
     {
       key: 'prompt_tokens',
-      label: '输入 Token',
-      width: 88,
+      label: '输入Tok',
+      width: 76,
+      minWidth: 76,
+      grow: 0,
       maxWidth: 150,
       sortable: true,
       align: 'right',
     },
     {
       key: 'completion_tokens',
-      label: '输出 Token',
-      width: 88,
+      label: '输出Tok',
+      width: 76,
+      minWidth: 76,
+      grow: 0,
       maxWidth: 150,
       sortable: true,
       align: 'right',
     },
     {
       key: 'cache_read_input_tokens',
-      label: '缓存读取 Token',
-      width: 144,
+      label: '缓存Tok',
+      width: 96,
+      minWidth: 84,
+      grow: 0,
       maxWidth: 180,
       sortable: true,
       align: 'right',
@@ -274,7 +398,9 @@ export const columnsByView: Record<StatisticsView, TableColumn[]> = {
     {
       key: 'cache_hit_rate',
       label: '缓存命中率',
-      width: 124,
+      width: 92,
+      minWidth: 92,
+      grow: 0,
       maxWidth: 154,
       sortable: true,
       align: 'right',
@@ -285,18 +411,22 @@ export const columnsByView: Record<StatisticsView, TableColumn[]> = {
     },
     {
       key: 'total_tokens',
-      label: '总 Token',
-      width: 92,
+      label: '总Tok',
+      width: 76,
+      minWidth: 76,
+      grow: 0,
       maxWidth: 150,
       sortable: true,
       align: 'right',
     },
-    { ...latency, maxWidth: 180 },
-    { ...tps, width: 96, maxWidth: 180 },
+    { ...latency, width: 80, minWidth: 80, maxWidth: 180, grow: 0 },
+    { ...tps, width: 96, minWidth: 96, maxWidth: 180, grow: 0 },
     {
       key: 'duration',
       label: '耗时',
-      width: 96,
+      width: 80,
+      minWidth: 80,
+      grow: 0,
       maxWidth: 160,
       sortable: true,
       align: 'right',
@@ -304,16 +434,40 @@ export const columnsByView: Record<StatisticsView, TableColumn[]> = {
     },
   ],
 }
-export function modelFlowSteps(row: UsageRow) {
-  const steps: { model: string; stage: string }[] = []
-  for (const [stage, model] of [
-    ['请求', row.request_model],
-    ['目标', row.target_model_id],
-  ] as const) {
-    if (!model) continue
-    steps.push({ model, stage })
-  }
-  return steps
+export function statisticsColumns(rows: UsageRow[], view: StatisticsView): TableColumn[] {
+  const footer: Record<string, string | number | undefined> | undefined = totals(rows, view)
+  const columns = columnsByView[view]
+  const growMetrics = !columns.some((column) => (column.grow ?? 0) > 0)
+  return columns.map((column) => {
+    if (column.align !== 'right') return column.grow ? { ...column, maxWidth: undefined } : column
+    const values = rows.map((row) => {
+      if (column.key === 'cache_hit_rate')
+        return cacheRate(row.cache_hit_rate, row.cache_usage_status)
+      if (column.key === 'upstream_success_rate') return percent(row.upstream_success_rate)
+      if (column.key === 'duration') return `${duration(row)} s`
+      if (column.key === 'tps') return row.tps == null ? '—' : `${metric(row.tps)} tok/s`
+      if (column.key === 'first_token_latency_ms')
+        return row.first_token_latency_ms == null
+          ? '—'
+          : `${metric(row.first_token_latency_ms / 1000, 2)} s`
+      return number(row[column.key as (typeof tokenKeys)[number] | 'request_count' | 'ip_count'])
+    })
+    const total = footer?.[column.key]
+    if (total !== undefined) values.push(String(total))
+    // 等宽数字按字符预留空间；精确数值与单位始终完整显示，不使用 k/M 缩写。
+    const minWidth = values.reduce(
+      (width, value) => Math.max(width, value.length * 8 + 16),
+      column.minWidth ?? 80,
+    )
+    return {
+      ...column,
+      minWidth,
+      width: Math.max(column.width ?? 80, minWidth),
+      // 没有弹性文本列时由数值列铺满容器，用户名和 IP 保持紧凑。
+      grow: growMetrics ? 1 : column.grow,
+      maxWidth: growMetrics ? undefined : Math.max(column.maxWidth ?? 180, minWidth),
+    }
+  })
 }
 export function rowKey(row: UsageRow, view: StatisticsView) {
   if (view === 'response_model_usage') return JSON.stringify(row.response_model || null)

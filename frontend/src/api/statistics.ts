@@ -1,5 +1,7 @@
 import { api, download, type Query } from './client'
 
+export type StatisticsInterval = '5m' | '1h' | '1d'
+
 export type StatisticsView =
   | 'stats'
   | 'model_usage'
@@ -14,6 +16,7 @@ export interface StatisticsFilters {
   end_date: string
   username: string[]
   request_model: string[]
+  target_model_id: string[]
   response_model: string[]
   ip_address: string[]
 }
@@ -70,6 +73,8 @@ export interface UsageRow {
 export interface StatisticsOverview {
   totals: UsageRow
   series: (UsageRow & { date: string })[]
+  series_interval?: StatisticsInterval
+  series_partial?: boolean
   models: UsageRow[]
   model_flows: UsageRow[]
   response_models: UsageRow[]
@@ -127,6 +132,7 @@ export const statisticsApi = {
     return api<{
       users: string[]
       models: string[]
+      target_models: string[]
       response_models: string[]
       ip_addresses: string[]
     }>('/api/statistics/filter-options', { signal })

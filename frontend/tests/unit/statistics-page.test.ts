@@ -43,6 +43,7 @@ describe('统计页面', () => {
       users: [],
       models: [],
       response_models: [],
+      target_models: [],
       ip_addresses: [],
     })
     const pinia = createPinia()

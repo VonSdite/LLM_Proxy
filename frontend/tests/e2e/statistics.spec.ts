@@ -1,12 +1,117 @@
 import { expect, test } from '../browser-test'
 import { mockAdmin } from '../browser-fixtures'
 
-test('响应模型与 IP 多选收起后查询一次，并随维度、明细和导出保留', async ({ page }) => {
+test('请求明细保留完整单行时间，自适应模型列并保留手动列宽', async ({ page }) => {
+  await mockAdmin(page)
+  await page.addInitScript(() => {
+    const key = 'table-widths:statistics-logs'
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          prompt_tokens: 76,
+          cache_read_input_tokens: 108,
+          cache_hit_rate: 92,
+          first_token_latency_ms: 80,
+        }),
+      )
+    }
+  })
+  await page.setViewportSize({ width: 2560, height: 1000 })
+  await page.goto('/statistics')
+  await page.getByRole('tab', { name: '请求明细', exact: true }).click()
+  const table = page.getByRole('table')
+  const header = (name: string) =>
+    table.getByRole('columnheader').filter({ has: page.getByRole('button', { name, exact: true }) })
+  const unreadableHeaders = () =>
+    table.getByRole('columnheader').evaluateAll((headers) =>
+      headers.flatMap((cell) => {
+        const content = cell.querySelector('.ui-table-header-content')!
+        const label = content.querySelector('.ui-table-heading:not(.ui-table-sort)')!
+        const range = document.createRange()
+        range.selectNodeContents(label)
+        const bounds = cell.getBoundingClientRect()
+        const group = content.getBoundingClientRect()
+        return range.getClientRects().length !== 1 ||
+          group.left < bounds.left + 7 ||
+          group.right > bounds.right - 7
+          ? [label.textContent?.trim()]
+          : []
+      }),
+    )
+  await expect.poll(unreadableHeaders).toEqual([])
+  const time = page.locator('tbody time').first()
+  await expect(time).toHaveText('2026-11-06 10:00:00')
+  expect((await time.boundingBox())!.height).toBeLessThan(24)
+  expect((await header('请求时间').boundingBox())!.width).toBeLessThanOrEqual(145)
+  expect(
+    await time.evaluate((element) => {
+      const text = element.getBoundingClientRect()
+      const cell = element.closest('td')!.getBoundingClientRect()
+      return text.left >= cell.left + 7 && text.right <= cell.right - 7
+    }),
+  ).toBe(true)
+  expect((await header('结果').boundingBox())!.width).toBeLessThanOrEqual(81)
+  const wide = (await header('映射模型').boundingBox())!.width
+  await page.setViewportSize({ width: 1920, height: 1000 })
+  await expect.poll(async () => (await header('映射模型').boundingBox())!.width).toBeLessThan(wide)
+  expect((await time.boundingBox())!.height).toBeLessThan(24)
+  await expect
+    .poll(() =>
+      page
+        .locator('.ui-table-scroll')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    )
+    .toBeLessThanOrEqual(1)
+  await expect(page.getByRole('cell', { name: '300,000', exact: true })).toBeVisible()
+  const inputWidth = (await header('输入Tok').boundingBox())!.width
+  await page.getByRole('separator', { name: '调整输入Tok列宽', exact: true }).press('ArrowLeft')
+  await expect
+    .poll(async () => (await header('输入Tok').boundingBox())!.width)
+    .toBeCloseTo(inputWidth, 0)
+  const handle = page.getByRole('separator', { name: '调整映射模型列宽', exact: true })
+  const initial = (await header('映射模型').boundingBox())!.width
+  await handle.focus()
+  await handle.press('ArrowRight')
+  await expect
+    .poll(async () => (await header('映射模型').boundingBox())!.width)
+    .toBeCloseTo(initial + 16, 0)
+  const manual = (await header('映射模型').boundingBox())!.width
+  await page.setViewportSize({ width: 2048, height: 1000 })
+  await expect
+    .poll(async () => (await header('映射模型').boundingBox())!.width)
+    .toBeCloseTo(manual, 0)
+  await page.reload()
+  await page.getByRole('tab', { name: '请求明细', exact: true }).click()
+  await expect
+    .poll(async () => (await header('映射模型').boundingBox())!.width)
+    .toBeCloseTo(manual, 0)
+  await handle.dblclick()
+  await expect
+    .poll(async () => (await header('映射模型').boundingBox())!.width)
+    .toBeGreaterThan(manual)
+  const requestHandle = page.getByRole('separator', { name: '调整请求模型列宽', exact: true })
+  const beforeDrag = (await header('请求模型').boundingBox())!.width
+  const box = (await requestHandle.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 32, box.y + box.height / 2, { steps: 4 })
+  await page.mouse.up()
+  await expect
+    .poll(async () => (await header('请求模型').boundingBox())!.width)
+    .toBeCloseTo(beforeDrag + 32, 0)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await expect.poll(unreadableHeaders).toEqual([])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('映射模型、响应模型与 IP 多选收起后查询一次，并随维度、明细和导出保留', async ({ page }) => {
   const fixture = await mockAdmin(page)
   await page.goto('/statistics')
   await expect(page.getByRole('region', { name: '使用趋势' })).toBeVisible()
   const count = fixture.calls.filter((call) => call.path === '/api/statistics/overview').length
   for (const [label, values] of [
+    ['映射模型', ['provider/a', 'provider/b']],
     ['响应模型', ['response-a', 'response-b']],
     ['IP', ['192.168.1.10', '192.168.1.20']],
   ] as const) {
@@ -32,16 +137,21 @@ test('响应模型与 IP 多选收起后查询一次，并随维度、明细和�
   }
   await expect
     .poll(() => fixture.calls.filter((call) => call.path === '/api/statistics/overview').length)
-    .toBe(count + 2)
+    .toBe(count + 3)
   const check = async (path: string) => {
     await expect
       .poll(() => {
         const url = fixture.calls.filter((call) => call.path === path).at(-1)?.url
         if (!url) return null
         const params = new URL(url).searchParams
-        return [params.getAll('response_model'), params.getAll('ip_address')]
+        return [
+          params.getAll('target_model_id'),
+          params.getAll('response_model'),
+          params.getAll('ip_address'),
+        ]
       })
       .toEqual([
+        ['provider/a', 'provider/b'],
         ['response-a', 'response-b'],
         ['192.168.1.10', '192.168.1.20'],
       ])
@@ -96,6 +206,11 @@ test('日期编辑过程不查询，提交有效日期后刷新一次', async ({
   const fixture = await mockAdmin(page)
   await page.goto('/statistics')
   await expect(page.getByRole('region', { name: '使用趋势' })).toBeVisible()
+  const response = (await page.getByLabel('响应模型', { exact: true }).boundingBox())!
+  const refresh = (await page.getByRole('button', { name: '刷新统计', exact: true }).boundingBox())!
+  expect(refresh.x).toBeGreaterThanOrEqual(response.x + response.width)
+  expect(refresh.x - response.x - response.width).toBeLessThanOrEqual(12)
+  expect(Math.abs(refresh.y + refresh.height - response.y - response.height)).toBeLessThanOrEqual(1)
   const count = () =>
     fixture.calls.filter((call) => call.path === '/api/statistics/overview').length
   const before = count()
@@ -145,14 +260,14 @@ test('概览图表、模型下钻与请求性能使用同一筛选', async ({ pa
   for (const value of ['300,000', '45,000', '120,000', '40.00%', '345,000']) {
     await expect(page.getByRole('cell', { name: value, exact: true })).toBeVisible()
   }
-  for (const label of ['输入 Token', '输出 Token', '缓存读取 Token', '缓存命中率', '总 Token']) {
+  for (const label of ['输入Tok', '输出Tok', '缓存Tok', '缓存命中率', '总Tok']) {
     await expect(
       page
         .getByRole('columnheader')
         .filter({ has: page.getByRole('button', { name: label, exact: true }) }),
     ).toBeVisible()
   }
-  await page.getByRole('button', { name: '输出 Token', exact: true }).click()
+  await page.getByRole('button', { name: '输出Tok', exact: true }).click()
   await expect
     .poll(() => fixture.calls.filter((call) => call.path === '/api/request-logs').at(-1)?.url)
     .toContain('sort_key=completion_tokens')
@@ -188,9 +303,14 @@ test('用量维度统一切换，请求模型和 IP 汇总读取最新概览数�
     (call) => call.path === '/api/statistics/overview',
   ).length
   await dimensions.getByRole('tab', { name: '请求模型', exact: true }).click()
-  await expect(page.getByRole('columnheader', { name: '输入 Token' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '输入Tok' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '请求数' })).toBeVisible()
-  await expect(page.getByRole('cell', { name: 'smart → provider/a', exact: true })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'smart', exact: true })).toHaveCount(3)
+  await expect(page.getByRole('cell', { name: 'provider/a', exact: true })).toBeVisible()
+  await page.getByRole('table').getByRole('button', { name: '映射模型', exact: true }).click()
+  await expect(page.locator('tbody tr').first()).toContainText('provider/a')
+  await page.getByRole('table').getByRole('button', { name: '映射模型', exact: true }).click()
+  await expect(page.locator('tbody tr').first()).toContainText('provider/b')
   await expect(page.getByRole('cell', { name: 'response-b', exact: true })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'response-c', exact: true })).toBeVisible()
   await page.getByRole('table').getByRole('button', { name: '响应模型', exact: true }).click()
@@ -264,12 +384,19 @@ test('往返切换统计视图和用量维度均刷新一次，保留已应用�
     expect(calls).toHaveLength(before + 1)
     expect(calls.at(-1)!.url).toContain('start_date=2026-11-01')
     expect(calls.at(-1)!.url).toContain('end_date=2026-11-14')
+    await page.getByRole('button', { name: '刷新统计', exact: true }).click()
+    await expect
+      .poll(() => fixture.calls.filter((call) => call.path === path).length)
+      .toBe(before + 2)
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0)
+    expect(fixture.calls.filter((call) => call.path === path).at(-1)!.url).toBe(calls.at(-1)!.url)
   }
   expect(fixture.unexpected).toEqual([])
 })
 
 test('全部用量维度显示分组上游成功率、明细计数与合计', async ({ page }) => {
   const fixture = await mockAdmin(page)
+  await page.setViewportSize({ width: 1920, height: 1000 })
   await page.goto('/statistics')
   await page.getByRole('tab', { name: '用量', exact: true }).click()
   const dimensions = page.getByRole('tablist', { name: '汇总维度' })
@@ -283,6 +410,60 @@ test('全部用量维度显示分组上游成功率、明细计数与合计', as
     )
     await page.keyboard.press('Escape')
     await expect(page.locator('tfoot')).toContainText('90.9%')
+    await expect
+      .poll(() =>
+        page.getByRole('table').evaluate((table) => {
+          const edge = table.closest('.ui-table-scroll')!.getBoundingClientRect().right
+          return Math.max(
+            ...[...table.querySelectorAll('tr')].map((row) =>
+              Math.abs(row.lastElementChild!.getBoundingClientRect().right - edge),
+            ),
+          )
+        }),
+      )
+      .toBeLessThanOrEqual(1)
+    for (const [key, width] of [
+      ['ip_address', 112],
+      ['username', 72],
+    ] as const) {
+      const header = page.locator(`th[data-column-id="${key}"]`)
+      if (await header.count()) expect((await header.boundingBox())!.width).toBeCloseTo(width, 0)
+    }
+    await expect
+      .poll(() =>
+        page.locator('th').evaluateAll((headers) =>
+          headers.flatMap((cell) => {
+            const content = cell.querySelector('.ui-table-header-content')!
+            const label = content.querySelector('.ui-table-heading:not(.ui-table-sort)')!
+            const range = document.createRange()
+            range.selectNodeContents(label)
+            const bounds = cell.getBoundingClientRect()
+            const group = content.getBoundingClientRect()
+            return range.getClientRects().length !== 1 ||
+              group.left < bounds.left + 7 ||
+              group.right > bounds.right - 7
+              ? [label.textContent?.trim()]
+              : []
+          }),
+        ),
+      )
+      .toEqual([])
+    expect(
+      await page
+        .locator('tbody .statistics-measure, tfoot .statistics-measure')
+        .evaluateAll((elements) =>
+          elements.flatMap((element) => {
+            const text = element.getBoundingClientRect()
+            const cell = element.closest('td')!.getBoundingClientRect()
+            return text.left < cell.left + 7 || text.right > cell.right - 7
+              ? [element.textContent]
+              : []
+          }),
+        ),
+    ).toEqual([])
+    expect(
+      await page.locator('.ui-table-scroll').evaluate((el) => el.scrollWidth - el.clientWidth),
+    ).toBeLessThanOrEqual(1)
     await page.getByRole('button', { name: '上游成功率', exact: true }).click()
   }
   await expect
@@ -304,12 +485,157 @@ test('趋势切换与单日范围保留可读数值和悬浮提示', async ({ pa
   await first.hover()
   await expect(page.getByRole('tooltip')).toContainText('上游成功率 90.9%')
   await page.getByRole('tab', { name: '今天', exact: true }).click()
-  await expect(chart.locator('.ui-trend-target')).toHaveCount(1)
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(288)
   await chart.getByRole('tab', { name: '缓存命中率', exact: true }).click()
+  await chart.getByRole('tab', { name: '天', exact: true }).click()
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(1)
   await expect(chart.locator('.ui-trend-target')).toHaveAttribute('aria-label', /40\.0%/)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
+})
+
+test('趋势粒度按日期范围显示，手动切换保留指标与筛选', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-22T04:00:00Z') })
+  const fixture = await mockAdmin(page)
+  await page.goto('/statistics')
+  const chart = page.getByRole('region', { name: '使用趋势' })
+  const intervals = chart.getByRole('tablist', { name: '时间粒度' })
+  await expect(chart.getByRole('tab', { name: 'Token', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(intervals.getByRole('tab')).toHaveText(['小时', '天'])
+  await expect(intervals.getByRole('tab', { name: '小时', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(168)
+  const count = () =>
+    fixture.calls.filter((call) => call.path === '/api/statistics/overview').length
+  let before = count()
+  await intervals.getByRole('tab', { name: '天', exact: true }).click()
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(7)
+  expect(count()).toBe(before + 1)
+  before = count()
+  await page.getByLabel('请求模型', { exact: true }).click()
+  await page.getByLabel('搜索选项').fill('smart')
+  await page.getByRole('checkbox', { name: 'smart', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(intervals.getByRole('tab', { name: '天', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect
+    .poll(
+      () => fixture.calls.filter((call) => call.path === '/api/statistics/overview').at(-1)?.url,
+    )
+    .toContain('request_model=smart')
+  expect(count()).toBe(before + 1)
+  expect(
+    fixture.calls.filter((call) => call.path === '/api/statistics/overview').at(-1)!.url,
+  ).toContain('interval=1d')
+  before = count()
+  await page.getByRole('tab', { name: '今天', exact: true }).click()
+  await expect(intervals.getByRole('tab')).toHaveText(['5分钟', '小时', '天'])
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(288)
+  await expect(intervals.getByRole('tab', { name: '5分钟', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  expect(count()).toBe(before + 1)
+  before = count()
+  await intervals.getByRole('tab', { name: '小时', exact: true }).click()
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(24)
+  expect(count()).toBe(before + 1)
+  before = count()
+  await intervals.getByRole('tab', { name: '5分钟', exact: true }).click()
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(288)
+  expect(count()).toBe(before + 1)
+  await expect(chart.locator('.ui-trend-date').first()).toHaveText('11-22 00:00')
+  await expect(chart.locator('.ui-trend-target').first()).toHaveAttribute(
+    'aria-label',
+    /2026-11-22 00:00:00 Token 144k/,
+  )
+  before = count()
+  await page.getByRole('tab', { name: '近 7 天', exact: true }).click()
+  await expect(intervals.getByRole('tab')).toHaveText(['小时', '天'])
+  await expect(intervals.getByRole('tab', { name: '小时', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(168)
+  expect(count()).toBe(before + 1)
+  expect(
+    fixture.calls.filter((call) => call.path === '/api/statistics/overview').at(-1)!.url,
+  ).toContain('interval=1h')
+  await expect(chart.getByRole('tab', { name: 'Token', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  before = count()
+  await page.getByLabel('开始日期', { exact: true }).fill('2026-11-15')
+  await page.getByLabel('开始日期', { exact: true }).blur()
+  await expect(intervals.getByRole('tab')).toHaveText(['天'])
+  await expect(intervals.getByRole('tab', { name: '天', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(8)
+  expect(count()).toBe(before + 1)
+  const latest = new URL(
+    fixture.calls.filter((call) => call.path === '/api/statistics/overview').at(-1)!.url,
+  )
+  expect(latest.searchParams.get('interval')).toBe('1d')
+  expect(latest.searchParams.get('request_model')).toBe('smart')
+  await chart.getByRole('tab', { name: '缓存命中率', exact: true }).click()
+  await page.getByRole('tab', { name: '近 30 天', exact: true }).click()
+  await expect(intervals.getByRole('tab')).toHaveText(['天'])
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(30)
+  await page.getByRole('tab', { name: '今天', exact: true }).click()
+  await expect(intervals.getByRole('tab')).toHaveText(['5分钟', '小时', '天'])
+  await expect(intervals.getByRole('tab', { name: '5分钟', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(chart.locator('.ui-trend-target')).toHaveCount(288)
+  await expect(chart.getByRole('tab', { name: '缓存命中率', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  expect(fixture.unexpected).toEqual([])
+})
+
+test('历史明细不足时说明覆盖范围，按天仍可查看完整用量', async ({ page }) => {
+  await mockAdmin(page)
+  await page.route('**/api/statistics/overview?*', async (route) => {
+    const day = new URL(route.request().url()).searchParams.get('interval') === '1d'
+    await route.fulfill({
+      json: {
+        totals: { request_count: 10, total_tokens: 1000 },
+        series_interval: day ? '1d' : '1h',
+        series_partial: !day,
+        series: [
+          {
+            date: day ? '2026-11-22' : '2026-11-22 09:00:00',
+            request_count: day ? 10 : 1,
+            total_tokens: day ? 1000 : 100,
+          },
+        ],
+        models: [],
+        model_flows: [],
+        response_models: [],
+        ips: [],
+      },
+    })
+  })
+  await page.goto('/statistics')
+  const chart = page.getByRole('region', { name: '使用趋势' })
+  await expect(chart).toContainText('部分历史用量仅支持按天查看')
+  await chart.getByRole('tab', { name: '天', exact: true }).click()
+  await expect(chart).not.toContainText('部分历史用量仅支持按天查看')
+  await expect(chart.locator('.ui-trend-target')).toHaveAttribute('aria-label', /Token 1k/)
 })
 
 test('失败与未知用量保持独立，无样本的趋势不显示零命中率', async ({ page }) => {
@@ -371,7 +697,7 @@ test('失败与未知用量保持独立，无样本的趋势不显示零命中�
   await expect(page.getByRole('cell', { name: '2026-11-13 10:00:00', exact: true })).toBeVisible()
   await expect(page.getByRole('cell', { name: '127.0.0.1', exact: true })).toBeVisible()
   await expect(page.getByText('未登记用户')).toHaveCount(0)
-  await expect(page.getByRole('cell', { name: '—', exact: true })).toHaveCount(1)
+  await expect(page.getByLabel('TPS 未计算原因')).toHaveText('—')
   await page.getByLabel('TPS 未计算原因').hover()
   await expect(page.getByRole('tooltip')).toContainText('请求失败或被取消')
 })
@@ -479,7 +805,7 @@ test('请求明细的说明在排序之前，结果解释四种实际状态', as
   }
 })
 
-test('请求与响应模型分列，同名映射保留目标且筛选保持请求模型', async ({ page }) => {
+test('请求、映射与响应模型分列，同名映射保留目标且筛选保持请求模型', async ({ page }) => {
   await mockAdmin(page)
   await page.route('**/api/request-logs?*', (route) =>
     route.fulfill({
@@ -492,7 +818,7 @@ test('请求与响应模型分列，同名映射保留目标且筛选保持请�
         ].map((row) => ({
           ...row,
           start_time: '2026-11-15 10:54:35',
-          username: 'local',
+          username: row.id === 3 ? null : 'local',
           ip_address: '127.0.0.1',
           outcome: 'success',
         })),
@@ -502,15 +828,23 @@ test('请求与响应模型分列，同名映射保留目标且筛选保持请�
   await page.goto('/statistics')
   await page.getByRole('tab', { name: '请求明细', exact: true }).click()
   const rows = page.locator('tbody tr')
-  const firstFlow = rows.nth(0).locator('.statistics-model-flow')
-  await expect(firstFlow).toHaveText('same→same')
-  await firstFlow.getByRole('button', { name: 'same', exact: true }).hover()
+  const cells = rows.nth(0).getByRole('cell')
+  await expect(page.getByRole('columnheader', { name: '调用来源', exact: true })).toHaveCount(0)
+  await expect(cells.nth(1)).toHaveText('local')
+  await expect(cells.nth(2)).toHaveText('127.0.0.1')
+  await expect(cells.nth(3)).toHaveText('same')
+  await expect(cells.nth(4)).toHaveText('same')
+  await expect(cells.nth(5)).toHaveText('same')
+  const requestModel = cells.nth(3).getByRole('button', { name: 'same', exact: true })
+  await requestModel.hover()
   await expect(page.getByRole('tooltip')).toContainText('请求模型：same')
-  await firstFlow.locator('.statistics-model-name').nth(0).hover()
-  await expect(page.getByRole('tooltip')).toContainText('目标模型：same')
-  await expect(rows.nth(0).getByRole('cell', { name: 'same', exact: true })).toHaveText('same')
-  await expect(rows.nth(1).locator('.statistics-model-flow')).toHaveText('a→b')
-  await expect(rows.nth(2).locator('.statistics-model-flow')).toHaveText('public')
+  await cells.nth(4).locator('.statistics-model-name').hover()
+  await expect(page.getByRole('tooltip')).toContainText('映射模型：same')
+  await expect(rows.nth(1).getByRole('cell').nth(3)).toHaveText('a')
+  await expect(rows.nth(1).getByRole('cell').nth(4)).toHaveText('b')
+  await expect(rows.nth(2).getByRole('cell').nth(1)).toHaveText('-')
+  await expect(rows.nth(2).getByRole('cell').nth(3)).toHaveText('public')
+  await expect(rows.nth(2).getByRole('cell').nth(4)).toHaveText('-')
   await expect(rows.nth(2).getByRole('cell', { name: 'upstream', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('tooltip')).toHaveCount(0)
@@ -521,6 +855,6 @@ test('请求与响应模型分列，同名映射保留目标且筛选保持请�
       url.searchParams.get('request_model') === 'same'
     )
   })
-  await firstFlow.getByRole('button', { name: 'same', exact: true }).click()
+  await requestModel.click()
   await filteredRequest
 })

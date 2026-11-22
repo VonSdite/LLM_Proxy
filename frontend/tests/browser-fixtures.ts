@@ -311,6 +311,7 @@ export async function mockAdmin(page: Page, authenticated = true) {
         return send({
           users: ['开发用户', '另一位用户'],
           models: ['smart', ...models],
+          target_models: ['provider/a', 'provider/b'],
           response_models: ['response-a', 'response-b', 'response-c'],
           ip_addresses: ['192.168.1.10', '192.168.1.20'],
         })
@@ -318,16 +319,28 @@ export async function mockAdmin(page: Page, authenticated = true) {
       if (path === '/api/statistics/overview') {
         const end = url.searchParams.get('end_date') || '2026-11-13'
         const start = url.searchParams.get('start_date') || end
+        const startTime = Date.parse(`${start}T00:00:00Z`)
+        const endTime = Date.parse(`${end}T00:00:00Z`) + 86400000
+        const days = (endTime - startTime) / 86400000
+        const requestedInterval = url.searchParams.get('interval') || '1d'
+        const interval =
+          requestedInterval === 'auto'
+            ? days === 1
+              ? '5m'
+              : days <= 7
+                ? '1h'
+                : '1d'
+            : requestedInterval
+        const step = interval === '5m' ? 300000 : interval === '1h' ? 3600000 : 86400000
         const series: (typeof statistics & { date: string })[] = []
-        for (
-          const day = new Date(`${start}T12:00:00`);
-          day <= new Date(`${end}T12:00:00`);
-          day.setDate(day.getDate() + 1)
-        ) {
+        for (let moment = startTime; moment < endTime; moment += step) {
           const count = [12, 28, 19, 43, 32, 54, 38][series.length % 7]!
           series.push({
             ...statistics,
-            date: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`,
+            date: new Date(moment)
+              .toISOString()
+              .replace('T', ' ')
+              .slice(0, interval === '1d' ? 10 : 19),
             request_count: count,
             total_tokens: count * 12000,
           })
@@ -350,6 +363,8 @@ export async function mockAdmin(page: Page, authenticated = true) {
         return send({
           totals: statistics,
           series,
+          series_interval: interval,
+          series_partial: false,
           models: modelRows,
           model_flows: modelFlows,
           response_models: modelFlows.map((row) => ({

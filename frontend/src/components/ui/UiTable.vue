@@ -15,6 +15,7 @@ import UiDragHandle from './UiDragHandle.vue'
 import UiHelpPopover from './UiHelpPopover.vue'
 import UiButton from './UiButton.vue'
 import { useRowDrag } from './drag'
+import { fitColumnWidths } from './tableWidths'
 const props = withDefaults(
   defineProps<{
     rows: T[]
@@ -27,6 +28,8 @@ const props = withDefaults(
     loading?: boolean
     empty?: string
     storageKey?: string
+    adaptive?: boolean
+    compact?: boolean
     reorderable?: boolean
     reorderDisabled?: boolean
     reorderGroup?: (row: T) => string
@@ -52,6 +55,76 @@ const { setRoot, dragging, startDrag, endDrag, drop, over, leave, startPointer, 
     (move) => emit('reorder', move),
   )
 const sizes = ref<ColumnSizingState>({})
+const tableRoot = ref<HTMLElement>()
+const availableWidth = ref(0)
+const utilityWidth = ref(0)
+const headerWidths = ref<Record<string, number>>({})
+const layoutColumns = computed(() =>
+  props.adaptive
+    ? props.columns.map((column) => {
+        const minWidth = Math.max(column.minWidth ?? 80, headerWidths.value[column.key] ?? 0)
+        return {
+          ...column,
+          minWidth,
+          maxWidth: column.maxWidth === undefined ? undefined : Math.max(column.maxWidth, minWidth),
+        }
+      })
+    : props.columns,
+)
+function setTableRoot(element: unknown) {
+  setRoot(element)
+  tableRoot.value = element instanceof HTMLElement ? element : undefined
+}
+watch(
+  [
+    tableRoot,
+    () => props.adaptive,
+    () => props.selectable,
+    () => props.reorderable,
+    () => props.compact,
+    () => props.columns,
+  ],
+  ([root, adaptive], _, onCleanup) => {
+    if (!root || !adaptive) return
+    const measure = () => {
+      availableWidth.value = root.clientWidth
+      utilityWidth.value = [
+        ...root.querySelectorAll('thead .ui-table-check, thead .ui-table-order'),
+      ].reduce((total, cell) => total + cell.getBoundingClientRect().width, 0)
+      // 表头使用单行固有宽度，包含说明、排序图标与内边距，作为自动和手动列宽的共同下限。
+      const widths: Record<string, number> = {}
+      for (const cell of root.querySelectorAll<HTMLElement>('th[data-column-id]')) {
+        const content = cell.querySelector<HTMLElement>('.ui-table-header-content')
+        if (!content) continue
+        const style = getComputedStyle(cell)
+        widths[cell.dataset.columnId!] = Math.ceil(
+          content.getBoundingClientRect().width +
+            (parseFloat(style.paddingLeft) || 0) +
+            (parseFloat(style.paddingRight) || 0),
+        )
+      }
+      headerWidths.value = widths
+    }
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      if (!frame) {
+        frame = requestAnimationFrame(() => {
+          frame = 0
+          measure()
+        })
+      }
+    })
+    observer.observe(root)
+    for (const content of root.querySelectorAll('.ui-table-header-content'))
+      observer.observe(content)
+    measure()
+    onCleanup(() => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    })
+  },
+  { flush: 'post' },
+)
 if (props.storageKey) {
   try {
     sizes.value = JSON.parse(
@@ -78,8 +151,8 @@ const sorting = computed<SortingState>(() =>
   props.sort ? [{ id: props.sort.key, desc: props.sort.direction === 'desc' }] : [],
 )
 const selection = computed(() => Object.fromEntries(props.selected.map((id) => [id, true])))
-const columns = computed(() =>
-  props.columns.map((column) => ({
+const tableColumns = computed(() =>
+  layoutColumns.value.map((column) => ({
     id: column.key,
     accessorFn: (row: T) => Reflect.get(row, column.key) as unknown,
     header: column.label,
@@ -101,7 +174,7 @@ watch(
 const table = useVueTable({
   data,
   get columns() {
-    return columns.value
+    return tableColumns.value
   },
   getRowId: (row) => props.rowKey(row),
   getCoreRowModel: getCoreRowModel(),
@@ -138,6 +211,33 @@ const table = useVueTable({
   },
   enableSortingRemoval: false,
 })
+const fittedWidths = computed(() =>
+  fitColumnWidths(layoutColumns.value, sizes.value, availableWidth.value - utilityWidth.value),
+)
+const fittedTotal = computed(() =>
+  Object.values(fittedWidths.value).reduce((total, width) => total + width, 0),
+)
+function displayedWidth(id: string, fallback: number) {
+  return props.adaptive ? (fittedWidths.value[id] ?? fallback) : fallback
+}
+function resizeColumn(id: string, delta: number) {
+  const column = table.getColumn(id)
+  if (!column) return
+  const next = displayedWidth(id, column.getSize()) + delta
+  table.setColumnSizing((old) => ({
+    ...old,
+    [id]: Math.max(
+      column.columnDef.minSize ?? 80,
+      Math.min(column.columnDef.maxSize ?? Infinity, next),
+    ),
+  }))
+}
+function startResize(id: string, event: MouseEvent | TouchEvent) {
+  const header = table.getFlatHeaders().find((item) => item.id === id)
+  if (!header) return
+  if (props.adaptive) sizes.value = { ...sizes.value, [id]: displayedWidth(id, header.getSize()) }
+  header.getResizeHandler()(event)
+}
 const flexibleWeight = computed(() =>
   props.columns.reduce(
     (total, column) =>
@@ -146,6 +246,7 @@ const flexibleWeight = computed(() =>
   ),
 )
 function columnWidth(id: string, size: number) {
+  if (props.adaptive) return `${displayedWidth(id, size)}px`
   const column = props.columns.find((column) => column.key === id)
   if (column?.fixed) return `${size}px`
   if (!flexibleWeight.value) return `${size}px`
@@ -173,9 +274,13 @@ function columnWidth(id: string, size: number) {
 </script>
 <template>
   <div
-    :ref="setRoot"
+    :ref="setTableRoot"
     class="ui-table-wrap ui-sort-root surface"
-    :class="{ 'ui-table-wrap--reorderable': reorderable }"
+    :class="{
+      'ui-table-wrap--reorderable': reorderable,
+      'ui-table-wrap--compact': compact,
+      'ui-table-wrap--adaptive': adaptive,
+    }"
     :aria-busy="loading || undefined"
     @dragover="over"
     @dragleave="leave"
@@ -186,7 +291,7 @@ function columnWidth(id: string, size: number) {
         class="ui-table"
         :style="{
           '--table-utility-width': `calc(${selectable ? 'var(--table-check-width)' : '0px'} + ${reorderable ? 'var(--table-order-width)' : '0px'})`,
-          minWidth: `calc(${table.getTotalSize()}px + var(--table-utility-width))`,
+          minWidth: `calc(${adaptive ? fittedTotal : table.getTotalSize()}px + var(--table-utility-width))`,
         }"
       >
         <thead>
@@ -210,6 +315,7 @@ function columnWidth(id: string, size: number) {
             <th
               v-for="header in table.getFlatHeaders()"
               :key="header.id"
+              :data-column-id="header.id"
               :style="{ width: columnWidth(header.id, header.getSize()) }"
               :class="{
                 'ui-table-right':
@@ -263,22 +369,12 @@ function columnWidth(id: string, size: number) {
                 tabindex="0"
                 aria-orientation="vertical"
                 :aria-label="`调整${header.column.columnDef.header}列宽`"
-                :aria-valuenow="Math.round(header.getSize())"
-                @mousedown="header.getResizeHandler()($event)"
-                @touchstart="header.getResizeHandler()($event)"
+                :aria-valuenow="Math.round(displayedWidth(header.id, header.getSize()))"
+                @mousedown="startResize(header.id, $event)"
+                @touchstart="startResize(header.id, $event)"
                 @dblclick="header.column.resetSize()"
-                @keydown.left.prevent="
-                  table.setColumnSizing((old) => ({
-                    ...old,
-                    [header.id]: Math.max(
-                      header.column.columnDef.minSize || 80,
-                      header.getSize() - 16,
-                    ),
-                  }))
-                "
-                @keydown.right.prevent="
-                  table.setColumnSizing((old) => ({ ...old, [header.id]: header.getSize() + 16 }))
-                "
+                @keydown.left.prevent="resizeColumn(header.id, -16)"
+                @keydown.right.prevent="resizeColumn(header.id, 16)"
               />
             </th>
           </tr>
@@ -317,7 +413,7 @@ function columnWidth(id: string, size: number) {
               :key="cell.id"
               :class="{
                 'ui-table-right':
-                  columns.find((column) => column.id === cell.column.id) &&
+                  tableColumns.find((column) => column.id === cell.column.id) &&
                   props.columns.find((column) => column.key === cell.column.id)?.align === 'right',
               }"
             >
@@ -417,6 +513,28 @@ function columnWidth(id: string, size: number) {
 .ui-table tfoot {
   background: var(--surface-soft);
   font-weight: var(--weight-emphasis);
+}
+
+.ui-table-wrap--compact .ui-table th,
+.ui-table-wrap--compact .ui-table td {
+  padding-inline: var(--space-2);
+}
+
+.ui-table-wrap--compact .ui-table-header-content {
+  gap: 2px;
+}
+
+.ui-table-wrap--adaptive .ui-table-header-content {
+  width: max-content;
+  white-space: nowrap;
+}
+
+.ui-table-wrap--adaptive .ui-table-heading {
+  white-space: nowrap;
+}
+
+.ui-table-wrap--adaptive .ui-table-right .ui-table-header-content {
+  margin-left: auto;
 }
 
 .ui-table .ui-table-add-row td {

@@ -1,0 +1,1 @@
+import{ft as e}from"./index-BlqtoP9R.js";function t(){let t=new AbortController;return e(()=>t.abort()),t.signal}export{t};

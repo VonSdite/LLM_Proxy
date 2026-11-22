@@ -3,6 +3,8 @@ import { nextTick, reactive } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { UiTable } from '@/components/ui'
 import { moveItem } from '@/features/shared/order'
+import { fitColumnWidths } from '@/components/ui/tableWidths'
+import type { TableColumn } from '@/components/ui'
 const rows = [
   { id: 'a', name: 'Alpha' },
   { id: 'b', name: 'Beta' },
@@ -14,6 +16,42 @@ const props = {
 }
 afterEach(() => vi.restoreAllMocks())
 describe('共享表格', () => {
+  it('自适应宽度在上下限内填满容器，固定列及手动列不参与伸缩', () => {
+    const columns: TableColumn[] = [
+      { key: 'time', label: '时间', width: 156, minWidth: 156, fixed: true },
+      { key: 'result', label: '结果', width: 80, minWidth: 80, fixed: true },
+      { key: 'model', label: '模型', width: 200, minWidth: 100, maxWidth: 400 },
+      { key: 'target', label: '映射', width: 200, minWidth: 120, maxWidth: 600, grow: 2 },
+    ]
+    for (const width of [456, 520, 800, 1236]) {
+      const sizes = fitColumnWidths(columns, {}, width)
+      expect(Object.values(sizes).reduce((sum, value) => sum + value, 0)).toBeCloseTo(width)
+      expect(sizes.time).toBe(156)
+      expect(sizes.result).toBe(80)
+      expect(sizes.model).toBeGreaterThanOrEqual(100)
+      expect(sizes.model).toBeLessThanOrEqual(400)
+      expect(sizes.target).toBeGreaterThanOrEqual(120)
+      expect(sizes.target).toBeLessThanOrEqual(600)
+    }
+    expect(fitColumnWidths(columns, {}, 300)).toEqual({
+      time: 156,
+      result: 80,
+      model: 100,
+      target: 120,
+    })
+    expect(fitColumnWidths(columns, { model: 240 }, 800)).toEqual({
+      time: 156,
+      result: 80,
+      model: 240,
+      target: 324,
+    })
+    expect(fitColumnWidths(columns, {}, 1500)).toEqual({
+      time: 156,
+      result: 80,
+      model: 400,
+      target: 600,
+    })
+  })
   it('快速拖动按帧合并、复用行索引且不重渲染单元格，松手采用最终位置', async () => {
     const frames = new Map<number, FrameRequestCallback>()
     let sequence = 0

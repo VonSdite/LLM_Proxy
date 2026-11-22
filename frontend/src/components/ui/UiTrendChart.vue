@@ -5,6 +5,7 @@ const props = defineProps<{
   label: string
   points: { label: string; value: number | null }[]
   format: (value: number) => string
+  formatLabel?: (value: string) => string
 }>()
 const id = useId()
 const container = ref<HTMLElement>()
@@ -117,7 +118,9 @@ const focusPoint = computed(() =>
           />
         </UiTooltip>
       </foreignObject>
-      <text x="48" y="222" class="ui-trend-date">{{ points[0]?.label }}</text>
+      <text x="48" y="222" class="ui-trend-date">
+        {{ formatLabel?.(points[0]?.label || '') ?? points[0]?.label }}
+      </text>
       <text
         v-if="points.length > 1"
         :x="width - 48"
@@ -125,7 +128,7 @@ const focusPoint = computed(() =>
         text-anchor="end"
         class="ui-trend-date"
       >
-        {{ points.at(-1)?.label }}
+        {{ formatLabel?.(points.at(-1)?.label || '') ?? points.at(-1)?.label }}
       </text>
     </svg>
   </div>

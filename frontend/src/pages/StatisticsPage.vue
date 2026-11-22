@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { statisticsApi, type StatisticsView } from '@/api/statistics'
+import { statisticsApi, type StatisticsInterval, type StatisticsView } from '@/api/statistics'
 import {
   UiAlert,
   UiButton,
   UiField,
   UiHelpPopover,
-  UiIconButton,
   UiInput,
   UiListToolbar,
   UiMultiSelect,
@@ -33,6 +32,17 @@ const view = computed<StatisticsView>(() =>
 )
 const draft = reactive(datePreset(7))
 const applied = ref(datePreset(7))
+const interval = ref<StatisticsInterval>('1h')
+const rangeDays = computed(
+  () => (Date.parse(applied.value.end_date) - Date.parse(applied.value.start_date)) / 86400000 + 1,
+)
+watch(
+  [() => applied.value.start_date, () => applied.value.end_date],
+  () => {
+    interval.value = rangeDays.value === 1 ? '5m' : rangeDays.value <= 7 ? '1h' : '1d'
+  },
+  { flush: 'sync' },
+)
 const presets = [
   { value: '1', label: '今天' },
   { value: '7', label: '近 7 天' },
@@ -91,7 +101,9 @@ const query = computed(() => ({
   sort_direction: sort.value.direction,
   ...(view.value === 'logs' ? { page: page.value, page_size: pageSize.value } : {}),
 }))
-const overview = useRequest((signal) => statisticsApi.overview(applied.value, signal))
+const overview = useRequest((signal) =>
+  statisticsApi.overview({ ...applied.value, interval: interval.value }, signal),
+)
 const request = useRequest(async (signal) => {
   const current = view.value
   return { ...(await statisticsApi.list(current, query.value, signal)), view: current }
@@ -105,7 +117,7 @@ const usesOverview = computed(() =>
   ['models', 'model_usage', 'response_model_usage', 'ip_usage'].includes(view.value),
 )
 watch(
-  [applied, view],
+  [applied, view, interval],
   ([filters], [previousFilters]) => {
     if (usesOverview.value || filters !== previousFilters) void overview.refresh()
   },
@@ -150,6 +162,7 @@ function apply() {
     ...draft,
     username: [...draft.username],
     request_model: [...draft.request_model],
+    target_model_id: [...draft.target_model_id],
     response_model: [...draft.response_model],
     ip_address: [...draft.ip_address],
   }
@@ -165,6 +178,7 @@ function model(value: string) {
   Object.assign(draft, applied.value, {
     username: [...applied.value.username],
     request_model: [value],
+    target_model_id: [...applied.value.target_model_id],
     response_model: [...applied.value.response_model],
     ip_address: [...applied.value.ip_address],
   })
@@ -199,18 +213,15 @@ function imported(message: string) {
           label="统计视图"
         />
       </template>
-      <UiIconButton icon="refresh" label="刷新统计" :loading="loading" @click="refresh" />
     </UiPageHeader>
     <UiListToolbar>
       <template #actions>
-        <div class="statistics-presets">
-          <UiSegmented
-            :model-value="selectedPreset"
-            :items="presets"
-            label="日期快捷范围"
-            @update:model-value="preset(Number($event))"
-          />
-        </div>
+        <UiSegmented
+          :model-value="selectedPreset"
+          :items="presets"
+          label="日期快捷范围"
+          @update:model-value="preset(Number($event))"
+        />
         <UiButton icon="upload" @click="importing = true">导入</UiButton>
         <UiButton
           icon="download"
@@ -286,26 +297,49 @@ function imported(message: string) {
         />
       </UiField>
       <UiField
-        label="响应模型"
-        help="按请求最终返回的上游模型 ID 筛选。同一请求中的全部重试仍计入成功率。支持多选，与其他筛选条件同时生效。"
+        label="映射模型"
+        help="模型映射最终选中的目标模型 ID。支持多选，与请求模型及其他筛选同时生效；同一请求中的全部重试仍计入成功率。"
       >
         <UiMultiSelect
-          v-model="draft.response_model"
+          v-model="draft.target_model_id"
           :options="
-            (candidates.data.value?.response_models || []).map((value) => ({ value, label: value }))
+            (candidates.data.value?.target_models || []).map((value) => ({ value, label: value }))
           "
-          placeholder="全部响应模型"
+          placeholder="全部映射模型"
           @commit="apply"
         />
       </UiField>
+      <div class="statistics-response-filter">
+        <UiField
+          label="响应模型"
+          help="按请求最终返回的上游模型 ID 筛选。同一请求中的全部重试仍计入成功率。支持多选，与其他筛选条件同时生效。"
+        >
+          <UiMultiSelect
+            v-model="draft.response_model"
+            :options="
+              (candidates.data.value?.response_models || []).map((value) => ({
+                value,
+                label: value,
+              }))
+            "
+            placeholder="全部响应模型"
+            @commit="apply"
+          />
+        </UiField>
+        <UiButton icon="refresh" aria-label="刷新统计" :loading="loading" @click="refresh">
+          刷新
+        </UiButton>
+      </div>
     </div>
     <UiAlert v-if="request.error.value || overview.error.value || candidates.error.value">
       {{ request.error.value || overview.error.value || candidates.error.value }}
     </UiAlert>
     <StatisticsOverview
       v-if="section === 'overview'"
+      v-model:interval="interval"
       :data="overview.data.value"
       :loading="overview.loading.value"
+      :range-days="rangeDays"
     />
     <template v-else>
       <div v-if="section === 'usage'" class="statistics-dimensions">
@@ -370,18 +404,18 @@ function imported(message: string) {
 <style scoped>
 .statistics-filters {
   display: grid;
-  grid-template-columns: 155px 155px minmax(120px, 0.8fr) minmax(140px, 1fr) repeat(
-      2,
-      minmax(160px, 1.2fr)
-    );
+  grid-template-columns:
+    155px 155px minmax(120px, 0.8fr) minmax(140px, 1fr) repeat(2, minmax(160px, 1.2fr))
+    minmax(248px, 1.2fr);
   gap: var(--space-3);
   align-items: start;
 }
 
-.statistics-presets {
-  display: flex;
-  gap: var(--space-1);
-  margin-right: var(--space-3);
+.statistics-response-filter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-2);
 }
 
 .statistics-dimensions {
@@ -393,15 +427,15 @@ function imported(message: string) {
 
 @media (width <= 1500px) {
   .statistics-filters {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
   }
 
-  .statistics-filters > :nth-child(5) {
-    grid-column: 1 / span 2;
+  .statistics-filters > :nth-child(-n + 4) {
+    grid-column: span 3;
   }
 
-  .statistics-filters > :nth-child(6) {
-    grid-column: span 2;
+  .statistics-filters > :nth-child(n + 5) {
+    grid-column: span 4;
   }
 }
 
@@ -410,8 +444,7 @@ function imported(message: string) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .statistics-filters > :nth-child(5),
-  .statistics-filters > :nth-child(6) {
+  .statistics-filters > :nth-child(n) {
     grid-column: auto;
   }
 }
@@ -423,11 +456,6 @@ function imported(message: string) {
 
   .statistics-filters > :nth-child(n + 3) {
     grid-column: 1 / -1;
-  }
-
-  .statistics-presets {
-    flex-basis: 100%;
-    margin-right: 0;
   }
 
   .statistics-dimensions {

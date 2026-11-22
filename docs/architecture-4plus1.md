@@ -1223,9 +1223,9 @@ API Key 管理页始终提供顶层 `API Key` 导航项。`api_keys.enabled` 默
 
 缓存命中率按 `SUM(cache_read_input_tokens) / SUM(cache_known_prompt_tokens)` 计算。`cache_known_prompt_tokens` 只包含缓存 usage 已知请求的完整 prompt/input Token，混合已知和未知请求时未知请求不进入分母；没有有效分母时命中率为空，已知且缓存读取为零时命中率为 `0%`。
 
-统计管理页面使用概览、用量和请求明细三个视图。用量按来源与模型交叉、完整请求流向、响应模型、IP、用户或 API Key 分组；表格与 Excel 分别展示请求模型和响应模型，请求列包含映射 ID 与实际目标。概览提供核心汇总指标与通栏的按日请求量、Token、成功率、缓存命中率趋势，模型筛选与请求明细共用，模型维度统计位于用量页。`GET /api/statistics/overview` 经 `WebController`、`LogService`、`LogRepository` 调用 `statistics_queries`，在同一读取事务内组合日聚合用量与请求结果、性能样本，包含按响应模型汇总的 `response_models`。
+统计管理页面使用概览、用量和请求明细三个视图。用量按来源与模型交叉、完整请求流向、响应模型、IP、用户或 API Key 分组；来源与模型交叉、请求模型用量和请求明细的表格与 Excel 分列展示请求模型、映射模型和响应模型。概览提供核心汇总指标与通栏的请求量、Token、成功率、缓存命中率趋势，默认展示 Token，模型筛选与请求明细共用，模型维度统计位于用量页。`GET /api/statistics/overview` 经 `WebController`、`LogService`、`LogRepository` 调用 `statistics_queries`，在同一读取事务内组合日聚合用量与请求结果、性能样本，包含按响应模型汇总的 `response_models`。页面保存 5 分钟、小时或天的趋势粒度，仅提供当前范围支持的选项：单日提供三种粒度，2 至 7 天提供小时和天，超过 7 天仅提供天；日期范围变化时选择当前范围最细的粒度。分钟及小时用量按请求开始时间从保留明细聚合，日用量和概览总量由日聚合提供，`series_partial` 标识缺少历史明细的细粒度趋势。
 
-六个用量维度均提供上游成功率及调用结果计数。`statistics_queries.usage_outcomes` 使用同一日期、用户与请求模型筛选，按来源与完整模型流向、完整模型流向、响应模型、IP 或用户关联日聚合与请求日志；API Key 直接聚合请求日志。响应模型合并不同请求、映射目标和来源，空模型 ID 统一归入未知，不用请求模型替代。`upstream_rates` 通过 SQLite `json_each` 展开调用明细，按每次调用的实际目标与响应模型聚合。上游成功率为成功次数除以成功与失败总次数；异常、中止和未知单列。只有日聚合的记录保留未知，只有调用样本的分组不重复叠加用量。页面合计按调用次数加权，Excel 使用同一数据与筛选范围。
+六个用量维度均提供上游成功率及调用结果计数。`statistics_queries.usage_outcomes` 使用同一日期、用户、请求模型、映射模型、响应模型和 IP 筛选，按来源与完整模型流向、完整模型流向、响应模型、IP 或用户关联日聚合与请求日志；API Key 直接聚合请求日志。响应模型合并不同请求、映射目标和来源，空模型 ID 统一归入未知，不用请求模型替代。`upstream_rates` 通过 SQLite `json_each` 展开调用明细，按每次调用的实际目标与响应模型聚合。上游成功率为成功次数除以成功与失败总次数；异常、中止和未知单列。只有日聚合的记录保留未知，只有调用样本的分组不重复叠加用量。页面合计按调用次数加权，Excel 使用同一数据与筛选范围。
 
 `RequestObservation` 在数据面准入后创建，观察最终下游响应；上游完成回调向它提供规范化 usage、实际目标和上游协议。内部重试与模型映射切换只提交一条最终请求记录。普通响应、流式结束、异常及关闭共享幂等提交；未迭代的流关闭时也释放原始迭代器。统计不改变响应字节。
 
@@ -1933,7 +1933,7 @@ sequenceDiagram
 
 API Key 管理列表默认读取持久化自定义顺序。旧库首次增加 sort_order 时按 created_at 降序、id 升序初始化，新建 Key 位于列表开头。排序操作读取全量 ID 并在同一事务内移动单项，分页外记录保持相对顺序；此顺序不参与鉴权、限流或数据平面路由，不持有新增运行时缓存。
 
-统计候选接口 GET /api/statistics/filter-options 经 WebController、LogService、LogRepository 合并请求明细与日聚合中的用户、请求模型、响应模型和 IP。全部统计、请求明细与导出沿相同分层传递多选条件；响应模型按最终请求记录筛选，该请求的所有上游重试仍参与成功率计算。架构未变化。
+统计候选接口 GET /api/statistics/filter-options 经 WebController、LogService、LogRepository 合并请求明细与日聚合中的用户、请求模型、映射目标模型、响应模型和 IP，映射目标候选字段为 `target_models`。全部统计、请求明细与导出沿相同分层传递多选条件；`target_model_id` 与 `response_model` 按最终请求记录筛选，该请求的所有上游重试仍参与成功率计算。架构未变化。
 
 ### 功能设置与数据面准入
 

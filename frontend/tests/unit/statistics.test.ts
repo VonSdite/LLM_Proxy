@@ -5,12 +5,44 @@ import {
   dateErrors,
   datePreset,
   duration,
+  statisticsColumns,
+  requestTime,
   rowKey,
   totals,
 } from '@/features/statistics/statistics'
 
 afterEach(() => vi.unstubAllGlobals())
 describe('统计数据与筛选契约', () => {
+  it('时间保留完整年月日和秒，精确数值较长时扩大列宽下限', () => {
+    expect(requestTime('2026-11-22T09:23:15.123456')).toBe('2026-11-22 09:23:15')
+    const short = statisticsColumns([], 'logs').find((column) => column.key === 'total_tokens')!
+    const large = statisticsColumns([{ total_tokens: 1234567890123 } as UsageRow], 'logs').find(
+      (column) => column.key === 'total_tokens',
+    )!
+    expect(large.minWidth).toBeGreaterThan(short.minWidth!)
+    expect(large.minWidth).toBeGreaterThanOrEqual('1,234,567,890,123'.length * 8 + 16)
+    expect(large.maxWidth).toBeGreaterThanOrEqual(large.minWidth!)
+  })
+  it('用量列宽同时容纳合计与百分比，不截断精确数值', () => {
+    const rows = Array.from({ length: 11 }, () => ({ total_tokens: 999999999 }) as UsageRow)
+    for (const view of [
+      'stats',
+      'model_usage',
+      'response_model_usage',
+      'ip_usage',
+      'user_usage',
+      'api_key_usage',
+    ] as const) {
+      const columns = statisticsColumns(rows, view)
+      const total = columns.find((column) => column.key === 'total_tokens')!
+      expect(total.minWidth).toBeGreaterThanOrEqual('10,999,999,989'.length * 8 + 16)
+      expect(total.maxWidth ?? Infinity).toBeGreaterThanOrEqual(total.minWidth!)
+      const rate = statisticsColumns([{ upstream_success_rate: 10 / 11 } as UsageRow], view).find(
+        (column) => column.key === 'upstream_success_rate',
+      )!
+      expect(rate.minWidth).toBeLessThan(120)
+    }
+  })
   it('使用本地自然日，允许一年范围并正确处理闰年', () => {
     expect(datePreset(7, new Date(2026, 0, 3)).start_date).toBe('2025-12-28')
     const filters = {
@@ -18,6 +50,7 @@ describe('统计数据与筛选契约', () => {
       end_date: '2025-02-28',
       username: [],
       request_model: [],
+      target_model_id: [],
       response_model: [],
       ip_address: [],
     }
@@ -78,6 +111,7 @@ describe('统计数据与筛选契约', () => {
           end_date: '2026-11-06',
           username: ['one', 'two'],
           request_model: ['provider/full/model'],
+          target_model_id: ['target/a', 'target/b'],
           response_model: ['response/a', 'response/b'],
           ip_address: ['127.0.0.1', '::1'],
           sort_key: 'duration',
@@ -91,6 +125,7 @@ describe('统计数据与筛选契约', () => {
     const url = new URL(String(fetch.mock.calls[0]![0]), 'http://localhost')
     expect(url.searchParams.getAll('username')).toEqual(['one', 'two'])
     expect(url.searchParams.getAll('request_model')).toEqual(['provider/full/model'])
+    expect(url.searchParams.getAll('target_model_id')).toEqual(['target/a', 'target/b'])
     expect(url.searchParams.getAll('response_model')).toEqual(['response/a', 'response/b'])
     expect(url.searchParams.getAll('ip_address')).toEqual(['127.0.0.1', '::1'])
     expect(url.searchParams.get('page')).toBe('2')

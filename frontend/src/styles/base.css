@@ -49,9 +49,8 @@ a:hover {
   text-decoration: underline;
 }
 
-button:focus-visible,
-a:focus-visible,
-[tabindex]:focus-visible {
+/* 全局焦点样式仅作兜底，组件的行高亮、内描边与焦点阴影优先。 */
+:where(button:focus-visible, a:focus-visible, [tabindex]:focus-visible) {
   outline: 2px solid var(--link);
   outline-offset: 3px;
 }
