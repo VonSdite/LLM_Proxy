@@ -33,16 +33,12 @@ test('DSH 与 Hermes 从目录定义生成表单、数值失焦提交、布尔�
   const effort = page.getByRole('combobox', { name: '思考强度', exact: true })
   await effort.click()
   await page.screenshot({ path: testInfo.outputPath('dsh-effort-options.png') })
-  await page.getByRole('option', { name: '高（high）', exact: true }).click()
-  await expect(effort).toHaveText('高（high）')
+  await page.getByRole('option', { name: 'high', exact: true }).click()
+  await expect(effort).toHaveText('high')
   await expect.poll(() => draft('dsh')?.values?.effort).toBe('high')
-  for (const [value, label] of [
-    ['minimal', '极低（minimal）'],
-    ['xhigh', '极高（xhigh）'],
-    ['max', '最高（max）'],
-  ]) {
+  for (const value of ['minimal', 'xhigh', 'max']) {
     await effort.click()
-    await page.getByRole('option', { name: label, exact: true }).click()
+    await page.getByRole('option', { name: value, exact: true }).click()
     await expect.poll(() => draft('dsh')?.values?.effort).toBe(value)
   }
   await effort.click()

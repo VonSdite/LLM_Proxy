@@ -56,13 +56,13 @@ fields:
     file: opencodeV2
     path: [modelSettings, reasoningEffort]
     options:
-      - {value: none, label: 关闭}
-      - {value: minimal, label: 极低}
-      - {value: low, label: 低}
-      - {value: medium, label: 中}
-      - {value: high, label: 高}
-      - {value: xhigh, label: 极高}
-      - {value: max, label: 最高}
+      - {value: none, label: none}
+      - {value: minimal, label: minimal}
+      - {value: low, label: low}
+      - {value: medium, label: medium}
+      - {value: high, label: high}
+      - {value: xhigh, label: xhigh}
+      - {value: max, label: max}
     help: [写入当前模型的 settings.reasoningEffort；实际支持档位取决于模型与协议包。]
   - id: context
     label: 模型上下文
