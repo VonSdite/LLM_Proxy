@@ -42,6 +42,10 @@ export default defineConfig(({ command }) => ({
     emptyOutDir: false,
     manifest: 'manifest.json',
     sourcemap: false,
+    // 通过独立映射引用分块，避免依赖文件的哈希变化向其他页面传播。
+    chunkImportMap: true,
+    // 分块标识统一相对前端目录，保持不同命令调用目录下的产物一致。
+    rolldownOptions: { cwd: fileURLToPath(new URL('.', import.meta.url)) },
   },
   server: {
     fs: { allow: [projectRoot] },

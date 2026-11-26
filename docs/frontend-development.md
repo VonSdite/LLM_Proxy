@@ -48,7 +48,7 @@ frontend/
 extensions/              本地管理端扩展包（前端页面与后端 Python）
 src/presentation/
   templates/app.html     Flask 页面入口
-  static/app/            生产构建资源与 manifest
+  static/app/            生产构建资源、manifest 与 import map
 ```
 
 - 业务请求统一经过 `api` 层，基础组件通过 `@/components/ui` 导入。
@@ -113,6 +113,8 @@ npm --prefix frontend run build
 uv run python main.py --config config.yaml
 ```
 
-构建脚本仅清理已解析校验的 `src/presentation/static/app/`，保留相邻 Ace 文件。产物包含 manifest 和按路由分块的哈希文件；源码、锁文件与产物一同提交后，部署端可直接启动 Python 服务。`pyproject.toml` 是版本来源，页面从 `/api/ui/bootstrap` 读取实际版本。
+构建脚本仅清理已解析校验的 `src/presentation/static/app/`，保留相邻 Ace 文件。产物包含 `index.html`、`manifest.json`、`importmap.json` 和按路由分块的哈希文件；源码、锁文件与完整产物一同提交后，部署端通过 `git pull` 获取对应版本，再启动 Python 服务即可。部署端无需安装 Node.js，也无需重新构建。`pyproject.toml` 是版本来源，页面从 `/api/ui/bootstrap` 读取实际版本。
 
-HTML 和 bootstrap 使用 `no-store`，manifest 使用 `no-cache`，哈希资源使用长期不可变缓存。部署使用同一版本的 Python 代码、manifest 和全部资源。生产入口支持既有深链接，未知 `/api/*`、`/v1/*` 和页面路径遵循 Flask 路由结果。构建后的页面运行不需要 Node.js。
+Vite 使用 `build.chunkImportMap` 生成独立的分块导入映射。分块之间引用稳定的资源标识，映射记录当前内容哈希文件名。单页内容或样式变化通常仅影响该页资源与清单；公共代码、依赖或分块结构变化仍可能影响多个产物。该选项属于当前锁定 Vite 版本的实验功能，依赖升级需要通过构建资源稳定性测试与生产页面加载验证。
+
+浏览器需要支持原生 Import Map。Flask 在模块预加载和模块脚本之前内嵌 `importmap.json`，并检查映射目标属于当前构建目录且文件存在。HTML 和 bootstrap 使用 `no-store`，manifest 和 import map 使用 `no-cache`，哈希资源使用长期不可变缓存。部署使用同一版本的 Python 代码、两份清单和全部资源；缺少有效产物时，管理页面返回 HTTP 503 并提示构建命令。生产入口支持既有深链接，未知 `/api/*`、`/v1/*` 和页面路径遵循 Flask 路由结果。

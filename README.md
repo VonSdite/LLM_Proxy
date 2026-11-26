@@ -22,7 +22,7 @@
 <a href="https://github.com/VonSdite/LLM_Proxy/network/members">
   <img alt="GitHub Forks" src="https://img.shields.io/github/forks/VonSdite/LLM_Proxy?style=flat-square&logo=github">
 </a>
-<img alt="Version" src="https://img.shields.io/badge/version-3.0.0-2f80ed?style=flat-square">
+<img alt="Version" src="https://img.shields.io/badge/version-3.0.5-2f80ed?style=flat-square">
 <img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white">
 <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white">
 
@@ -54,7 +54,7 @@ Provider 编辑页还支持模型发现、可用性测试、首字延迟与 TPS 
 | [![Provider 管理](docs/images/providers.png)](docs/images/providers.png) | [![用户管理](docs/images/users.png)](docs/images/users.png) |
 | 上游协议、模型、认证池、Hook 与启停状态集中管理。 | 用户模型权限、IP 白名单与累计用量清晰可查。 |
 
-管理界面基于 Vue 3，支持深色与浅色主题。生产构建资源已包含在仓库中，运行服务无需安装 Node.js。
+管理界面基于 Vue 3，支持深色与浅色主题，需要支持原生 Import Map 的现代浏览器。生产构建资源已包含在仓库中，运行服务无需安装 Node.js。
 
 ## 🚀 快速开始
 
@@ -168,6 +168,8 @@ npm --prefix frontend run dev
 ```
 
 开发服务器位于 `http://127.0.0.1:5173`，API 默认代理到 `http://127.0.0.1:8080`。
+
+发布前执行 `npm --prefix frontend run build`，并提交完整构建产物。分块使用独立导入映射，单页修改通常只影响相关资源和清单；部署端通过 `git pull` 获取产物即可。详见 [前端开发指南](docs/frontend-development.md#5-构建与部署)。
 
 ## 🔐 安全提示
 

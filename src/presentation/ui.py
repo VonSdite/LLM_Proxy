@@ -52,8 +52,17 @@ def render_ui():
                 raise ValueError("Invalid frontend asset path")
             return url_for("static", filename="app/" + name)
 
+        import_map = json.loads((asset_root / "importmap.json").read_text(encoding="utf-8"))
+        if not isinstance(import_map, dict) or not isinstance(import_map.get("imports"), dict):
+            raise ValueError("Invalid frontend import map")
+        for target in import_map["imports"].values():
+            if not isinstance(target, str) or not target.startswith("/static/app/"):
+                raise ValueError("Invalid frontend import map target")
+            asset_url(target.removeprefix("/static/app/"))
+
         html = render_template(
             "app.html",
+            import_map=import_map,
             script_url=asset_url(entry["file"]),
             style_urls=[asset_url(name) for name in dict.fromkeys(styles)],
             preload_urls=[asset_url(name) for name in dict.fromkeys(imports)],

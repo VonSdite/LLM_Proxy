@@ -38,7 +38,7 @@
 
 `UiController` 提供 `/api/ui/bootstrap`，返回版本、认证状态、当前用户、功能开关和 Agent 页面能力。该响应不包含配置内容或凭据，采用 `no-store`；Agent 能力按已认证会话或本机回环 Host 与连接对端判定，文件 API 继续执行原有完整保护链路。
 
-`render_ui` 从 `static/app/manifest.json` 解析内容哈希资源。HTML 使用 `no-store`，manifest 使用 `no-cache`，内容哈希资源使用长期不可变缓存。Vue 生产资源由 Flask 同源提供，Node.js 属于开发与构建工具。
+`render_ui` 从 `static/app/manifest.json` 解析入口资源，从 `static/app/importmap.json` 读取分块导入映射。Vite 的 `build.chunkImportMap` 使分块引用稳定的资源标识，由映射定位当前内容哈希文件。Flask 校验映射目标位于构建目录且文件存在，并在模块预加载与模块脚本前内嵌映射；缺少有效清单或资源时返回 HTTP 503。HTML 使用 `no-store`，两份清单使用 `no-cache`，内容哈希资源使用长期不可变缓存。Vue 生产资源与清单随 Git 交付，由 Flask 同源提供；Node.js 属于开发与构建工具。
 
 `/login`、`/`、`/providers`、`/users`、`/api-keys`、`/model-mappings`、`/oauth`、`/agents`、`/statistics`、`/settings` 和 `/extensions/<id>` 使用同一 Vue 入口。Flask 保留页面认证与 Agent 访问保护；Vue Router 处理站内导航和登录校验，OAuth、API Key 和模型映射管理页始终可进入。API、数据平面与未知路径使用各自 Flask 路由，不进入页面兜底。旧业务模板、页面脚本、Bootstrap 资源不参与生产装配；Ace 由本地 vendor 按需加载。
 
@@ -68,6 +68,8 @@ flowchart LR
     Backend["extensions/*/extension.py"] --> Manager[AdminExtensionManager]
     Manager --> ExtensionAPI
     Vite[Vite 构建] --> Assets[static/app 内容哈希资源]
+    Vite --> ImportMap[importmap.json 分块导入映射]
+    ImportMap --> Flask
     Assets --> Flask[Flask 同源页面与静态资源]
     DataClient[模型调用客户端] --> Data[现有 /v1/* 数据平面]
 ```
@@ -1442,7 +1444,7 @@ flowchart LR
 ### 4.2 Key Files
 
 - [src/presentation/ui.py](../src/presentation/ui.py)、[app.html](../src/presentation/templates/app.html)
-  - Vue 页面入口、内容哈希资源装配与启动上下文
+  - Vue 页面入口、内容哈希资源与导入映射装配、启动上下文
 - [frontend/src/app](../frontend/src/app)、[components/ui](../frontend/src/components/ui)、[styles](../frontend/src/styles)
   - 路由外壳、页面注册表、扩展页宿主、共享控件、主题与设计变量
 - [src/presentation/admin_extension_manager.py](../src/presentation/admin_extension_manager.py)、[extension-development.md](extension-development.md)
@@ -1543,7 +1545,7 @@ flowchart LR
 部署上是单体服务：
 
 - 一个 Flask 应用
-- 一套预构建 Vue 静态资源，Node.js 仅在开发、测试和构建环境使用
+- 一套随 Git 交付的预构建 Vue 静态资源、manifest 与 import map，Node.js 仅在开发、测试和构建环境使用
 - 一个 Pinia 页面注册表和一组内置或本地源码页面扩展
 - 一个配置文件
 - 一个 SQLite 数据库，保存用户、请求日志、日聚合统计、API Key、模型映射定义和映射运行状态

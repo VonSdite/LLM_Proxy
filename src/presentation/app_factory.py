@@ -32,7 +32,7 @@ def create_flask_app() -> Flask:
         """内容哈希资源长期缓存，构建清单每次重新校验。"""
         if request.path.startswith("/static/app/assets/") and response.status_code == 200:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif request.path == "/static/app/manifest.json":
+        elif request.path in {"/static/app/manifest.json", "/static/app/importmap.json"}:
             response.headers["Cache-Control"] = "no-cache"
         return response
 

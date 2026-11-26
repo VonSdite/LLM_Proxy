@@ -1,0 +1,1 @@
+import{tt as e}from"./index-C1TLYQNg.js";function t(t){let n=JSON.stringify(t());return e(()=>JSON.stringify(t())!==n)}export{t};

@@ -135,6 +135,8 @@ npm --prefix frontend run dev
 
 开发地址为 `http://127.0.0.1:5173`，API 默认代理到 `http://127.0.0.1:8080`，后端地址可通过 `LLM_PROXY_DEV_URL` 环境变量指定。生产构建使用 `npm --prefix frontend run build`，源码、锁文件与 `src/presentation/static/app/` 产物一同交付。
 
+构建产物包含 `manifest.json`、`importmap.json`、`index.html` 和哈希资源，均随 Git 提交。目标机器通过 `git pull` 获取同版本代码与产物后可直接启动 Python，无需 Node.js。浏览器需要支持原生 Import Map；页面通过独立导入映射解析分块文件，单页修改通常只影响相关资源和清单。
+
 组件选择、测试和部署步骤见 [前端开发指南](frontend-development.md)。
 
 ### 管理端扩展

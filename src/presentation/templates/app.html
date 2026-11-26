@@ -10,6 +10,7 @@
         catch { document.documentElement.dataset.theme = 'dark'; }
     </script>
     {% for href in style_urls %}<link rel="stylesheet" href="{{ href }}">{% endfor %}
+    <script type="importmap">{{ import_map | tojson }}</script>
     {% for href in preload_urls %}<link rel="modulepreload" href="{{ href }}">{% endfor %}
     <script type="module" src="{{ script_url }}"></script>
 </head>

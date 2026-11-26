@@ -22,7 +22,7 @@
 <a href="https://github.com/VonSdite/LLM_Proxy/network/members">
   <img alt="GitHub Forks" src="https://img.shields.io/github/forks/VonSdite/LLM_Proxy?style=flat-square&logo=github">
 </a>
-<img alt="Version" src="https://img.shields.io/badge/version-3.0.0-2f80ed?style=flat-square">
+<img alt="Version" src="https://img.shields.io/badge/version-3.0.5-2f80ed?style=flat-square">
 <img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white">
 <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white">
 
@@ -54,7 +54,7 @@ The Provider editor also includes model discovery, availability checks, first-to
 | [![Provider management](docs/images/providers.png)](docs/images/providers.png) | [![User management](docs/images/users.png)](docs/images/users.png) |
 | Manage upstream protocols, models, credential pools, Hooks, and availability in one place. | Review model permissions, IP allowlists, and cumulative usage by user. |
 
-The Vue 3 admin interface supports dark and light themes. Production assets are included in the repository, so Node.js is not required to run the service.
+The Vue 3 admin interface supports dark and light themes and requires a modern browser with native Import Map support. Production assets are included in the repository, so Node.js is not required to run the service.
 
 ## 🚀 Quick Start
 
@@ -170,6 +170,8 @@ npm --prefix frontend run dev
 ```
 
 The development server runs at `http://127.0.0.1:5173` and proxies API requests to `http://127.0.0.1:8080` by default.
+
+Before publishing, run `npm --prefix frontend run build` and commit the complete build output. Chunks use a separate import map, so a single-page edit usually affects only its resources and manifests; deployment machines receive the assets through `git pull`. See [Frontend Development](docs/frontend-development.md#5-构建与部署).
 
 ## 🔐 Security Notes
 

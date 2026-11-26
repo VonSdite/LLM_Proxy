@@ -80,18 +80,31 @@ class UiEntryTests(unittest.TestCase):
                 "shared": {"file": "assets/shared-456.js"},
             }
             (root / "app/manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            import_map = {"imports": {"/static/app/assets/shared-stable.js": "/static/app/assets/shared-456.js"}}
+            (root / "app/importmap.json").write_text(json.dumps(import_map), encoding="utf-8")
             self.app.static_folder = str(root)
             self.app.add_url_rule("/settings", "test_ui", render_ui)
             response = self.client.get("/settings")
             self.assertEqual(response.status_code, 200)
             self.assertIn(b"/static/app/assets/main-123.js", response.data)
             self.assertIn(b"/static/app/assets/shared-456.js", response.data)
+            self.assertIn(b"/static/app/assets/shared-stable.js", response.data)
+            self.assertLess(response.data.index(b'type="importmap"'), response.data.index(b'rel="modulepreload"'))
+            self.assertLess(response.data.index(b'type="importmap"'), response.data.index(b'type="module"'))
             self.assertEqual(response.headers["Cache-Control"], "no-store")
             self.assertEqual(self.client.get("/api/not-found").status_code, 404)
             self.assertEqual(self.client.get("/v1/not-found").status_code, 404)
             asset = self.client.get("/static/app/assets/main-123.js")
             self.assertIn("immutable", asset.headers["Cache-Control"])
             asset.close()
+            for name in ("manifest.json", "importmap.json"):
+                with self.client.get(f"/static/app/{name}") as asset:
+                    self.assertEqual(asset.status_code, 200)
+                    self.assertEqual(asset.headers["Cache-Control"], "no-cache")
+                    etag = asset.headers["ETag"]
+                with self.client.get(f"/static/app/{name}", headers={"If-None-Match": etag}) as cached:
+                    self.assertEqual(cached.status_code, 304)
+                    self.assertEqual(cached.headers["Cache-Control"], "no-cache")
 
     def test_all_admin_deep_links_share_vue_entry_and_keep_server_guards(self):
         context = SimpleNamespace(flask_app=self.app, config_manager=self.config, logger=Mock())
@@ -166,12 +179,42 @@ class UiEntryTests(unittest.TestCase):
             (root / "app/manifest.json").write_text(
                 json.dumps({"index.html": {"file": "../outside.js"}}), encoding="utf-8"
             )
+            (root / "app/importmap.json").write_text(json.dumps({"imports": {}}), encoding="utf-8")
             self.app.static_folder = str(root)
             self.app.add_url_rule("/settings", "test_ui", render_ui)
             with self.assertLogs(self.app.logger, level="ERROR"):
                 response = self.client.get("/settings")
             self.assertEqual(response.status_code, 503)
             self.assertNotIn(b"sensitive", response.data)
+
+    def test_missing_or_invalid_import_map_returns_build_instructions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "app/assets").mkdir(parents=True)
+            (root / "app/assets/main.js").write_text("/* fixture */", encoding="utf-8")
+            (root / "outside.js").write_text("sensitive", encoding="utf-8")
+            (root / "app/manifest.json").write_text(
+                json.dumps({"index.html": {"file": "assets/main.js"}}), encoding="utf-8"
+            )
+            self.app.static_folder = str(root)
+            self.app.add_url_rule("/settings", "test_ui", render_ui)
+            for import_map in (
+                None,
+                "invalid json",
+                "[]",
+                json.dumps({"imports": []}),
+                json.dumps({"imports": {"chunk": "/static/app/../outside.js"}}),
+                json.dumps({"imports": {"chunk": "https://example.com/module.js"}}),
+                json.dumps({"imports": {"chunk": "/static/app/assets/missing.js"}}),
+            ):
+                with self.subTest(import_map=import_map):
+                    if import_map is not None:
+                        (root / "app/importmap.json").write_text(import_map, encoding="utf-8")
+                    with self.assertLogs(self.app.logger, level="ERROR"):
+                        response = self.client.get("/settings")
+                    self.assertEqual(response.status_code, 503)
+                    self.assertIn(b"npm --prefix frontend run build", response.data)
+                    self.assertNotIn(b"sensitive", response.data)
 
 
 if __name__ == "__main__":

@@ -1,1 +1,0 @@
-import{ft as e}from"./index-B29MopGI.js";function t(){let t=new AbortController;return e(()=>t.abort()),t.signal}export{t};
