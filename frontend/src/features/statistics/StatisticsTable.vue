@@ -131,7 +131,7 @@ const columns = computed(() => statisticsColumns(props.rows, props.view))
       </span>
     </template>
     <template #cell-ip_address="{ row }">
-      <span class="mono">{{ row.ip_address || '-' }}</span>
+      <span class="mono statistics-ip">{{ row.ip_address || '-' }}</span>
     </template>
     <template v-for="key in tokenKeys" :key="key" #[`cell-${key}`]="{ row }">
       <span v-if="view !== 'logs'" class="statistics-measure">{{ number(row[key]) }}</span>
@@ -213,9 +213,13 @@ const columns = computed(() => statisticsColumns(props.rows, props.view))
   white-space: nowrap;
 }
 
+.statistics-ip,
+.statistics-time {
+  white-space: nowrap;
+}
+
 .statistics-time {
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
   font-size: var(--text-sm);
 }
 

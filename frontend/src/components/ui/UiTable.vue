@@ -59,12 +59,21 @@ const tableRoot = ref<HTMLElement>()
 const availableWidth = ref(0)
 const utilityWidth = ref(0)
 const headerWidths = ref<Record<string, number>>({})
+const contentWidths = ref<Record<string, number>>({})
 const layoutColumns = computed(() =>
   props.adaptive
     ? props.columns.map((column) => {
-        const minWidth = Math.max(column.minWidth ?? 80, headerWidths.value[column.key] ?? 0)
+        const minWidth = Math.max(
+          column.minWidth ?? 80,
+          headerWidths.value[column.key] ?? 0,
+          column.fitContent && column.grow === 0 ? (contentWidths.value[column.key] ?? 0) : 0,
+        )
+        const width = column.fitContent
+          ? Math.max(minWidth, contentWidths.value[column.key] ?? 0)
+          : column.width
         return {
           ...column,
+          width,
           minWidth,
           maxWidth: column.maxWidth === undefined ? undefined : Math.max(column.maxWidth, minWidth),
         }
@@ -83,6 +92,7 @@ watch(
     () => props.reorderable,
     () => props.compact,
     () => props.columns,
+    () => props.rows,
   ],
   ([root, adaptive], _, onCleanup) => {
     if (!root || !adaptive) return
@@ -104,6 +114,24 @@ watch(
         )
       }
       headerWidths.value = widths
+      // 临时按不换行的固有宽度测量实际单元格，避免当前列宽影响测量结果。
+      const contents: Record<string, number> = {}
+      root.classList.add('ui-table-wrap--measuring')
+      for (const content of root.querySelectorAll<HTMLElement>('[data-content-column]')) {
+        const cell = content.parentElement!
+        const style = getComputedStyle(cell)
+        const key = content.dataset.contentColumn!
+        contents[key] = Math.max(
+          contents[key] ?? 0,
+          Math.ceil(
+            content.getBoundingClientRect().width +
+              (parseFloat(style.paddingLeft) || 0) +
+              (parseFloat(style.paddingRight) || 0),
+          ),
+        )
+      }
+      root.classList.remove('ui-table-wrap--measuring')
+      contentWidths.value = contents
     }
     let frame = 0
     const observer = new ResizeObserver(() => {
@@ -212,7 +240,20 @@ const table = useVueTable({
   enableSortingRemoval: false,
 })
 const fittedWidths = computed(() =>
-  fitColumnWidths(layoutColumns.value, sizes.value, availableWidth.value - utilityWidth.value),
+  fitColumnWidths(
+    layoutColumns.value.map((column) =>
+      column.fitContent && sizes.value[column.key] === undefined
+        ? {
+            ...column,
+            maxWidth: Math.min(column.maxWidth ?? Infinity, column.width ?? Infinity),
+            grow:
+              column.grow === 0 ? 0 : Math.max(0, (column.width ?? 0) - (column.minWidth ?? 80)),
+          }
+        : column,
+    ),
+    sizes.value,
+    availableWidth.value - utilityWidth.value,
+  ),
 )
 const fittedTotal = computed(() =>
   Object.values(fittedWidths.value).reduce((total, width) => total + width, 0),
@@ -292,6 +333,7 @@ function columnWidth(id: string, size: number) {
         :style="{
           '--table-utility-width': `calc(${selectable ? 'var(--table-check-width)' : '0px'} + ${reorderable ? 'var(--table-order-width)' : '0px'})`,
           minWidth: `calc(${adaptive ? fittedTotal : table.getTotalSize()}px + var(--table-utility-width))`,
+          width: adaptive ? `calc(${fittedTotal}px + var(--table-utility-width))` : undefined,
         }"
       >
         <thead>
@@ -417,9 +459,19 @@ function columnWidth(id: string, size: number) {
                   props.columns.find((column) => column.key === cell.column.id)?.align === 'right',
               }"
             >
-              <slot :name="`cell-${cell.column.id}`" :row="row.original" :value="cell.getValue()">
-                {{ cell.getValue() ?? '—' }}
-              </slot>
+              <div
+                class="ui-table-cell-content"
+                :data-content-column="
+                  adaptive &&
+                  props.columns.find((column) => column.key === cell.column.id)?.fitContent
+                    ? cell.column.id
+                    : undefined
+                "
+              >
+                <slot :name="`cell-${cell.column.id}`" :row="row.original" :value="cell.getValue()">
+                  {{ cell.getValue() ?? '—' }}
+                </slot>
+              </div>
             </td>
           </tr>
           <tr v-if="addLabel" class="ui-table-add-row">
@@ -445,9 +497,14 @@ function columnWidth(id: string, size: number) {
               :key="column.key"
               :class="{ 'ui-table-right': column.align === 'right' }"
             >
-              <slot :name="`footer-${column.key}`" :value="footer[column.key]">
-                {{ footer[column.key] }}
-              </slot>
+              <div
+                class="ui-table-cell-content"
+                :data-content-column="adaptive && column.fitContent ? column.key : undefined"
+              >
+                <slot :name="`footer-${column.key}`" :value="footer[column.key]">
+                  {{ footer[column.key] }}
+                </slot>
+              </div>
             </td>
           </tr>
         </tfoot>
@@ -522,6 +579,16 @@ function columnWidth(id: string, size: number) {
 
 .ui-table-wrap--compact .ui-table-header-content {
   gap: 2px;
+}
+
+.ui-table-cell-content {
+  display: contents;
+}
+
+.ui-table-wrap--measuring [data-content-column] {
+  display: inline-block;
+  width: max-content;
+  white-space: nowrap;
 }
 
 .ui-table-wrap--adaptive .ui-table-header-content {

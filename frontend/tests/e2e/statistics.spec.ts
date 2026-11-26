@@ -54,7 +54,9 @@ test('请求明细保留完整单行时间，自适应模型列并保留手动�
   expect((await header('结果').boundingBox())!.width).toBeLessThanOrEqual(81)
   const wide = (await header('映射模型').boundingBox())!.width
   await page.setViewportSize({ width: 1920, height: 1000 })
-  await expect.poll(async () => (await header('映射模型').boundingBox())!.width).toBeLessThan(wide)
+  await expect
+    .poll(async () => (await header('映射模型').boundingBox())!.width)
+    .toBeLessThanOrEqual(wide)
   expect((await time.boundingBox())!.height).toBeLessThan(24)
   await expect
     .poll(() =>
@@ -89,7 +91,7 @@ test('请求明细保留完整单行时间，自适应模型列并保留手动�
   await handle.dblclick()
   await expect
     .poll(async () => (await header('映射模型').boundingBox())!.width)
-    .toBeGreaterThan(manual)
+    .toBeCloseTo(wide, 0)
   const requestHandle = page.getByRole('separator', { name: '调整请求模型列宽', exact: true })
   const beforeDrag = (await header('请求模型').boundingBox())!.width
   const box = (await requestHandle.boundingBox())!
@@ -103,6 +105,116 @@ test('请求明细保留完整单行时间，自适应模型列并保留手动�
   await page.setViewportSize({ width: 1440, height: 1000 })
   await expect.poll(unreadableHeaders).toEqual([])
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('IP 按最长地址保留单行，三列模型独立收窄并随刷新重新适配', async ({ page }) => {
+  const fixture = await mockAdmin(page)
+  let expanded = true
+  await page.route('**/api/request-logs?*', (route) =>
+    route.fulfill({
+      json: {
+        total: 2,
+        logs: [
+          {
+            id: 1,
+            ip_address: '203.0.113.7',
+            target_model_id: expanded
+              ? 'provider/organization/long-mapped-model-20261125-preview'
+              : 'tiny',
+          },
+          {
+            id: 2,
+            ip_address: expanded ? '2001:db8:ffff:eeee:dddd:cccc:bbbb:aaaa' : '203.0.113.8',
+            target_model_id: 'tiny',
+          },
+        ].map((row) => ({
+          ...row,
+          username: '演示用户',
+          request_model: 'chat',
+          response_model: 'model-v1',
+          start_time: '2026-11-25 10:00:00',
+          outcome: 'success',
+          usage_status: 'known',
+          total_tokens: 1234567,
+          prompt_tokens: 1200000,
+          completion_tokens: 34567,
+          cache_usage_status: 'known',
+          cache_read_input_tokens: 1000000,
+          cache_hit_rate: 5 / 6,
+        })),
+      },
+    }),
+  )
+  await page.setViewportSize({ width: 3200, height: 1000 })
+  await page.goto('/statistics')
+  await page.getByRole('tab', { name: '请求明细', exact: true }).click()
+  const width = (key: string) =>
+    page
+      .locator(`th[data-column-id="${key}"]`)
+      .evaluate((cell) => cell.getBoundingClientRect().width)
+  // 用实际文字与表头的边界验证列宽，避免只核对组件计算值。
+  const excessWidths = () =>
+    page.getByRole('table').evaluate((table) =>
+      ['ip_address', 'request_model', 'target_model_id', 'response_model'].map((key) => {
+        const header = table.querySelector<HTMLElement>(`th[data-column-id="${key}"]`)!
+        const style = getComputedStyle(header)
+        const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+        const textWidths = [
+          ...table.querySelectorAll<HTMLElement>(`tbody [data-content-column="${key}"]`),
+        ].map((content) => {
+          const range = document.createRange()
+          range.selectNodeContents(content)
+          return range.getBoundingClientRect().width
+        })
+        const expected = Math.ceil(
+          Math.max(
+            header.querySelector('.ui-table-header-content')!.getBoundingClientRect().width,
+            ...textWidths,
+          ) + padding,
+        )
+        return Math.abs(header.getBoundingClientRect().width - expected)
+      }),
+    )
+  await expect.poll(async () => Math.max(...(await excessWidths()))).toBeLessThanOrEqual(1)
+  const ipWidth = await width('ip_address')
+  const targetWidth = await width('target_model_id')
+  expect(ipWidth).toBeGreaterThan(240)
+  expect(targetWidth).toBeGreaterThan((await width('request_model')) * 2)
+  expect(targetWidth).toBeGreaterThan((await width('response_model')) * 2)
+  const requestWidth = await width('request_model')
+  const handle = page.getByRole('separator', { name: '调整请求模型列宽', exact: true })
+  await handle.press('ArrowRight')
+  await expect.poll(() => width('request_model')).toBeCloseTo(requestWidth + 16, 0)
+  await page.reload()
+  await page.getByRole('tab', { name: '请求明细', exact: true }).click()
+  await expect.poll(() => width('request_model')).toBeCloseTo(requestWidth + 16, 0)
+  await handle.dblclick()
+  await expect.poll(() => width('request_model')).toBeCloseTo(requestWidth, 0)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await expect.poll(() => width('target_model_id')).toBeLessThan(targetWidth)
+  await expect.poll(() => width('ip_address')).toBeCloseTo(ipWidth, 0)
+  expect(
+    await page.locator('.statistics-ip').evaluateAll((elements) =>
+      elements.every((element) => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        return range.getClientRects().length === 1
+      }),
+    ),
+  ).toBe(true)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect
+    .poll(() => page.locator('.ui-table-scroll').evaluate((el) => el.scrollWidth > el.clientWidth))
+    .toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.setViewportSize({ width: 3200, height: 1000 })
+  expanded = false
+  await page.getByRole('button', { name: '刷新统计', exact: true }).click()
+  await expect(page.getByRole('cell', { name: '203.0.113.8', exact: true })).toBeVisible()
+  await expect.poll(() => width('ip_address')).toBeLessThan(ipWidth)
+  await expect.poll(() => width('target_model_id')).toBeLessThan(targetWidth)
+  await expect.poll(async () => Math.max(...(await excessWidths()))).toBeLessThanOrEqual(1)
+  expect(fixture.unexpected).toEqual([])
 })
 
 test('映射模型、响应模型与 IP 多选收起后查询一次，并随维度、明细和导出保留', async ({ page }) => {
@@ -413,7 +525,7 @@ test('全部用量维度显示分组上游成功率、明细计数与合计', as
     await expect
       .poll(() =>
         page.getByRole('table').evaluate((table) => {
-          const edge = table.closest('.ui-table-scroll')!.getBoundingClientRect().right
+          const edge = table.getBoundingClientRect().right
           return Math.max(
             ...[...table.querySelectorAll('tr')].map((row) =>
               Math.abs(row.lastElementChild!.getBoundingClientRect().right - edge),
@@ -422,12 +534,15 @@ test('全部用量维度显示分组上游成功率、明细计数与合计', as
         }),
       )
       .toBeLessThanOrEqual(1)
-    for (const [key, width] of [
-      ['ip_address', 112],
-      ['username', 72],
-    ] as const) {
-      const header = page.locator(`th[data-column-id="${key}"]`)
-      if (await header.count()) expect((await header.boundingBox())!.width).toBeCloseTo(width, 0)
+    const username = page.locator('th[data-column-id="username"]')
+    if (await username.count()) expect((await username.boundingBox())!.width).toBeCloseTo(72, 0)
+    const ip = page.locator('th[data-column-id="ip_address"]')
+    if (await ip.count()) {
+      const textWidth = await page
+        .locator('.statistics-ip')
+        .first()
+        .evaluate((element) => element.getBoundingClientRect().width)
+      expect((await ip.boundingBox())!.width).toBeCloseTo(Math.ceil(textWidth + 16), 0)
     }
     await expect
       .poll(() =>

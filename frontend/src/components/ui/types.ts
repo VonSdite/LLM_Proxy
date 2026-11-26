@@ -14,6 +14,7 @@ export interface TableColumn {
   maxWidth?: number
   fixed?: boolean
   grow?: number
+  fitContent?: boolean
   align?: 'left' | 'right'
 }
 export interface TableSort {

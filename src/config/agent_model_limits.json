@@ -1,9 +1,53 @@
 [
   {
     "ids": [
-      "glm-5.3-flash"
+      "glm-5.4"
     ],
-    "label": "智谱 GLM-5.3-Flash 官方参数",
+    "label": "智谱 GLM-5.4 官方参数（Coding Plan）",
+    "context": 1000000,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1M（1,000,000）",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/glm-5.4",
+          "checkedAt": "2026-11-25"
+        },
+        {
+          "value": 512000,
+          "kind": "official",
+          "label": "官方 Coding Plan 建议客户端窗口 512,000",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/coding-plan/latest-model",
+          "checkedAt": "2026-11-25"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 128K（131,072）",
+          "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/glm-5.4",
+          "checkedAt": "2026-11-25"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "glm-5.3-flash",
+      "glm-5.3-flashx",
+      "glm-5.3-flashx-legal"
+    ],
+    "label": "智谱 GLM-5.3-Flash / FlashX / FlashX-Legal 官方参数",
     "context": 1048576,
     "output": 131072,
     "candidates": {
@@ -13,7 +57,7 @@
           "kind": "official",
           "label": "官方上下文 1,048,576",
           "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash",
-          "checkedAt": "2026-09-06"
+          "checkedAt": "2026-11-25"
         }
       ],
       "compact": [
@@ -29,7 +73,7 @@
           "kind": "official",
           "label": "官方最大输出 131,072",
           "sourceUrl": "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash",
-          "checkedAt": "2026-09-06"
+          "checkedAt": "2026-11-25"
         }
       ]
     }
@@ -498,10 +542,12 @@
   },
   {
     "ids": [
-      "qwen3.8-max",
-      "qwen3.8-flash"
+      "qwen4-max"
     ],
-    "label": "通义千问官方上下文和内置输出参数",
+    "aliases": [
+      "qwen4-max-preview"
+    ],
+    "label": "通义千问 Qwen4-Max 官方参数（输出区分思考模式）",
     "context": 1000000,
     "output": 131072,
     "candidates": {
@@ -510,8 +556,8 @@
           "value": 1000000,
           "kind": "official",
           "label": "官方上下文 1,000,000",
-          "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
-          "checkedAt": "2026-09-06"
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen4-max",
+          "checkedAt": "2026-11-25"
         }
       ],
       "compact": [
@@ -524,20 +570,29 @@
       "output": [
         {
           "value": 131072,
-          "kind": "fallback",
-          "label": "内置最大输出 131,072"
+          "kind": "official",
+          "label": "官方非思考模式最大输出 131,072",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen4-max",
+          "checkedAt": "2026-11-25"
+        },
+        {
+          "value": 262144,
+          "kind": "official",
+          "label": "官方思考模式最大输出 262,144（思考与回答合计）",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen4-max",
+          "checkedAt": "2026-11-25"
         }
       ]
     }
   },
   {
     "ids": [
-      "qwen3.7-plus",
-      "qwen3.7-flash"
+      "qwen3.8-max",
+      "qwen3.8-flash"
     ],
-    "label": "通义千问官方上下文，输出使用通用候选",
+    "label": "通义千问 Qwen3.8 Max / Flash 官方参数",
     "context": 1000000,
-    "output": 32000,
+    "output": 131072,
     "candidates": {
       "context": [
         {
@@ -545,7 +600,7 @@
           "kind": "official",
           "label": "官方上下文 1,000,000",
           "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
-          "checkedAt": "2026-08-26"
+          "checkedAt": "2026-11-25"
         }
       ],
       "compact": [
@@ -557,9 +612,116 @@
       ],
       "output": [
         {
-          "value": 32000,
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 128K（131,072）",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+          "checkedAt": "2026-11-25"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "qwen3.8-omni-flash"
+    ],
+    "label": "通义千问 Qwen3.8 Omni Flash 官方参数",
+    "context": 1000000,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1M（1,000,000）",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen3-8-omni-flash",
+          "checkedAt": "2026-11-25"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
           "kind": "fallback",
-          "label": "通用最大输出 32,000（待确认）"
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 131,072",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/qwen3-8-omni-flash",
+          "checkedAt": "2026-11-25"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "qwen3.7-plus"
+    ],
+    "label": "通义千问 Qwen3.7 Plus 官方参数",
+    "context": 1000000,
+    "output": 131072,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1,000,000",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+          "checkedAt": "2026-11-25"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 131072,
+          "kind": "official",
+          "label": "官方最大输出 128K（131,072）",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+          "checkedAt": "2026-11-25"
+        }
+      ]
+    }
+  },
+  {
+    "ids": [
+      "qwen3.7-flash"
+    ],
+    "label": "通义千问 Qwen3.7 Flash 官方参数",
+    "context": 1000000,
+    "output": 65536,
+    "candidates": {
+      "context": [
+        {
+          "value": 1000000,
+          "kind": "official",
+          "label": "官方上下文 1,000,000",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+          "checkedAt": "2026-11-25"
+        }
+      ],
+      "compact": [
+        {
+          "value": 60,
+          "kind": "fallback",
+          "label": "建议压缩阈值"
+        }
+      ],
+      "output": [
+        {
+          "value": 65536,
+          "kind": "official",
+          "label": "官方最大输出 64K（65,536）",
+          "sourceUrl": "https://help.aliyun.com/zh/model-studio/text-generation-model/",
+          "checkedAt": "2026-11-25"
         }
       ]
     }
@@ -632,9 +794,10 @@
   },
   {
     "ids": [
+      "minimax-m3.1-flash",
       "minimax-m3"
     ],
-    "label": "MiniMax 官方上下文和输出参数",
+    "label": "MiniMax M3.1 Flash / M3 官方上下文和输出参数",
     "context": 1000000,
     "output": 131072,
     "candidates": {
@@ -643,8 +806,8 @@
           "value": 1000000,
           "kind": "official",
           "label": "官方上下文 1,000,000",
-          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
-          "checkedAt": "2026-08-26"
+          "sourceUrl": "https://platform.minimax.io/docs/api-reference/text-openai-api",
+          "checkedAt": "2026-11-25"
         }
       ],
       "compact": [
@@ -658,16 +821,16 @@
         {
           "value": 131072,
           "kind": "official",
-          "label": "官方推荐输出 131,072",
-          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
-          "checkedAt": "2026-08-26"
+          "label": "官方推荐输出 131,072（含思考）",
+          "sourceUrl": "https://platform.minimax.io/docs/api-reference/text-chat-openai",
+          "checkedAt": "2026-11-25"
         },
         {
           "value": 524288,
           "kind": "official",
-          "label": "官方输出上限 524,288",
-          "sourceUrl": "https://platform.minimax.io/docs/guides/models-intro",
-          "checkedAt": "2026-08-26"
+          "label": "官方输出上限 524,288（含思考）",
+          "sourceUrl": "https://platform.minimax.io/docs/api-reference/text-chat-openai",
+          "checkedAt": "2026-11-25"
         }
       ]
     }
