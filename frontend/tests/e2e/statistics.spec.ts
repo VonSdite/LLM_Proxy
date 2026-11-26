@@ -152,6 +152,11 @@ test('IP 按最长地址保留单行，三列模型独立收窄并随刷新重�
     page
       .locator(`th[data-column-id="${key}"]`)
       .evaluate((cell) => cell.getBoundingClientRect().width)
+  const rightGap = () =>
+    page.getByRole('table').evaluate((table) => {
+      const container = table.closest('.ui-table-scroll')!.getBoundingClientRect()
+      return Math.abs(container.right - table.getBoundingClientRect().right)
+    })
   // 用实际文字与表头的边界验证列宽，避免只核对组件计算值。
   const excessWidths = () =>
     page.getByRole('table').evaluate((table) =>
@@ -176,6 +181,7 @@ test('IP 按最长地址保留单行，三列模型独立收窄并随刷新重�
       }),
     )
   await expect.poll(async () => Math.max(...(await excessWidths()))).toBeLessThanOrEqual(1)
+  await expect.poll(rightGap).toBeLessThanOrEqual(1)
   const ipWidth = await width('ip_address')
   const targetWidth = await width('target_model_id')
   expect(ipWidth).toBeGreaterThan(240)
@@ -185,6 +191,7 @@ test('IP 按最长地址保留单行，三列模型独立收窄并随刷新重�
   const handle = page.getByRole('separator', { name: '调整请求模型列宽', exact: true })
   await handle.press('ArrowRight')
   await expect.poll(() => width('request_model')).toBeCloseTo(requestWidth + 16, 0)
+  await expect.poll(rightGap).toBeLessThanOrEqual(1)
   await page.reload()
   await page.getByRole('tab', { name: '请求明细', exact: true }).click()
   await expect.poll(() => width('request_model')).toBeCloseTo(requestWidth + 16, 0)
@@ -214,6 +221,7 @@ test('IP 按最长地址保留单行，三列模型独立收窄并随刷新重�
   await expect.poll(() => width('ip_address')).toBeLessThan(ipWidth)
   await expect.poll(() => width('target_model_id')).toBeLessThan(targetWidth)
   await expect.poll(async () => Math.max(...(await excessWidths()))).toBeLessThanOrEqual(1)
+  await expect.poll(rightGap).toBeLessThanOrEqual(1)
   expect(fixture.unexpected).toEqual([])
 })
 
@@ -522,18 +530,21 @@ test('全部用量维度显示分组上游成功率、明细计数与合计', as
     )
     await page.keyboard.press('Escape')
     await expect(page.locator('tfoot')).toContainText('90.9%')
-    await expect
-      .poll(() =>
-        page.getByRole('table').evaluate((table) => {
-          const edge = table.getBoundingClientRect().right
-          return Math.max(
-            ...[...table.querySelectorAll('tr')].map((row) =>
-              Math.abs(row.lastElementChild!.getBoundingClientRect().right - edge),
-            ),
-          )
-        }),
-      )
-      .toBeLessThanOrEqual(1)
+    for (const width of [1920, 2560, 3200]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await expect
+        .poll(() =>
+          page.getByRole('table').evaluate((table) => {
+            const edge = table.closest('.ui-table-scroll')!.getBoundingClientRect().right
+            return Math.max(
+              ...[...table.querySelectorAll('tr')].map((row) =>
+                Math.abs(row.lastElementChild!.getBoundingClientRect().right - edge),
+              ),
+            )
+          }),
+        )
+        .toBeLessThanOrEqual(1)
+    }
     const username = page.locator('th[data-column-id="username"]')
     if (await username.count()) expect((await username.boundingBox())!.width).toBeCloseTo(72, 0)
     const ip = page.locator('th[data-column-id="ip_address"]')

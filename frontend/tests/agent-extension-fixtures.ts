@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { parse } from 'yaml'
 import type { AgentDefinition, AgentField } from '../src/api/agents'
 import type { mockAdmin } from './browser-fixtures'
@@ -6,7 +6,12 @@ import type { mockAdmin } from './browser-fixtures'
 export function extensionDefinitions(): AgentDefinition[] {
   const root = new URL('../../agents/', import.meta.url)
   return readdirSync(root, { withFileTypes: true })
-    .filter((item) => item.isDirectory() && !item.name.startsWith('_'))
+    .filter(
+      (item) =>
+        item.isDirectory() &&
+        !item.name.startsWith('_') &&
+        existsSync(new URL(`${item.name}/agent.yaml`, root)),
+    )
     .map((item) => {
       const source = parse(readFileSync(new URL(`${item.name}/agent.yaml`, root), 'utf8'))
       const groups = Object.keys(source.groups || {})
@@ -40,7 +45,7 @@ export function addExtensionFixtures(fixture: Awaited<ReturnType<typeof mockAdmi
       const path =
         target === 'opencodeV2'
           ? '/home/test/.config/opencode/opencode.json'
-          : `/home/test/.${agent.id}/${target === 'dsh' ? 'cordis.patch.yml' : target === 'dshCredentials' ? '.credentials.yaml' : 'config.yaml'}`
+          : `/home/test/.${agent.id}/config.yaml`
       fixture.snapshot.files[target] = {
         path,
         defaultPath: path,

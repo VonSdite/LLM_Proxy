@@ -1,4 +1,4 @@
-"""声明式 Agent 扩展、DSH 与 Hermes 的配置保存回归。"""
+"""声明式 Agent 扩展、Opencode 与 Hermes 的配置保存回归。"""
 
 from __future__ import annotations
 
@@ -24,9 +24,7 @@ class AgentExtensionTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
-        self.env = patch.dict(
-            os.environ, {key: "" for key in ("CODEX_HOME", "CLAUDE_CONFIG_DIR", "DSH_HOME", "HERMES_HOME")}
-        )
+        self.env = patch.dict(os.environ, {key: "" for key in ("CODEX_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME")})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.service = make_service(self.directory)
@@ -50,15 +48,36 @@ class AgentExtensionTests(unittest.TestCase):
         registry = self.service.extensions
         self.assertEqual([], registry.errors)
         self.assertEqual(
-            ["Claude", "Codex", "Opencode v1", "Opencode v2", "DSH", "Hermes"],
+            ["Claude", "Codex", "Opencode v1", "Opencode v2", "Hermes"],
             [item["label"] for item in registry.public()],
         )
         paths = registry.paths(SimpleNamespace(home="/home/alice", local=False), posixpath)
-        self.assertEqual("/home/alice/.dsh/cordis.patch.yml", paths["dsh"])
         self.assertEqual("/home/alice/.hermes/config.yaml", paths["hermes"])
         bootstrap = self.service.bootstrap("browser", "http://localhost:8080")
         self.assertEqual([], bootstrap["extensionErrors"])
-        self.assertEqual(6, len(bootstrap["agents"]))
+        self.assertEqual(5, len(bootstrap["agents"]))
+
+    def test_removed_agent_paths_and_existing_files_are_untouched(self):
+        directory = self.directory / "home/.dsh"
+        directory.mkdir(parents=True)
+        files = {
+            "dsh": (directory / "cordis.patch.yml", b"- id: agent-default-model\n  config: {model: original}\n"),
+            "dshCredentials": (directory / ".credentials.yaml", b"version: 1\nrefs: {}\n"),
+        }
+        for target, (path, content) in files.items():
+            path.write_bytes(content)
+            self.service.state["paths"].setdefault("local", {})[target] = str(path)
+        self.service.repository.save(self.service.state)
+        with patch.object(self.service.local, "read", wraps=self.service.local.read) as read:
+            snapshot = self.service.snapshot("browser", "local")
+        for target, (path, content) in files.items():
+            self.assertNotIn(target, snapshot["files"])
+            self.assertFalse(any(Path(call.args[0]) == path for call in read.call_args_list))
+            with self.assertRaises(AgentConfigError):
+                self.service.set_path("browser", "local", {"target": target, "path": str(path)})
+            self.assertEqual(content, path.read_bytes())
+        with self.assertRaises(AgentConfigError):
+            self.service.preview("browser", "local", "dsh", {"draft": {"values": {}}})
 
     def test_opencode_existing_sharing_and_update_snapshot(self):
         path = self.directory / "home/.config/opencode/opencode.json"
@@ -76,7 +95,7 @@ class AgentExtensionTests(unittest.TestCase):
                     self.assertEqual(["openai"], managed["disabled_providers"])
 
     def test_preview_order_matches_forms_across_files(self):
-        for agent in ("claude", "codex", "opencode", "opencode_v2", "dsh", "hermes"):
+        for agent in ("claude", "codex", "opencode", "opencode_v2", "hermes"):
             registry = self.service.extensions
             if registry.agents[agent].get("legacy"):
                 draft = legacy_draft(agent)
@@ -98,9 +117,7 @@ class AgentExtensionTests(unittest.TestCase):
             with self.subTest(agent=agent):
                 self.assertTrue(paths[0].endswith(("base_url", "baseURL", "ANTHROPIC_BASE_URL")), paths)
                 self.assertTrue(
-                    paths[1].endswith(
-                        ("apiKey", "OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "LLM_PROXY_API_KEY", "api_key")
-                    ),
+                    paths[1].endswith(("apiKey", "OPENAI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "api_key")),
                     paths,
                 )
                 self.assertTrue(paths[2].endswith(("model", "ANTHROPIC_MODEL", "default", "modelID")), paths)
@@ -245,7 +262,7 @@ class AgentExtensionTests(unittest.TestCase):
         self.assertFalse((self.directory / "home/.config/opencode/opencode.json").exists())
 
     def test_optional_default_models_clear_and_round_trip(self):
-        for agent, target in (("opencode_v2", "opencodeV2"), ("dsh", "dsh"), ("hermes", "hermes")):
+        for agent, target in (("opencode_v2", "opencodeV2"), ("hermes", "hermes")):
             with self.subTest(agent=agent):
                 values = {
                     "base-url": "http://localhost:8080/v1",
@@ -260,11 +277,14 @@ class AgentExtensionTests(unittest.TestCase):
                     values["provider"] = "custom"
                 self.save(agent, values)
                 path = Path(self.service.snapshot("browser", "local")["files"][target]["path"])
-                load = lambda: (
-                    parse_document("json", path.read_text(encoding="utf-8"))
-                    if agent == "opencode_v2"
-                    else yaml_load(path.read_text(encoding="utf-8"))
-                )
+
+                def load():
+                    return (
+                        parse_document("json", path.read_text(encoding="utf-8"))
+                        if agent == "opencode_v2"
+                        else yaml_load(path.read_text(encoding="utf-8"))
+                    )
+
                 original = load()
                 values["model"] = None
                 ticket = self.save(agent, values)
@@ -274,9 +294,6 @@ class AgentExtensionTests(unittest.TestCase):
                     self.assertNotIn("model", saved)
                     self.assertEqual(original["providers"], saved["providers"])
                     self.assertNotIn("", saved["providers"]["proxy"]["models"])
-                elif agent == "dsh":
-                    self.assertFalse(any(row["id"] == "agent-default-model" for row in saved))
-                    self.assertEqual([row for row in original if row["id"] != "agent-default-model"], saved)
                 else:
                     self.assertNotIn("default", saved["model"])
                     expected = original["model"].copy()
@@ -294,7 +311,7 @@ class AgentExtensionTests(unittest.TestCase):
                 )
 
     def test_new_connections_without_default_do_not_create_empty_model_entries(self):
-        for agent, target in (("opencode_v2", "opencodeV2"), ("dsh", "dsh"), ("hermes", "hermes")):
+        for agent, target in (("opencode_v2", "opencodeV2"), ("hermes", "hermes")):
             with self.subTest(agent=agent):
                 values = {"base-url": "https://example.com/v1", "model": None}
                 self.save(agent, values)
@@ -304,8 +321,6 @@ class AgentExtensionTests(unittest.TestCase):
                 if agent == "opencode_v2":
                     data = parse_document("json", text)
                     self.assertNotIn("models", data["providers"]["proxy"])
-                elif agent == "dsh":
-                    self.assertEqual(["llm-pi-ai"], [row["id"] for row in yaml_load(text)])
                 self.assertFalse(self.save(agent, values)["hasChanges"])
 
     def test_hermes_preserves_comments_and_unmanaged_values_and_clears_explicitly(self):
@@ -344,89 +359,6 @@ class AgentExtensionTests(unittest.TestCase):
         self.assertEqual("main/org/model.v1", data["model"]["default"])
         self.assertTrue(Path(str(path) + ".bak.1").is_file())
 
-    def test_dsh_patch_and_separate_credentials_preserve_other_routes(self):
-        path = self.directory / "home/.dsh/cordis.patch.yml"
-        path.parent.mkdir(parents=True)
-        path.write_text(
-            "# 插件注释\n- id: other-plugin\n  config: {enabled: true}\n- id: llm-pi-ai\n  config:\n    providers:\n      external: {baseURL: https://other.example/v1}\n      proxy:\n        models:\n          - {id: old, contextWindow: 1234, custom: keep}\n",
-            encoding="utf-8",
-        )
-        values = {
-            "base-url": "http://localhost:8080/v1",
-            "api-key": "secret-dsh",
-            "model": "main/gpt-5",
-            "protocol": "openai-completions",
-            "context": 200000,
-            "output": 32000,
-        }
-        ticket = self.save("dsh", values)
-        text = path.read_text(encoding="utf-8")
-        patches = yaml_load(text)
-        self.assertIn("# 插件注释", text)
-        self.assertEqual("other-plugin", patches[0]["id"])
-        providers = patches[1]["config"]["providers"]
-        self.assertEqual("https://other.example/v1", providers["external"]["baseURL"])
-        self.assertEqual("keep", providers["proxy"]["models"][0]["custom"])
-        self.assertEqual("main/gpt-5", providers["proxy"]["models"][1]["id"])
-        credentials = self.directory / "home/.dsh/.credentials.yaml"
-        self.assertEqual("secret-dsh", yaml_load(credentials.read_text())["refs"]["LLM_PROXY_API_KEY"])
-        self.assertNotIn("secret-dsh", text)
-        self.assertNotIn("secret-dsh", json.dumps(ticket))
-        self.assertFalse(self.save("dsh", values)["hasChanges"])
-        snapshot = self.service.snapshot("browser", "local")
-        self.assertEqual(200000, snapshot["files"]["dsh"]["managed"]["context"])
-        self.save("dsh", {"api-key": None})
-        self.assertNotIn("apiKeyEnv", yaml_load(path.read_text())[1]["config"]["providers"]["proxy"])
-
-    def test_dsh_global_permissions_round_trip_and_clear(self):
-        values = {"base-url": "http://localhost:8080/v1", "model": "main/test", "protocol": "openai-completions"}
-        path = self.directory / "home/.dsh/cordis.patch.yml"
-        self.assertNotIn("permission", self.service.snapshot("browser", "local")["files"]["dsh"]["managed"])
-        for mode, approval in (("read-only", "ask"), ("workspace-write", "ask"), ("danger-full-access", "never")):
-            with self.subTest(mode=mode):
-                ticket = self.save("dsh", {**values, "permission": mode})
-                rows = yaml_load(path.read_text(encoding="utf-8"))
-                permission = next(row["config"] for row in rows if row["id"] == "permission")
-                self.assertEqual(mode, permission["defaultPreset"])
-                self.assertEqual({"sandbox": mode, "approval": approval}, permission["presets"][mode])
-                self.assertEqual(3, len(permission["presets"]))
-                self.assertEqual(
-                    mode, self.service.snapshot("browser", "local")["files"]["dsh"]["managed"]["permission"]
-                )
-                self.assertIn("permission.config.defaultPreset", [row["path"] for row in ticket["rows"]])
-                self.assertFalse(self.save("dsh", {**values, "permission": mode})["hasChanges"])
-        self.save("dsh", {**values, "permission": None})
-        permission = next(row["config"] for row in yaml_load(path.read_text()) if row["id"] == "permission")
-        self.assertNotIn("defaultPreset", permission)
-        self.assertEqual(3, len(permission["presets"]))
-        self.assertFalse((path.parent / "profiles").exists())
-
-    def test_dsh_custom_path_and_permission_presets_are_preserved(self):
-        path = self.directory / "custom/profiles/web/cordis.patch.yml"
-        path.parent.mkdir(parents=True)
-        path.write_text(
-            "# 用户权限\n- id: permission\n  config:\n    defaultPreset: workspace-write\n    extra: keep\n    presets:\n      workspace-write: {sandbox: read-only, approval: never}\n      restricted: {sandbox: read-only, approval: never}\n",
-            encoding="utf-8",
-        )
-        self.service.set_path("browser", "local", {"target": "dsh", "path": str(path)})
-        values = {"base-url": "http://localhost:8080/v1", "model": "main/test", "protocol": "openai-completions"}
-        managed = self.service.snapshot("browser", "local")["files"]["dsh"]["managed"]
-        self.assertEqual({"custom": True}, managed["permission"])
-        self.save("dsh", values)
-        permission = next(row["config"] for row in yaml_load(path.read_text()) if row["id"] == "permission")
-        self.assertEqual("read-only", permission["presets"]["workspace-write"]["sandbox"])
-        self.save("dsh", {**values, "permission": "read-only"})
-        permission = next(row["config"] for row in yaml_load(path.read_text()) if row["id"] == "permission")
-        self.assertEqual("keep", permission["extra"])
-        self.assertEqual({"sandbox": "read-only", "approval": "never"}, permission["presets"]["restricted"])
-        self.assertIn("# 用户权限", path.read_text(encoding="utf-8"))
-        self.assertFalse((self.directory / "home/.dsh/cordis.patch.yml").exists())
-        self.assertEqual(str(path), self.service.snapshot("browser", "local")["files"]["dsh"]["path"])
-        registry = self.service.extensions
-        with patch.dict(os.environ, {"DSH_HOME": str(self.directory / "custom-home")}):
-            paths = registry.paths(SimpleNamespace(home="unused", local=True), os.path)
-        self.assertEqual(str(self.directory / "custom-home/cordis.patch.yml"), paths["dsh"])
-
     def test_new_declarative_agent_and_invalid_extension_isolation(self):
         root = self.directory / "agents"
         good = root / "sample"
@@ -460,10 +392,6 @@ class AgentExtensionTests(unittest.TestCase):
         ):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 registry.desired("hermes", {"values": values}, [])
-        with self.assertRaises(ValueError):
-            registry.parse("dsh", "- id: llm-pi-ai\n- id: llm-pi-ai\n")
-        with self.assertRaises(ValueError):
-            registry.parse("dshCredentials", "version: 2\n")
         snapshot = self.service.snapshot("browser", "local")
         payload = {
             "versions": {key: value["version"] for key, value in snapshot["files"].items()},
@@ -477,41 +405,11 @@ class AgentExtensionTests(unittest.TestCase):
             self.service.apply("browser", "local", ticket["token"])
         self.assertIn("false", path.read_text())
 
-    def test_dsh_rolls_back_profile_when_credentials_write_fails(self):
-        snapshot = self.service.snapshot("browser", "local")
-        ticket = self.service.preview(
-            "browser",
-            "local",
-            "dsh",
-            {
-                "versions": {key: value["version"] for key, value in snapshot["files"].items()},
-                "draft": {
-                    "values": {
-                        "base-url": "http://localhost:8080/v1",
-                        "model": "main/model",
-                        "protocol": "openai-completions",
-                        "api-key": "secret",
-                    }
-                },
-            },
-        )
-        write = self.service.local.write
-
-        def fail_credentials(path, data, mode=0o600):
-            if path == snapshot["files"]["dshCredentials"]["path"]:
-                raise OSError("Simulated credential write failure")
-            return write(path, data, mode)
-
-        with patch.object(self.service.local, "write", side_effect=fail_credentials), self.assertRaises(OSError):
-            self.service.apply("browser", "local", ticket["token"])
-        self.assertFalse(Path(snapshot["files"]["dsh"]["path"]).exists())
-        self.assertFalse(Path(snapshot["files"]["dshCredentials"]["path"]).exists())
-
     def test_parse_errors_are_isolated_in_snapshot(self):
         snapshot = self.service.snapshot("browser", "local")
-        path = Path(snapshot["files"]["dsh"]["path"])
+        path = Path(snapshot["files"]["hermes"]["path"])
         path.parent.mkdir(parents=True)
-        path.write_text("- id: [invalid\n", encoding="utf-8")
+        path.write_text("model: [invalid\n", encoding="utf-8")
         snapshot = self.service.snapshot("browser", "local")
-        self.assertTrue(snapshot["files"]["dsh"]["parseError"])
-        self.assertFalse(snapshot["files"]["hermes"]["parseError"])
+        self.assertTrue(snapshot["files"]["hermes"]["parseError"])
+        self.assertFalse(snapshot["files"]["opencodeV2"]["parseError"])

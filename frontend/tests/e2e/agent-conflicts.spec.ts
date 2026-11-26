@@ -88,7 +88,6 @@ for (const [agent, label, target] of [
   ['codex', 'Codex', 'codex'],
   ['opencode', 'Opencode v1', 'opencode'],
   ['opencode_v2', 'Opencode v2', 'opencodeV2'],
-  ['dsh', 'DSH', 'dsh'],
   ['hermes', 'Hermes', 'hermes'],
 ]) {
   test(`${label} 外部冲突仍可保存，取消保留草稿，确认使用最新预览`, async ({ page }) => {

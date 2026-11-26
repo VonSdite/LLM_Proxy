@@ -721,7 +721,7 @@ SQLite 表：
 
 Provider、模型映射、API Key、用户、Auth Group 运行态和统计表使用共享 `UiTable`。列宽独立调整，表格超出容器时内部横向滚动；配置 `storageKey` 的表格将列宽持久保存至 `table-widths:*`，其余表格使用当前组件内状态。表头分隔条支持鼠标拖动和键盘左右键。Provider 弹窗模型使用同一表格，映射目标使用 `UiSortableList`；两者均使用稳定行 ID、拖动和上下移动按钮。
 
-统计表启用 `adaptive`，组件内测量表头与当前已加载内容的固有宽度。IP 列按最长地址保留完整单行，请求、映射与响应模型三列分别在表头下限与内容所需宽度之间伸缩，短列达到内容宽度后停止扩张。测量值仅保留在组件内存中，刷新、筛选与翻页时重新计算；手动列宽优先，双击列边界恢复自动分配。
+统计表启用 `adaptive`，组件内测量表头与当前已加载内容的固有宽度。IP 列按最长地址保留完整单行，请求、映射与响应模型三列分别在表头下限与内容所需宽度之间伸缩，短列达到内容宽度后停止扩张；未手动调整的数值列分配剩余空间，使表头、数据行与合计行至少铺满容器。测量值仅保留在组件内存中，刷新、筛选与翻页时重新计算；手动列宽优先，双击列边界恢复自动分配。
 
 ### 3.4 Provider Runtime Contract
 
@@ -1291,8 +1291,6 @@ flowchart LR
 
 ### 3.12 Control-Plane Agent Configuration
 
-DSH 的默认文件目标为 `$DSH_HOME/cordis.patch.yml`（未设置时使用 `~/.dsh/cordis.patch.yml`），与独立凭据文件共同参与预览及保存事务。全局补丁供加载对应插件的 Web、Desktop、headless、SDK、ACP 共用；自定义路径可定位单个 Profile。默认权限由 DSH 适配器维护 `permission` 的预设和 `defaultPreset`，既有会话权限不由文件编辑流程修改。sdk-minimal 的独立插件组合不在完整支持范围。
-
 浏览器以 localStorage 的 `agent-active-tab` 记忆最近选中的 Agent。页面在服务端定义加载完成后恢复该页签；已隐藏或不存在的项回退到第一个可见项。此偏好只保存页签 ID，配置文件仍在进入页面时重新读取。
 
 Agent 页签每次切入时请求最新文件快照，无修改的表单使用最新配置重建；未保存草稿保留原始文件版本指纹，外部文件变化时提示用户，保存继续执行版本冲突校验。快速切换取消前一次读取，迟到响应不更新当前页签；读取期间暂停预览和保存。表单保存预览由后端按选项顺序跨文件排列，自动生成的附属字段排在表单字段之后。
@@ -1301,7 +1299,7 @@ Agent 页签每次切入时请求最新文件快照，无修改的表单使用�
 
 表单保存成功后，浏览器以已应用票据的目标值原位更新预览行，状态为“无修改”；缓存关联保存返回的文件版本和回填后的草稿。相同草稿不重复发起保存后预览，后续字段修改或重新读取恢复正常校验。失败保存保留现有草稿和预览。
 
-Agent 定义由 `AgentExtensions` 在服务启动时从根目录 `agents/*/agent.yaml` 加载，同目录 `adapter.py` 提供可选的受信任格式转换。bootstrap 返回声明式字段、文件格式和加载错误。前端登记表接收服务定义，Opencode v2 / DSH / Hermes / 用户扩展共用 `AgentExtensionForm`；已有三个 Agent 保留专用表单。JSONC、TOML、YAML 和 dotenv 字段编辑均通过同一文件事务、本机或 SSH 传输完成。自定义文件路径按动态文件目标 ID 持久化；扩展加载失败不影响其他 Agent。
+Agent 定义由 `AgentExtensions` 在服务启动时从根目录 `agents/*/agent.yaml` 加载，同目录 `adapter.py` 提供可选的受信任格式转换。bootstrap 返回声明式字段、文件格式和加载错误。前端登记表接收服务定义，Opencode v2 / Hermes / 用户扩展共用 `AgentExtensionForm`；已有三个 Agent 保留专用表单。JSONC、TOML、YAML 和 dotenv 字段编辑均通过同一文件事务、本机或 SSH 传输完成。自定义文件路径按动态文件目标 ID 持久化；扩展加载失败不影响其他 Agent。
 
 ```mermaid
 flowchart LR
@@ -1316,14 +1314,14 @@ flowchart LR
     Transport --> Files["Agent 配置 / 凭据 / 备份"]
 ```
 
-Opencode v2 适配器管理 providers/settings、permissions 数组与 compaction.buffer，独立文件目标 opencodeV2 使用通用 JSONC 编辑流程；默认路径与 V1 相同，自定义路径分别登记。DSH 的全局或自定义 Profile 补丁与独立凭据文件在同一保存票据中校验和写入；Hermes 使用 YAML 配置，支持字符串模型简写。新扩展只新增目录并重启服务，声明式表单无需重新构建前端。接口、数据面路由和 SSH 会话隔离保持现有职责。
+Opencode v2 适配器管理 providers/settings、permissions 数组与 compaction.buffer，独立文件目标 opencodeV2 使用通用 JSONC 编辑流程；默认路径与 V1 相同，自定义路径分别登记。Hermes 使用 YAML 配置，支持字符串模型简写。新扩展只新增目录并重启服务，声明式表单无需重新构建前端。接口、数据面路由和 SSH 会话隔离保持现有职责。
 
 - 前端 `features/agents/registry.ts` 接收服务端 Agent ID、名称和文件目标，供页签、工作区草稿初始化、预览缓存清理和文件路径行共用。页签设置复用 UiDialog / UiSortableList / UiSwitch，提供排序、显隐和恢复默认，弹窗内操作保留为本地草稿，保存时统一更新页签，取消放弃本次调整，外侧点击和 Escape 使用共享未保存确认；偏好以 `agent-tab-preferences` 保存到当前浏览器 localStorage，对所有机器共用，至少显示一项。隐藏当前项会切到第一个可见项，已有配置和内存草稿保留，保存期间禁止调整。此偏好只影响界面，不影响后端快照或文件读写授权。
 - Opencode v1 表单读写 V1 的 `provider/options`、`compaction.reserved` 和顶层 `permission`。权限策略使用 allow / ask / deny 字符串，自定义权限对象在未主动替换时保留；V2 字段不进入表单快照或写入计划，历史登记过的 `permissions` 不参与自动清理。
 
 - `GET /api/agent-config/bootstrap` 返回机器、当前模型目录、下游 Key 候选及页面和写入逻辑共用的模型限制候选。
 - `/api/agent-config/machines` 和 `/machines/<id>` 提供机器登记、更新和删除；`local` 表示服务进程所属用户所在的机器。
-- `/machines/<id>/connect`、`disconnect` 和 `snapshot` 提供 SSH 会话和文件快照。`PUT /machines/<id>/path` 接收 `target` 与完整文件 `path`，支持已注册 Agent 的全部文件目标，包括 Codex 配置与认证、DSH 补丁与凭据；未提供 `target` 的旧请求按 opencode 处理。
+- `/machines/<id>/connect`、`disconnect` 和 `snapshot` 提供 SSH 会话和文件快照。`PUT /machines/<id>/path` 接收 `target` 与完整文件 `path`，支持已注册 Agent 的全部文件目标，包括 Codex 配置、认证与环境变量文件；未提供 `target` 的旧请求按 opencode 处理。
 - `agent-config/state.json` 使用版本 3，路径按机器 ID 与文件目标保存；读取版本 1 时将 opencode 路径字符串转换为对应的路径记录，读取版本 1 / 2 时将 Codex 目录展开为 config.toml 与 auth.json 两个独立路径。清空路径仅恢复当前文件的默认位置。候选路径成功读取且登记文件写入成功后更新内存状态；配置内容格式错误通过快照的 `parseError` 展示。
 - 浏览器使用模型台账中的完整参数候选，配置输入与推荐独立。Claude 优先参考主模型或唯一已配置模型；多个模型且没有主模型时，菜单直接展示各模型的候选值与名称。切换模型和手填模型 ID 更新候选，选择候选时即时修改参数草稿，手填数值在失焦且值变化时提交草稿。Codex 压缩上限和 opencode 压缩预留显示在压缩阈值标题旁；每个模型的悬停说明显示上下文和最大输出参考值。
 - `/machines/<id>/<agent>/preview` 接受表单或文件编辑内容与读取版本，生成有效期五分钟的预览票据；进程内最多保留四十份票据。原文编辑的票据仅包含 `raw` 中提交的文件及其读取版本。

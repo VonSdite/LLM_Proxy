@@ -88,7 +88,7 @@ function suggestions(field: AgentField) {
 }
 function needsModel(field: AgentField) {
   return (
-    ['dsh', 'opencode_v2'].includes(props.definition.id) &&
+    props.definition.id === 'opencode_v2' &&
     !props.draft.values?.model &&
     ['context', 'output', 'effort'].includes(field.id)
   )

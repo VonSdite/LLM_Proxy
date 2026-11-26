@@ -21,7 +21,7 @@ describe('统计数据与筛选契约', () => {
     )!
     expect(large.minWidth).toBeGreaterThan(short.minWidth!)
     expect(large.minWidth).toBeGreaterThanOrEqual('1,234,567,890,123'.length * 8 + 16)
-    expect(large.maxWidth).toBeGreaterThanOrEqual(large.minWidth!)
+    expect(large.maxWidth ?? Infinity).toBeGreaterThanOrEqual(large.minWidth!)
   })
   it('用量列宽同时容纳合计与百分比，不截断精确数值', () => {
     const rows = Array.from({ length: 11 }, () => ({ total_tokens: 999999999 }) as UsageRow)

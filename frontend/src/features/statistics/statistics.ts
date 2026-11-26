@@ -440,7 +440,6 @@ export const columnsByView: Record<StatisticsView, TableColumn[]> = {
 export function statisticsColumns(rows: UsageRow[], view: StatisticsView): TableColumn[] {
   const footer: Record<string, string | number | undefined> | undefined = totals(rows, view)
   const columns = columnsByView[view]
-  const growMetrics = !columns.some((column) => (column.grow ?? 0) > 0)
   return columns.map((column) => {
     if (column.align !== 'right') return column.grow ? { ...column, maxWidth: undefined } : column
     const values = rows.map((row) => {
@@ -466,9 +465,9 @@ export function statisticsColumns(rows: UsageRow[], view: StatisticsView): Table
       ...column,
       minWidth,
       width: Math.max(column.width ?? 80, minWidth),
-      // 没有弹性文本列时由数值列铺满容器，用户名和 IP 保持紧凑。
-      grow: growMetrics ? 1 : column.grow,
-      maxWidth: growMetrics ? undefined : Math.max(column.maxWidth ?? 180, minWidth),
+      // 模型列达到内容宽度后，由未手动调整的数值列分配剩余空间，铺满容器。
+      grow: 1,
+      maxWidth: undefined,
     }
   })
 }

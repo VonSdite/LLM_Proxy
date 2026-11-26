@@ -6,7 +6,6 @@ import type { PreviewInput } from '@/api/agents'
 for (const [agent, label, target] of [
   ['opencode', 'Opencode v1', 'opencode'],
   ['opencode_v2', 'Opencode v2', 'opencodeV2'],
-  ['dsh', 'DSH', 'dsh'],
   ['hermes', 'Hermes', 'hermes'],
 ] as const) {
   test(`${label} 默认模型可不设置，保存刷新后保持为空`, async ({ page }) => {

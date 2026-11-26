@@ -77,7 +77,7 @@ fields:
 
 原文件已有值优先回显；缺失的可选字段显示“不设置”。不支持的复杂对象显示“保留自定义配置”，未操作时保持原值。主动清空可选项表示删除字段。只修改声明路径，不清理未声明字段。缺失的 API 地址与必填模型使用本服务候选；外部地址的模型 ID 保留手动输入能力。
 
-Opencode v2、DSH 和 Hermes 的思考强度选项与选中值直接显示配置值，例如 `minimal`、`high`、`xhigh`；清空配置的选项显示“不设置”。
+Opencode v2 和 Hermes 的思考强度选项与选中值直接显示配置值，例如 `minimal`、`high`、`xhigh`；清空配置的选项显示“不设置”。
 
 dotenv 文件的字段路径是单个环境变量名，解析支持可选 `export` 前缀、成对单双引号和未加引号值的行尾注释。编辑保留注释、空行和未声明行；写入值包含空白或特殊字符时使用双引号，同名变量的后续行随写入或删除一并移除，避免旧值覆盖本次写入。
 
@@ -233,24 +233,7 @@ API 服务配置、模型、思考强度、上下文窗口、压缩 Token 阈值
 
 依据：[V2 配置](https://opencode.ai/docs/config/)、[V2 模型](https://opencode.ai/docs/models/)、[V2 服务](https://opencode.ai/docs/providers/)、[V2 权限](https://opencode.ai/docs/permissions/)、[官方 JSON Schema](https://opencode.ai/config.json)。核对日期：2026-11-13。
 
-## 4. DSH 与 Hermes
-
-### 4.1 DSH
-
-- 默认全局补丁为 `~/.dsh/cordis.patch.yml`，凭据文件为 `~/.dsh/.credentials.yaml`，本机尊重 `DSH_HOME`。全局补丁在 Web、Desktop、headless、SDK、ACP 的 profile 补丁之后加载。
-- 页面管理 `llm-pi-ai` 插件中的 `proxy` 路由、模型容量及 `agent-default-model` 默认选择，其他模型和插件保持原样。
-- 默认模型支持“不设置”：移除当前补丁中 `agent-default-model` 的整组 `config` 覆盖（provider、model、reasoningEffort），保留连接、凭据及模型列表。下层 profile 或插件配置需提供有效的默认选择；未选默认模型时，本页不编辑模型容量与默认思考强度。
-- 全局默认模型覆盖会阻止 DSH 将不同的默认选择保存到 profile，当前会话仍可切换模型。不设置全局默认模型后，默认选择可由 profile 管理。
-- 思考强度提供“不设置”和 llm-pi-ai 支持的 off、minimal、low、medium、high、xhigh、max 档位；ultra 不属于该适配器的档位。候选不代表当前模型支持的档位；模型需在 DSH 中声明推理档位，未声明时使用“不设置”。reasoningEfforts 可映射各档位对应的 API 参数值，off 的实际效果由适配器与模型兼容配置决定。
-- API Key 保存为凭据文件的 `refs.LLM_PROXY_API_KEY`，补丁仅保存 `apiKeyEnv` 引用；主动清空 Key 同时删除引用。
-- 目标 Profile 需包含 `llm-pi-ai`、`agent-default-model` 及权限插件。sdk-minimal 的插件组合独立，启动参数、既有设置和会话选择可能覆盖默认值。
-- 默认权限写入 `permission.config.defaultPreset`，支持 `read-only`、`workspace-write`、`danger-full-access`。never 表示拒绝仍需审批的请求，不自动批准；默认值仅作用于新会话。
-- 标准权限预设保留其他自定义项；同名但不同语义的预设显示为自定义。选择不设置只移除 `defaultPreset`。
-- 上下文和最大输出是模型容量声明，不等同每次请求的输出上限。重复受管插件补丁需要先在原文编辑器整理。
-
-依据：[模型配置](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.md)、[Profile](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/README.md#profiles)、[权限预设](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/interaction/permission-presets/README.md)、[模型适配器](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/llm-pi-ai/README.md)、[凭据文件](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/credentials/credentials-local/README.md)。核对日期：2026-11-13。
-
-### 4.2 Hermes
+## 4. Hermes
 
 - 默认路径为 `~/.hermes/config.yaml`，本机尊重 `HERMES_HOME`；其他 profile 使用自定义文件路径。
 - 支持 API 地址、Key、默认模型、API 协议、服务类型、思考强度、上下文、压缩阈值、最大迭代次数、命令确认、长期记忆、用户画像及自动压缩。
